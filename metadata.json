@@ -1,0 +1,6 @@
+{
+  "name": "FunkyTalk",
+  "description": "FunkyTalk is a language exchange application designed to connect you with language partners worldwide.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
