@@ -1,14 +1,45 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+const ALLOWED_ORIGINS = [
+  "https://funkytalk.jo3.org",
+  "https://ais-dev-mahnbfoa6eavbwr4735yzy-335946446072.asia-east1.run.app",
+  "https://ais-pre-mahnbfoa6eavbwr4735yzy-335946446072.asia-east1.run.app",
+  "https://dulpqochkxtamqztauea.supabase.co",
+]
+
+function getCorsHeaders(req: Request) {
+  const origin = req.headers.get("origin") || ""
+  const isAllowed =
+    ALLOWED_ORIGINS.includes(origin) ||
+    origin.endsWith(".run.app") ||
+    origin.endsWith(".supabase.co") ||
+    origin.endsWith(".jo3.org") ||
+    origin.startsWith("android-app://") ||
+    origin.startsWith("funkytalk://")
+
+  return {
+    "Access-Control-Allow-Origin": isAllowed ? origin : ALLOWED_ORIGINS[0],
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, prefer",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Vary": "Origin",
+  }
+}
+
+async function hashToken(token: string): Promise<string> {
+  const encoder = new TextEncoder()
+  const data = encoder.encode(token)
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data)
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
 }
 
 serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+  const corsHeaders = getCorsHeaders(req)
+
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders })
   }
 
   try {
@@ -16,76 +47,167 @@ serve(async (req) => {
     const uid = url.searchParams.get("uid")
     const token = url.searchParams.get("token")
 
-    if (!uid || !token) {
-      return renderHtmlResponse(
-        "Invalid Link",
-        "We couldn't authenticate this request. Missing security parameters.",
-        false
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!
+
+    // 1. AUTHENTICATION CHECK: Authorization header or auth parameter
+    const authHeader = req.headers.get("Authorization") || (url.searchParams.get("auth") ? `Bearer ${url.searchParams.get("auth")}` : null)
+    if (!authHeader || !authHeader.toLowerCase().startsWith("bearer ")) {
+      return renderResponse(
+        req,
+        401,
+        "Unauthorized",
+        "Missing or invalid Authorization credentials.",
+        false,
+        corsHeaders
       )
     }
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!
-    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    const rawJwt = authHeader.replace(/^bearer\s+/i, "").trim()
+    const supabaseAuthClient = createClient(supabaseUrl, supabaseAnonKey)
+    const { data: authData, error: authError } = await supabaseAuthClient.auth.getUser(rawJwt)
 
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
+    const isServiceKey = rawJwt === supabaseServiceKey
+    if (authError && !isServiceKey && !authData?.user) {
+      return renderResponse(
+        req,
+        401,
+        "Unauthorized",
+        "Invalid or expired authorization token.",
+        false,
+        corsHeaders
+      )
+    }
 
-    // Retrieve token from Supabase Table
-    const { data: user, error: fetchError } = await supabase
-      .from('users')
-      .select('email_verification_token, custom_email_verified')
-      .eq('uid', uid)
+    // 2. Validate input parameters
+    if (!uid || !token) {
+      return renderResponse(
+        req,
+        400,
+        "Invalid Link",
+        "We couldn't authenticate this request. Missing security parameters.",
+        false,
+        corsHeaders
+      )
+    }
+
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey)
+
+    // Retrieve user record including token hash and expiry
+    const { data: user, error: fetchError } = await supabaseAdmin
+      .from("users")
+      .select("email_verification_token, email_verification_expires_at, custom_email_verified")
+      .eq("uid", uid)
       .maybeSingle()
 
     if (fetchError || !user) {
-      return renderHtmlResponse(
+      return renderResponse(
+        req,
+        404,
         "Verification Failed",
         "User account not found or database sync pending.",
-        false
+        false,
+        corsHeaders
       )
     }
 
     if (user.custom_email_verified) {
-      return renderHtmlResponse(
+      return renderResponse(
+        req,
+        200,
         "Already Verified ✨",
         "Your email is already verified. You are completely set to log in and use FunkyTalk!",
-        true
+        true,
+        corsHeaders
       )
     }
 
-    if (user.email_verification_token !== token) {
-      return renderHtmlResponse(
-        "Verification Expired",
-        "The verification link is invalid or has expired. Please check your inbox or click resend.",
-        false
+    // 3. EXPIRY CHECK: Verify email_verification_expires_at
+    if (user.email_verification_expires_at) {
+      const expiresAt = new Date(user.email_verification_expires_at)
+      if (expiresAt.getTime() < Date.now()) {
+        return renderResponse(
+          req,
+          410,
+          "Link Expired",
+          "This verification link has expired (links are valid for 24 hours). Please open FunkyTalk and request a new verification email.",
+          false,
+          corsHeaders
+        )
+      }
+    }
+
+    // 4. TOKEN HASH COMPARISON
+    const incomingHashedToken = await hashToken(token)
+    const tokenMatches =
+      user.email_verification_token &&
+      (user.email_verification_token === incomingHashedToken ||
+        user.email_verification_token === token)
+
+    if (!tokenMatches) {
+      return renderResponse(
+        req,
+        400,
+        "Verification Invalid",
+        "The verification link is invalid or has already been used. Please check your inbox or click resend in the app.",
+        false,
+        corsHeaders
       )
     }
 
-    // Update state to True
-    const { error: updateError } = await supabase
-      .from('users')
-      .update({ custom_email_verified: true })
-      .eq('uid', uid)
+    // 5. ONE-TIME USE: Invalidate/clear token upon successful verification
+    const { error: updateError } = await supabaseAdmin
+      .from("users")
+      .update({
+        custom_email_verified: true,
+        email_verification_token: null,
+        email_verification_expires_at: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("uid", uid)
 
     if (updateError) {
       throw new Error(`Database update failed: ${updateError.message}`)
     }
 
-    return renderHtmlResponse(
+    return renderResponse(
+      req,
+      200,
       "Verified Successfully 🎉",
       "Your FunkyTalk email has been verified. You can return directly to your application now!",
-      true
+      true,
+      corsHeaders
     )
-
   } catch (error) {
-    return renderHtmlResponse(
+    return renderResponse(
+      req,
+      500,
       "Service Error",
       `An unexpected issue occurred: ${error.message}`,
-      false
+      false,
+      corsHeaders
     )
   }
 })
 
-function renderHtmlResponse(title: string, message: string, isSuccess: boolean): Response {
+function renderResponse(
+  req: Request,
+  status: number,
+  title: string,
+  message: string,
+  isSuccess: boolean,
+  corsHeaders: Record<string, string>
+): Response {
+  const acceptsHtml = req.headers.get("accept")?.includes("text/html") ?? true
+
+  if (!acceptsHtml && !isSuccess) {
+    return new Response(JSON.stringify({ error: title, message }), {
+      status,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    })
+  }
+
   const accentColor = isSuccess ? "#FF9E00" : "#D32F2F"
   const iconHtml = isSuccess
     ? `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="80" height="80"><circle cx="12" cy="12" r="10" fill="#FFF3E0"/><path d="M10 15.17l-3.23-3.23a1 1 0 00-1.42 1.42l4 4a1 1 0 001.42 0l8-8a1 1 0 00-1.42-1.42z" fill="#FF9E00"/></svg>`
@@ -173,9 +295,11 @@ function renderHtmlResponse(title: string, message: string, isSuccess: boolean):
         <div class="footer">FunkyTalk Authentic Verification System</div>
     </div>
 </body>
-</html>
-`
+</html>`
+
   return new Response(html, {
-    headers: { ...corsHeaders, 'Content-Type': 'text/html' }
+    status,
+    headers: { ...corsHeaders, "Content-Type": "text/html" },
   })
 }
+

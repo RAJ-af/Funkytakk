@@ -40,8 +40,7 @@ data class UserProfile(
     val learningLanguage: String? = null,
     val country: String? = null,
     val countryCode: String? = null,
-    val hobbies: List<String> = emptyList(),
-    val isVip: Boolean = false
+    val hobbies: List<String> = emptyList()
 )
 
 class AuthViewModel : ViewModel() {
@@ -60,6 +59,65 @@ class AuthViewModel : ViewModel() {
 
     private val _authState = MutableStateFlow<AuthState>(AuthState.Idle)
     val authState: StateFlow<AuthState> = _authState
+
+    private val _supabaseProfiles = MutableStateFlow<List<UserProfile>>(emptyList())
+    val supabaseProfiles: StateFlow<List<UserProfile>> = _supabaseProfiles
+
+    private val _activeRoomId = MutableStateFlow<String?>(null)
+    val activeRoomId: StateFlow<String?> = _activeRoomId
+
+    private val _activeRoomTitle = MutableStateFlow<String?>(null)
+    val activeRoomTitle: StateFlow<String?> = _activeRoomTitle
+
+    fun joinRoom(roomId: String, title: String) {
+        _activeRoomId.value = roomId
+        _activeRoomTitle.value = title
+        
+        val uid = (authState.value as? AuthState.Success)?.user?.uid ?: return
+        val db = firestore ?: return
+        
+        // 1. Add current user as speaker in rooms/{roomId}/userids/{userId}
+        db.collection("rooms").document(roomId).collection("userids").document(uid).set(mapOf("action" to "speaker"))
+            .addOnSuccessListener {
+                Log.d("AuthViewModel", "User added to rooms/$roomId/userids/$uid")
+            }
+            .addOnFailureListener { e ->
+                Log.e("AuthViewModel", "Error adding user to rooms/$roomId/userids/$uid", e)
+            }
+            
+        // 2. Update users/{userId} status to "speaking", currentRoomId, isInVoiceRoom
+        val userUpdate = mapOf(
+            "status" to "speaking",
+            "currentRoomId" to roomId,
+            "isInVoiceRoom" to true
+        )
+        db.collection("users").document(uid).update(userUpdate)
+            .addOnSuccessListener {
+                Log.d("AuthViewModel", "User status updated to active room $roomId")
+            }
+    }
+
+    fun leaveRoom() {
+        val roomId = _activeRoomId.value
+        val uid = (authState.value as? AuthState.Success)?.user?.uid
+        val db = firestore
+        
+        if (roomId != null && uid != null && db != null) {
+            // 1. Remove current user from rooms/{roomId}/userids/{userId}
+            db.collection("rooms").document(roomId).collection("userids").document(uid).delete()
+            
+            // 2. Clear user's status inside users/{userId}
+            val userUpdate = mapOf(
+                "status" to "online",
+                "currentRoomId" to null,
+                "isInVoiceRoom" to false
+            )
+            db.collection("users").document(uid).update(userUpdate)
+        }
+        
+        _activeRoomId.value = null
+        _activeRoomTitle.value = null
+    }
 
     private var firebaseAuth: FirebaseAuth? = null
     private var firestore: FirebaseFirestore? = null
@@ -606,16 +664,21 @@ class AuthViewModel : ViewModel() {
         prefs.edit().putString("active_session_id_${uid}", newSessionId).apply()
         
         val userDoc = firestoreDb.collection("users").document(uid)
-        userDoc.update("activeSessionId", newSessionId)
+        val initialUpdates = mapOf(
+            "activeSessionId" to newSessionId,
+            "status" to "online",
+            "isInVoiceRoom" to false,
+            "currentRoomId" to ""
+        )
+        userDoc.update(initialUpdates)
             .addOnSuccessListener {
-                Log.d("AuthViewModel", "Successfully updated activeSessionId in Firestore: $newSessionId")
+                Log.d("AuthViewModel", "Successfully updated activeSessionId & online status in Firestore: $newSessionId")
                 startSessionListener(context, uid)
             }
             .addOnFailureListener {
-                val data = hashMapOf<String, Any>("activeSessionId" to newSessionId)
-                userDoc.set(data, com.google.firebase.firestore.SetOptions.merge())
+                userDoc.set(initialUpdates, com.google.firebase.firestore.SetOptions.merge())
                     .addOnSuccessListener {
-                        Log.d("AuthViewModel", "Successfully set activeSessionId in Firestore merge: $newSessionId")
+                        Log.d("AuthViewModel", "Successfully merged activeSessionId & online status in Firestore: $newSessionId")
                         startSessionListener(context, uid)
                     }
                     .addOnFailureListener { e ->
@@ -671,6 +734,11 @@ class AuthViewModel : ViewModel() {
         }
     }
 
+    private fun hashTokenSha256(token: String): String {
+        val bytes = java.security.MessageDigest.getInstance("SHA-256").digest(token.toByteArray(Charsets.UTF_8))
+        return bytes.joinToString("") { "%02x".format(it) }
+    }
+
     fun triggerSupabaseVerificationEmail(
         context: Context,
         email: String,
@@ -681,7 +749,13 @@ class AuthViewModel : ViewModel() {
     ) {
         viewModelScope.launch {
             try {
-                // Pre-upsert to Supabase DB so verification token matches
+                // Compute SHA-256 hash and 24-hour expiration for secure storage
+                val hashedToken = hashTokenSha256(token)
+                val expiresAt = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply {
+                    timeZone = java.util.TimeZone.getTimeZone("UTC")
+                }.format(java.util.Date(System.currentTimeMillis() + 24 * 60 * 60 * 1000L))
+
+                // Pre-upsert to Supabase DB with hashed token (never plaintext)
                 val supaUser = SupabaseUser(
                     uid = uid,
                     email = email,
@@ -696,7 +770,8 @@ class AuthViewModel : ViewModel() {
                     country_code = null,
                     hobbies = null,
                     custom_email_verified = false,
-                    email_verification_token = token
+                    email_verification_token = hashedToken,
+                    email_verification_expires_at = expiresAt
                 )
                 
                 withContext(Dispatchers.IO) {
@@ -798,31 +873,7 @@ class AuthViewModel : ViewModel() {
                     _authState.value = AuthState.Error(e.localizedMessage ?: "Google sign in failed")
                 }
         } else {
-            // Simulator - Use centralized google chooser logic
-            simulateGoogleLogin(context, "shwetabhatingar@gmail.com", "Shwetabh", "google-uid-72", onSuccess)
-        }
-    }
-
-    fun simulateGoogleLogin(context: Context, email: String, displayName: String, uid: String, onSuccess: () -> Unit) {
-        _authState.value = AuthState.Loading
-        viewModelScope.launch {
-            delay(1200)
-            loadUserProfileFromSpOrFirestore(context, uid) { finalProfile ->
-                val finalEmail = if (finalProfile.email.isBlank()) email else finalProfile.email
-                val finalDisplayName = if (finalProfile.displayName.isNullOrBlank()) displayName else finalProfile.displayName
-                val updatedProfile = finalProfile.copy(
-                    uid = uid,
-                    email = finalEmail,
-                    displayName = finalDisplayName,
-                    isEmailVerified = true
-                )
-                // Set success state only AFTER profile has been fully loaded from Sp or Supabase
-                _authState.value = AuthState.Success(updatedProfile)
-                registerAndStartSession(context, uid)
-                triggerSupabaseLoginNotification(context, finalEmail, finalDisplayName)
-                Toast.makeText(context, "Signed in with Google as $finalDisplayName!", Toast.LENGTH_SHORT).show()
-                onSuccess()
-            }
+            _authState.value = AuthState.Error("Google Sign-In failed. Please try again.")
         }
     }
 
@@ -832,9 +883,15 @@ class AuthViewModel : ViewModel() {
         sessionListener = null
         
         if (firestore != null && uid.isNotEmpty()) {
-            firestore?.collection("users")?.document(uid)?.update("activeSessionId", null)
+            val offlineUpdates = mapOf(
+                "activeSessionId" to null,
+                "status" to "offline",
+                "isInVoiceRoom" to false,
+                "currentRoomId" to ""
+            )
+            firestore?.collection("users")?.document(uid)?.update(offlineUpdates)
                 ?.addOnFailureListener {
-                    Log.e("AuthViewModel", "Failed to clear active session field during logout")
+                    Log.e("AuthViewModel", "Failed to clear active session and offline status during logout")
                 }
         }
         
@@ -984,7 +1041,6 @@ class AuthViewModel : ViewModel() {
         val isCustomVerified = prefs.getBoolean("custom_email_verified_${userId}", false)
         val firebaseVerified = firebaseAuth?.currentUser?.let { if (it.uid == userId) it.isEmailVerified else false } ?: false
         val resolvedVerified = isCustomVerified || firebaseVerified
-        val isVip = prefs.getBoolean("profile_is_vip_${userId}", false)
 
         val username = prefs.getString("profile_username_${userId}", null)
         val displayName = prefs.getString("profile_displayName_${userId}", null)
@@ -1012,8 +1068,7 @@ class AuthViewModel : ViewModel() {
             learningLanguage = learningLanguage,
             country = country,
             countryCode = countryCode,
-            hobbies = hobbies,
-            isVip = isVip
+            hobbies = hobbies
         )
 
         val mergedProfile = currentProfile.copy(
@@ -1027,8 +1082,7 @@ class AuthViewModel : ViewModel() {
             learningLanguage = learningLanguage ?: currentProfile.learningLanguage,
             country = country ?: currentProfile.country,
             countryCode = countryCode ?: currentProfile.countryCode,
-            hobbies = if (hobbies.isNotEmpty()) hobbies else currentProfile.hobbies,
-            isVip = isVip
+            hobbies = if (hobbies.isNotEmpty()) hobbies else currentProfile.hobbies
         )
 
         val isCachedConfigured = !username.isNullOrBlank() && !dob.isNullOrBlank()
@@ -1226,22 +1280,41 @@ class AuthViewModel : ViewModel() {
             }
     }
 
-    fun purchaseVip(context: android.content.Context, callback: () -> Unit) {
-        val currentState = _authState.value
-        if (currentState is AuthState.Success) {
-            val user = currentState.user
-            val updatedUser = user.copy(isVip = true)
-            _authState.value = AuthState.Success(updatedUser)
-            
-            val prefs = context.getSharedPreferences("funky_talk_prefs", android.content.Context.MODE_PRIVATE)
-            prefs.edit().putBoolean("profile_is_vip_${user.uid}", true).apply()
-            
-            // Also update firestore if online
-            val firestoreDb = firestore
-            if (firestoreDb != null) {
-                firestoreDb.collection("users").document(user.uid).update("isVip", true)
+    fun fetchSupabaseProfiles(context: Context) {
+        viewModelScope.launch {
+            try {
+                val response = withContext(Dispatchers.IO) {
+                    SupabaseClient.api.getAllUsers()
+                }
+                if (response.isSuccessful) {
+                    val supaUsers = response.body() ?: emptyList()
+                    val profiles = supaUsers.map { supaUser ->
+                        UserProfile(
+                            uid = supaUser.uid,
+                            email = supaUser.email,
+                            displayName = supaUser.display_name ?: "Learner",
+                            isEmailVerified = supaUser.custom_email_verified ?: false,
+                            username = supaUser.username ?: "learner_user",
+                            avatar = supaUser.avatar ?: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150",
+                            dob = supaUser.dob ?: "2000-01-01",
+                            gender = supaUser.gender ?: "Non-binary",
+                            nativeLanguage = supaUser.native_language ?: "Hindi",
+                            learningLanguage = supaUser.learning_language ?: "English",
+                            country = supaUser.country ?: "India",
+                            countryCode = supaUser.country_code ?: "in",
+                            hobbies = supaUser.hobbies ?: emptyList()
+                        )
+                    }
+                    _supabaseProfiles.value = profiles
+                    Log.d("AuthViewModel", "Fetched ${profiles.size} profiles from Supabase successfully")
+                } else {
+                    Log.e("AuthViewModel", "Failed to fetch Supabase profiles: ${response.code()} ${response.message()}")
+                    _supabaseProfiles.value = emptyList()
+                }
+            } catch (e: Exception) {
+                Log.e("AuthViewModel", "Error fetching Supabase profiles: ${e.message}", e)
+                _supabaseProfiles.value = emptyList()
             }
-            callback()
         }
     }
 

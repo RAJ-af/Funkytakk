@@ -59,6 +59,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.R
+import com.example.AuthViewModel
+import com.example.UserProfile
+import androidx.compose.runtime.collectAsState
 import com.example.ui.components.CircleFlag
 import androidx.compose.foundation.Canvas
 import androidx.compose.ui.graphics.drawscope.rotate
@@ -231,7 +234,8 @@ data class ChillRoomSpeaker(
     val flagCode: String,
     val isMuted: Boolean = false,
     val isCenter: Boolean = false,
-    val gradientColors: List<Color>
+    val gradientColors: List<Color>,
+    val isHost: Boolean = false
 )
 
 data class ChillRoomMessage(
@@ -285,48 +289,150 @@ data class DirectMessage(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VoiceRoomScreen(
+    viewModel: AuthViewModel? = null,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
 
-    val speakers = listOf(
-        ChillRoomSpeaker(
-            name = "Arjun",
-            imageUrl = "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400",
-            flagCode = "in",
-            isMuted = false,
-            gradientColors = listOf(Color(0xFF8B5CF6), Color(0xFFEC4899))
-        ),
-        ChillRoomSpeaker(
-            name = "Riya",
-            imageUrl = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400",
-            flagCode = "in",
-            isMuted = false,
-            isCenter = true,
-            gradientColors = listOf(Color(0xFFFFB800), Color(0xFFF59E0B), Color(0xFFFFB800))
-        ),
-        ChillRoomSpeaker(
-            name = "Sara",
-            imageUrl = "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400",
-            flagCode = "pk",
-            isMuted = false,
-            gradientColors = listOf(Color(0xFF8B5CF6), Color(0xFF6366F1))
-        ),
-        ChillRoomSpeaker(
-            name = "Vihaan",
-            imageUrl = "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400",
-            flagCode = "in",
-            isMuted = false,
-            gradientColors = listOf(Color(0xFF8B5CF6), Color(0xFFEC4899))
-        ),
-        ChillRoomSpeaker(
-            name = "Ananya",
-            imageUrl = "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400",
-            flagCode = "in",
-            isMuted = true,
-            gradientColors = listOf(Color(0xFFD1D5DB), Color(0xFF9CA3AF))
+    val supabaseProfiles = if (viewModel != null) {
+        viewModel.supabaseProfiles.collectAsState().value
+    } else {
+        emptyList()
+    }
+
+    val activeRoomId = viewModel?.activeRoomId?.collectAsState()?.value ?: "FT5272"
+    val activeRoomTitle = viewModel?.activeRoomTitle?.collectAsState()?.value ?: "Hindi Voice Circle"
+    val firestore = viewModel?.firestoreDb
+
+    var roomHostId by remember { mutableStateOf<String?>("") }
+    var participantsList by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) } // Pair: userId, action (speaker/listener)
+
+    if (firestore != null) {
+        DisposableEffect(firestore, activeRoomId) {
+            val roomDocListener = firestore.collection("rooms").document(activeRoomId)
+                .addSnapshotListener { snapshot, error ->
+                    if (error == null && snapshot != null) {
+                        roomHostId = snapshot.getString("hostId") ?: ""
+                    }
+                }
+            val listener = firestore.collection("rooms").document(activeRoomId).collection("userids")
+                .addSnapshotListener { snapshot, error ->
+                    if (error == null && snapshot != null) {
+                        val parsed = snapshot.documents.mapNotNull { doc ->
+                            val userId = doc.id
+                            val action = doc.getString("action") ?: "listener"
+                            Pair(userId, action)
+                        }
+                        participantsList = parsed
+                    }
+                }
+            onDispose {
+                roomDocListener.remove()
+                listener.remove()
+            }
+        }
+    }
+
+    val speakers = remember(participantsList, supabaseProfiles, roomHostId) {
+        val speakerUserIds = participantsList.filter { it.second == "speaker" }.map { it.first }
+        val mappedList = speakerUserIds.mapIndexed { idx, userId ->
+            val p = supabaseProfiles.find { it.uid == userId }
+            val name = p?.displayName ?: p?.username ?: when (userId) {
+                "supa_user_siddharth" -> "Siddharth"
+                "supa_user_jungkook" -> "Jungkook"
+                "supa_user_dmitry" -> "Dmitry"
+                else -> "Speaker ${idx + 1}"
+            }
+            val avatar = p?.avatar ?: when (userId) {
+                "supa_user_siddharth" -> "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150"
+                "supa_user_jungkook" -> "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150"
+                "supa_user_dmitry" -> "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150"
+                else -> "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400"
+            }
+            val flagCode = p?.countryCode ?: when (userId) {
+                "supa_user_siddharth" -> "in"
+                "supa_user_jungkook" -> "kr"
+                "supa_user_dmitry" -> "ru"
+                else -> "in"
+            }
+            val isHost = (userId == roomHostId) || 
+                         (activeRoomId == "FT5272" && userId == "supa_user_siddharth") ||
+                         (activeRoomId == "FT1902" && userId == "supa_user_jungkook") ||
+                         (idx == 0 && roomHostId.isNullOrBlank())
+
+            ChillRoomSpeaker(
+                name = name,
+                imageUrl = avatar,
+                flagCode = flagCode,
+                isMuted = idx == 4 || userId == "supa_user_yuki",
+                isCenter = idx == 1,
+                gradientColors = when (idx % 5) {
+                    0 -> listOf(Color(0xFF8B5CF6), Color(0xFFEC4899))
+                    1 -> listOf(Color(0xFFFFB800), Color(0xFFF59E0B), Color(0xFFFFB800))
+                    2 -> listOf(Color(0xFF8B5CF6), Color(0xFF6366F1))
+                    3 -> listOf(Color(0xFF8B5CF6), Color(0xFFEC4899))
+                    else -> listOf(Color(0xFFD1D5DB), Color(0xFF9CA3AF))
+                },
+                isHost = isHost
+            )
+        }.toMutableList()
+
+        val fallbacks = listOf(
+            ChillRoomSpeaker(
+                name = "Arjun",
+                imageUrl = "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400",
+                flagCode = "in",
+                isMuted = false,
+                gradientColors = listOf(Color(0xFF8B5CF6), Color(0xFFEC4899)),
+                isHost = false
+            ),
+            ChillRoomSpeaker(
+                name = "Riya",
+                imageUrl = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400",
+                flagCode = "in",
+                isMuted = false,
+                isCenter = true,
+                gradientColors = listOf(Color(0xFFFFB800), Color(0xFFF59E0B), Color(0xFFFFB800)),
+                isHost = true
+            ),
+            ChillRoomSpeaker(
+                name = "Sara",
+                imageUrl = "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400",
+                flagCode = "pk",
+                isMuted = false,
+                gradientColors = listOf(Color(0xFF8B5CF6), Color(0xFF6366F1)),
+                isHost = false
+            ),
+            ChillRoomSpeaker(
+                name = "Vihaan",
+                imageUrl = "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400",
+                flagCode = "in",
+                isMuted = false,
+                gradientColors = listOf(Color(0xFF8B5CF6), Color(0xFFEC4899)),
+                isHost = false
+            ),
+            ChillRoomSpeaker(
+                name = "Ananya",
+                imageUrl = "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400",
+                flagCode = "in",
+                isMuted = true,
+                gradientColors = listOf(Color(0xFFD1D5DB), Color(0xFF9CA3AF)),
+                isHost = false
+            )
         )
-    )
+        
+        while (mappedList.size < 5) {
+            val fallbackToAdd = fallbacks[mappedList.size % fallbacks.size]
+            val finalFallback = if (mappedList.any { it.name == fallbackToAdd.name }) {
+                fallbackToAdd.copy(name = fallbackToAdd.name + " (Host)")
+            } else {
+                fallbackToAdd
+            }
+            mappedList.add(finalFallback)
+        }
+        
+        mappedList
+    }
 
     var chatInputValue by remember { mutableStateOf("") }
     var showEmojiPicker by remember { mutableStateOf(false) }
@@ -1738,6 +1844,24 @@ fun VoiceSpeakerItem(
                         .clip(CircleShape)
                         .background(Color.LightGray)
                 )
+            }
+
+            // Host Badge / Crown
+            if (speaker.isHost) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .offset(x = (-4).dp, y = (-4).dp)
+                        .background(Color(0xFFFFD700), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "👑 HOST",
+                        color = Color.Black,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
 
             // Circular Image Flag

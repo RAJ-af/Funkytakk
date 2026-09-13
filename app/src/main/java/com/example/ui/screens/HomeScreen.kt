@@ -6,6 +6,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -37,8 +38,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -56,7 +61,6 @@ import com.example.AuthState
 import com.example.AuthViewModel
 import com.example.UserProfile
 import com.example.ui.components.CircleFlag
-import com.example.ui.components.Icon
 import com.example.ui.theme.*
 import java.util.Calendar
 
@@ -239,19 +243,20 @@ fun decideRoomTag(
     return room.statusTag.ifBlank { "LIVE" }
 }
 
-fun seedDefaultFriends(db: com.google.firebase.firestore.FirebaseFirestore) {
+fun seedDefaultFriends(db: com.google.firebase.firestore.FirebaseFirestore, currentUserId: String) {
+    if (currentUserId.isBlank() || currentUserId == "guest") return
     val defaultFriends = listOf(
         FirestoreFriend(
-            userId = "user_001",
+            userId = "supa_user_siddharth",
             name = "Siddharth",
-            avatarUrl = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
+            avatarUrl = "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150",
             flagCode = "in",
             status = "speaking",
             isInVoiceRoom = true,
             currentRoomId = "FT5272"
         ),
         FirestoreFriend(
-            userId = "user_002",
+            userId = "supa_user_jungkook",
             name = "Jungkook",
             avatarUrl = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150",
             flagCode = "kr",
@@ -260,7 +265,7 @@ fun seedDefaultFriends(db: com.google.firebase.firestore.FirebaseFirestore) {
             currentRoomId = "FT1902"
         ),
         FirestoreFriend(
-            userId = "user_003",
+            userId = "supa_user_yuki",
             name = "Yuki",
             avatarUrl = "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150",
             flagCode = "jp",
@@ -269,22 +274,51 @@ fun seedDefaultFriends(db: com.google.firebase.firestore.FirebaseFirestore) {
             currentRoomId = null
         ),
         FirestoreFriend(
-            userId = "user_004",
+            userId = "supa_user_dmitry",
             name = "Dmitry",
             avatarUrl = "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150",
             flagCode = "ru",
             status = "speaking",
             isInVoiceRoom = true,
-            currentRoomId = "FT8823"
+            currentRoomId = "FT5272"
+        ),
+        FirestoreFriend(
+            userId = "supa_user_wei",
+            name = "Wei",
+            avatarUrl = "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150",
+            flagCode = "cn",
+            status = "online",
+            isInVoiceRoom = false,
+            currentRoomId = null
+        ),
+        FirestoreFriend(
+            userId = "supa_user_emily",
+            name = "Emily",
+            avatarUrl = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
+            flagCode = "us",
+            status = "online",
+            isInVoiceRoom = false,
+            currentRoomId = null
         )
     )
-    db.collection("friends").get().addOnSuccessListener { snapshot ->
+    val subCol = db.collection("users").document(currentUserId).collection("following_users")
+    subCol.get().addOnSuccessListener { snapshot ->
         if (snapshot == null || snapshot.isEmpty) {
             val batch = db.batch()
             for (f in defaultFriends) {
-                batch.set(db.collection("friends").document(f.userId), f.toMap())
+                batch.set(subCol.document(f.userId), f.toMap())
             }
             batch.commit()
+            
+            // Also seed default participants inside the default rooms!
+            // FT5272 speakers: supa_user_siddharth, supa_user_dmitry
+            db.collection("rooms").document("FT5272").collection("userids").document("supa_user_siddharth").set(mapOf("action" to "speaker"))
+            db.collection("rooms").document("FT5272").collection("userids").document("supa_user_dmitry").set(mapOf("action" to "speaker"))
+            db.collection("rooms").document("FT5272").collection("userids").document("supa_user_yuki").set(mapOf("action" to "listener"))
+
+            // FT1902 speakers: supa_user_jungkook
+            db.collection("rooms").document("FT1902").collection("userids").document("supa_user_jungkook").set(mapOf("action" to "speaker"))
+            db.collection("rooms").document("FT1902").collection("userids").document("supa_user_wei").set(mapOf("action" to "listener"))
         }
     }
 }
@@ -825,7 +859,13 @@ fun HomeScreen(
     onRoomClick: () -> Unit = {}
 ) {
     val authState by viewModel.authState.collectAsState()
+    val supabaseProfiles by viewModel.supabaseProfiles.collectAsState()
     val context = LocalContext.current
+
+    LaunchedEffect(Unit) {
+        viewModel.fetchSupabaseProfiles(context)
+    }
+
     var showCreateRoomBottomSheet by remember { mutableStateOf(false) }
     var showLogoutDialog by remember { mutableStateOf(false) }
 
@@ -858,9 +898,9 @@ fun HomeScreen(
         (authState as? AuthState.Success)?.user ?: UserProfile(
             uid = "guest",
             email = "learner@funkytalk.com",
-            displayName = "Raj",
+            displayName = "Batto",
             isEmailVerified = true,
-            username = "raj_learner",
+            username = "batto_learner",
             avatar = "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150",
             nativeLanguage = "Hindi",
             learningLanguage = "English"
@@ -878,86 +918,32 @@ fun HomeScreen(
     }
 
     // Followed friends state loaded from Firestore in real-time
-    var onlineLearnersCount by remember { mutableStateOf(1842) }
     var activeFriends by remember { mutableStateOf<List<FollowedFriend>>(emptyList()) }
 
-    // Real-time Firestore synchronizer for welcome dynamic data & followed friends
-    LaunchedEffect(viewModel.firestoreDb) {
-        val db = viewModel.firestoreDb ?: return@LaunchedEffect
-
-        // 1. Online count listener
-        db.collection("app_metadata").document("welcome_data")
-            .addSnapshotListener { snapshot, error ->
-                if (error == null && snapshot != null && snapshot.exists()) {
-                    val count = snapshot.getLong("onlineLearnersCount")?.toInt()
-                    if (count != null) {
-                        onlineLearnersCount = count
-                    }
-                } else if (snapshot != null && !snapshot.exists()) {
-                    db.collection("app_metadata").document("welcome_data")
-                        .set(mapOf("onlineLearnersCount" to 1842))
-                }
-            }
-
-        // 2. Active Following Friends real-time update
-        db.collection("following_users").addSnapshotListener { snapshot, error ->
-            if (error != null) return@addSnapshotListener
-            if (snapshot != null) {
-                if (snapshot.isEmpty) {
-                    prepopulateDatabaseWithFollowingUsers(db)
+    val activeFriendsList = remember(activeFriends, supabaseProfiles) {
+        val mapped = if (activeFriends.isNotEmpty()) {
+            activeFriends.map { f ->
+                val p = supabaseProfiles.find { it.uid == f.id }
+                if (p != null) {
+                    f.copy(
+                        name = p.displayName ?: p.username ?: f.name,
+                        avatarUrl = p.avatar ?: f.avatarUrl,
+                        flagCode = p.countryCode ?: f.flagCode
+                    )
                 } else {
-                    val friends = snapshot.documents.mapNotNull { doc ->
-                        try {
-                            val id = doc.getString("userId") ?: doc.id
-                            val name = doc.getString("name") ?: "Friend"
-                            val avatarUrl = doc.getString("avatarUrl") ?: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150"
-                            val countryFlag = doc.getString("countryFlag") ?: "🇮🇳"
-                            val flagCode = doc.getString("flagCode") ?: when (countryFlag) {
-                                "🇮🇳" -> "in"
-                                "🇺🇸" -> "us"
-                                "🇰🇷" -> "kr"
-                                "🇯🇵" -> "jp"
-                                "🇨🇳" -> "cn"
-                                "🇪🇸" -> "es"
-                                "🇫🇷" -> "fr"
-                                "🇩🇪" -> "de"
-                                "🇮🇹" -> "it"
-                                "🇷🇺" -> "ru"
-                                "🇦🇪" -> "ae"
-                                else -> "us"
-                            }
-                            val status = doc.getString("status") ?: "online"
-                            
-                            val isSpeaking = status == "speaking"
-                            val statusText = when (status) {
-                                "speaking" -> "Speaking"
-                                "online" -> "Online"
-                                else -> "Offline"
-                            }
-                            
-                            FollowedFriend(
-                                id = id,
-                                name = name,
-                                avatarUrl = avatarUrl,
-                                flagCode = flagCode,
-                                isSpeaking = isSpeaking,
-                                statusText = statusText
-                            )
-                        } catch (e: Exception) {
-                            null
-                        }
-                    }
-                    activeFriends = friends
+                    f
                 }
             }
+        } else {
+            activeFriends
+        }
+        mapped.filter { f ->
+            val status = f.statusText.lowercase()
+            status != "offline" && status.isNotBlank()
         }
     }
 
-    // Local minor real-time active fluctuation simulation
-    LaunchedEffect(onlineLearnersCount) {
-        kotlinx.coroutines.delay(10000)
-        onlineLearnersCount = (onlineLearnersCount + (-3..3).random()).coerceIn(1000, 5000)
-    }
+    // Real-time Firestore synchronizer for welcome dynamic data is consolidated in the DisposableEffect below
 
     val amusementEvents = remember {
         listOf(
@@ -999,43 +985,77 @@ fun HomeScreen(
 
     // Real-time Firestore Subscriptions handling memory safety with DisposableEffect
     val firestore = viewModel.firestoreDb
-    DisposableEffect(firestore) {
-        if (firestore == null) {
+    val currentUserId = currentUserProfile.uid
+    DisposableEffect(firestore, currentUserId) {
+        if (firestore == null || currentUserId.isBlank() || currentUserId == "guest") {
             onDispose {}
         } else {
             // Dry seeding to ensure user is greeted with high fidelity database components instantly!
             seedDefaultRoomsAndStats(firestore)
-            seedDefaultFriends(firestore)
+            seedDefaultFriends(firestore, currentUserId)
 
-            // 1. Subscribe to online count document
-            val statsSub = firestore.collection("stats").document("onlineCounters")
-                .addSnapshotListener { snapshot, _ ->
-                    if (snapshot != null && snapshot.exists()) {
-                        val count = snapshot.getLong("onlineLearnersCount")?.toInt()
-                        if (count != null) {
-                            onlineLearnersCount = count
-                        }
-                    }
-                }
+            var masterStatusSub: com.google.firebase.firestore.ListenerRegistration? = null
 
-            // 2. Subscribe to active friends list
-            val friendsSub = firestore.collection("friends")
+            // 2. Subscribe to active friends subcollection (users/{currentUserId}/following_users)
+            val friendsSub = firestore.collection("users").document(currentUserId).collection("following_users")
                 .addSnapshotListener { snapshot, _ ->
                     if (snapshot != null) {
-                        val fList = snapshot.map { doc ->
-                            val f = FirestoreFriend.fromMap(doc.data)
-                            FollowedFriend(
-                                id = f.userId,
-                                name = f.name,
-                                avatarUrl = f.avatarUrl,
-                                flagCode = f.flagCode,
-                                isSpeaking = f.status == "speaking",
-                                statusText = f.status.replaceFirstChar { it.uppercase() },
-                                currentRoomId = f.currentRoomId
-                            )
+                        val staticFriends = snapshot.map { doc ->
+                            FirestoreFriend.fromMap(doc.data)
                         }
-                        if (fList.isNotEmpty()) {
-                            activeFriends = fList
+                        
+                        masterStatusSub?.remove()
+                        masterStatusSub = null
+
+                        if (staticFriends.isNotEmpty()) {
+                            val followedIds = staticFriends.map { f -> f.userId.ifBlank { f.userId } }
+                            masterStatusSub = firestore.collection("users")
+                                .whereIn(com.google.firebase.firestore.FieldPath.documentId(), followedIds)
+                                .addSnapshotListener { usersSnapshot, _ ->
+                                    if (usersSnapshot != null) {
+                                        val liveStatusMap = usersSnapshot.documents.associate { doc ->
+                                            doc.id to doc.data
+                                        }
+                                        val liveFriends = staticFriends.map { f ->
+                                            val liveData = liveStatusMap[f.userId]
+                                            val liveStatus = liveData?.get("status") as? String ?: f.status
+                                            val liveIsInRoom = liveData?.get("isInVoiceRoom") as? Boolean ?: f.isInVoiceRoom
+                                            val liveRoomId = liveData?.get("currentRoomId") as? String ?: f.currentRoomId ?: ""
+                                            
+                                            val isSpeaking = liveStatus == "speaking"
+                                            val statusText = when (liveStatus) {
+                                                "speaking" -> "Speaking"
+                                                "online" -> "Online"
+                                                else -> "Offline"
+                                            }
+                                            
+                                            FollowedFriend(
+                                                id = f.userId,
+                                                name = f.name,
+                                                avatarUrl = f.avatarUrl,
+                                                flagCode = f.flagCode,
+                                                isSpeaking = isSpeaking,
+                                                statusText = statusText,
+                                                currentRoomId = liveRoomId
+                                            )
+                                        }
+                                        activeFriends = liveFriends
+                                    } else {
+                                        activeFriends = staticFriends.map { f ->
+                                            FollowedFriend(
+                                                id = f.userId,
+                                                name = f.name,
+                                                avatarUrl = f.avatarUrl,
+                                                flagCode = f.flagCode,
+                                                isSpeaking = f.status == "speaking",
+                                                statusText = f.status.replaceFirstChar { it.uppercase() },
+                                                currentRoomId = f.currentRoomId ?: ""
+                                            )
+                                        }
+                                    }
+                                }
+                        } else {
+                            activeFriends = emptyList()
                         }
                     }
                 }
@@ -1069,6 +1089,17 @@ fun HomeScreen(
                                 Brush.linearGradient(listOf(Color(0xFFFFFBEB), Color(0xFFFEF3C7)))
                             }
 
+                            val roomAvatars = if (supabaseProfiles.isNotEmpty()) {
+                                when (r.roomId) {
+                                    "FT5272" -> supabaseProfiles.filter { it.countryCode == "in" || it.countryCode == "pk" }.mapNotNull { it.avatar }
+                                    "FT1902" -> supabaseProfiles.filter { it.countryCode == "kr" || it.countryCode == "jp" }.mapNotNull { it.avatar }
+                                    "FT8823" -> supabaseProfiles.filter { it.countryCode == "us" || it.countryCode == "ru" }.mapNotNull { it.avatar }
+                                    else -> supabaseProfiles.shuffled().take(3).mapNotNull { it.avatar }
+                                }.ifEmpty { r.previewAvatars }
+                            } else {
+                                r.previewAvatars
+                            }
+
                             CustomRoom(
                                 id = r.roomId,
                                 title = r.title,
@@ -1083,7 +1114,7 @@ fun HomeScreen(
                                 overlayColor = overlayVal,
                                 badgeText = decidedTag,
                                 badgeColor = badgeColor,
-                                avatars = r.previewAvatars
+                                avatars = roomAvatars
                             )
                         }
                         if (mapped.isNotEmpty()) {
@@ -1093,8 +1124,8 @@ fun HomeScreen(
                 }
 
             onDispose {
-                statsSub.remove()
                 friendsSub.remove()
+                masterStatusSub?.remove()
                 roomsSub.remove()
             }
         }
@@ -2184,51 +2215,203 @@ fun HomeScreen(
                             }
                         }
 
-                        // 2. GOOD EVENING STATIC WELCOME ACCENT CARD
+                        // 2. MOTIVATIONAL GREETING CARD (SUN & PAPER PLANE)
                         item {
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .height(120.dp)
                                     .padding(horizontal = 18.dp, vertical = 8.dp),
                                 colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF9E6)),
-                                shape = RoundedCornerShape(24.dp),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFF2C2))
+                                shape = RoundedCornerShape(28.dp)
                             ) {
                                 Row(
                                     modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(18.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                        .fillMaxSize()
+                                        .padding(horizontal = 20.dp, vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        val displayGreetName = currentUserProfile.displayName?.ifBlank { "User" } 
-                                            ?: currentUserProfile.username?.ifBlank { "User" } 
-                                            ?: "Learner"
-                                        Text(
-                                            text = "$greetingText, $displayGreetName!",
-                                            fontWeight = FontWeight.ExtraBold,
-                                            fontSize = 16.sp,
-                                            color = Color(0xFF5A440D)
-                                        )
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = "${java.text.NumberFormat.getIntegerInstance().format(onlineLearnersCount)} learners online now",
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 14.sp,
-                                                color = Color.Black
+                                    // LEFT: Circular outlined sun icon in yellow
+                                    Box(
+                                        modifier = Modifier.size(56.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Canvas(modifier = Modifier.fillMaxSize()) {
+                                            val center = androidx.compose.ui.geometry.Offset(size.width / 2, size.height / 2)
+                                            // Draw outer circle dashed/outlined
+                                            drawCircle(
+                                                color = Color(0xFFFDE68A),
+                                                radius = size.width / 2 - 2.dp.toPx(),
+                                                style = Stroke(
+                                                    width = 1.5.dp.toPx(),
+                                                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(12f, 12f), 0f)
+                                                )
                                             )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(8.dp)
-                                                    .clip(CircleShape)
-                                                    .background(Color(0xFF10B981))
+                                            // Draw center sun circle
+                                            drawCircle(
+                                                color = Color(0xFFFFB300),
+                                                radius = 12.dp.toPx()
+                                            )
+                                            // Draw 8 rays
+                                            val numRays = 8
+                                            val rayLength = 6.dp.toPx()
+                                            val rayStart = 15.dp.toPx()
+                                            for (i in 0 until numRays) {
+                                                val angle = (i * 360f / numRays) * (Math.PI / 180f)
+                                                val startX = center.x + rayStart * Math.cos(angle).toFloat()
+                                                val startY = center.y + rayStart * Math.sin(angle).toFloat()
+                                                val endX = center.x + (rayStart + rayLength) * Math.cos(angle).toFloat()
+                                                val endY = center.y + (rayStart + rayLength) * Math.sin(angle).toFloat()
+                                                drawLine(
+                                                    color = Color(0xFFFFB300),
+                                                    start = androidx.compose.ui.geometry.Offset(startX, startY),
+                                                    end = androidx.compose.ui.geometry.Offset(endX, endY),
+                                                    strokeWidth = 2.dp.toPx(),
+                                                    cap = androidx.compose.ui.graphics.StrokeCap.Round
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.width(16.dp))
+
+                                    // CENTER: Text Section
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        val displayGreetName = (currentUserProfile.displayName?.ifBlank { "Batto" } 
+                                            ?: currentUserProfile.username?.ifBlank { "Batto" } 
+                                            ?: "Batto")
+                                        
+                                        // Text 1 (Bold 30sp): Good Morning, {UserName}!
+                                        Text(
+                                            text = "Good Morning, $displayGreetName!",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 30.sp,
+                                            color = Color(0xFF453000),
+                                            lineHeight = 34.sp
+                                        )
+                                        
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        
+                                        // Text 2 (18sp) & Text 3 with fluency. ✨ highlighted
+                                        val annotatedText = buildAnnotatedString {
+                                            append("Every conversation you have today\nbrings you one step closer to ")
+                                            withStyle(style = SpanStyle(color = Color(0xFFF6C945), fontWeight = FontWeight.Bold)) {
+                                                append("fluency.")
+                                            }
+                                            append(" ✨")
+                                        }
+                                        Text(
+                                            text = annotatedText,
+                                            fontSize = 18.sp,
+                                            lineHeight = 22.sp,
+                                            color = Color(0xFF4B5563)
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.width(12.dp))
+
+                                    // RIGHT: Yellow paper plane, flight path, hearts, faded globe
+                                    Box(
+                                        modifier = Modifier
+                                            .width(100.dp)
+                                            .fillMaxHeight(),
+                                        contentAlignment = Alignment.CenterEnd
+                                    ) {
+                                        Canvas(modifier = Modifier.fillMaxSize()) {
+                                            val w = size.width
+                                            val h = size.height
+                                            val centerX = w * 0.7f
+                                            val centerY = h * 0.5f
+                                            val radius = h * 0.45f
+                                            
+                                            // Draw the globe outline (faded yellow)
+                                            drawCircle(
+                                                color = Color(0xFFFFB300).copy(alpha = 0.08f),
+                                                radius = radius,
+                                                center = androidx.compose.ui.geometry.Offset(centerX, centerY)
+                                            )
+                                            // Draw grid lines on the globe
+                                            drawArc(
+                                                color = Color(0xFFFFB300).copy(alpha = 0.06f),
+                                                startAngle = 0f,
+                                                sweepAngle = 360f,
+                                                useCenter = false,
+                                                topLeft = androidx.compose.ui.geometry.Offset(centerX - radius, centerY - radius * 0.5f),
+                                                size = androidx.compose.ui.geometry.Size(radius * 2f, radius),
+                                                style = Stroke(width = 1.dp.toPx())
+                                            )
+                                            drawArc(
+                                                color = Color(0xFFFFB300).copy(alpha = 0.06f),
+                                                startAngle = 0f,
+                                                sweepAngle = 360f,
+                                                useCenter = false,
+                                                topLeft = androidx.compose.ui.geometry.Offset(centerX - radius * 0.5f, centerY - radius),
+                                                size = androidx.compose.ui.geometry.Size(radius, radius * 2f),
+                                                style = Stroke(width = 1.dp.toPx())
+                                            )
+                                            
+                                            // Flight path (S-curve dashed line)
+                                            val path = Path().apply {
+                                                moveTo(w * 0.1f, h * 0.8f)
+                                                cubicTo(
+                                                    w * 0.4f, h * 1.1f,
+                                                    w * 0.1f, h * 0.2f,
+                                                    w * 0.9f, h * 0.4f
+                                                )
+                                            }
+                                            drawPath(
+                                                path = path,
+                                                color = Color(0xFF6B7280).copy(alpha = 0.4f),
+                                                style = Stroke(
+                                                    width = 1.5.dp.toPx(),
+                                                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(8f, 8f), 0f)
+                                                )
                                             )
                                         }
+
+                                        // Hearts positioned around path
+                                        Icon(
+                                            imageVector = Icons.Default.Favorite,
+                                            contentDescription = null,
+                                            tint = Color(0xFFFFB300),
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .align(Alignment.CenterStart)
+                                                .offset(x = 10.dp, y = (-15).dp)
+                                        )
+                                        Icon(
+                                            imageVector = Icons.Default.Favorite,
+                                            contentDescription = null,
+                                            tint = Color(0xFFFFB300),
+                                            modifier = Modifier
+                                                .size(10.dp)
+                                                .align(Alignment.BottomCenter)
+                                                .offset(x = (-10).dp, y = (-20).dp)
+                                        )
+                                        Icon(
+                                            imageVector = Icons.Default.Favorite,
+                                            contentDescription = null,
+                                            tint = Color(0xFFFFB300),
+                                            modifier = Modifier
+                                                .size(6.dp)
+                                                .align(Alignment.TopCenter)
+                                                .offset(x = 15.dp, y = 15.dp)
+                                        )
+
+                                        // Yellow paper plane (Send icon rotated)
+                                        Icon(
+                                            imageVector = Icons.Default.Send,
+                                            contentDescription = "Paper plane",
+                                            tint = Color(0xFFFFB300),
+                                            modifier = Modifier
+                                                .size(28.dp)
+                                                .align(Alignment.TopEnd)
+                                                .offset(x = 5.dp, y = 20.dp)
+                                                .rotate(-35f)
+                                        )
                                     }
                                 }
                             }
@@ -2252,7 +2435,7 @@ fun HomeScreen(
                                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                                     contentPadding = PaddingValues(horizontal = 2.dp)
                                 ) {
-                                    itemsIndexed(activeFriends) { index, friend ->
+                                    itemsIndexed(activeFriendsList) { index, friend ->
                                         Column(
                                             horizontalAlignment = Alignment.CenterHorizontally,
                                             modifier = Modifier
@@ -2525,6 +2708,7 @@ fun HomeScreen(
                                         .padding(horizontal = 18.dp, vertical = 10.dp)
                                         .height(210.dp)
                                         .clickable {
+                                            viewModel.joinRoom(room.id, room.title)
                                             onRoomClick()
                                         },
                                     shape = RoundedCornerShape(24.dp),
@@ -2687,6 +2871,7 @@ fun HomeScreen(
                                                     Button(
                                                         onClick = {
                                                             Toast.makeText(context, "Welcome to ${room.title}! Connecting audio...", Toast.LENGTH_LONG).show()
+                                                            viewModel.joinRoom(room.id, room.title)
                                                             onRoomClick()
                                                         },
                                                         colors = ButtonDefaults.buttonColors(containerColor = GoldAccent),
@@ -3611,8 +3796,171 @@ fun AnimatedRoomBanner(
     overlayColor: Color,
     modifier: Modifier = Modifier
 ) {
-    Box(modifier = modifier) {
-        val infiniteTransition = rememberInfiniteTransition(label = "banner_transition")
+    if (imageUrl.startsWith("gradient:")) {
+        val colorsString = imageUrl.removePrefix("gradient:")
+        val colorHexes = colorsString.split(",")
+        val colors = colorHexes.mapNotNull { hex ->
+            try {
+                val cleanHex = hex.trim()
+                val finalHex = if (cleanHex.startsWith("#")) cleanHex else "#$cleanHex"
+                Color(android.graphics.Color.parseColor(finalHex))
+            } catch (e: Exception) {
+                null
+            }
+        }.ifEmpty { listOf(Color(0xFF6366F1), Color(0xFFEC4899)) }
+
+        val infiniteTransition = rememberInfiniteTransition(label = "live_gradient_anim")
+        
+        // 1. Shimmer/Shine translation
+        val shimmerOffset by infiniteTransition.animateFloat(
+            initialValue = -1.5f,
+            targetValue = 1.5f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(4500, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "gradient_shimmer"
+        )
+        
+        // 2. Pulse of the secondary neon layer
+        val pulseScale by infiniteTransition.animateFloat(
+            initialValue = 0.4f,
+            targetValue = 0.85f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(3500, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "gradient_pulse"
+        )
+
+        Box(modifier = modifier) {
+            // Background Base Gradient
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        brush = Brush.linearGradient(
+                            colors = colors,
+                            start = androidx.compose.ui.geometry.Offset(0f, 0f),
+                            end = androidx.compose.ui.geometry.Offset(800f * (1f + (styleIndex % 3) * 0.15f), 1000f)
+                        )
+                    )
+            )
+
+            // Live glowing effects depending on Style Index
+            when (styleIndex % 5) {
+                0 -> {
+                    // Style 0: Golden Sunburst Glow
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.radialGradient(
+                                    colors = listOf(Color(0xFFFFD700).copy(alpha = pulseScale * 0.35f), Color.Transparent),
+                                    radius = 550f
+                                )
+                            )
+                    )
+                }
+                1 -> {
+                    // Style 1: Cyberpunk Slanted Ribbon Sweep (Glassmorphic Accent)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .drawBehind {
+                                val w = size.width
+                                val h = size.height
+                                val currentX = w * shimmerOffset
+                                drawRect(
+                                    brush = Brush.linearGradient(
+                                        colors = listOf(
+                                            Color.White.copy(alpha = 0f),
+                                            Color.White.copy(alpha = 0.28f),
+                                            Color.White.copy(alpha = 0f)
+                                        ),
+                                        start = androidx.compose.ui.geometry.Offset(currentX - 150f, 0f),
+                                        end = androidx.compose.ui.geometry.Offset(currentX + 150f, h)
+                                    )
+                                )
+                            }
+                    )
+                }
+                2 -> {
+                    // Style 2: Secondary Nebulae Float
+                    val nebulaColor = colors.lastOrNull()?.copy(alpha = pulseScale * 0.45f) ?: Color.White.copy(alpha = 0.2f)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.radialGradient(
+                                    colors = listOf(nebulaColor, Color.Transparent),
+                                    radius = 700f,
+                                    center = androidx.compose.ui.geometry.Offset(750f, 200f)
+                                )
+                            )
+                    )
+                }
+                3 -> {
+                    // Style 3: Sparkling Twinkle Dust
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .drawBehind {
+                                val w = size.width
+                                val h = size.height
+                                drawCircle(
+                                    color = Color.White.copy(alpha = pulseScale * 0.85f),
+                                    radius = 5.5f,
+                                    center = androidx.compose.ui.geometry.Offset(w * 0.22f, h * 0.33f)
+                                )
+                                drawCircle(
+                                    color = Color.White.copy(alpha = (1f - pulseScale) * 0.8f),
+                                    radius = 4.5f,
+                                    center = androidx.compose.ui.geometry.Offset(w * 0.78f, h * 0.48f)
+                                )
+                                drawCircle(
+                                    color = Color.White.copy(alpha = pulseScale * 0.65f),
+                                    radius = 6f,
+                                    center = androidx.compose.ui.geometry.Offset(w * 0.52f, h * 0.72f)
+                                )
+                            }
+                    )
+                }
+                else -> {
+                    // Style 4: Minimalist Deep Vignette
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.radialGradient(
+                                    colors = listOf(Color.Transparent, Color.Black.copy(alpha = (1f - pulseScale) * 0.3f)),
+                                    radius = 650f
+                                )
+                            )
+                    )
+                }
+            }
+
+            // Standard overlays to guarantee text legibility & elegant bottom fade
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(overlayColor)
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color.White.copy(alpha = 0.18f), Color.White.copy(alpha = 0.95f)),
+                            startY = 100f
+                        )
+                    )
+            )
+        }
+    } else {
+        Box(modifier = modifier) {
+            val infiniteTransition = rememberInfiniteTransition(label = "banner_transition")
 
         when (styleIndex % 10) {
             0 -> {
@@ -3970,4 +4318,5 @@ fun AnimatedRoomBanner(
                 )
         )
     }
+}
 }

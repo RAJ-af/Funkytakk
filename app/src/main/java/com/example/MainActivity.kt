@@ -199,10 +199,14 @@ class MainActivity : ComponentActivity() {
                             "create_language_room" -> CreateLanguageRoomScreen(
                                 viewModel = authViewModel,
                                 onBack = { currentScreen = "home" },
-                                onCreate = { currentScreen = "voice_room" }
+                                onCreate = { currentScreen = "home" }
                             )
                             "voice_room" -> VoiceRoomScreen(
-                                onBack = { currentScreen = "home" }
+                                viewModel = authViewModel,
+                                onBack = {
+                                    authViewModel.leaveRoom()
+                                    currentScreen = "home"
+                                }
                             )
                         }
                     }

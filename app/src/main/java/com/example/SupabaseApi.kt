@@ -27,7 +27,8 @@ data class SupabaseUser(
     val country_code: String?,
     val hobbies: List<String>?,
     val custom_email_verified: Boolean? = null,
-    val email_verification_token: String? = null
+    val email_verification_token: String? = null,
+    val email_verification_expires_at: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -46,7 +47,28 @@ data class SendLoginNotificationRequest(
     val timestamp: String
 )
 
+@JsonClass(generateAdapter = true)
+data class GeminiProxyRequest(
+    val prompt: String,
+    val model: String? = "gemini-2.5-flash",
+    val systemInstruction: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class GeminiProxyResponse(
+    val success: Boolean? = null,
+    val text: String? = null,
+    val error: String? = null
+)
+
 interface SupabaseApi {
+
+    @POST("functions/v1/gemini-proxy")
+    suspend fun callGeminiProxy(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
+        @Body request: GeminiProxyRequest
+    ): Response<GeminiProxyResponse>
 
     @POST("functions/v1/send-verification-email")
     suspend fun sendVerificationEmail(
@@ -91,5 +113,11 @@ interface SupabaseApi {
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
         @Query("username") usernameEq: String // e.g. "eq.Raj"
+    ): Response<List<SupabaseUser>>
+
+    @GET("rest/v1/users")
+    suspend fun getAllUsers(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
     ): Response<List<SupabaseUser>>
 }

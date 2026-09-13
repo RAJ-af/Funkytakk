@@ -38,7 +38,6 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.components.Icon
 import com.example.AuthState
 import com.example.AuthViewModel
 import com.example.R
@@ -79,7 +78,6 @@ fun AuthScreen(
     var password by remember { mutableStateOf("") }
     var isPasswordVisible by remember { mutableStateOf(false) }
     var isSignUpMode by remember { mutableStateOf(true) }
-    var showGoogleAccountChooser by remember { mutableStateOf(false) }
 
     val authState by viewModel.authState.collectAsState()
 
@@ -458,7 +456,7 @@ fun AuthScreen(
                             Toast.makeText(context, "Google sign in error: ${e.message}", Toast.LENGTH_SHORT).show()
                         }
                     } else {
-                        showGoogleAccountChooser = true
+                        Toast.makeText(context, "Google Sign-In is not configured. Please use Email Login.", Toast.LENGTH_LONG).show()
                     }
                 },
                 modifier = Modifier
@@ -497,216 +495,7 @@ fun AuthScreen(
         }
     }
 
-    if (showGoogleAccountChooser) {
-        androidx.compose.ui.window.Dialog(
-            onDismissRequest = { showGoogleAccountChooser = false }
-        ) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                shape = RoundedCornerShape(28.dp),
-                color = Color.White,
-                tonalElevation = 6.dp
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    // Google logo
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.ic_google),
-                            contentDescription = "Google Logo",
-                            tint = Color.Unspecified,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
 
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Text(
-                        text = "Choose an account",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.Black,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "to continue to FunkyTalk",
-                        fontSize = 13.sp,
-                        color = Color.Gray,
-                        textAlign = TextAlign.Center
-                    )
-
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    // Account 1: Shwetabh shwetabhatingar@gmail.com
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable {
-                                showGoogleAccountChooser = false
-                                viewModel.simulateGoogleLogin(
-                                    context, 
-                                    "shwetabhatingar@gmail.com", 
-                                    "Shwetabh", 
-                                    "google-uid-72", 
-                                    onAuthSuccess
-                                )
-                            }
-                            .padding(vertical = 12.dp, horizontal = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFFFFC529)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "S",
-                                color = Color.Black,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Shwetabh",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.Black
-                            )
-                            Text(
-                                text = "shwetabhatingar@gmail.com",
-                                fontSize = 13.sp,
-                                color = Color.Gray
-                            )
-                        }
-                    }
-
-                    HorizontalDivider(color = Color.Black.copy(alpha = 0.08f))
-
-                    // Account 2: FunkyTalk Test User funkytest@gmail.com
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable {
-                                showGoogleAccountChooser = false
-                                viewModel.simulateGoogleLogin(
-                                    context, 
-                                    "funkytest@gmail.com", 
-                                    "FunkyTalk Test User", 
-                                    "google-uid-test-100", 
-                                    onAuthSuccess
-                                )
-                            }
-                            .padding(vertical = 12.dp, horizontal = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFFEAF2F9)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "F",
-                                color = Color(0xFF4285F4),
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "FunkyTalk Test User",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.Black
-                            )
-                            Text(
-                                text = "funkytest@gmail.com",
-                                fontSize = 13.sp,
-                                color = Color.Gray
-                            )
-                        }
-                    }
-
-                    HorizontalDivider(color = Color.Black.copy(alpha = 0.08f))
-
-                    // Account 3: Add new test account / Setup from Scratch
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable {
-                                showGoogleAccountChooser = false
-                                viewModel.simulateGoogleLogin(
-                                    context, 
-                                    "new_learner_99@gmail.com", 
-                                    "New Learner", 
-                                    "google-uid-new-" + System.currentTimeMillis().toString().takeLast(6), 
-                                    onAuthSuccess
-                                )
-                            }
-                            .padding(vertical = 12.dp, horizontal = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFFF3F4F6)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = null,
-                                tint = Color.Gray,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Add another account",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.Black
-                            )
-                            Text(
-                                text = "Sign in to a different profile from scratch",
-                                fontSize = 12.sp,
-                                color = Color.Gray
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    TextButton(
-                        onClick = { showGoogleAccountChooser = false },
-                        colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFFF9E00))
-                    ) {
-                        Text("Cancel", fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-    }
 }
 
 @Composable

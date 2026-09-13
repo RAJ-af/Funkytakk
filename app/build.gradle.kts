@@ -20,13 +20,24 @@ android {
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
+  val envKeystorePath = System.getenv("KEYSTORE_PATH")
+  val envStorePassword = System.getenv("STORE_PASSWORD")
+  val envKeyPassword = System.getenv("KEY_PASSWORD")
+  val envKeyAlias = System.getenv("KEY_ALIAS") ?: "upload"
+
+  val hasReleaseSigningCredentials = !envKeystorePath.isNullOrBlank() &&
+      !envStorePassword.isNullOrBlank() &&
+      !envKeyPassword.isNullOrBlank() &&
+      file(envKeystorePath).exists()
+
   signingConfigs {
-    create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+    if (hasReleaseSigningCredentials) {
+      create("release") {
+        storeFile = file(envKeystorePath!!)
+        storePassword = envStorePassword
+        keyAlias = envKeyAlias
+        keyPassword = envKeyPassword
+      }
     }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")
@@ -39,9 +50,15 @@ android {
   buildTypes {
     release {
       isCrunchPngs = false
-      isMinifyEnabled = false
+      isMinifyEnabled = true
+      isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = signingConfigs.getByName("release")
+      if (hasReleaseSigningCredentials) {
+        signingConfig = signingConfigs.getByName("release")
+      } else {
+        signingConfig = null
+        logger.warn("SECURITY WARNING: Release signing credentials (KEYSTORE_PATH, STORE_PASSWORD, KEY_PASSWORD) are not configured or file does not exist. Release build will NOT be signed with debug keys.")
+      }
     }
     debug {
       signingConfig = signingConfigs.getByName("debugConfig")
@@ -63,6 +80,10 @@ android {
 secrets {
   propertiesFileName = ".env"
   defaultPropertiesFileName = ".env.example"
+  // Keep server-side secrets out of the client Android APK
+  ignoreList.add("GEMINI_API_KEY")
+  ignoreList.add("BREVO_API_KEY")
+  ignoreList.add("BREVO_TEMPLATE_ID")
 }
 
 // Some unused dependencies are commented out below instead of being removed.
@@ -91,8 +112,8 @@ dependencies {
   implementation(libs.firebase.auth)
   implementation(libs.firebase.firestore)
   implementation(libs.play.services.auth)
-  implementation(libs.androidx.room.ktx)
-  implementation(libs.androidx.room.runtime)
+  // implementation(libs.androidx.room.ktx)
+  // implementation(libs.androidx.room.runtime)
   implementation(libs.coil.compose)
   implementation(libs.coil.svg)
   implementation(libs.converter.moshi)
@@ -120,6 +141,6 @@ dependencies {
   androidTestImplementation(libs.androidx.runner)
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
-  "ksp"(libs.androidx.room.compiler)
+  // "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
 }
