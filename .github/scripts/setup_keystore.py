@@ -13,8 +13,18 @@ os.makedirs(home_android, exist_ok=True)
 # ----------------------------------------------------
 debug_dst = os.path.abspath(os.path.join(home_android, "debug.keystore"))
 debug_saved = os.path.abspath(os.path.join(artifacts_dir, "debug.keystore"))
+debug_b64_env = os.environ.get("DEBUG_KEYSTORE_BASE64", "").strip()
 
-if os.path.exists("debug.keystore"):
+if debug_b64_env:
+    print("Restoring debug.keystore from DEBUG_KEYSTORE_BASE64 secret...")
+    data = base64.b64decode(debug_b64_env)
+    with open(debug_dst, "wb") as f:
+        f.write(data)
+    with open(debug_saved, "wb") as f:
+        f.write(data)
+    with open("debug.keystore", "wb") as f:
+        f.write(data)
+elif os.path.exists("debug.keystore"):
     print("Found debug.keystore in workspace...")
     with open("debug.keystore", "rb") as f:
         data = f.read()
