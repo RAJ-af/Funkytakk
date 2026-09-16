@@ -30,13 +30,6 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
-      - name: Restore Debug Keystore
-        run: |
-          if [ -f "debug.keystore.base64" ] && [ ! -f "debug.keystore" ]; then
-            echo "Decoding debug.keystore from base64..."
-            base64 -d debug.keystore.base64 > debug.keystore
-          fi
-
       - name: Setup Environment Variables (.env)
         env:
           ENV_FILE: ${{ secrets.ENV_FILE }}
