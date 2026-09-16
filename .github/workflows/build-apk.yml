@@ -44,28 +44,56 @@ jobs:
           BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
           BREVO_TEMPLATE_ID: ${{ secrets.BREVO_TEMPLATE_ID }}
         run: |
-          if [ -n "$ENV_FILE" ]; then
-            echo "Creating .env from GitHub Secret ENV_FILE..."
-            echo "$ENV_FILE" > .env
-          elif [ ! -f .env ]; then
-            echo "Creating .env from .env.example..."
-            cp .env.example .env
-          else
-            echo "Using existing .env file..."
-          fi
+          python3 -c '
+          import os
 
-          # Inject any individual secrets if provided in GitHub repository settings
-          [ -n "$GEMINI_API_KEY" ] && sed -i "s|^GEMINI_API_KEY=.*|GEMINI_API_KEY=$GEMINI_API_KEY|" .env
-          [ -n "$GOOGLE_WEB_CLIENT_ID" ] && sed -i "s|^GOOGLE_WEB_CLIENT_ID=.*|GOOGLE_WEB_CLIENT_ID=$GOOGLE_WEB_CLIENT_ID|" .env
-          [ -n "$FIREBASE_API_KEY" ] && sed -i "s|^FIREBASE_API_KEY=.*|FIREBASE_API_KEY=$FIREBASE_API_KEY|" .env
-          [ -n "$FIREBASE_APPLICATION_ID" ] && sed -i "s|^FIREBASE_APPLICATION_ID=.*|FIREBASE_APPLICATION_ID=$FIREBASE_APPLICATION_ID|" .env
-          [ -n "$FIREBASE_PROJECT_ID" ] && sed -i "s|^FIREBASE_PROJECT_ID=.*|FIREBASE_PROJECT_ID=$FIREBASE_PROJECT_ID|" .env
-          [ -n "$SUPABASE_URL" ] && sed -i "s|^SUPABASE_URL=.*|SUPABASE_URL=$SUPABASE_URL|" .env
-          [ -n "$SUPABASE_ANON_KEY" ] && sed -i "s|^SUPABASE_ANON_KEY=.*|SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY|" .env
-          [ -n "$FUNKYTALK_BACKEND_URL" ] && sed -i "s|^FUNKYTALK_BACKEND_URL=.*|FUNKYTALK_BACKEND_URL=$FUNKYTALK_BACKEND_URL|" .env
-          [ -n "$BREVO_API_KEY" ] && sed -i "s|^BREVO_API_KEY=.*|BREVO_API_KEY=$BREVO_API_KEY|" .env
-          [ -n "$BREVO_TEMPLATE_ID" ] && sed -i "s|^BREVO_TEMPLATE_ID=.*|BREVO_TEMPLATE_ID=$BREVO_TEMPLATE_ID|" .env
+          env_file = os.environ.get("ENV_FILE")
+          if env_file:
+              print("Creating .env from GitHub Secret ENV_FILE...")
+              with open(".env", "w") as f:
+                  f.write(env_file)
+          elif not os.path.exists(".env"):
+              print("Creating .env from .env.example...")
+              with open(".env.example", "r") as src, open(".env", "w") as dst:
+                  dst.write(src.read())
+          else:
+              print("Using existing .env file...")
 
+          # Read current .env
+          env_vars = {}
+          if os.path.exists(".env"):
+              with open(".env", "r") as f:
+                  for line in f:
+                      line = line.strip()
+                      if line and not line.startswith("#") and "=" in line:
+                          k, v = line.split("=", 1)
+                          env_vars[k.strip()] = v.strip()
+
+          # Override with any individual GitHub Secrets if provided
+          keys_to_check = [
+              "GEMINI_API_KEY",
+              "GOOGLE_WEB_CLIENT_ID",
+              "FIREBASE_API_KEY",
+              "FIREBASE_APPLICATION_ID",
+              "FIREBASE_PROJECT_ID",
+              "SUPABASE_URL",
+              "SUPABASE_ANON_KEY",
+              "FUNKYTALK_BACKEND_URL",
+              "BREVO_API_KEY",
+              "BREVO_TEMPLATE_ID"
+          ]
+
+          for k in keys_to_check:
+              val = os.environ.get(k)
+              if val and val.strip():
+                  env_vars[k] = val.strip()
+
+          with open(".env", "w") as f:
+              for k, v in env_vars.items():
+                  f.write(f"{k}={v}\n")
+
+          print("Configured .env keys:", list(env_vars.keys()))
+          '
           echo "Environment configuration completed."
 
       - name: Build Debug APK with Gradle
