@@ -35,6 +35,15 @@ fun VerifyEmailScreen(
     var userEmail by remember { mutableStateOf("your email") }
     var isVerified by remember { mutableStateOf(false) }
 
+    var cooldownSeconds by remember { mutableStateOf(0) }
+
+    LaunchedEffect(cooldownSeconds) {
+        if (cooldownSeconds > 0) {
+            kotlinx.coroutines.delay(1000)
+            cooldownSeconds -= 1
+        }
+    }
+
     DisposableEffect(Unit) {
         viewModel.startAutoVerificationCheck(context) {
             onVerifiedSuccess()
@@ -188,24 +197,30 @@ fun VerifyEmailScreen(
                     )
                 }
 
-                // Resend email link
+                // Resend email link with 60s cooldown indicator
                 Button(
                     onClick = {
-                        viewModel.resendVerificationEmail(context)
+                        if (cooldownSeconds == 0) {
+                            cooldownSeconds = 60
+                            viewModel.resendVerificationEmail(context)
+                        }
                     },
+                    enabled = cooldownSeconds == 0,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp)
                         .testTag("resend_email_button"),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFF5F5F7),
-                        contentColor = Color.Black
+                        containerColor = if (cooldownSeconds == 0) Color(0xFFF5F5F7) else Color(0xFFF1F5F9),
+                        contentColor = if (cooldownSeconds == 0) Color.Black else Color.Gray,
+                        disabledContainerColor = Color(0xFFF1F5F9),
+                        disabledContentColor = Color.Gray
                     ),
                     shape = RoundedCornerShape(28.dp),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
                 ) {
                     Text(
-                        text = "Resend Verification Link",
+                        text = if (cooldownSeconds > 0) "Resend link in ${cooldownSeconds}s" else "Resend Verification Link",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
                     )

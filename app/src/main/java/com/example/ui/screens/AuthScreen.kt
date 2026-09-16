@@ -408,6 +408,93 @@ fun AuthScreen(
                     )
                 )
 
+                // Password Strength Meter (Weak / Medium / Strong) for Signup Mode
+                val passwordStrength = remember(password) {
+                    when {
+                        password.isEmpty() -> 0
+                        password.length < 6 -> 1 // Weak
+                        password.length >= 8 && password.any { it.isDigit() } && password.any { it.isUpperCase() || !it.isLetterOrDigit() } -> 3 // Strong
+                        password.length >= 6 -> 2 // Medium
+                        else -> 1
+                    }
+                }
+
+                if (isSignUpMode && password.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(
+                                        when {
+                                            passwordStrength >= 1 -> if (passwordStrength == 1) Color(0xFFEF4444) else if (passwordStrength == 2) Color(0xFFF59E0B) else Color(0xFF10B981)
+                                            else -> Color(0xFFE5E7EB)
+                                        }
+                                    )
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(
+                                        when {
+                                            passwordStrength >= 2 -> if (passwordStrength == 2) Color(0xFFF59E0B) else Color(0xFF10B981)
+                                            else -> Color(0xFFE5E7EB)
+                                        }
+                                    )
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(
+                                        if (passwordStrength >= 3) Color(0xFF10B981) else Color(0xFFE5E7EB)
+                                    )
+                            )
+                        }
+                        
+                        Spacer(modifier = Modifier.height(4.dp))
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = when (passwordStrength) {
+                                    1 -> "Weak (add numbers/uppercase)"
+                                    2 -> "Moderate"
+                                    3 -> "Strong password"
+                                    else -> ""
+                                },
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = when (passwordStrength) {
+                                    1 -> Color(0xFFEF4444)
+                                    2 -> Color(0xFFD97706)
+                                    3 -> Color(0xFF059669)
+                                    else -> Color.Gray
+                                }
+                            )
+                            Text(
+                                text = "Min 6 characters",
+                                fontSize = 11.sp,
+                                color = Color(0xFF9CA3AF)
+                            )
+                        }
+                    }
+                }
+
                 // Password hint or Forgot password
                 Row(
                     modifier = Modifier
@@ -416,11 +503,13 @@ fun AuthScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Password must be at least 6 characters.",
-                        fontSize = 12.sp,
-                        color = Color(0xFF8E8E93)
-                    )
+                    if (!isSignUpMode) {
+                        Text(
+                            text = "Enter your registered password",
+                            fontSize = 12.sp,
+                            color = Color(0xFF8E8E93)
+                        )
+                    }
 
                     if (!isSignUpMode) {
                         Text(

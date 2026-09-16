@@ -95,75 +95,38 @@ class MainActivity : ComponentActivity() {
                                     currentScreen = "auth"
                                 }
                             )
-                            "onboarding_profile" -> OnboardingProfileScreen(
+                            "onboarding_profile" -> ProfileStep1QuickCard(
                                 viewModel = authViewModel,
-                                initialUsername = tempUsername,
                                 initialDisplayName = tempDisplayName,
+                                initialUsername = tempUsername,
                                 initialAvatar = tempAvatar,
-                                onNext = { username, displayName, avatar ->
-                                    tempUsername = username
+                                initialGender = tempGender,
+                                initialDob = tempDob,
+                                onNext = { displayName, username, avatar, gender, dob ->
                                     tempDisplayName = displayName
+                                    tempUsername = username
                                     tempAvatar = avatar
-                                    currentScreen = "onboarding_age"
+                                    tempGender = gender
+                                    tempDob = dob
+                                    currentScreen = "onboarding_personalize"
                                 },
                                 onBack = {
                                     authViewModel.logout(applicationContext)
                                     currentScreen = "auth"
                                 }
                             )
-                            "onboarding_age" -> OnboardingAgeScreen(
-                                initialDob = tempDob,
-                                onNext = { dobString ->
-                                    tempDob = dobString
-                                    currentScreen = "onboarding_gender"
-                                },
-                                onBack = {
-                                    currentScreen = "onboarding_profile"
-                                }
-                            )
-                            "onboarding_gender" -> OnboardingGenderScreen(
-                                initialGender = tempGender,
-                                onComplete = { selectedGender ->
-                                    tempGender = selectedGender
-                                    currentScreen = "onboarding_country"
-                                },
-                                onBack = {
-                                    currentScreen = "onboarding_age"
-                                }
-                            )
-                            "onboarding_country" -> OnboardingCountryScreen(
+                            "onboarding_personalize" -> ProfileStep2Personalize(
+                                initialNativeLanguage = tempNativeLanguage,
+                                initialLearningLanguage = tempLearningLanguage,
                                 initialCountry = tempCountry,
                                 initialCountryCode = tempCountryCode,
-                                onComplete = { countryName, countryCode ->
-                                    tempCountry = countryName
+                                initialHobbies = tempHobbies,
+                                onComplete = { nativeLang, learningLang, country, countryCode, hobbies ->
+                                    tempNativeLanguage = nativeLang
+                                    tempLearningLanguage = learningLang
+                                    tempCountry = country
                                     tempCountryCode = countryCode
-                                    currentScreen = "onboarding_native"
-                                },
-                                onBack = {
-                                    currentScreen = "onboarding_gender"
-                                }
-                            )
-                            "onboarding_native" -> OnboardingNativeLanguageScreen(
-                                onComplete = { selectedLanguage ->
-                                    tempNativeLanguage = selectedLanguage
-                                    currentScreen = "onboarding_learning"
-                                },
-                                onBack = {
-                                    currentScreen = "onboarding_country"
-                                }
-                            )
-                            "onboarding_learning" -> OnboardingLearningLanguageScreen(
-                                onComplete = { selectedLanguage ->
-                                    tempLearningLanguage = selectedLanguage
-                                    currentScreen = "onboarding_hobbies"
-                                },
-                                onBack = {
-                                    currentScreen = "onboarding_native"
-                                }
-                            )
-                            "onboarding_hobbies" -> OnboardingHobbiesScreen(
-                                onComplete = { selectedHobbies ->
-                                    tempHobbies = selectedHobbies
+                                    tempHobbies = hobbies
                                     authViewModel.updateProfile(
                                         context = applicationContext,
                                         username = tempUsername,
@@ -180,8 +143,25 @@ class MainActivity : ComponentActivity() {
                                         currentScreen = "home"
                                     }
                                 },
+                                onSkip = {
+                                    authViewModel.updateProfile(
+                                        context = applicationContext,
+                                        username = tempUsername,
+                                        displayName = tempDisplayName,
+                                        avatar = tempAvatar,
+                                        dob = tempDob,
+                                        gender = tempGender,
+                                        nativeLanguage = if (tempNativeLanguage.isNotBlank()) tempNativeLanguage else "English",
+                                        learningLanguage = if (tempLearningLanguage.isNotBlank()) tempLearningLanguage else "Spanish",
+                                        country = if (tempCountry.isNotBlank()) tempCountry else "United States",
+                                        countryCode = if (tempCountryCode.isNotBlank()) tempCountryCode else "us",
+                                        hobbies = tempHobbies
+                                    ) {
+                                        currentScreen = "home"
+                                    }
+                                },
                                 onBack = {
-                                    currentScreen = "onboarding_learning"
+                                    currentScreen = "onboarding_profile"
                                 }
                             )
                             "home" -> HomeScreen(
