@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
 import android.widget.Toast
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -23,19 +25,24 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.AuthState
@@ -95,98 +102,222 @@ fun AuthScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFFFFF7E8), // Tender golden warm cream
-                        Color(0xFFFBF1D5), // Soft pastel sunset bronze
-                        Color(0xFFEAF2F9)  // Soft premium azure blue haze
-                    )
-                )
-            )
+            .background(Color(0xFFFAFAEE)) // Warm ivory background
     ) {
-        // Star decorative sparkle crosses matching Screenshot 3
-        DecorativeBackgroundAccents()
+        // Infinite rotation animations for background shapes
+        val infiniteTransition = rememberInfiniteTransition(label = "bg_shapes_rotation")
+        
+        // Gentle smooth continuous rotation for top-right shape (clockwise)
+        val topRotation by infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 26000, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "top_shape_rot"
+        )
+
+        // Gentle smooth continuous rotation for bottom-left shape (counter-clockwise)
+        val bottomRotation by infiniteTransition.animateFloat(
+            initialValue = 360f,
+            targetValue = 0f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 32000, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "bottom_shape_rot"
+        )
+
+        // Top-right rotating organic 8-pointed star / flower shape (non-circular)
+        Canvas(
+            modifier = Modifier
+                .size(340.dp)
+                .align(Alignment.TopEnd)
+                .offset(x = 100.dp, y = (-50).dp)
+                .rotate(topRotation)
+        ) {
+            val w = size.width
+            val h = size.height
+            val cx = w / 2f
+            val cy = h / 2f
+            val path = Path().apply {
+                // Smooth organic morphing petal shape
+                val rMax = w * 0.48f
+                val rMin = w * 0.36f
+                val points = 7
+                for (i in 0 until points * 2) {
+                    val angle = (i * Math.PI / points).toFloat()
+                    val radius = if (i % 2 == 0) rMax else rMin
+                    val x = cx + radius * kotlin.math.cos(angle)
+                    val y = cy + radius * kotlin.math.sin(angle)
+                    if (i == 0) moveTo(x, y) else lineTo(x, y)
+                }
+                close()
+            }
+            drawPath(
+                path = path,
+                color = Color(0xFFF7ECBC).copy(alpha = 0.55f)
+            )
+        }
+
+        // Bottom-left rotating soft rounded organic blob polygon (non-circular)
+        Canvas(
+            modifier = Modifier
+                .size(380.dp)
+                .align(Alignment.BottomStart)
+                .offset(x = (-110).dp, y = 130.dp)
+                .rotate(bottomRotation)
+        ) {
+            val w = size.width
+            val h = size.height
+            val cx = w / 2f
+            val cy = h / 2f
+            val path = Path().apply {
+                // Smooth 5-wave flowing organic pebble shape
+                val rMax = w * 0.47f
+                val rMin = w * 0.35f
+                val points = 5
+                for (i in 0 until points * 2) {
+                    val angle = (i * Math.PI / points).toFloat()
+                    val radius = if (i % 2 == 0) rMax else rMin
+                    val x = cx + radius * kotlin.math.cos(angle)
+                    val y = cy + radius * kotlin.math.sin(angle)
+                    if (i == 0) moveTo(x, y) else lineTo(x, y)
+                }
+                close()
+            }
+            drawPath(
+                path = path,
+                color = Color(0xFFF7ECBC).copy(alpha = 0.50f)
+            )
+        }
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .statusBarsPadding()
                 .imePadding()
                 .verticalScroll(scrollState)
-                .padding(horizontal = 24.dp, vertical = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween
+                .padding(horizontal = 24.dp, vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(36.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            // Screen Header Panel
+            // 1. BRAND HEADER ROW: Only "FunkyTalk." (Removed "Learn • Share • Connect")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Start,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = buildAnnotatedString {
+                        withStyle(style = SpanStyle(color = Color(0xFF141414), fontWeight = FontWeight.Black)) {
+                            append("Funky")
+                        }
+                        withStyle(style = SpanStyle(color = Color(0xFFF6C343), fontWeight = FontWeight.Black)) {
+                            append("Talk.")
+                        }
+                    },
+                    fontSize = 28.sp,
+                    letterSpacing = (-0.8).sp
+                )
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // 2. WELCOME TO FUNKYTALK & TITLE
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.Start
             ) {
                 Text(
-                    text = "Welcome to",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.Black.copy(alpha = 0.5f),
-                    letterSpacing = (-0.5).sp
+                    text = "WELCOME TO FUNKYTALK",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF8E8E93),
+                    letterSpacing = 2.sp
                 )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
                 Text(
-                    text = "FunkyTalk",
-                    fontSize = 44.sp,
+                    text = if (isSignUpMode) "Create your\naccount" else "Welcome\nback",
+                    fontSize = 40.sp,
                     fontWeight = FontWeight.Black,
-                    color = Color.Black,
+                    color = Color(0xFF141414),
+                    lineHeight = 44.sp,
                     letterSpacing = (-1.5).sp,
-                    lineHeight = 48.sp,
                     modifier = Modifier.testTag("auth_welcome_title")
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = "Meet language partners\nfrom around the world! 🌍💬✨",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color.Black.copy(alpha = 0.6f),
+                    text = if (isSignUpMode) 
+                        "Start connecting with amazing\npeople around the world."
+                    else 
+                        "Log in to continue chatting with\nyour friends around the world.",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Normal,
+                    color = Color(0xFF6B6B70),
                     lineHeight = 24.sp
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Yellow horizontal accent bar (signature FunkyTalk underline indicator)
+                Box(
+                    modifier = Modifier
+                        .width(48.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(Color(0xFFF6C343))
                 )
             }
 
-            Spacer(modifier = Modifier.height(40.dp))
+            Spacer(modifier = Modifier.height(30.dp))
 
-            // Fields Input panel
+            // 3. INPUT FIELDS
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Email field
+                // Email field - Soft pill shape matching reference image
                 OutlinedTextField(
                     value = email,
                     onValueChange = { email = it },
-                    textStyle = LocalTextStyle.current.copy(color = Color.Black, fontSize = 16.sp, fontWeight = FontWeight.Medium),
-                    placeholder = { Text("Enter your email", color = Color.Black.copy(alpha = 0.4f), fontSize = 16.sp) },
+                    textStyle = LocalTextStyle.current.copy(color = Color(0xFF141414), fontSize = 15.sp, fontWeight = FontWeight.Medium),
+                    placeholder = { Text("Enter your email", color = Color(0xFF9E9E9E), fontSize = 15.sp) },
                     leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Default.Email,
-                            contentDescription = "Email Icon",
-                            tint = Color.Black.copy(alpha = 0.4f),
-                            modifier = Modifier.size(20.dp)
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .background(Color(0xFFF0F0F2), RoundedCornerShape(10.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Email,
+                                contentDescription = "Email Icon",
+                                tint = Color(0xFF757575),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(58.dp)
+                        .height(60.dp)
                         .testTag("email_input"),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.Black,
-                        unfocusedTextColor = Color.Black,
+                        focusedTextColor = Color(0xFF141414),
+                        unfocusedTextColor = Color(0xFF141414),
                         focusedContainerColor = Color.White,
                         unfocusedContainerColor = Color.White,
-                        focusedBorderColor = Color(0xFFFFC529),
-                        unfocusedBorderColor = Color.Black.copy(alpha = 0.12f),
-                        cursorColor = Color(0xFFFFC529)
+                        focusedBorderColor = Color(0xFFE2E2E6),
+                        unfocusedBorderColor = Color(0xFFE5E5EA),
+                        cursorColor = Color(0xFFF6C343)
                     ),
-                    shape = CircleShape,
+                    shape = RoundedCornerShape(22.dp),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Email,
@@ -197,44 +328,51 @@ fun AuthScreen(
                     )
                 )
 
-                // Password field
+                // Password field - Soft pill shape matching reference image
                 OutlinedTextField(
                     value = password,
                     onValueChange = { password = it },
-                    textStyle = LocalTextStyle.current.copy(color = Color.Black, fontSize = 16.sp, fontWeight = FontWeight.Medium),
-                    placeholder = { Text(if (isSignUpMode) "Create a password" else "Enter your password", color = Color.Black.copy(alpha = 0.4f), fontSize = 16.sp) },
+                    textStyle = LocalTextStyle.current.copy(color = Color(0xFF141414), fontSize = 15.sp, fontWeight = FontWeight.Medium),
+                    placeholder = { Text(if (isSignUpMode) "Create a password" else "Enter your password", color = Color(0xFF9E9E9E), fontSize = 15.sp) },
                     leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Default.Lock,
-                            contentDescription = "Lock Icon",
-                            tint = Color.Black.copy(alpha = 0.4f),
-                            modifier = Modifier.size(20.dp)
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .background(Color(0xFFF0F0F2), RoundedCornerShape(10.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = "Lock Icon",
+                                tint = Color(0xFF757575),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     },
                     trailingIcon = {
                         IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
                             Icon(
                                 imageVector = if (isPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                                 contentDescription = if (isPasswordVisible) "Hide Password" else "Show Password",
-                                tint = Color.Black.copy(alpha = 0.4f),
+                                tint = Color(0xFF757575),
                                 modifier = Modifier.size(20.dp)
                             )
                         }
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(58.dp)
+                        .height(60.dp)
                         .testTag("password_input"),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.Black,
-                        unfocusedTextColor = Color.Black,
+                        focusedTextColor = Color(0xFF141414),
+                        unfocusedTextColor = Color(0xFF141414),
                         focusedContainerColor = Color.White,
                         unfocusedContainerColor = Color.White,
-                        focusedBorderColor = Color(0xFFFFC529),
-                        unfocusedBorderColor = Color.Black.copy(alpha = 0.12f),
-                        cursorColor = Color(0xFFFFC529)
+                        focusedBorderColor = Color(0xFFE2E2E6),
+                        unfocusedBorderColor = Color(0xFFE5E5EA),
+                        cursorColor = Color(0xFFF6C343)
                     ),
-                    shape = CircleShape,
+                    shape = RoundedCornerShape(22.dp),
                     singleLine = true,
                     visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(
@@ -246,29 +384,30 @@ fun AuthScreen(
                     )
                 )
 
-                // Password field helper text or guidelines
+                // Password hint or Forgot password
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "Password must be at least 6 characters.",
-                        color = Color.Black.copy(alpha = 0.45f),
                         fontSize = 12.sp,
-                        modifier = Modifier.weight(1f)
+                        color = Color(0xFF8E8E93)
                     )
-                    
+
                     if (!isSignUpMode) {
                         Text(
-                            text = "Forgot Password?",
-                            color = Color(0xFFFF9E00),
+                            text = "Forgot password?",
+                            color = Color(0xFFF6C343),
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier
                                 .clickable {
                                     if (email.isBlank()) {
-                                        Toast.makeText(context, "Please enter your email address in the field above first.", Toast.LENGTH_LONG).show()
+                                        Toast.makeText(context, "Please enter your email address first.", Toast.LENGTH_SHORT).show()
                                     } else {
                                         viewModel.sendPasswordResetEmail(email, context)
                                     }
@@ -284,48 +423,14 @@ fun AuthScreen(
                         text = (authState as AuthState.Error).message,
                         color = Color(0xFFD32F2F),
                         fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = 8.dp)
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 6.dp)
                     )
                 }
 
-                // Beautiful Adaptive Guide notice
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = Color.White.copy(alpha = 0.5f)
-                    ),
-                    shape = RoundedCornerShape(16.dp),
-                    border = CardDefaults.outlinedCardBorder().copy(
-                        brush = androidx.compose.ui.graphics.SolidColor(Color(0xFFFFC529).copy(alpha = 0.35f))
-                    )
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "💡",
-                            fontSize = 18.sp,
-                            modifier = Modifier.padding(end = 8.dp)
-                        )
-                        Text(
-                            text = if (isSignUpMode) {
-                                "If you already have an account, entering your password will automatically sign you in safely!"
-                            } else {
-                                "If you don't have an account yet, entering an email and password will securely create one for you automatically!"
-                            },
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                             color = Color.Black.copy(alpha = 0.7f),
-                            lineHeight = 16.sp
-                        )
-                    }
-                }
+                Spacer(modifier = Modifier.height(4.dp))
 
-                // CTA Button: Beautiful Gold Pill With Arrow
+                // 4. CTA BUTTON: "Continue ->" in warm yellow pill
                 Button(
                     onClick = {
                         focusManager.clearFocus()
@@ -357,18 +462,18 @@ fun AuthScreen(
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(58.dp)
+                        .height(60.dp)
                         .testTag("submit_button"),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFFFC529),
-                        contentColor = Color.Black
+                        containerColor = Color(0xFFF7C343),
+                        contentColor = Color(0xFF141414)
                     ),
-                    shape = RoundedCornerShape(29.dp),
+                    shape = RoundedCornerShape(30.dp),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
                 ) {
                     if (authState is AuthState.Loading) {
                         CircularProgressIndicator(
-                            color = Color.Black,
+                            color = Color(0xFF141414),
                             modifier = Modifier.size(24.dp),
                             strokeWidth = 2.5.dp
                         )
@@ -378,68 +483,50 @@ fun AuthScreen(
                             horizontalArrangement = Arrangement.Center
                         ) {
                             Text(
-                                text = if (isSignUpMode) "Get Started" else "Log In",
+                                text = "Continue",
                                 fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF141414)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                                 contentDescription = "Arrow",
-                                modifier = Modifier.size(18.dp)
+                                tint = Color(0xFF141414),
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
                 }
-
-                // Toggle Row Sign Up vs Log In
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = if (isSignUpMode) "Already have an account? " else "Don't have an account? ",
-                        fontSize = 14.sp,
-                        color = Color.Black.copy(alpha = 0.55f)
-                    )
-                    Text(
-                        text = if (isSignUpMode) "Log In" else "Sign Up",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFFFF9E00),
-                        modifier = Modifier
-                            .clickable { isSignUpMode = !isSignUpMode }
-                            .testTag("toggle_auth_mode")
-                    )
-                }
             }
 
-            // Divider OR indicator
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // 5. OR DIVIDER
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 16.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 HorizontalDivider(
                     modifier = Modifier.weight(1f),
-                    color = Color.Black.copy(alpha = 0.08f)
+                    color = Color(0xFFDCDCE0)
                 )
                 Text(
                     text = "OR",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color.Black.copy(alpha = 0.35f),
-                    modifier = Modifier.padding(horizontal = 14.dp)
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF8E8E93),
+                    modifier = Modifier.padding(horizontal = 16.dp)
                 )
                 HorizontalDivider(
                     modifier = Modifier.weight(1f),
-                    color = Color.Black.copy(alpha = 0.08f)
+                    color = Color(0xFFDCDCE0)
                 )
             }
 
-            // Google login pill button (Capsule border)
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // 6. CONTINUE WITH GOOGLE BUTTON
             Button(
                 onClick = {
                     if (isRealGoogleAuthAvailable) {
@@ -453,7 +540,7 @@ fun AuthScreen(
                                 googleSignInLauncher.launch(googleSignInClient.signInIntent)
                             }
                         } catch (e: Exception) {
-                            Toast.makeText(context, "Google sign in error: ${e.message}", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Google Sign-In error: ${e.message}", Toast.LENGTH_SHORT).show()
                         }
                     } else {
                         Toast.makeText(context, "Google Sign-In is not configured. Please use Email Login.", Toast.LENGTH_LONG).show()
@@ -461,14 +548,14 @@ fun AuthScreen(
                 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(56.dp)
-                    .border(1.dp, Color.Black.copy(alpha = 0.12f), CircleShape)
+                    .height(58.dp)
+                    .border(1.dp, Color(0xFFE2E2E8), RoundedCornerShape(29.dp))
                     .testTag("google_login_button"),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color.White,
-                    contentColor = Color.Black
+                    contentColor = Color(0xFF141414)
                 ),
-                shape = CircleShape,
+                shape = RoundedCornerShape(29.dp),
                 elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
             ) {
                 Row(
@@ -485,53 +572,38 @@ fun AuthScreen(
                     Text(
                         text = "Continue with Google",
                         fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.Black
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF141414)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(32.dp))
+
+            // 7. TOGGLE: Already have an account? Log In
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (isSignUpMode) "Already have an account? " else "Don't have an account? ",
+                    fontSize = 15.sp,
+                    color = Color(0xFF6B6B70)
+                )
+                Text(
+                    text = if (isSignUpMode) "Log In" else "Sign Up",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFF7C343),
+                    modifier = Modifier
+                        .clickable { isSignUpMode = !isSignUpMode }
+                        .testTag("toggle_auth_mode")
+                )
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
         }
     }
-
-
 }
 
-@Composable
-fun DecorativeBackgroundAccents() {
-    Box(modifier = Modifier.fillMaxSize()) {
-        // Star cross accent 1
-        Text(
-            text = "+",
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Normal,
-            color = Color(0xFF4285F4).copy(alpha = 0.2f),
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .offset(x = 40.dp, y = 110.dp)
-        )
-
-        // Star cross accent 2
-        Text(
-            text = "+",
-            fontSize = 32.sp,
-            fontWeight = FontWeight.Normal,
-            color = Color(0xFFFFB300).copy(alpha = 0.2f),
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .offset(x = (-40).dp, y = 170.dp)
-        )
-
-        // Star cross accent 3
-        Text(
-            text = "+",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Normal,
-            color = Color(0xFF4285F4).copy(alpha = 0.15f),
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .offset(x = (-30).dp, y = 140.dp)
-        )
-    }
-}

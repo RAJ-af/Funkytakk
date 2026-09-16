@@ -456,19 +456,22 @@ class AuthViewModel : ViewModel() {
                 }
                 .addOnFailureListener { e ->
                     val errorCode = (e as? com.google.firebase.auth.FirebaseAuthException)?.errorCode
-                    val isCredError = errorCode == "ERROR_USER_NOT_FOUND" || 
-                                     errorCode == "user-not-found" || 
-                                     errorCode == "invalid-credential" || 
-                                     errorCode == "INVALID_LOGIN_CREDENTIALS" || 
-                                     errorCode == "ERROR_WRONG_PASSWORD" ||
-                                     errorCode == "wrong-password" ||
-                                     e.message?.contains("no user record", ignoreCase = true) == true || 
-                                     e.message?.contains("incorrect", ignoreCase = true) == true
+                    val isUserNotFound = errorCode == "ERROR_USER_NOT_FOUND" ||
+                                         errorCode == "user-not-found" ||
+                                         e.message?.contains("no user record", ignoreCase = true) == true
                     
-                    if (isCredError) {
-                        _authState.value = AuthState.Error("Incorrect password or the account does not exist. Please check your credentials or switch to Sign Up.")
+                    val isWrongPassword = errorCode == "ERROR_WRONG_PASSWORD" ||
+                                          errorCode == "wrong-password" ||
+                                          e.message?.contains("password is invalid", ignoreCase = true) == true
+                    
+                    if (isUserNotFound) {
+                        _authState.value = AuthState.Error("Oops, no account found with this email! Tap Sign Up below to join.")
+                    } else if (isWrongPassword) {
+                        _authState.value = AuthState.Error("Wrong password, bestie! Double check or tap 'Forgot password?'.")
+                    } else if (errorCode == "invalid-credential" || errorCode == "INVALID_LOGIN_CREDENTIALS") {
+                        _authState.value = AuthState.Error("Oops! That password doesn't match this account. Try again or reset it.")
                     } else {
-                        _authState.value = AuthState.Error(e.localizedMessage ?: "Login failed")
+                        _authState.value = AuthState.Error(e.localizedMessage ?: "Login failed. Give it another shot!")
                     }
                 }
         } else {
