@@ -313,12 +313,17 @@ class AuthViewModel : ViewModel() {
         onLoginNeeded: () -> Unit = {}, 
         onVerificationSent: () -> Unit
     ) {
-        if (email.isBlank() || password.isBlank()) {
-            _authState.value = AuthState.Error("Email and password cannot be empty")
+        val cleanEmail = email.trim()
+        if (cleanEmail.isBlank() || password.isBlank()) {
+            _authState.value = AuthState.Error("Drop your email and password first, bestie!")
+            return
+        }
+        if (!android.util.Patterns.EMAIL_ADDRESS.matcher(cleanEmail).matches()) {
+            _authState.value = AuthState.Error("That email format looks a lil sus! Check it once.")
             return
         }
         if (password.length < 6) {
-            _authState.value = AuthState.Error("Password must be at least 6 characters")
+            _authState.value = AuthState.Error("Password's gotta be at least 6 characters, no shortcuts!")
             return
         }
         _authState.value = AuthState.Loading
@@ -326,7 +331,7 @@ class AuthViewModel : ViewModel() {
 
         val auth = firebaseAuth
         if (auth != null) {
-            auth.createUserWithEmailAndPassword(email, password)
+            auth.createUserWithEmailAndPassword(cleanEmail, password)
                 .addOnSuccessListener { result ->
                     val user = result.user
                     if (user != null) {
@@ -343,7 +348,7 @@ class AuthViewModel : ViewModel() {
                             .putInt("verification_resend_count_${user.uid}", 0)
                             .apply()
                         
-                        triggerSupabaseVerificationEmail(context, email, null, token, user.uid) {
+                        triggerSupabaseVerificationEmail(context, cleanEmail, null, token, user.uid) {
                             onVerificationSent()
                             _authState.value = AuthState.Success(
                                 UserProfile(
@@ -355,7 +360,7 @@ class AuthViewModel : ViewModel() {
                             )
                         }
                     } else {
-                        _authState.value = AuthState.Error("Failed to obtain signed up user details.")
+                        _authState.value = AuthState.Error("Oof, couldn't grab your details. Hit continue again!")
                     }
                 }
                 .addOnFailureListener { e ->
@@ -363,13 +368,17 @@ class AuthViewModel : ViewModel() {
                     if (errorCode == "ERROR_EMAIL_ALREADY_IN_USE" || errorCode == "email-already-in-use" || e.message?.contains("already in use", ignoreCase = true) == true) {
                         // Email already in use -> Securely auto-log in!
                         Toast.makeText(context, "Account already exists! Seamlessly logging you in...", Toast.LENGTH_LONG).show()
-                        loginWithEmail(email, password, context, onSignUpNeeded = onVerificationSent, onSuccess = onLoginNeeded)
+                        loginWithEmail(cleanEmail, password, context, onSignUpNeeded = onVerificationSent, onSuccess = onLoginNeeded)
+                    } else if (errorCode == "ERROR_INVALID_EMAIL" || errorCode == "invalid-email") {
+                        _authState.value = AuthState.Error("That email format looks a lil sus! Double check it.")
+                    } else if (errorCode == "ERROR_WEAK_PASSWORD" || errorCode == "weak-password") {
+                        _authState.value = AuthState.Error("Password is too weak, make it stronger bestie!")
                     } else {
-                        _authState.value = AuthState.Error(e.localizedMessage ?: "Sign up failed")
+                        _authState.value = AuthState.Error(e.localizedMessage ?: "Sign up hit a snag. Let's try once more!")
                     }
                 }
         } else {
-            _authState.value = AuthState.Error("Firebase Auth not initialized.")
+            _authState.value = AuthState.Error("Firebase is taking a nap. Give it a second and retry!")
         }
     }
 
@@ -380,12 +389,17 @@ class AuthViewModel : ViewModel() {
         onSignUpNeeded: () -> Unit,
         onSuccess: () -> Unit
     ) {
-        if (email.isBlank() || password.isBlank()) {
-            _authState.value = AuthState.Error("Email and password cannot be empty")
+        val cleanEmail = email.trim()
+        if (cleanEmail.isBlank() || password.isBlank()) {
+            _authState.value = AuthState.Error("Drop your email and password first, bestie!")
+            return
+        }
+        if (!android.util.Patterns.EMAIL_ADDRESS.matcher(cleanEmail).matches()) {
+            _authState.value = AuthState.Error("That email looks a bit off! Double check the spelling.")
             return
         }
         if (password.length < 6) {
-            _authState.value = AuthState.Error("Password must be at least 6 characters")
+            _authState.value = AuthState.Error("Passwords are at least 6 characters, bestie!")
             return
         }
         _authState.value = AuthState.Loading
@@ -393,7 +407,7 @@ class AuthViewModel : ViewModel() {
 
         val auth = firebaseAuth
         if (auth != null) {
-            auth.signInWithEmailAndPassword(email, password)
+            auth.signInWithEmailAndPassword(cleanEmail, password)
                 .addOnSuccessListener { result ->
                     val user = result.user
                     if (user != null) {
@@ -440,18 +454,18 @@ class AuthViewModel : ViewModel() {
                                     _authState.value = AuthState.Success(finalProfileWithVerified)
                                     if (isVerified) {
                                         registerAndStartSession(context, user.uid)
-                                        triggerSupabaseLoginNotification(context, user.email ?: email, finalProfile.displayName)
+                                        triggerSupabaseLoginNotification(context, user.email ?: cleanEmail, finalProfile.displayName)
                                         onSuccess()
                                     } else {
                                         // User is authentic but unverified. Halt login and redirect to VerifyEmailScreen!
-                                        Toast.makeText(context, "Email is unverified. Please check your inbox and verify your email.", Toast.LENGTH_LONG).show()
+                                        Toast.makeText(context, "Almost there! Check your inbox to verify your email.", Toast.LENGTH_LONG).show()
                                         onSignUpNeeded()
                                     }
                                 }
                             }
                         }
                     } else {
-                        _authState.value = AuthState.Error("Unknown login error")
+                        _authState.value = AuthState.Error("Oof, couldn't find your profile. Give it another tap!")
                     }
                 }
                 .addOnFailureListener { e ->
@@ -465,17 +479,19 @@ class AuthViewModel : ViewModel() {
                                           e.message?.contains("password is invalid", ignoreCase = true) == true
                     
                     if (isUserNotFound) {
-                        _authState.value = AuthState.Error("Oops, no account found with this email! Tap Sign Up below to join.")
+                        _authState.value = AuthState.Error("No account found with this email, bestie! Tap Sign Up below.")
                     } else if (isWrongPassword) {
                         _authState.value = AuthState.Error("Wrong password, bestie! Double check or tap 'Forgot password?'.")
                     } else if (errorCode == "invalid-credential" || errorCode == "INVALID_LOGIN_CREDENTIALS") {
-                        _authState.value = AuthState.Error("Oops! That password doesn't match this account. Try again or reset it.")
+                        _authState.value = AuthState.Error("Oops! That password doesn't match this account, bestie. Check or reset it.")
+                    } else if (errorCode == "ERROR_INVALID_EMAIL" || errorCode == "invalid-email") {
+                        _authState.value = AuthState.Error("That email format looks a lil sus! Double check it.")
                     } else {
-                        _authState.value = AuthState.Error(e.localizedMessage ?: "Login failed. Give it another shot!")
+                        _authState.value = AuthState.Error(e.localizedMessage ?: "Login failed. Give it another shot, bestie!")
                     }
                 }
         } else {
-            _authState.value = AuthState.Error("Firebase Auth not initialized.")
+            _authState.value = AuthState.Error("Firebase is taking a nap. Give it a second and retry!")
         }
     }
 

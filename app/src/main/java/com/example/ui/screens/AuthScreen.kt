@@ -54,6 +54,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.CommonStatusCodes
 
 @Composable
 fun AuthScreen(
@@ -74,10 +75,33 @@ fun AuthScreen(
         val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
         try {
             val account = task.getResult(ApiException::class.java)!!
-            val idToken = account.idToken!!
-            viewModel.loginWithGoogle(context, idToken, onAuthSuccess)
+            val idToken = account.idToken
+            if (idToken != null) {
+                viewModel.loginWithGoogle(context, idToken, onAuthSuccess)
+            } else {
+                Toast.makeText(context, "Google didn't share your auth token, bestie! Try again.", Toast.LENGTH_LONG).show()
+            }
+        } catch (e: ApiException) {
+            val friendlyMsg = when (e.statusCode) {
+                CommonStatusCodes.DEVELOPER_ERROR -> { // Code 10
+                    "Google setup needs SHA-1 fingerprint & Web Client ID synced in Firebase Console! Use Email login in the meantime, bestie."
+                }
+                CommonStatusCodes.SIGN_IN_REQUIRED -> {
+                    "Google sign-in needed! Pick your account to roll."
+                }
+                CommonStatusCodes.NETWORK_ERROR -> {
+                    "Network's ghosting us! Check your connection, bestie."
+                }
+                CommonStatusCodes.CANCELED -> {
+                    "Sign-in cancelled! Whenever you're ready, tap continue."
+                }
+                else -> {
+                    "Google Sign-In hit a glitch (${e.statusCode}): ${e.localizedMessage ?: "Try again bestie!"}"
+                }
+            }
+            Toast.makeText(context, friendlyMsg, Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
-            Toast.makeText(context, "Google Sign-In failed: " + (e.localizedMessage ?: "Unknown error"), Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "Sign-In tripped: ${e.localizedMessage ?: "Try email login bestie!"}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -407,7 +431,7 @@ fun AuthScreen(
                             modifier = Modifier
                                 .clickable {
                                     if (email.isBlank()) {
-                                        Toast.makeText(context, "Please enter your email address first.", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "Drop your email address first, bestie!", Toast.LENGTH_SHORT).show()
                                     } else {
                                         viewModel.sendPasswordResetEmail(email, context)
                                     }
@@ -435,11 +459,11 @@ fun AuthScreen(
                     onClick = {
                         focusManager.clearFocus()
                         if (email.isBlank() || password.isBlank()) {
-                            Toast.makeText(context, "Please enter both email and password.", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Drop your email and password first, bestie!", Toast.LENGTH_SHORT).show()
                             return@Button
                         }
                         if (password.length < 6) {
-                            Toast.makeText(context, "Password must be at least 6 characters.", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Password's gotta be at least 6 characters, bestie!", Toast.LENGTH_SHORT).show()
                             return@Button
                         }
                         if (isSignUpMode) {
@@ -540,10 +564,10 @@ fun AuthScreen(
                                 googleSignInLauncher.launch(googleSignInClient.signInIntent)
                             }
                         } catch (e: Exception) {
-                            Toast.makeText(context, "Google Sign-In error: ${e.message}", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Google Sign-In hit a bump: ${e.message}", Toast.LENGTH_SHORT).show()
                         }
                     } else {
-                        Toast.makeText(context, "Google Sign-In is not configured. Please use Email Login.", Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, "Google Sign-In is still setting up! Hop in with Email login for now, bestie.", Toast.LENGTH_LONG).show()
                     }
                 },
                 modifier = Modifier
