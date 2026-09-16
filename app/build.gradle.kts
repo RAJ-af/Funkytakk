@@ -39,12 +39,6 @@ android {
         keyPassword = envKeyPassword
       }
     }
-    create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
-    }
   }
 
   buildTypes {
@@ -61,7 +55,7 @@ android {
       }
     }
     debug {
-      signingConfig = signingConfigs.getByName("debugConfig")
+      // Uses standard default Android SDK debug keystore automatically
     }
   }
   compileOptions {
