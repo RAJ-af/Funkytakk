@@ -110,7 +110,65 @@ fun AuthScreen(
     var isPasswordVisible by remember { mutableStateOf(false) }
     var isSignUpMode by remember { mutableStateOf(true) }
 
+    var emailError by remember { mutableStateOf<String?>(null) }
+    var passwordError by remember { mutableStateOf<String?>(null) }
+
     val authState by viewModel.authState.collectAsState()
+    val isLoading = authState is AuthState.Loading
+
+    // Email format validator regex
+    val isEmailFormatValid: (String) -> Boolean = { input ->
+        android.util.Patterns.EMAIL_ADDRESS.matcher(input.trim()).matches()
+    }
+
+    // Function to submit authentication
+    val submitAuth: () -> Unit = {
+        focusManager.clearFocus()
+        val trimmedEmail = email.trim()
+        email = trimmedEmail // Apply trimming
+
+        var hasError = false
+
+        if (trimmedEmail.isEmpty()) {
+            emailError = "Please enter your email"
+            hasError = true
+        } else if (!isEmailFormatValid(trimmedEmail)) {
+            emailError = "Please enter a valid email format (e.g. user@example.com)"
+            hasError = true
+        } else {
+            emailError = null
+        }
+
+        if (password.isEmpty()) {
+            passwordError = "Please enter your password"
+            hasError = true
+        } else if (isSignUpMode && password.length < 6) {
+            passwordError = "Password must be at least 6 characters"
+            hasError = true
+        } else {
+            passwordError = null
+        }
+
+        if (!hasError && !isLoading) {
+            if (isSignUpMode) {
+                viewModel.signUpWithEmail(
+                    email = trimmedEmail,
+                    password = password,
+                    context = context,
+                    onLoginNeeded = onAuthSuccess,
+                    onVerificationSent = onVerificationWaiting
+                )
+            } else {
+                viewModel.loginWithEmail(
+                    email = trimmedEmail,
+                    password = password,
+                    context = context,
+                    onSignUpNeeded = onVerificationWaiting,
+                    onSuccess = onAuthSuccess
+                )
+            }
+        }
+    }
 
     LaunchedEffect(authState) {
         if (authState is AuthState.Success) {
@@ -305,110 +363,149 @@ fun AuthScreen(
             // 3. INPUT FIELDS
             Column(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 // Email field - Soft pill shape matching reference image
-                OutlinedTextField(
-                    value = email,
-                    onValueChange = { email = it },
-                    textStyle = LocalTextStyle.current.copy(color = Color(0xFF141414), fontSize = 15.sp, fontWeight = FontWeight.Medium),
-                    placeholder = { Text("Enter your email", color = Color(0xFF9E9E9E), fontSize = 15.sp) },
-                    leadingIcon = {
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .background(Color(0xFFF0F0F2), RoundedCornerShape(10.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Email,
-                                contentDescription = "Email Icon",
-                                tint = Color(0xFF757575),
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(60.dp)
-                        .testTag("email_input"),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color(0xFF141414),
-                        unfocusedTextColor = Color(0xFF141414),
-                        focusedContainerColor = Color.White,
-                        unfocusedContainerColor = Color.White,
-                        focusedBorderColor = Color(0xFFE2E2E6),
-                        unfocusedBorderColor = Color(0xFFE5E5EA),
-                        cursorColor = Color(0xFFF6C343)
-                    ),
-                    shape = RoundedCornerShape(22.dp),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Email,
-                        imeAction = ImeAction.Next
-                    ),
-                    keyboardActions = KeyboardActions(
-                        onNext = { focusManager.moveFocus(FocusDirection.Down) }
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = email,
+                        onValueChange = { 
+                            email = it 
+                            emailError = null
+                        },
+                        enabled = !isLoading,
+                        isError = emailError != null,
+                        textStyle = LocalTextStyle.current.copy(color = Color(0xFF141414), fontSize = 15.sp, fontWeight = FontWeight.Medium),
+                        placeholder = { Text("Enter your email", color = Color(0xFF9E9E9E), fontSize = 15.sp) },
+                        leadingIcon = {
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .background(Color(0xFFF0F0F2), RoundedCornerShape(10.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Email,
+                                    contentDescription = "Email Icon",
+                                    tint = Color(0xFF757575),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(60.dp)
+                            .testTag("email_input"),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color(0xFF141414),
+                            unfocusedTextColor = Color(0xFF141414),
+                            focusedContainerColor = Color.White,
+                            unfocusedContainerColor = Color.White,
+                            disabledContainerColor = Color(0xFFF3F4F6),
+                            focusedBorderColor = Color(0xFFE2E2E6),
+                            unfocusedBorderColor = Color(0xFFE5E5EA),
+                            errorBorderColor = Color(0xFFEF4444),
+                            cursorColor = Color(0xFFF6C343)
+                        ),
+                        shape = RoundedCornerShape(22.dp),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Email,
+                            imeAction = ImeAction.Next
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onNext = { focusManager.moveFocus(FocusDirection.Down) }
+                        )
                     )
-                )
+
+                    // Email error text
+                    if (emailError != null) {
+                        Text(
+                            text = emailError!!,
+                            color = Color(0xFFDC2626),
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(start = 12.dp, top = 4.dp)
+                        )
+                    }
+                }
 
                 // Password field - Soft pill shape matching reference image
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    textStyle = LocalTextStyle.current.copy(color = Color(0xFF141414), fontSize = 15.sp, fontWeight = FontWeight.Medium),
-                    placeholder = { Text(if (isSignUpMode) "Create a password" else "Enter your password", color = Color(0xFF9E9E9E), fontSize = 15.sp) },
-                    leadingIcon = {
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .background(Color(0xFFF0F0F2), RoundedCornerShape(10.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Lock,
-                                contentDescription = "Lock Icon",
-                                tint = Color(0xFF757575),
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    },
-                    trailingIcon = {
-                        IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
-                            Icon(
-                                imageVector = if (isPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                contentDescription = if (isPasswordVisible) "Hide Password" else "Show Password",
-                                tint = Color(0xFF757575),
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(60.dp)
-                        .testTag("password_input"),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color(0xFF141414),
-                        unfocusedTextColor = Color(0xFF141414),
-                        focusedContainerColor = Color.White,
-                        unfocusedContainerColor = Color.White,
-                        focusedBorderColor = Color(0xFFE2E2E6),
-                        unfocusedBorderColor = Color(0xFFE5E5EA),
-                        cursorColor = Color(0xFFF6C343)
-                    ),
-                    shape = RoundedCornerShape(22.dp),
-                    singleLine = true,
-                    visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Password,
-                        imeAction = ImeAction.Done
-                    ),
-                    keyboardActions = KeyboardActions(
-                        onDone = { focusManager.clearFocus() }
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { 
+                            password = it 
+                            passwordError = null
+                        },
+                        enabled = !isLoading,
+                        isError = passwordError != null,
+                        textStyle = LocalTextStyle.current.copy(color = Color(0xFF141414), fontSize = 15.sp, fontWeight = FontWeight.Medium),
+                        placeholder = { Text(if (isSignUpMode) "Create a password" else "Enter your password", color = Color(0xFF9E9E9E), fontSize = 15.sp) },
+                        leadingIcon = {
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .background(Color(0xFFF0F0F2), RoundedCornerShape(10.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = "Lock Icon",
+                                    tint = Color(0xFF757575),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        },
+                        trailingIcon = {
+                            IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
+                                Icon(
+                                    imageVector = if (isPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                    contentDescription = if (isPasswordVisible) "Hide Password" else "Show Password",
+                                    tint = Color(0xFF757575),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(60.dp)
+                            .testTag("password_input"),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color(0xFF141414),
+                            unfocusedTextColor = Color(0xFF141414),
+                            focusedContainerColor = Color.White,
+                            unfocusedContainerColor = Color.White,
+                            disabledContainerColor = Color(0xFFF3F4F6),
+                            focusedBorderColor = Color(0xFFE2E2E6),
+                            unfocusedBorderColor = Color(0xFFE5E5EA),
+                            errorBorderColor = Color(0xFFEF4444),
+                            cursorColor = Color(0xFFF6C343)
+                        ),
+                        shape = RoundedCornerShape(22.dp),
+                        singleLine = true,
+                        visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Password,
+                            imeAction = if (isSignUpMode) ImeAction.Done else ImeAction.Go
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onDone = { submitAuth() },
+                            onGo = { submitAuth() }
+                        )
                     )
-                )
 
-                // Password Strength Meter (Weak / Medium / Strong) for Signup Mode
+                    // Password error text
+                    if (passwordError != null) {
+                        Text(
+                            text = passwordError!!,
+                            color = Color(0xFFDC2626),
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(start = 12.dp, top = 4.dp)
+                        )
+                    }
+                }
+
+                // Password Strength Meter (Only for Sign Up Mode)
                 val passwordStrength = remember(password) {
                     when {
                         password.isEmpty() -> 0
@@ -495,34 +592,27 @@ fun AuthScreen(
                     }
                 }
 
-                // Password hint or Forgot password
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (!isSignUpMode) {
-                        Text(
-                            text = "Enter your registered password",
-                            fontSize = 12.sp,
-                            color = Color(0xFF8E8E93)
-                        )
-                    }
-
-                    if (!isSignUpMode) {
+                // Forgot password (Clean & Right-aligned in Log In mode)
+                if (!isSignUpMode) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
                             text = "Forgot password?",
                             color = Color(0xFFF6C343),
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier
-                                .clickable {
-                                    if (email.isBlank()) {
-                                        Toast.makeText(context, "Drop your email address first, bestie!", Toast.LENGTH_SHORT).show()
+                                .clickable(enabled = !isLoading) {
+                                    val trimmed = email.trim()
+                                    if (trimmed.isBlank()) {
+                                        Toast.makeText(context, "Please enter your email address first.", Toast.LENGTH_SHORT).show()
                                     } else {
-                                        viewModel.sendPasswordResetEmail(email, context)
+                                        viewModel.sendPasswordResetEmail(trimmed, context)
                                     }
                                 }
                                 .testTag("forgot_password_button")
@@ -545,41 +635,17 @@ fun AuthScreen(
 
                 // 4. CTA BUTTON: "Continue ->" in warm yellow pill
                 Button(
-                    onClick = {
-                        focusManager.clearFocus()
-                        if (email.isBlank() || password.isBlank()) {
-                            Toast.makeText(context, "Drop your email and password first, bestie!", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-                        if (password.length < 6) {
-                            Toast.makeText(context, "Password's gotta be at least 6 characters, bestie!", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-                        if (isSignUpMode) {
-                            viewModel.signUpWithEmail(
-                                email = email,
-                                password = password,
-                                context = context,
-                                onLoginNeeded = onAuthSuccess,
-                                onVerificationSent = onVerificationWaiting
-                            )
-                        } else {
-                            viewModel.loginWithEmail(
-                                email = email,
-                                password = password,
-                                context = context,
-                                onSignUpNeeded = onVerificationWaiting,
-                                onSuccess = onAuthSuccess
-                            )
-                        }
-                    },
+                    onClick = { submitAuth() },
+                    enabled = !isLoading,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(60.dp)
                         .testTag("submit_button"),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color(0xFFF7C343),
-                        contentColor = Color(0xFF141414)
+                        contentColor = Color(0xFF141414),
+                        disabledContainerColor = Color(0xFFE5E7EB),
+                        disabledContentColor = Color(0xFF9CA3AF)
                     ),
                     shape = RoundedCornerShape(30.dp),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
