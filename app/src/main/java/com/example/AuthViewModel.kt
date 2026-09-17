@@ -1025,6 +1025,160 @@ class AuthViewModel : ViewModel() {
         }
     }
 
+    fun patchProfileStep(
+        context: Context,
+        updates: Map<String, Any?>,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            try {
+                val supaUid = SupabaseSessionManager.getUserId(context)
+                val token = SupabaseSessionManager.getBearerToken(context)
+                if (supaUid.isNullOrBlank()) {
+                    Log.e("AuthViewModel", "User session not found for patchProfileStep")
+                    onSuccess()
+                    return@launch
+                }
+
+                val response = SupabaseClient.api.patchProfile(
+                    auth = token,
+                    idEq = "eq.$supaUid",
+                    updates = updates
+                )
+
+                val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
+                val editor = prefs.edit()
+
+                if (updates.containsKey("username")) {
+                    editor.putString("profile_username_${supaUid}", updates["username"] as? String ?: "")
+                }
+                if (updates.containsKey("profile_name")) {
+                    editor.putString("profile_displayName_${supaUid}", updates["profile_name"] as? String ?: "")
+                }
+                if (updates.containsKey("avatar_url")) {
+                    editor.putString("profile_avatar_${supaUid}", updates["avatar_url"] as? String ?: "")
+                }
+                if (updates.containsKey("age")) {
+                    val ageVal = (updates["age"] as? Number)?.toInt() ?: 0
+                    editor.putInt("profile_age_${supaUid}", ageVal)
+                }
+                if (updates.containsKey("gender")) {
+                    editor.putString("profile_gender_${supaUid}", updates["gender"] as? String ?: "")
+                }
+                if (updates.containsKey("country")) {
+                    editor.putString("profile_country_${supaUid}", updates["country"] as? String ?: "")
+                }
+                if (updates.containsKey("native_languages")) {
+                    val list = updates["native_languages"] as? List<*> ?: emptyList<Any>()
+                    editor.putString("profile_nativeLanguage_${supaUid}", list.joinToString(", "))
+                }
+                if (updates.containsKey("learning_languages")) {
+                    val list = updates["learning_languages"] as? List<*> ?: emptyList<Any>()
+                    editor.putString("profile_learningLanguage_${supaUid}", list.joinToString(", "))
+                }
+                if (updates.containsKey("hobbies")) {
+                    val list = updates["hobbies"] as? List<*> ?: emptyList<Any>()
+                    editor.putString("profile_hobbies_${supaUid}", list.joinToString("||"))
+                }
+                if (updates.containsKey("onboarding_complete")) {
+                    val complete = updates["onboarding_complete"] as? Boolean ?: false
+                    editor.putBoolean("profile_onboarding_complete_${supaUid}", complete)
+                }
+                editor.apply()
+
+                val current = _authState.value
+                if (current is AuthState.Success) {
+                    val u = current.user
+                    val updatedUser = u.copy(
+                        username = if (updates.containsKey("username")) updates["username"] as? String else u.username,
+                        displayName = if (updates.containsKey("profile_name")) updates["profile_name"] as? String else u.displayName,
+                        avatar = if (updates.containsKey("avatar_url")) updates["avatar_url"] as? String else u.avatar,
+                        age = if (updates.containsKey("age")) (updates["age"] as? Number)?.toInt() else u.age,
+                        gender = if (updates.containsKey("gender")) updates["gender"] as? String else u.gender,
+                        country = if (updates.containsKey("country")) updates["country"] as? String else u.country,
+                        nativeLanguage = if (updates.containsKey("native_languages")) (updates["native_languages"] as? List<*>)?.joinToString(", ") else u.nativeLanguage,
+                        learningLanguage = if (updates.containsKey("learning_languages")) (updates["learning_languages"] as? List<*>)?.joinToString(", ") else u.learningLanguage,
+                        hobbies = if (updates.containsKey("hobbies")) (updates["hobbies"] as? List<String>) ?: u.hobbies else u.hobbies,
+                        onboardingComplete = if (updates.containsKey("onboarding_complete")) updates["onboarding_complete"] as? Boolean ?: u.onboardingComplete else u.onboardingComplete
+                    )
+                    _authState.value = AuthState.Success(updatedUser)
+                }
+
+                if (response.isSuccessful) {
+                    Log.d("AuthViewModel", "Profile patched successfully: $updates")
+                    onSuccess()
+                } else {
+                    Log.e("AuthViewModel", "Failed to patch profile: ${response.code()} ${response.errorBody()?.string()}")
+                    onSuccess()
+                }
+            } catch (e: Exception) {
+                Log.e("AuthViewModel", "Exception patching profile", e)
+                onSuccess()
+            }
+        }
+    }
+
+    fun patchStep1Profile(
+        context: Context,
+        username: String,
+        displayName: String,
+        avatar: String,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            var finalAvatar = avatar
+            try {
+                var inputStream: java.io.InputStream? = null
+                if (avatar.startsWith("content://")) {
+                    val uri = android.net.Uri.parse(avatar)
+                    inputStream = context.contentResolver.openInputStream(uri)
+                } else if (avatar.startsWith("/") || avatar.startsWith("file://")) {
+                    val purePath = avatar.removePrefix("file://")
+                    val file = java.io.File(purePath)
+                    if (file.exists()) {
+                        inputStream = java.io.FileInputStream(file)
+                    }
+                }
+                if (inputStream != null) {
+                    val bytes = inputStream.readBytes()
+                    inputStream.close()
+                    val mediaType = "image/*".toMediaTypeOrNull()
+                    val requestFile = bytes.toRequestBody(mediaType, 0, bytes.size)
+                    val supaUid = SupabaseSessionManager.getUserId(context) ?: "anon"
+                    val filename = "avatar_${supaUid}_${System.currentTimeMillis()}.jpg"
+                    val body = okhttp3.MultipartBody.Part.createFormData("file", filename, requestFile)
+                    val bearerAuth = SupabaseSessionManager.getBearerToken(context)
+                    val response = SupabaseClient.api.uploadAvatar(
+                        auth = bearerAuth,
+                        filename = filename,
+                        file = body
+                    )
+                    if (response.isSuccessful) {
+                        val baseUrl = BuildConfig.SUPABASE_URL.let {
+                            if (!it.startsWith("http")) "https://$it" else it
+                        }.trimEnd('/')
+                        finalAvatar = "$baseUrl/storage/v1/object/public/avatars/$filename"
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("AuthViewModel", "Avatar upload exception", e)
+            }
+
+            patchProfileStep(
+                context = context,
+                updates = mapOf(
+                    "username" to username,
+                    "profile_name" to displayName,
+                    "avatar_url" to finalAvatar
+                ),
+                onSuccess = onSuccess,
+                onError = onError
+            )
+        }
+    }
+
     fun updateProfile(
         context: Context,
         username: String,
@@ -1074,73 +1228,32 @@ class AuthViewModel : ViewModel() {
                             Log.e("AuthViewModel", "Failed to upload avatar: ${response.code()} ${response.message()}")
                         }
                     }
-                    
-                    // 2. Save user Profile to Supabase Postgres Database
-                    val supaUser = SupabaseUser(
-                        uid = currentState.user.uid,
-                        email = currentState.user.email,
-                        display_name = displayName,
-                        username = username,
-                        avatar = finalAvatar,
-                        dob = dob,
-                        gender = gender,
-                        native_language = nativeLanguage,
-                        learning_language = learningLanguage,
-                        country = country,
-                        country_code = countryCode,
-                        hobbies = hobbies
-                    )
-                    val bearerAuth = SupabaseSessionManager.getBearerToken(context)
-                    val apiResponse = SupabaseClient.api.upsertUser(
-                        auth = bearerAuth,
-                        user = supaUser
-                    )
-                    if (apiResponse.isSuccessful) {
-                        Log.d("AuthViewModel", "User successfully upserted to Supabase Database!")
-                    } else {
-                        Log.e("AuthViewModel", "Failed to upsert to Supabase Postgres: ${apiResponse.errorBody()?.string()}")
-                    }
 
+                    val supaUid = SupabaseSessionManager.getUserId(context) ?: currentState.user.uid
+                    val bearerAuth = SupabaseSessionManager.getBearerToken(context)
+                    val nativeList = nativeLanguage.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                    val learningList = learningLanguage.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+
+                    SupabaseClient.api.patchProfile(
+                        auth = bearerAuth,
+                        idEq = "eq.$supaUid",
+                        updates = mapOf(
+                            "username" to username,
+                            "profile_name" to displayName,
+                            "avatar_url" to finalAvatar,
+                            "gender" to gender,
+                            "country" to country,
+                            "native_languages" to nativeList,
+                            "learning_languages" to learningList,
+                            "hobbies" to hobbies,
+                            "onboarding_complete" to true
+                        )
+                    )
                 } catch (e: Exception) {
                     Log.e("AuthViewModel", "Supabase update error: ${e.message}", e)
                 }
 
-                val updatedUser = currentState.user.copy(
-                    username = username,
-                    displayName = displayName,
-                    avatar = finalAvatar,
-                    dob = dob,
-                    gender = gender,
-                    nativeLanguage = nativeLanguage,
-                    learningLanguage = learningLanguage,
-                    country = country,
-                    countryCode = countryCode,
-                    hobbies = hobbies
-                )
-                _authState.value = AuthState.Success(updatedUser)
-                
-                val userId = updatedUser.uid
-                val firestoreDb = firestore
-                if (firestoreDb != null) {
-                    val updates = mapOf(
-                        "username" to username,
-                        "displayName" to displayName,
-                        "avatar" to finalAvatar,
-                        "dob" to dob,
-                        "gender" to gender,
-                        "nativeLanguage" to nativeLanguage,
-                        "learningLanguage" to learningLanguage,
-                        "country" to country,
-                        "countryCode" to countryCode,
-                        "hobbies" to hobbies,
-                        "isOnboarded" to true
-                    )
-                    firestoreDb.collection("users").document(userId).set(updates, com.google.firebase.firestore.SetOptions.merge())
-                        .addOnSuccessListener {
-                            Log.d("AuthViewModel", "Profile updated in Firestore")
-                        }
-                }
-                
+                val userId = currentState.user.uid
                 val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
                 prefs.edit().apply {
                     putString("profile_username_${userId}", username)
@@ -1153,9 +1266,24 @@ class AuthViewModel : ViewModel() {
                     putString("profile_country_${userId}", country)
                     putString("profile_countryCode_${userId}", countryCode)
                     putString("profile_hobbies_${userId}", hobbies.joinToString("||"))
-                    putBoolean("profile_configured_${userId}", true)
+                    putBoolean("profile_onboarding_complete_${userId}", true)
                     apply()
                 }
+
+                val updatedUser = currentState.user.copy(
+                    username = username,
+                    displayName = displayName,
+                    avatar = finalAvatar,
+                    dob = dob,
+                    gender = gender,
+                    nativeLanguage = nativeLanguage,
+                    learningLanguage = learningLanguage,
+                    country = country,
+                    countryCode = countryCode,
+                    hobbies = hobbies,
+                    onboardingComplete = true
+                )
+                _authState.value = AuthState.Success(updatedUser)
                 onSuccess()
             }
         }
@@ -1169,6 +1297,7 @@ class AuthViewModel : ViewModel() {
         val username = prefs.getString("profile_username_${userId}", null)
         val displayName = prefs.getString("profile_displayName_${userId}", null)
         val avatar = prefs.getString("profile_avatar_${userId}", null)
+        val ageVal = prefs.getInt("profile_age_${userId}", 0).takeIf { it > 0 }
         val dob = prefs.getString("profile_dob_${userId}", null)
         val gender = prefs.getString("profile_gender_${userId}", null)
         val nativeLanguage = prefs.getString("profile_nativeLanguage_${userId}", null)
@@ -1177,6 +1306,7 @@ class AuthViewModel : ViewModel() {
         val countryCode = prefs.getString("profile_countryCode_${userId}", null)
         val hobbiesStr = prefs.getString("profile_hobbies_${userId}", null)
         val hobbies = hobbiesStr?.split("||")?.filter { it.isNotEmpty() } ?: emptyList()
+        val isOnboardingComplete = prefs.getBoolean("profile_onboarding_complete_${userId}", false)
 
         val currentState = _authState.value
         val currentProfile = if (currentState is AuthState.Success) currentState.user else UserProfile(
@@ -1186,13 +1316,15 @@ class AuthViewModel : ViewModel() {
             isEmailVerified = resolvedVerified,
             username = username,
             avatar = avatar,
+            age = ageVal,
             dob = dob,
             gender = gender,
             nativeLanguage = nativeLanguage,
             learningLanguage = learningLanguage,
             country = country,
             countryCode = countryCode,
-            hobbies = hobbies
+            hobbies = hobbies,
+            onboardingComplete = isOnboardingComplete
         )
 
         val mergedProfile = currentProfile.copy(
@@ -1200,140 +1332,69 @@ class AuthViewModel : ViewModel() {
             username = username ?: currentProfile.username,
             displayName = displayName ?: currentProfile.displayName,
             avatar = avatar ?: currentProfile.avatar,
+            age = ageVal ?: currentProfile.age,
             dob = dob ?: currentProfile.dob,
             gender = gender ?: currentProfile.gender,
             nativeLanguage = nativeLanguage ?: currentProfile.nativeLanguage,
             learningLanguage = learningLanguage ?: currentProfile.learningLanguage,
             country = country ?: currentProfile.country,
             countryCode = countryCode ?: currentProfile.countryCode,
-            hobbies = if (hobbies.isNotEmpty()) hobbies else currentProfile.hobbies
+            hobbies = if (hobbies.isNotEmpty()) hobbies else currentProfile.hobbies,
+            onboardingComplete = isOnboardingComplete || currentProfile.onboardingComplete
         )
 
-        val isCachedConfigured = !username.isNullOrBlank() && !dob.isNullOrBlank()
-        if (!isCachedConfigured) {
-            _authState.value = AuthState.Loading
-            viewModelScope.launch {
-                try {
-                    val bearerToken = SupabaseSessionManager.getBearerToken(context)
-                    val response = SupabaseClient.api.getUser(
-                        auth = bearerToken,
-                        uidEq = "eq.$userId"
-                    )
-                    if (response.isSuccessful) {
-                        val supaUsers = response.body()
-                        if (!supaUsers.isNullOrEmpty()) {
-                            val supaUser = supaUsers.first()
-                            val fsUsername = supaUser.username
-                            if (fsUsername != null) {
-                                prefs.edit().apply {
-                                    putString("profile_username_${userId}", fsUsername)
-                                    putString("profile_displayName_${userId}", supaUser.display_name ?: "")
-                                    putString("profile_avatar_${userId}", supaUser.avatar ?: "")
-                                    putString("profile_dob_${userId}", supaUser.dob ?: "")
-                                    putString("profile_gender_${userId}", supaUser.gender ?: "")
-                                    putString("profile_nativeLanguage_${userId}", supaUser.native_language ?: "")
-                                    putString("profile_learningLanguage_${userId}", supaUser.learning_language ?: "")
-                                    putString("profile_country_${userId}", supaUser.country ?: "")
-                                    putString("profile_countryCode_${userId}", supaUser.country_code ?: "")
-                                    putString("profile_hobbies_${userId}", supaUser.hobbies?.joinToString("||") ?: "")
-                                    putBoolean("profile_configured_${userId}", true)
-                                    apply()
-                                }
-                                val finalProfile = mergedProfile.copy(
-                                    isEmailVerified = resolvedVerified,
-                                    username = fsUsername,
-                                    displayName = supaUser.display_name ?: mergedProfile.displayName,
-                                    avatar = supaUser.avatar ?: mergedProfile.avatar,
-                                    dob = supaUser.dob ?: mergedProfile.dob,
-                                    gender = supaUser.gender ?: mergedProfile.gender,
-                                    nativeLanguage = supaUser.native_language ?: mergedProfile.nativeLanguage,
-                                    learningLanguage = supaUser.learning_language ?: mergedProfile.learningLanguage,
-                                    country = supaUser.country ?: mergedProfile.country,
-                                    countryCode = supaUser.country_code ?: mergedProfile.countryCode,
-                                    hobbies = supaUser.hobbies ?: mergedProfile.hobbies
-                                )
-                                _authState.value = AuthState.Success(finalProfile)
-                                onComplete(finalProfile)
-                                return@launch
-                            }
+        viewModelScope.launch {
+            try {
+                val bearerToken = SupabaseSessionManager.getBearerToken(context)
+                val response = SupabaseClient.api.getProfile(
+                    auth = bearerToken,
+                    idEq = "eq.$userId"
+                )
+                if (response.isSuccessful) {
+                    val supaProfiles = response.body()
+                    if (!supaProfiles.isNullOrEmpty()) {
+                        val supaProfile = supaProfiles.first()
+                        val supaComplete = supaProfile.onboarding_complete == true
+                        val nativeStr = supaProfile.native_languages?.joinToString(", ")
+                        val learningStr = supaProfile.learning_languages?.joinToString(", ")
+                        val hobbiesList = supaProfile.hobbies ?: emptyList()
+
+                        prefs.edit().apply {
+                            putString("profile_username_${userId}", supaProfile.username ?: "")
+                            putString("profile_displayName_${userId}", supaProfile.profile_name ?: "")
+                            putString("profile_avatar_${userId}", supaProfile.avatar_url ?: "")
+                            putInt("profile_age_${userId}", supaProfile.age ?: 0)
+                            putString("profile_gender_${userId}", supaProfile.gender ?: "")
+                            putString("profile_nativeLanguage_${userId}", nativeStr ?: "")
+                            putString("profile_learningLanguage_${userId}", learningStr ?: "")
+                            putString("profile_country_${userId}", supaProfile.country ?: "")
+                            putString("profile_hobbies_${userId}", hobbiesList.joinToString("||"))
+                            putBoolean("profile_onboarding_complete_${userId}", supaComplete)
+                            apply()
                         }
+
+                        val finalProfile = mergedProfile.copy(
+                            isEmailVerified = resolvedVerified,
+                            username = supaProfile.username ?: mergedProfile.username,
+                            displayName = supaProfile.profile_name ?: mergedProfile.displayName,
+                            avatar = supaProfile.avatar_url ?: mergedProfile.avatar,
+                            age = supaProfile.age ?: mergedProfile.age,
+                            gender = supaProfile.gender ?: mergedProfile.gender,
+                            nativeLanguage = nativeStr ?: mergedProfile.nativeLanguage,
+                            learningLanguage = learningStr ?: mergedProfile.learningLanguage,
+                            country = supaProfile.country ?: mergedProfile.country,
+                            hobbies = if (hobbiesList.isNotEmpty()) hobbiesList else mergedProfile.hobbies,
+                            onboardingComplete = supaComplete
+                        )
+                        _authState.value = AuthState.Success(finalProfile)
+                        onComplete(finalProfile)
+                        return@launch
                     }
-                } catch (e: Exception) {
-                    Log.e("AuthViewModel", "Failed to load from Supabase", e)
                 }
-
-                // Fallback to Firestore
-                val firestoreDb = firestore
-                if (firestoreDb != null) {
-                    firestoreDb.collection("users").document(userId).get()
-                        .addOnSuccessListener { doc ->
-                            if (doc.exists()) {
-                                val fsUsername = doc.getString("username")
-                                val remoteCustomVerified = doc.getBoolean("customEmailVerified") ?: false
-                                if (remoteCustomVerified) {
-                                    prefs.edit().putBoolean("custom_email_verified_${userId}", true).apply()
-                                }
-                                val updatedResolvedVerified = resolvedVerified || remoteCustomVerified
-
-                                val fsDisplayName = doc.getString("displayName")
-                                val fsAvatar = doc.getString("avatar")
-                                val fsDob = doc.getString("dob")
-                                val fsGender = doc.getString("gender")
-                                val fsNativeLanguage = doc.getString("nativeLanguage")
-                                val fsLearningLanguage = doc.getString("learningLanguage")
-                                val fsCountry = doc.getString("country")
-                                val fsCountryCode = doc.getString("countryCode")
-                                val fsHobbies = doc.get("hobbies") as? List<String> ?: emptyList()
-
-                                if (fsUsername != null) {
-                                    prefs.edit().apply {
-                                        putString("profile_username_${userId}", fsUsername)
-                                        putString("profile_displayName_${userId}", fsDisplayName ?: "")
-                                        putString("profile_avatar_${userId}", fsAvatar ?: "")
-                                        putString("profile_dob_${userId}", fsDob ?: "")
-                                        putString("profile_gender_${userId}", fsGender ?: "")
-                                        putString("profile_nativeLanguage_${userId}", fsNativeLanguage ?: "")
-                                        putString("profile_learningLanguage_${userId}", fsLearningLanguage ?: "")
-                                        putString("profile_country_${userId}", fsCountry ?: "")
-                                        putString("profile_countryCode_${userId}", fsCountryCode ?: "")
-                                        putString("profile_hobbies_${userId}", fsHobbies.joinToString("||"))
-                                        putBoolean("profile_configured_${userId}", true)
-                                        apply()
-                                    }
-                                    val finalProfile = mergedProfile.copy(
-                                        isEmailVerified = updatedResolvedVerified,
-                                        username = fsUsername,
-                                        displayName = fsDisplayName ?: mergedProfile.displayName,
-                                        avatar = fsAvatar ?: mergedProfile.avatar,
-                                        dob = fsDob ?: mergedProfile.dob,
-                                        gender = fsGender ?: mergedProfile.gender,
-                                        nativeLanguage = fsNativeLanguage ?: mergedProfile.nativeLanguage,
-                                        learningLanguage = fsLearningLanguage ?: mergedProfile.learningLanguage,
-                                        country = fsCountry ?: mergedProfile.country,
-                                        countryCode = fsCountryCode ?: mergedProfile.countryCode,
-                                        hobbies = fsHobbies.ifEmpty { mergedProfile.hobbies }
-                                    )
-                                    _authState.value = AuthState.Success(finalProfile)
-                                    onComplete(finalProfile)
-                                } else {
-                                    _authState.value = AuthState.Success(mergedProfile.copy(isEmailVerified = updatedResolvedVerified))
-                                    onComplete(mergedProfile.copy(isEmailVerified = updatedResolvedVerified))
-                                }
-                            } else {
-                                _authState.value = AuthState.Success(mergedProfile)
-                                onComplete(mergedProfile)
-                            }
-                        }
-                        .addOnFailureListener {
-                            _authState.value = AuthState.Success(mergedProfile)
-                            onComplete(mergedProfile)
-                        }
-                } else {
-                    _authState.value = AuthState.Success(mergedProfile)
-                    onComplete(mergedProfile)
-                }
+            } catch (e: Exception) {
+                Log.e("AuthViewModel", "Failed to load profile from Supabase: ${e.message}", e)
             }
-        } else {
+
             _authState.value = AuthState.Success(mergedProfile)
             onComplete(mergedProfile)
         }
