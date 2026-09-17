@@ -35,12 +35,14 @@ data class UserProfile(
     val username: String? = null,
     val avatar: String? = null,
     val dob: String? = null,
+    val age: Int? = null,
     val gender: String? = null,
     val nativeLanguage: String? = null,
     val learningLanguage: String? = null,
     val country: String? = null,
     val countryCode: String? = null,
-    val hobbies: List<String> = emptyList()
+    val hobbies: List<String> = emptyList(),
+    val onboardingComplete: Boolean = false
 )
 
 class AuthViewModel : ViewModel() {
@@ -171,7 +173,7 @@ class AuthViewModel : ViewModel() {
                     val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
                     val isCustomVerified = prefs.getBoolean("custom_email_verified_${effectiveUid}", false)
                     loadUserProfileFromSpOrFirestore(context, effectiveUid) { finalProfile ->
-                        val initialVerified = isCustomVerified || authUser.isEmailVerified
+                        val initialVerified = isCustomVerified
                         _authState.value = AuthState.Success(
                             finalProfile.copy(
                                 isEmailVerified = initialVerified
@@ -183,9 +185,8 @@ class AuthViewModel : ViewModel() {
                         
                         // Concurrent secure validation & auto-detection on boot
                         viewModelScope.launch {
-                            val realVerify = performRemoteVerificationStatusCheck(context, effectiveUid, authUser.isEmailVerified)
+                            val realVerify = performRemoteVerificationStatusCheck(context, effectiveUid, false)
                             if (realVerify != initialVerified) {
-                                // Mismatch found (hacker detected or newly verified via magic link). Correct local cache!
                                 prefs.edit().putBoolean("custom_email_verified_${effectiveUid}", realVerify).apply()
                                 _authState.value = AuthState.Success(
                                     finalProfile.copy(
@@ -197,13 +198,13 @@ class AuthViewModel : ViewModel() {
                     }
                 }
             } else {
-                // If context is null, emit what we have. It might not have the fully remote-fetched data though.
+                // If context is null, emit what we have.
                 _authState.value = AuthState.Success(
                     UserProfile(
                         uid = authUser.uid,
                         email = authUser.email ?: "",
                         displayName = authUser.displayName,
-                        isEmailVerified = authUser.isEmailVerified
+                        isEmailVerified = false
                     )
                 )
             }
@@ -256,18 +257,18 @@ class AuthViewModel : ViewModel() {
 
     private fun checkAndCleanupUnverifiedAccount(context: Context, user: FirebaseUser, onCleaned: () -> Unit) {
         val creationTime = user.metadata?.creationTimestamp ?: 0L
+        val effectiveUid = SupabaseSessionManager.getUserId(context) ?: user.uid
         val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
-        val isCustomVerified = prefs.getBoolean("custom_email_verified_${user.uid}", false)
-        val isVerified = isCustomVerified || user.isEmailVerified
+        val isCustomVerified = prefs.getBoolean("custom_email_verified_${effectiveUid}", false)
 
-        if (!isVerified && creationTime > 0L && (System.currentTimeMillis() - creationTime) > 2L * 3600L * 1000L) {
+        if (!isCustomVerified && creationTime > 0L && (System.currentTimeMillis() - creationTime) > 2L * 3600L * 1000L) {
             _authState.value = AuthState.Loading
             viewModelScope.launch {
-                // Double-check remote verification state to see if they verified but cache is stale
-                val remoteVerified = performRemoteVerificationStatusCheck(context, user.uid, user.isEmailVerified)
+                // Double-check remote verification state in Supabase
+                val remoteVerified = performRemoteVerificationStatusCheck(context, effectiveUid, false)
                 if (remoteVerified) {
-                    prefs.edit().putBoolean("custom_email_verified_${user.uid}", true).apply()
-                    loadUserProfileFromSpOrFirestore(context, user.uid) { profile ->
+                    prefs.edit().putBoolean("custom_email_verified_${effectiveUid}", true).apply()
+                    loadUserProfileFromSpOrFirestore(context, effectiveUid) { profile ->
                         _authState.value = AuthState.Success(profile.copy(isEmailVerified = true))
                         onCleaned()
                     }
@@ -1163,8 +1164,7 @@ class AuthViewModel : ViewModel() {
     fun loadUserProfileFromSpOrFirestore(context: Context, userId: String, onComplete: (UserProfile) -> Unit = {}) {
         val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
         val isCustomVerified = prefs.getBoolean("custom_email_verified_${userId}", false)
-        val firebaseVerified = firebaseAuth?.currentUser?.let { if (it.uid == userId) it.isEmailVerified else false } ?: false
-        val resolvedVerified = isCustomVerified || firebaseVerified
+        val resolvedVerified = isCustomVerified
 
         val username = prefs.getString("profile_username_${userId}", null)
         val displayName = prefs.getString("profile_displayName_${userId}", null)

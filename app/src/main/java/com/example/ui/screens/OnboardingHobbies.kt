@@ -36,10 +36,15 @@ val predefinedHobbies = listOf(
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun OnboardingHobbiesScreen(
+    initialHobbies: List<String> = emptyList(),
     onComplete: (List<String>) -> Unit,
     onBack: () -> Unit
 ) {
-    val selectedHobbies = remember { mutableStateListOf<String>() }
+    val selectedHobbies = remember { 
+        mutableStateListOf<String>().apply {
+            addAll(initialHobbies)
+        }
+    }
     var customHobby by remember { mutableStateOf("") }
     
     Scaffold(

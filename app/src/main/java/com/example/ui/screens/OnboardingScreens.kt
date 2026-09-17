@@ -543,7 +543,7 @@ fun OnboardingProfileScreen(
 @Composable
 fun OnboardingAgeScreen(
     initialDob: String = "",
-    onNext: (dobString: String) -> Unit,
+    onNext: (dobString: String, age: Int) -> Unit,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -968,7 +968,7 @@ fun OnboardingAgeScreen(
                         return@Button
                     }
                     val dobStr = "$selectedYear-${selectedMonthIndex + 1}-$selectedDay"
-                    onNext(dobStr)
+                    onNext(dobStr, calculatedAge)
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1698,12 +1698,29 @@ fun OnboardingLanguageScreenBase(
     title: String,
     subtitle: String,
     currentStep: Int,
+    initialLanguageString: String = "",
     onComplete: (String) -> Unit,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
     var searchQuery by remember { mutableStateOf("") }
-    val selectedLanguages = remember { mutableStateListOf<SelectedLanguageWithLevel>() }
+    val selectedLanguages = remember {
+        mutableStateListOf<SelectedLanguageWithLevel>().apply {
+            if (initialLanguageString.isNotBlank()) {
+                val items = initialLanguageString.split(",").map { it.trim() }
+                for (item in items) {
+                    val langName = item.substringBefore(" (").trim()
+                    val levelTag = if (item.contains("(") && item.contains(")")) {
+                        item.substringAfter("(").substringBefore(")").trim()
+                    } else "Native / Fluent"
+                    val langObj = LanguageData.allLanguages.find { it.name.equals(langName, ignoreCase = true) } 
+                        ?: Language(name = langName, nativeName = langName, code = langName.lowercase().take(2), flagCode = "un", initials = langName.take(2).uppercase())
+                    val levelObj = GenZLevels.find { it.tag.equals(levelTag, ignoreCase = true) } ?: GenZLevels.first()
+                    add(SelectedLanguageWithLevel(langObj, levelObj))
+                }
+            }
+        }
+    }
     var isBrowseAllOpen by remember { mutableStateOf(false) }
 
     // Dialog trigger state
@@ -2516,6 +2533,7 @@ fun OnboardingLanguageScreenBase(
 // ==================== STEP 5: NATIVE LANGUAGE SCREEN ====================
 @Composable
 fun OnboardingNativeLanguageScreen(
+    initialNativeLanguages: String = "",
     onComplete: (String) -> Unit,
     onBack: () -> Unit
 ) {
@@ -2523,6 +2541,7 @@ fun OnboardingNativeLanguageScreen(
         title = "What's your native language?",
         subtitle = "Choose the language you grew up speaking.",
         currentStep = 5,
+        initialLanguageString = initialNativeLanguages,
         onComplete = onComplete,
         onBack = onBack
     )
@@ -2531,6 +2550,7 @@ fun OnboardingNativeLanguageScreen(
 // ==================== STEP 6: LEARNING LANGUAGE SCREEN ====================
 @Composable
 fun OnboardingLearningLanguageScreen(
+    initialLearningLanguages: String = "",
     onComplete: (String) -> Unit,
     onBack: () -> Unit
 ) {
@@ -2538,6 +2558,7 @@ fun OnboardingLearningLanguageScreen(
         title = "What language are you learning?",
         subtitle = "Choose the language you want to practice.",
         currentStep = 6,
+        initialLanguageString = initialLearningLanguages,
         onComplete = onComplete,
         onBack = onBack
     )

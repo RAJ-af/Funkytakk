@@ -81,6 +81,21 @@ data class GeminiProxyResponse(
     val error: String? = null
 )
 
+@JsonClass(generateAdapter = true)
+data class SupabaseProfile(
+    val id: String? = null,
+    val username: String? = null,
+    val profile_name: String? = null,
+    val avatar_url: String? = null,
+    val age: Int? = null,
+    val gender: String? = null,
+    val country: String? = null,
+    val native_languages: List<String>? = null,
+    val learning_languages: List<String>? = null,
+    val hobbies: List<String>? = null,
+    val onboarding_complete: Boolean? = null
+)
+
 interface SupabaseApi {
 
     @POST("functions/v1/verify-firebase-token")
@@ -154,4 +169,27 @@ interface SupabaseApi {
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
     ): Response<List<SupabaseUser>>
+
+    @GET("rest/v1/profiles")
+    suspend fun getProfile(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("id") idEq: String // e.g. "eq.<uuid>"
+    ): Response<List<SupabaseProfile>>
+
+    @PATCH("rest/v1/profiles")
+    suspend fun patchProfile(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("id") idEq: String, // e.g. "eq.<uuid>"
+        @Body updates: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<Unit>
+
+    @POST("rest/v1/profiles")
+    suspend fun upsertProfile(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Header("Prefer") prefer: String = "resolution=merge-duplicates",
+        @Body profile: SupabaseProfile
+    ): Response<Unit>
 }
