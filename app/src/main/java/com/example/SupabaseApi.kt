@@ -3,32 +3,52 @@ package com.example
 import com.squareup.moshi.JsonClass
 import okhttp3.MultipartBody
 import retrofit2.Response
-import retrofit2.http.Body
-import retrofit2.http.Header
-import retrofit2.http.Multipart
-import retrofit2.http.POST
-import retrofit2.http.GET
-import retrofit2.http.Part
-import retrofit2.http.Path
-import retrofit2.http.Query
+import retrofit2.http.*
+
+@JsonClass(generateAdapter = true)
+data class VerifyFirebaseTokenRequest(
+    val firebase_token: String? = null,
+    val firebaseIdToken: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class VerifyFirebaseTokenResponse(
+    val access_token: String? = null,
+    val refresh_token: String? = null,
+    val user_id: String? = null,
+    val user: SupabaseAuthUser? = null,
+    val error: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class SupabaseAuthUser(
+    val id: String? = null,
+    val email: String? = null
+)
 
 @JsonClass(generateAdapter = true)
 data class SupabaseUser(
     val uid: String, // from Firebase Auth
     val email: String,
-    val display_name: String?,
-    val username: String?,
-    val avatar: String?,
-    val dob: String?,
-    val gender: String?,
-    val native_language: String?,
-    val learning_language: String?,
-    val country: String?,
-    val country_code: String?,
-    val hobbies: List<String>?,
+    val display_name: String? = null,
+    val username: String? = null,
+    val avatar: String? = null,
+    val dob: String? = null,
+    val gender: String? = null,
+    val native_language: String? = null,
+    val learning_language: String? = null,
+    val country: String? = null,
+    val country_code: String? = null,
+    val hobbies: List<String>? = null,
     val custom_email_verified: Boolean? = null,
     val email_verification_token: String? = null,
     val email_verification_expires_at: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class UpdateEmailVerificationRequest(
+    val email_verification_token: String,
+    val custom_email_verified: Boolean
 )
 
 @JsonClass(generateAdapter = true)
@@ -63,19 +83,33 @@ data class GeminiProxyResponse(
 
 interface SupabaseApi {
 
+    @POST("functions/v1/verify-firebase-token")
+    suspend fun verifyFirebaseToken(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Body request: VerifyFirebaseTokenRequest
+    ): Response<VerifyFirebaseTokenResponse>
+
+    @PATCH("rest/v1/users")
+    suspend fun updateEmailVerification(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("uid") uidEq: String, // e.g. "eq.<uid>"
+        @Body request: UpdateEmailVerificationRequest
+    ): Response<Unit>
+
+    @POST("functions/v1/send-verification-email")
+    suspend fun sendVerificationEmail(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body request: SendVerificationRequest
+    ): Response<Unit>
+
     @POST("functions/v1/gemini-proxy")
     suspend fun callGeminiProxy(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
         @Body request: GeminiProxyRequest
     ): Response<GeminiProxyResponse>
-
-    @POST("functions/v1/send-verification-email")
-    suspend fun sendVerificationEmail(
-        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
-        @Body request: SendVerificationRequest
-    ): Response<Unit>
 
     @POST("functions/v1/send-login-notification")
     suspend fun sendLoginNotification(
