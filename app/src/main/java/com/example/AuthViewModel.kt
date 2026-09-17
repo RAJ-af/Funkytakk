@@ -166,10 +166,11 @@ class AuthViewModel : ViewModel() {
         val authUser = firebaseAuth?.currentUser
         if (authUser != null) {
             if (context != null) {
+                val effectiveUid = SupabaseSessionManager.getUserId(context) ?: authUser.uid
                 checkAndCleanupUnverifiedAccount(context, authUser) {
                     val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
-                    val isCustomVerified = prefs.getBoolean("custom_email_verified_${authUser.uid}", false)
-                    loadUserProfileFromSpOrFirestore(context, authUser.uid) { finalProfile ->
+                    val isCustomVerified = prefs.getBoolean("custom_email_verified_${effectiveUid}", false)
+                    loadUserProfileFromSpOrFirestore(context, effectiveUid) { finalProfile ->
                         val initialVerified = isCustomVerified || authUser.isEmailVerified
                         _authState.value = AuthState.Success(
                             finalProfile.copy(
@@ -178,14 +179,14 @@ class AuthViewModel : ViewModel() {
                         )
                         
                         // Start real-time session tracking on boot for secure single active device enforcement
-                        startSessionListener(context, authUser.uid)
+                        startSessionListener(context, effectiveUid)
                         
                         // Concurrent secure validation & auto-detection on boot
                         viewModelScope.launch {
-                            val realVerify = performRemoteVerificationStatusCheck(context, authUser.uid, authUser.isEmailVerified)
+                            val realVerify = performRemoteVerificationStatusCheck(context, effectiveUid, authUser.isEmailVerified)
                             if (realVerify != initialVerified) {
                                 // Mismatch found (hacker detected or newly verified via magic link). Correct local cache!
-                                prefs.edit().putBoolean("custom_email_verified_${authUser.uid}", realVerify).apply()
+                                prefs.edit().putBoolean("custom_email_verified_${effectiveUid}", realVerify).apply()
                                 _authState.value = AuthState.Success(
                                     finalProfile.copy(
                                         isEmailVerified = realVerify
@@ -630,8 +631,8 @@ class AuthViewModel : ViewModel() {
             if (auth != null) {
                 while (true) {
                     delay(3000)
-                    val user = auth.currentUser
-                    if (user != null) {
+                    val supabaseUserId = SupabaseSessionManager.getUserId(context) ?: auth.currentUser?.uid
+                    if (supabaseUserId != null) {
                         var isVerifiedRemote = false
                         val bearerToken = SupabaseSessionManager.getBearerToken(context)
                         
@@ -640,7 +641,7 @@ class AuthViewModel : ViewModel() {
                             val response = withContext(Dispatchers.IO) {
                                 SupabaseClient.api.getUser(
                                     auth = bearerToken,
-                                    uidEq = "eq.${user.uid}"
+                                    uidEq = "eq.$supabaseUserId"
                                 )
                             }
                             if (response.isSuccessful) {
@@ -655,9 +656,9 @@ class AuthViewModel : ViewModel() {
 
                         if (isVerifiedRemote) {
                             val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
-                            prefs.edit().putBoolean("custom_email_verified_${user.uid}", true).apply()
+                            prefs.edit().putBoolean("custom_email_verified_${supabaseUserId}", true).apply()
                             
-                            loadUserProfileFromSpOrFirestore(context, user.uid) { finalProfile ->
+                            loadUserProfileFromSpOrFirestore(context, supabaseUserId) { finalProfile ->
                                 _authState.value = AuthState.Success(finalProfile.copy(isEmailVerified = true))
                                 Toast.makeText(context, "Email verified successfully!", Toast.LENGTH_SHORT).show()
                                 onVerified()
@@ -679,8 +680,8 @@ class AuthViewModel : ViewModel() {
 
     fun checkAndRefreshVerification(context: Context, onVerified: () -> Unit) {
         val auth = firebaseAuth
-        val user = auth?.currentUser
-        if (auth != null && user != null) {
+        val supabaseUserId = SupabaseSessionManager.getUserId(context) ?: auth?.currentUser?.uid
+        if (auth != null && supabaseUserId != null) {
             _authState.value = AuthState.Loading
             viewModelScope.launch {
                 var isVerifiedRemote = false
@@ -691,7 +692,7 @@ class AuthViewModel : ViewModel() {
                     val response = withContext(Dispatchers.IO) {
                         SupabaseClient.api.getUser(
                             auth = bearerToken,
-                            uidEq = "eq.${user.uid}"
+                            uidEq = "eq.$supabaseUserId"
                         )
                     }
                     if (response.isSuccessful) {
@@ -706,10 +707,10 @@ class AuthViewModel : ViewModel() {
 
                 val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
                 if (isVerifiedRemote) {
-                    prefs.edit().putBoolean("custom_email_verified_${user.uid}", true).apply()
+                    prefs.edit().putBoolean("custom_email_verified_${supabaseUserId}", true).apply()
                 }
 
-                loadUserProfileFromSpOrFirestore(context, user.uid) { finalProfile ->
+                loadUserProfileFromSpOrFirestore(context, supabaseUserId) { finalProfile ->
                     _authState.value = AuthState.Success(finalProfile.copy(isEmailVerified = isVerifiedRemote))
                     if (isVerifiedRemote) {
                         Toast.makeText(context, "Email is verified!", Toast.LENGTH_SHORT).show()
@@ -928,10 +929,11 @@ class AuthViewModel : ViewModel() {
         initializeFirebaseIfNeeded(context)
         val auth = firebaseAuth
         val user = auth?.currentUser
-        if (auth != null && user != null) {
+        val supabaseUserId = SupabaseSessionManager.getUserId(context) ?: user?.uid
+        if (auth != null && user != null && supabaseUserId != null) {
             val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
-            val lastSend = prefs.getLong("last_verification_send_time_${user.uid}", 0L)
-            val resendCount = prefs.getInt("verification_resend_count_${user.uid}", 0)
+            val lastSend = prefs.getLong("last_verification_send_time_${supabaseUserId}", 0L)
+            val resendCount = prefs.getInt("verification_resend_count_${supabaseUserId}", 0)
             
             val currentTime = System.currentTimeMillis()
             val timeSinceLastResend = currentTime - lastSend
@@ -949,12 +951,12 @@ class AuthViewModel : ViewModel() {
             saveUserToFirestore(user, token = token)
             
             prefs.edit()
-                .putString("auth_token_${user.uid}", token)
-                .putLong("last_verification_send_time_${user.uid}", currentTime)
-                .putInt("verification_resend_count_${user.uid}", resendCount + 1)
+                .putString("auth_token_${supabaseUserId}", token)
+                .putLong("last_verification_send_time_${supabaseUserId}", currentTime)
+                .putInt("verification_resend_count_${supabaseUserId}", resendCount + 1)
                 .apply()
 
-            triggerSupabaseVerificationEmail(context, user.email ?: "", user.displayName, token, user.uid) {
+            triggerSupabaseVerificationEmail(context, user.email ?: "", user.displayName, token, supabaseUserId) {
                 Toast.makeText(context, "Verification email resent successfully!", Toast.LENGTH_SHORT).show()
             }
         } else {
@@ -1212,7 +1214,11 @@ class AuthViewModel : ViewModel() {
             _authState.value = AuthState.Loading
             viewModelScope.launch {
                 try {
-                    val response = SupabaseClient.api.getUser(uidEq = "eq.$userId")
+                    val bearerToken = SupabaseSessionManager.getBearerToken(context)
+                    val response = SupabaseClient.api.getUser(
+                        auth = bearerToken,
+                        uidEq = "eq.$userId"
+                    )
                     if (response.isSuccessful) {
                         val supaUsers = response.body()
                         if (!supaUsers.isNullOrEmpty()) {
