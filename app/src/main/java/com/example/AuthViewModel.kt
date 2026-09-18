@@ -562,8 +562,13 @@ class AuthViewModel : ViewModel() {
 
                                                         if (isCustomVerified) {
                                                             registerAndStartSession(context, userId)
-                                                            // STEP 5 (Optional): send-login-notification
-                                                            triggerSupabaseLoginNotification(context, firebaseUser.email ?: cleanEmail, finalProfile.displayName)
+                                                            // Send login notification email via Supabase Edge Function
+                                                            triggerSupabaseLoginNotification(
+                                                                context = context,
+                                                                email = firebaseUser.email ?: cleanEmail,
+                                                                displayName = finalProfile.displayName,
+                                                                accessToken = accessToken
+                                                            )
                                                             onSuccess()
                                                         } else {
                                                             // Redirect to "Please verify your email" screen
@@ -729,34 +734,40 @@ class AuthViewModel : ViewModel() {
     fun triggerSupabaseLoginNotification(
         context: Context,
         email: String,
-        displayName: String?
+        displayName: String?,
+        accessToken: String? = null
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
-                val manufacturer = android.os.Build.MANUFACTURER
-                val model = android.os.Build.MODEL
-                val deviceName = if (manufacturer.equals("unknown", ignoreCase = true)) {
-                    "Android Emulator Session"
+                val bearerToken = if (!accessToken.isNullOrBlank()) {
+                    if (accessToken.startsWith("Bearer ")) accessToken else "Bearer $accessToken"
                 } else {
-                    "${manufacturer.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.getDefault()) else it.toString() }} $model"
+                    SupabaseSessionManager.getBearerToken(context)
                 }
-                
-                val currentDateTime = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).apply {
-                    timeZone = java.util.TimeZone.getDefault()
-                }.format(java.util.Date()) + " (Local Device Time)"
 
-                withContext(Dispatchers.IO) {
-                    val req = SendLoginNotificationRequest(
-                        email = email,
-                        displayName = displayName ?: "FunkyTalk Learner",
-                        deviceType = deviceName,
-                        timestamp = currentDateTime
-                    )
-                    SupabaseClient.api.sendLoginNotification(request = req)
+                val currentIsoTimestamp = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply {
+                    timeZone = java.util.TimeZone.getTimeZone("UTC")
+                }.format(java.util.Date())
+
+                val req = SendLoginNotificationRequest(
+                    email = email,
+                    displayName = displayName?.ifBlank { null } ?: "FunkyTalk Learner",
+                    deviceType = "Android",
+                    timestamp = currentIsoTimestamp
+                )
+
+                Log.d("AuthViewModel", "Sending login notification to $email with timestamp $currentIsoTimestamp")
+                val response = SupabaseClient.api.sendLoginNotification(
+                    auth = bearerToken,
+                    request = req
+                )
+                if (response.isSuccessful) {
+                    Log.d("AuthViewModel", "Login notification sent successfully to $email")
+                } else {
+                    Log.w("AuthViewModel", "send-login-notification response code: ${response.code()} ${response.errorBody()?.string()}")
                 }
-                Log.d("AuthViewModel", "Successful login notification email triggered for $email")
             } catch (e: Exception) {
-                Log.e("AuthViewModel", "Failed to trigger login email notification: ${e.message}")
+                Log.w("AuthViewModel", "send-login-notification fire-and-forget failed: ${e.message}")
             }
         }
     }
@@ -975,13 +986,69 @@ class AuthViewModel : ViewModel() {
                 .addOnSuccessListener { result ->
                     val user = result.user
                     if (user != null) {
-                        loadUserProfileFromSpOrFirestore(context, user.uid) { finalProfile ->
-                            saveUserToFirestore(user)
-                            _authState.value = AuthState.Success(finalProfile.copy(isEmailVerified = true))
-                            registerAndStartSession(context, user.uid)
-                            triggerSupabaseLoginNotification(context, user.email ?: "", finalProfile.displayName)
-                            Toast.makeText(context, "Logged in with Google successfully!", Toast.LENGTH_SHORT).show()
-                            onSuccess()
+                        user.getIdToken(true).addOnSuccessListener { tokenResult ->
+                            val firebaseIdToken = tokenResult.token
+                            if (!firebaseIdToken.isNullOrEmpty()) {
+                                viewModelScope.launch {
+                                    var supaAccessToken: String? = null
+                                    try {
+                                        val verifyReq = VerifyFirebaseTokenRequest(
+                                            firebase_token = firebaseIdToken,
+                                            firebaseIdToken = firebaseIdToken
+                                        )
+                                        val verifyRes = withContext(Dispatchers.IO) {
+                                            SupabaseClient.api.verifyFirebaseToken(request = verifyReq)
+                                        }
+                                        if (verifyRes.isSuccessful && verifyRes.body() != null) {
+                                            val body = verifyRes.body()!!
+                                            supaAccessToken = body.access_token
+                                            val sUserId = body.user_id ?: body.user?.id ?: user.uid
+                                            if (!supaAccessToken.isNullOrEmpty()) {
+                                                SupabaseSessionManager.setSession(
+                                                    context = context,
+                                                    accessToken = supaAccessToken!!,
+                                                    refreshToken = body.refresh_token,
+                                                    userId = sUserId
+                                                )
+                                            }
+                                        }
+                                    } catch (e: Exception) {
+                                        Log.e("AuthViewModel", "Google Supabase session exchange error: ${e.message}")
+                                    }
+
+                                    loadUserProfileFromSpOrFirestore(context, user.uid) { finalProfile ->
+                                        saveUserToFirestore(user)
+                                        _authState.value = AuthState.Success(finalProfile.copy(isEmailVerified = true))
+                                        registerAndStartSession(context, user.uid)
+                                        triggerSupabaseLoginNotification(
+                                            context = context,
+                                            email = user.email ?: "",
+                                            displayName = finalProfile.displayName,
+                                            accessToken = supaAccessToken
+                                        )
+                                        Toast.makeText(context, "Logged in with Google successfully!", Toast.LENGTH_SHORT).show()
+                                        onSuccess()
+                                    }
+                                }
+                            } else {
+                                loadUserProfileFromSpOrFirestore(context, user.uid) { finalProfile ->
+                                    saveUserToFirestore(user)
+                                    _authState.value = AuthState.Success(finalProfile.copy(isEmailVerified = true))
+                                    registerAndStartSession(context, user.uid)
+                                    triggerSupabaseLoginNotification(context, user.email ?: "", finalProfile.displayName)
+                                    Toast.makeText(context, "Logged in with Google successfully!", Toast.LENGTH_SHORT).show()
+                                    onSuccess()
+                                }
+                            }
+                        }.addOnFailureListener {
+                            loadUserProfileFromSpOrFirestore(context, user.uid) { finalProfile ->
+                                saveUserToFirestore(user)
+                                _authState.value = AuthState.Success(finalProfile.copy(isEmailVerified = true))
+                                registerAndStartSession(context, user.uid)
+                                triggerSupabaseLoginNotification(context, user.email ?: "", finalProfile.displayName)
+                                Toast.makeText(context, "Logged in with Google successfully!", Toast.LENGTH_SHORT).show()
+                                onSuccess()
+                            }
                         }
                     } else {
                         _authState.value = AuthState.Error("Failed to obtain signed in Google user details.")

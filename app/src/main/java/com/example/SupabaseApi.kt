@@ -130,7 +130,7 @@ interface SupabaseApi {
     @POST("functions/v1/send-login-notification")
     suspend fun sendLoginNotification(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
+        @Header("Authorization") auth: String,
         @Body request: SendLoginNotificationRequest
     ): Response<Unit>
 

@@ -101,9 +101,9 @@ jobs:
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || secrets.STORE_PASSWORD || 'FunkyTalk2026!' }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || secrets.STORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'upload' }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || 'FunkyTalk2026!' }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || secrets.KEYSTORE_PASSWORD || secrets.STORE_PASSWORD }}
         run: python3 .github/scripts/setup_keystore.py
 
       - name: Build Debug APK with Gradle
@@ -154,7 +154,7 @@ jobs:
             ```
             - **SHA-256**: `${{ steps.keystore.outputs.release_sha256 }}`
             - **Keystore File**: `funkytalk-release.keystore` (download below)
-            - **Password**: `${{ steps.keystore.outputs.release_password }}` | **Alias**: `${{ steps.keystore.outputs.release_alias }}`
+            - **Password**: *(Configured in GitHub Secrets: KEYSTORE_PASSWORD)* | **Alias**: `${{ steps.keystore.outputs.release_alias }}`
             
             ---
             
