@@ -1043,7 +1043,7 @@ class AuthViewModel : ViewModel() {
 
                 val response = SupabaseClient.api.patchProfile(
                     auth = token,
-                    idEq = "eq.$supaUid",
+                    authUserIdEq = "eq.$supaUid",
                     updates = updates
                 )
 
@@ -1236,7 +1236,7 @@ class AuthViewModel : ViewModel() {
 
                     SupabaseClient.api.patchProfile(
                         auth = bearerAuth,
-                        idEq = "eq.$supaUid",
+                        authUserIdEq = "eq.$supaUid",
                         updates = mapOf(
                             "username" to username,
                             "profile_name" to displayName,
@@ -1348,7 +1348,7 @@ class AuthViewModel : ViewModel() {
                 val bearerToken = SupabaseSessionManager.getBearerToken(context)
                 val response = SupabaseClient.api.getProfile(
                     auth = bearerToken,
-                    idEq = "eq.$userId"
+                    authUserIdEq = "eq.$userId"
                 )
                 if (response.isSuccessful) {
                     val supaProfiles = response.body()
