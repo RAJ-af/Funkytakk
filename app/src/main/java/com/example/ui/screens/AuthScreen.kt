@@ -55,6 +55,8 @@ import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.CommonStatusCodes
+import android.content.pm.PackageManager
+import java.security.MessageDigest
 
 @Composable
 fun AuthScreen(
@@ -69,6 +71,38 @@ fun AuthScreen(
     val webClientId = GoogleServicesConfig.getWebClientId(context)
     val isRealGoogleAuthAvailable = webClientId.isNotEmpty()
 
+    var showGoogleDiagnosticDialog by remember { mutableStateOf(false) }
+    var detectedSha1 by remember { mutableStateOf("") }
+    var detectedPackage by remember { mutableStateOf(context.packageName) }
+
+    fun extractRuntimeSha1(): String {
+        return try {
+            val pm = context.packageManager
+            val flags = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                PackageManager.GET_SIGNING_CERTIFICATES
+            } else {
+                @Suppress("DEPRECATION")
+                PackageManager.GET_SIGNATURES
+            }
+            val packageInfo = pm.getPackageInfo(context.packageName, flags)
+            val certs = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                packageInfo.signingInfo?.apkContentsSigners
+            } else {
+                @Suppress("DEPRECATION")
+                packageInfo.signatures
+            }
+            if (!certs.isNullOrEmpty()) {
+                val md = MessageDigest.getInstance("SHA-1")
+                val digest = md.digest(certs[0].toByteArray())
+                digest.joinToString(":") { String.format("%02X", it) }
+            } else {
+                "Not available"
+            }
+        } catch (e: Exception) {
+            "Error extracting SHA-1: ${e.localizedMessage}"
+        }
+    }
+
     val googleSignInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -82,9 +116,13 @@ fun AuthScreen(
                 Toast.makeText(context, "Google didn't share your auth token, bestie! Try again.", Toast.LENGTH_LONG).show()
             }
         } catch (e: ApiException) {
+            if (e.statusCode == CommonStatusCodes.DEVELOPER_ERROR) {
+                detectedSha1 = extractRuntimeSha1()
+                showGoogleDiagnosticDialog = true
+            }
             val friendlyMsg = when (e.statusCode) {
                 CommonStatusCodes.DEVELOPER_ERROR -> { // Code 10
-                    "Google setup needs SHA-1 fingerprint & Web Client ID synced in Firebase Console! Use Email login in the meantime, bestie."
+                    "Google Developer Error (Code 10): SHA-1 mismatch! Tap info on screen."
                 }
                 CommonStatusCodes.SIGN_IN_REQUIRED -> {
                     "Google sign-in needed! Pick your account to roll."
@@ -782,6 +820,73 @@ fun AuthScreen(
             }
 
             Spacer(modifier = Modifier.height(28.dp))
+        }
+
+        if (showGoogleDiagnosticDialog) {
+            AlertDialog(
+                onDismissRequest = { showGoogleDiagnosticDialog = false },
+                title = {
+                    Text(
+                        text = "Google Sign-In SHA-1 Setup",
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF141414)
+                    )
+                },
+                text = {
+                    Column {
+                        Text(
+                            text = "Firebase needs the exact SHA-1 fingerprint of this installed APK. Here is the SHA-1 detected on your device right now:",
+                            fontSize = 14.sp,
+                            color = Color(0xFF49454F)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFFF4F4F6),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = detectedSha1,
+                                fontSize = 12.sp,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF141414),
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Package: $detectedPackage",
+                            fontSize = 12.sp,
+                            color = Color(0xFF6B6B70)
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Web Client ID: $webClientId",
+                            fontSize = 11.sp,
+                            color = Color(0xFF6B6B70)
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            val clip = android.content.ClipData.newPlainText("SHA-1 Fingerprint", detectedSha1)
+                            clipboard.setPrimaryClip(clip)
+                            Toast.makeText(context, "SHA-1 copied to clipboard! Paste into Firebase Console.", Toast.LENGTH_SHORT).show()
+                            showGoogleDiagnosticDialog = false
+                        }
+                    ) {
+                        Text("Copy SHA-1")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showGoogleDiagnosticDialog = false }) {
+                        Text("Close")
+                    }
+                }
+            )
         }
     }
 }

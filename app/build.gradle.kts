@@ -31,7 +31,17 @@ android {
       !envKeyPassword.isNullOrBlank() &&
       file(envKeystorePath).exists()
 
+  val projectDebugKeystore = rootProject.file("debug.keystore")
+
   signingConfigs {
+    getByName("debug") {
+      if (projectDebugKeystore.exists()) {
+        storeFile = projectDebugKeystore
+        storePassword = "android"
+        keyAlias = "androiddebugkey"
+        keyPassword = "android"
+      }
+    }
     if (hasReleaseSigningCredentials) {
       create("release") {
         storeFile = file(envKeystorePath!!)
@@ -56,7 +66,7 @@ android {
       }
     }
     debug {
-      // Uses standard default Android SDK debug keystore automatically
+      signingConfig = signingConfigs.getByName("debug")
     }
   }
   compileOptions {
