@@ -96,6 +96,69 @@ jobs:
           '
           echo "Environment configuration completed."
 
+      - name: Ensure google-services.json is Present
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            echo "Restoring google-services.json from GitHub secret..."
+            echo "$GOOGLE_SERVICES_JSON" > app/google-services.json
+          elif [ ! -f "app/google-services.json" ]; then
+            echo "Creating app/google-services.json from default template configuration..."
+            mkdir -p app
+            cat << 'EOF' > app/google-services.json
+          {
+            "project_info": {
+              "project_number": "1093102729820",
+              "firebase_url": "https://funkytalk-f1aae-default-rtdb.asia-southeast1.firebasedatabase.app",
+              "project_id": "funkytalk-f1aae",
+              "storage_bucket": "funkytalk-f1aae.firebasestorage.app"
+            },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:1093102729820:android:adf5504386d9f6f184c499",
+                  "android_client_info": {
+                    "package_name": "com.aistudio.funkytalk.kxmpzq"
+                  }
+                },
+                "oauth_client": [
+                  {
+                    "client_id": "1093102729820-4mdub6gveu7mbl6hf16e7pu1tvk2smeb.apps.googleusercontent.com",
+                    "client_type": 1,
+                    "android_info": {
+                      "package_name": "com.aistudio.funkytalk.kxmpzq",
+                      "certificate_hash": "ca4a705395fcc3ec0316deff4392ca8a2bb5d164"
+                    }
+                  },
+                  {
+                    "client_id": "1093102729820-7dbvqkqf7uall5go8aasmsvs89keesq6.apps.googleusercontent.com",
+                    "client_type": 3
+                  }
+                ],
+                "api_key": [
+                  {
+                    "current_key": "AIzaSyAZi997wGgWE7WJ-N5NO9kOWL2agpijq-8"
+                  }
+                ],
+                "services": {
+                  "appinvite_service": {
+                    "other_platform_oauth_client": [
+                      {
+                        "client_id": "1093102729820-7dbvqkqf7uall5go8aasmsvs89keesq6.apps.googleusercontent.com",
+                        "client_type": 3
+                      }
+                    ]
+                  }
+                }
+              }
+            ],
+            "configuration_version": "1"
+          }
+          EOF
+          fi
+          echo "Verified app/google-services.json exists."
+
       - name: Setup Keystores, Configure Signing & Extract SHA Fingerprints
         id: keystore
         env:
