@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -103,6 +104,14 @@ fun AuthScreen(
         }
     }
 
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var isPasswordVisible by remember { mutableStateOf(false) }
+    var isSignUpMode by remember { mutableStateOf(true) }
+
+    var emailError by remember { mutableStateOf<String?>(null) }
+    var passwordError by remember { mutableStateOf<String?>(null) }
+
     val googleSignInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -111,7 +120,12 @@ fun AuthScreen(
             val account = task.getResult(ApiException::class.java)!!
             val idToken = account.idToken
             if (idToken != null) {
-                viewModel.loginWithGoogle(context, idToken, onAuthSuccess)
+                viewModel.loginWithGoogle(
+                    context = context,
+                    idToken = idToken,
+                    isSignUpMode = isSignUpMode,
+                    onSuccess = onAuthSuccess
+                )
             } else {
                 Toast.makeText(context, "Google didn't share your auth token, bestie! Try again.", Toast.LENGTH_LONG).show()
             }
@@ -142,14 +156,6 @@ fun AuthScreen(
             Toast.makeText(context, "Sign-In tripped: ${e.localizedMessage ?: "Try email login bestie!"}", Toast.LENGTH_LONG).show()
         }
     }
-
-    var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var isPasswordVisible by remember { mutableStateOf(false) }
-    var isSignUpMode by remember { mutableStateOf(true) }
-
-    var emailError by remember { mutableStateOf<String?>(null) }
-    var passwordError by remember { mutableStateOf<String?>(null) }
 
     val authState by viewModel.authState.collectAsState()
     val isLoading = authState is AuthState.Loading
@@ -667,6 +673,14 @@ fun AuthScreen(
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier.padding(horizontal = 6.dp)
                     )
+                } else if (authState is AuthState.AccountCollision) {
+                    Text(
+                        text = (authState as AuthState.AccountCollision).message,
+                        color = Color(0xFFD32F2F),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 6.dp)
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(4.dp))
@@ -884,6 +898,125 @@ fun AuthScreen(
                 dismissButton = {
                     TextButton(onClick = { showGoogleDiagnosticDialog = false }) {
                         Text("Close")
+                    }
+                }
+            )
+        }
+
+        // Account Collision Dialog (Email Already Registered with Google or Email/Password)
+        if (authState is AuthState.AccountCollision) {
+            val collision = authState as AuthState.AccountCollision
+            AlertDialog(
+                onDismissRequest = {
+                    viewModel.resetAuthState()
+                },
+                containerColor = Color.White,
+                shape = RoundedCornerShape(24.dp),
+                icon = {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .background(Color(0xFFFFF7DB), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = "Account Exists",
+                            tint = Color(0xFFF7C343),
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                },
+                title = {
+                    Text(
+                        text = "Account Already Exists",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp,
+                        color = Color(0xFF141414),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                },
+                text = {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Only 1 account is permitted per email address.",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF141414),
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = Color(0xFFF4F4F6)
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Email,
+                                    contentDescription = "Email",
+                                    tint = Color(0xFF141414),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = collision.email.ifBlank { "Registered Email" },
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF141414),
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Text(
+                            text = "An account with this email already exists. Please select Log In to enter your password or sign in with Google.",
+                            fontSize = 13.sp,
+                            color = Color(0xFF6B6B70),
+                            textAlign = TextAlign.Center,
+                            lineHeight = 18.sp
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            isSignUpMode = false // switch tab to Log In mode
+                            if (collision.email.isNotBlank()) {
+                                email = collision.email
+                            }
+                            viewModel.resetAuthState()
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFF7C343),
+                            contentColor = Color(0xFF141414)
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Go to Log In", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            viewModel.resetAuthState()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Got It", color = Color(0xFF6B6B70), fontWeight = FontWeight.SemiBold)
                     }
                 }
             )

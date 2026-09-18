@@ -24,6 +24,7 @@ sealed class AuthState {
     object Loading : AuthState()
     data class Success(val user: UserProfile) : AuthState()
     data class Error(val message: String) : AuthState()
+    data class AccountCollision(val email: String, val message: String) : AuthState()
 }
 
 data class UserProfile(
@@ -61,6 +62,10 @@ class AuthViewModel : ViewModel() {
 
     private val _authState = MutableStateFlow<AuthState>(AuthState.Idle)
     val authState: StateFlow<AuthState> = _authState
+
+    fun resetAuthState() {
+        _authState.value = AuthState.Idle
+    }
 
     private val _supabaseProfiles = MutableStateFlow<List<UserProfile>>(emptyList())
     val supabaseProfiles: StateFlow<List<UserProfile>> = _supabaseProfiles
@@ -463,8 +468,10 @@ class AuthViewModel : ViewModel() {
                 .addOnFailureListener { e ->
                     val errorCode = (e as? com.google.firebase.auth.FirebaseAuthException)?.errorCode
                     if (errorCode == "ERROR_EMAIL_ALREADY_IN_USE" || errorCode == "email-already-in-use" || e.message?.contains("already in use", ignoreCase = true) == true) {
-                        Toast.makeText(context, "Account already exists! Logging you in...", Toast.LENGTH_LONG).show()
-                        loginWithEmail(cleanEmail, password, context, onSignUpNeeded = onVerificationSent, onSuccess = onLoginNeeded)
+                        _authState.value = AuthState.AccountCollision(
+                            email = cleanEmail,
+                            message = "An account with this email address already exists. Only one account is permitted per email address."
+                        )
                     } else if (errorCode == "ERROR_INVALID_EMAIL" || errorCode == "invalid-email") {
                         _authState.value = AuthState.Error("Please enter a valid email address.")
                     } else if (errorCode == "ERROR_WEAK_PASSWORD" || errorCode == "weak-password") {
@@ -982,7 +989,12 @@ class AuthViewModel : ViewModel() {
         }
     }
 
-    fun loginWithGoogle(context: Context, idToken: String, onSuccess: () -> Unit) {
+    fun loginWithGoogle(
+        context: Context, 
+        idToken: String, 
+        isSignUpMode: Boolean = false, 
+        onSuccess: () -> Unit
+    ) {
         _authState.value = AuthState.Loading
         initializeFirebaseIfNeeded(context)
         val auth = firebaseAuth
@@ -990,8 +1002,19 @@ class AuthViewModel : ViewModel() {
             val credential = com.google.firebase.auth.GoogleAuthProvider.getCredential(idToken, null)
             auth.signInWithCredential(credential)
                 .addOnSuccessListener { result ->
+                    val isNewUser = result.additionalUserInfo?.isNewUser ?: false
                     val user = result.user
                     if (user != null) {
+                        if (isSignUpMode && !isNewUser) {
+                            // User attempted to Sign Up with Google, but this account was already registered!
+                            auth.signOut()
+                            _authState.value = AuthState.AccountCollision(
+                                email = user.email ?: "",
+                                message = "An account with this email address already exists. Only 1 account is permitted per email address."
+                            )
+                            return@addOnSuccessListener
+                        }
+
                         user.getIdToken(true).addOnSuccessListener { tokenResult ->
                             val firebaseIdToken = tokenResult.token
                             if (!firebaseIdToken.isNullOrEmpty()) {
@@ -1091,7 +1114,20 @@ class AuthViewModel : ViewModel() {
                     }
                 }
                 .addOnFailureListener { e ->
-                    _authState.value = AuthState.Error(e.localizedMessage ?: "Google sign in failed")
+                    val errorCode = (e as? com.google.firebase.auth.FirebaseAuthException)?.errorCode
+                    if (errorCode == "ERROR_ACCOUNT_EXISTS_WITH_DIFFERENT_CREDENTIAL" ||
+                        errorCode == "account-exists-with-different-credential" ||
+                        e is com.google.firebase.auth.FirebaseAuthUserCollisionException ||
+                        e.message?.contains("already exists", ignoreCase = true) == true
+                    ) {
+                        val collisionEmail = (e as? com.google.firebase.auth.FirebaseAuthUserCollisionException)?.email ?: ""
+                        _authState.value = AuthState.AccountCollision(
+                            email = collisionEmail,
+                            message = "An account with this email address already exists. Only one account is permitted per email address."
+                        )
+                    } else {
+                        _authState.value = AuthState.Error(e.localizedMessage ?: "Google sign in failed")
+                    }
                 }
         } else {
             _authState.value = AuthState.Error("Google Sign-In failed. Please try again.")
