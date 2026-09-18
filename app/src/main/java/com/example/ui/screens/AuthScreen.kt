@@ -48,7 +48,7 @@ import androidx.compose.ui.unit.sp
 import com.example.AuthState
 import com.example.AuthViewModel
 import com.example.R
-import com.example.BuildConfig
+import com.example.GoogleServicesConfig
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.google.android.gms.auth.api.signin.GoogleSignIn
@@ -66,8 +66,8 @@ fun AuthScreen(
     val focusManager = LocalFocusManager.current
     val scrollState = rememberScrollState()
 
-    val webClientId = BuildConfig.GOOGLE_WEB_CLIENT_ID
-    val isRealGoogleAuthAvailable = webClientId.isNotEmpty() && webClientId != "YOUR_GOOGLE_WEB_CLIENT_ID"
+    val webClientId = GoogleServicesConfig.getWebClientId(context)
+    val isRealGoogleAuthAvailable = webClientId.isNotEmpty()
 
     val googleSignInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()

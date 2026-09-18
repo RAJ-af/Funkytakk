@@ -132,23 +132,16 @@ class AuthViewModel : ViewModel() {
         try {
             val apps = FirebaseApp.getApps(context)
             val app = if (apps.isEmpty()) {
-                val apiKey = BuildConfig.FIREBASE_API_KEY
-                val appId = BuildConfig.FIREBASE_APPLICATION_ID
-                val projectId = BuildConfig.FIREBASE_PROJECT_ID
+                val apiKey = GoogleServicesConfig.getApiKey(context)
+                val appId = GoogleServicesConfig.getApplicationId(context)
+                val projectId = GoogleServicesConfig.getProjectId(context)
 
-                if (apiKey.isNotEmpty() && apiKey != "YOUR_FIREBASE_API_KEY" &&
-                    appId.isNotEmpty() && appId != "YOUR_FIREBASE_APPLICATION_ID" &&
-                    projectId.isNotEmpty() && projectId != "YOUR_FIREBASE_PROJECT_ID") {
-
-                    val options = com.google.firebase.FirebaseOptions.Builder()
-                        .setApiKey(apiKey)
-                        .setApplicationId(appId)
-                        .setProjectId(projectId)
-                        .build()
-                    FirebaseApp.initializeApp(context.applicationContext, options)
-                } else {
-                    null
-                }
+                val options = com.google.firebase.FirebaseOptions.Builder()
+                    .setApiKey(apiKey)
+                    .setApplicationId(appId)
+                    .setProjectId(projectId)
+                    .build()
+                FirebaseApp.initializeApp(context.applicationContext, options)
             } else {
                 apps[0]
             }
@@ -157,7 +150,7 @@ class AuthViewModel : ViewModel() {
                 firebaseAuth = FirebaseAuth.getInstance()
                 firestore = FirebaseFirestore.getInstance()
                 checkCurrentUser(context)
-                Log.i("AuthViewModel", "Firebase dynamically initialized with credentials successfully!")
+                Log.i("AuthViewModel", "Firebase dynamically initialized with google-services.json credentials successfully!")
             }
         } catch (e: Exception) {
             Log.e("AuthViewModel", "Dynamic Firebase initialization failed: ${e.message}")
@@ -168,10 +161,14 @@ class AuthViewModel : ViewModel() {
         val authUser = firebaseAuth?.currentUser
         if (authUser != null) {
             if (context != null) {
+                val isGoogleAccount = authUser.providerData.any { it.providerId == "google.com" }
                 val effectiveUid = SupabaseSessionManager.getUserId(context) ?: authUser.uid
                 checkAndCleanupUnverifiedAccount(context, authUser) {
                     val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
-                    val isCustomVerified = prefs.getBoolean("custom_email_verified_${effectiveUid}", false)
+                    val isCustomVerified = if (isGoogleAccount) true else prefs.getBoolean("custom_email_verified_${effectiveUid}", false)
+                    if (isGoogleAccount) {
+                        prefs.edit().putBoolean("custom_email_verified_${effectiveUid}", true).apply()
+                    }
                     loadUserProfileFromSpOrFirestore(context, effectiveUid) { finalProfile ->
                         val initialVerified = isCustomVerified
                         _authState.value = AuthState.Success(
@@ -183,16 +180,18 @@ class AuthViewModel : ViewModel() {
                         // Start real-time session tracking on boot for secure single active device enforcement
                         startSessionListener(context, effectiveUid)
                         
-                        // Concurrent secure validation & auto-detection on boot
-                        viewModelScope.launch {
-                            val realVerify = performRemoteVerificationStatusCheck(context, effectiveUid, false)
-                            if (realVerify != initialVerified) {
-                                prefs.edit().putBoolean("custom_email_verified_${effectiveUid}", realVerify).apply()
-                                _authState.value = AuthState.Success(
-                                    finalProfile.copy(
-                                        isEmailVerified = realVerify
+                        // Concurrent secure validation & auto-detection on boot (only for password accounts)
+                        if (!isGoogleAccount) {
+                            viewModelScope.launch {
+                                val realVerify = performRemoteVerificationStatusCheck(context, effectiveUid, false)
+                                if (realVerify != initialVerified) {
+                                    prefs.edit().putBoolean("custom_email_verified_${effectiveUid}", realVerify).apply()
+                                    _authState.value = AuthState.Success(
+                                        finalProfile.copy(
+                                            isEmailVerified = realVerify
+                                        )
                                     )
-                                )
+                                }
                             }
                         }
                     }
@@ -256,6 +255,13 @@ class AuthViewModel : ViewModel() {
     }
 
     private fun checkAndCleanupUnverifiedAccount(context: Context, user: FirebaseUser, onCleaned: () -> Unit) {
+        // Skip cleanup for Google Auth accounts - Google accounts are inherently verified by provider
+        val isGoogleUser = user.providerData.any { it.providerId == "google.com" }
+        if (isGoogleUser) {
+            onCleaned()
+            return
+        }
+
         val creationTime = user.metadata?.creationTimestamp ?: 0L
         val effectiveUid = SupabaseSessionManager.getUserId(context) ?: user.uid
         val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
@@ -991,6 +997,7 @@ class AuthViewModel : ViewModel() {
                             if (!firebaseIdToken.isNullOrEmpty()) {
                                 viewModelScope.launch {
                                     var supaAccessToken: String? = null
+                                    var sUserId: String = user.uid
                                     try {
                                         val verifyReq = VerifyFirebaseTokenRequest(
                                             firebase_token = firebaseIdToken,
@@ -1002,7 +1009,7 @@ class AuthViewModel : ViewModel() {
                                         if (verifyRes.isSuccessful && verifyRes.body() != null) {
                                             val body = verifyRes.body()!!
                                             supaAccessToken = body.access_token
-                                            val sUserId = body.user_id ?: body.user?.id ?: user.uid
+                                            sUserId = body.user_id ?: body.user?.id ?: user.uid
                                             if (!supaAccessToken.isNullOrEmpty()) {
                                                 SupabaseSessionManager.setSession(
                                                     context = context,
@@ -1016,10 +1023,33 @@ class AuthViewModel : ViewModel() {
                                         Log.e("AuthViewModel", "Google Supabase session exchange error: ${e.message}")
                                     }
 
-                                    loadUserProfileFromSpOrFirestore(context, user.uid) { finalProfile ->
-                                        saveUserToFirestore(user)
+                                    // For Google Sign-In: Google accounts are pre-verified via Firebase's own email_verified claim.
+                                    // DO NOT generate verification token or call send-verification-email.
+                                    val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
+                                    prefs.edit().putBoolean("custom_email_verified_${sUserId}", true).apply()
+
+                                    // Direct check custom_email_verified on Supabase (optional confirmation)
+                                    if (!supaAccessToken.isNullOrEmpty()) {
+                                        try {
+                                            val bearerAuth = "Bearer $supaAccessToken"
+                                            val userRes = withContext(Dispatchers.IO) {
+                                                SupabaseClient.api.getUser(auth = bearerAuth, uidEq = "eq.$sUserId")
+                                            }
+                                            if (userRes.isSuccessful) {
+                                                val supaUsers = userRes.body()
+                                                if (!supaUsers.isNullOrEmpty() && supaUsers.first().custom_email_verified == true) {
+                                                    prefs.edit().putBoolean("custom_email_verified_${sUserId}", true).apply()
+                                                }
+                                            }
+                                        } catch (e: Exception) {
+                                            Log.d("AuthViewModel", "Google Supabase custom_email_verified check note: ${e.message}")
+                                        }
+                                    }
+
+                                    loadUserProfileFromSpOrFirestore(context, sUserId) { finalProfile ->
+                                        saveUserToFirestore(user, isVerified = true)
                                         _authState.value = AuthState.Success(finalProfile.copy(isEmailVerified = true))
-                                        registerAndStartSession(context, user.uid)
+                                        registerAndStartSession(context, sUserId)
                                         triggerSupabaseLoginNotification(
                                             context = context,
                                             email = user.email ?: "",
@@ -1031,20 +1061,26 @@ class AuthViewModel : ViewModel() {
                                     }
                                 }
                             } else {
-                                loadUserProfileFromSpOrFirestore(context, user.uid) { finalProfile ->
-                                    saveUserToFirestore(user)
+                                val sUserId = user.uid
+                                val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
+                                prefs.edit().putBoolean("custom_email_verified_${sUserId}", true).apply()
+                                loadUserProfileFromSpOrFirestore(context, sUserId) { finalProfile ->
+                                    saveUserToFirestore(user, isVerified = true)
                                     _authState.value = AuthState.Success(finalProfile.copy(isEmailVerified = true))
-                                    registerAndStartSession(context, user.uid)
+                                    registerAndStartSession(context, sUserId)
                                     triggerSupabaseLoginNotification(context, user.email ?: "", finalProfile.displayName)
                                     Toast.makeText(context, "Logged in with Google successfully!", Toast.LENGTH_SHORT).show()
                                     onSuccess()
                                 }
                             }
                         }.addOnFailureListener {
-                            loadUserProfileFromSpOrFirestore(context, user.uid) { finalProfile ->
-                                saveUserToFirestore(user)
+                            val sUserId = user.uid
+                            val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
+                            prefs.edit().putBoolean("custom_email_verified_${sUserId}", true).apply()
+                            loadUserProfileFromSpOrFirestore(context, sUserId) { finalProfile ->
+                                saveUserToFirestore(user, isVerified = true)
                                 _authState.value = AuthState.Success(finalProfile.copy(isEmailVerified = true))
-                                registerAndStartSession(context, user.uid)
+                                registerAndStartSession(context, sUserId)
                                 triggerSupabaseLoginNotification(context, user.email ?: "", finalProfile.displayName)
                                 Toast.makeText(context, "Logged in with Google successfully!", Toast.LENGTH_SHORT).show()
                                 onSuccess()
@@ -1513,7 +1549,7 @@ class AuthViewModel : ViewModel() {
         }
     }
 
-    fun saveUserToFirestore(user: FirebaseUser, code: String? = null, token: String? = null) {
+    fun saveUserToFirestore(user: FirebaseUser, code: String? = null, token: String? = null, isVerified: Boolean = false) {
         val firestoreDb = firestore ?: return
         val userData = hashMapOf<String, Any>(
             "uid" to user.uid,
@@ -1526,7 +1562,7 @@ class AuthViewModel : ViewModel() {
         if (token != null) {
             userData["emailVerificationToken"] = token
         }
-        userData["customEmailVerified"] = false
+        userData["customEmailVerified"] = isVerified
         firestoreDb.collection("users").document(user.uid).set(userData, com.google.firebase.firestore.SetOptions.merge())
             .addOnSuccessListener {
                 Log.d("AuthViewModel", "User document written successfully in Firestore!")
