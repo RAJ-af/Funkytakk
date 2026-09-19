@@ -3,6 +3,7 @@ package com.example.ui.theme
 import androidx.compose.ui.graphics.Color
 
 val GoldPrimary = Color(0xFFFFC529) // Warm honey gold for primary buttons / actions
+val GoldAccent = Color(0xFFFFC529) // FunkyTalk signature gold accent
 val GoldSecondary = Color(0xFFFFB300) // Rich amber for active items
 val GoldContainer = Color(0xFFFFF3D1) // Light warm gold container background
 val AmbientBlue = Color(0xFFE1EBF9) // Light ice/sky blue for the welcome gradient
