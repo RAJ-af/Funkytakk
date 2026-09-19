@@ -762,3 +762,91 @@ fun FunkyCloseIcon(
     }
 }
 
+@Composable
+fun FunkyStopSquareIcon(
+    color: Color = Color.White,
+    modifier: Modifier = Modifier.size(16.dp)
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(w * 0.25f, h * 0.25f),
+            size = Size(w * 0.50f, h * 0.50f),
+            cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx()),
+            style = Fill
+        )
+    }
+}
+
+@Composable
+fun FunkyLockIcon(
+    color: Color = Color(0xFF6B7280),
+    modifier: Modifier = Modifier.size(14.dp),
+    strokeWidth: Float = 1.8f
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val sw = strokeWidth * density
+
+        // Shackle
+        val shackle = Path().apply {
+            moveTo(w * 0.30f, h * 0.45f)
+            lineTo(w * 0.30f, h * 0.28f)
+            cubicTo(w * 0.30f, h * 0.12f, w * 0.70f, h * 0.12f, w * 0.70f, h * 0.28f)
+            lineTo(w * 0.70f, h * 0.45f)
+        }
+        drawPath(shackle, color = color, style = Stroke(width = sw, cap = StrokeCap.Round))
+
+        // Body
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(w * 0.20f, h * 0.42f),
+            size = Size(w * 0.60f, h * 0.48f),
+            cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx()),
+            style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+
+        // Keyhole dot
+        drawCircle(color = color, radius = sw * 0.8f, center = Offset(w * 0.50f, h * 0.62f))
+    }
+}
+
+@Composable
+fun FunkyPlusIcon(
+    color: Color = Color.Black,
+    modifier: Modifier = Modifier.size(20.dp),
+    strokeWidth: Float = 2f
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val sw = strokeWidth * density
+
+        drawLine(color, Offset(w * 0.50f, h * 0.22f), Offset(w * 0.50f, h * 0.78f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(w * 0.22f, h * 0.50f), Offset(w * 0.78f, h * 0.50f), strokeWidth = sw, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+fun FunkyChevronRightIcon(
+    color: Color = Color(0xFF6B7280),
+    modifier: Modifier = Modifier.size(16.dp),
+    strokeWidth: Float = 2f
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val sw = strokeWidth * density
+
+        val path = Path().apply {
+            moveTo(w * 0.35f, h * 0.25f)
+            lineTo(w * 0.65f, h * 0.50f)
+            lineTo(w * 0.35f, h * 0.75f)
+        }
+        drawPath(path, color = color, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
