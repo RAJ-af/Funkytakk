@@ -1,10 +1,10 @@
 package com.example.ui.screens.home.tabs
 
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -19,6 +19,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -30,18 +31,24 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.ui.components.*
 import com.example.ui.screens.home.models.DirectChat
-import com.example.ui.theme.GoldAccent
 
 @Composable
 fun ChatsTabContent(
     conversationsList: List<DirectChat>,
     onSelectChat: (DirectChat) -> Unit
 ) {
+    val context = LocalContext.current
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf("All") } // "All", "Unread", "Language", "Groups"
+    var showOptionsMenu by remember { mutableStateOf(false) }
 
-    val filteredList = remember(conversationsList, searchQuery, selectedFilter) {
-        conversationsList.filter { chat ->
+    // Dynamic list that can be updated (e.g., mark all as read)
+    var localConversations by remember(conversationsList) {
+        mutableStateOf(conversationsList)
+    }
+
+    val filteredList = remember(localConversations, searchQuery, selectedFilter) {
+        localConversations.filter { chat ->
             val matchesSearch = searchQuery.isBlank() ||
                     chat.name.contains(searchQuery, ignoreCase = true) ||
                     chat.lastMsg.contains(searchQuery, ignoreCase = true) ||
@@ -61,34 +68,34 @@ fun ChatsTabContent(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFFFCFBF7)),
-        contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)
+        contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp)
     ) {
-        // 1. Top App Header with Brand Name and Actions
+        // 1. Top App Header with Brand Name and 3-dots Menu Button
         item {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // FunkyTalk. Brand Title
+                // FunkyTalk. Brand Title with signature yellow accent
                 Text(
                     text = buildAnnotatedString {
                         withStyle(
                             style = SpanStyle(
                                 color = Color.Black,
                                 fontWeight = FontWeight.ExtraBold,
-                                fontSize = 24.sp
+                                fontSize = 25.sp
                             )
                         ) {
                             append("Funky")
                         }
                         withStyle(
                             style = SpanStyle(
-                                color = Color(0xFFF59E0B),
+                                color = Color(0xFFFFC529),
                                 fontWeight = FontWeight.ExtraBold,
-                                fontSize = 24.sp
+                                fontSize = 25.sp
                             )
                         ) {
                             append("Talk.")
@@ -96,33 +103,48 @@ fun ChatsTabContent(
                     }
                 )
 
-                // Top Right Action Buttons
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Search circle icon button
+                // Top Right: Functional 3-Dots Action Button with Dropdown Menu
+                Box {
                     Box(
                         modifier = Modifier
                             .size(38.dp)
                             .clip(CircleShape)
                             .background(Color(0xFFF3F4F6))
-                            .clickable { /* Trigger Search Action */ },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        FunkySearchIcon(color = Color.Black, modifier = Modifier.size(18.dp))
-                    }
-
-                    // More circle icon button (...)
-                    Box(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFF3F4F6))
-                            .clickable { /* Trigger More Options */ },
+                            .clickable { showOptionsMenu = true },
                         contentAlignment = Alignment.Center
                     ) {
                         FunkyMoreIcon(color = Color.Black, modifier = Modifier.size(18.dp))
+                    }
+
+                    DropdownMenu(
+                        expanded = showOptionsMenu,
+                        onDismissRequest = { showOptionsMenu = false },
+                        modifier = Modifier.background(Color.White)
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Mark all as read", color = Color.Black, fontSize = 14.sp) },
+                            onClick = {
+                                localConversations = localConversations.map { it.copy(unreadCount = 0) }
+                                showOptionsMenu = false
+                                Toast.makeText(context, "All conversations marked as read", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("New conversation", color = Color.Black, fontSize = 14.sp) },
+                            onClick = {
+                                showOptionsMenu = false
+                                if (localConversations.isNotEmpty()) {
+                                    onSelectChat(localConversations.first())
+                                }
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Chat settings", color = Color.Black, fontSize = 14.sp) },
+                            onClick = {
+                                showOptionsMenu = false
+                                Toast.makeText(context, "Opening chat settings...", Toast.LENGTH_SHORT).show()
+                            }
+                        )
                     }
                 }
             }
@@ -130,7 +152,7 @@ fun ChatsTabContent(
 
         // 2. Headline: Conversations & Subtitle with Gold Heart
         item {
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -247,7 +269,7 @@ fun ChatsTabContent(
 
         // 5. Chat Cards List
         item {
-            Spacer(modifier = Modifier.height(18.dp))
+            Spacer(modifier = Modifier.height(16.dp))
         }
 
         items(filteredList, key = { it.id }) { chat ->
@@ -269,9 +291,9 @@ fun ChatsTabContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 5.dp)
-                    .clip(RoundedCornerShape(20.dp))
+                    .clip(RoundedCornerShape(22.dp))
                     .clickable { onSelectChat(chat) },
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(22.dp),
                 color = Color.White,
                 border = BorderStroke(1.dp, Color(0xFFF0F0EE)),
                 shadowElevation = 0.dp
