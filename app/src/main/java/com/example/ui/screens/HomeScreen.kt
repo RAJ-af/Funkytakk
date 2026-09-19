@@ -328,10 +328,12 @@ fun HomeScreen(
     // DM Contacts inbox data
     val conversationsList = remember {
         listOf(
-            DirectChat("c_1", "Sarah Jenkins", "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150", "Hey! Are you free to practice English now?", "9:41 AM", 2, "online", "English"),
-            DirectChat("c_2", "Park Min-jun", "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150", "Let's join a room together tonight!", "Yesterday", 0, "online", "Korean"),
-            DirectChat("c_3", "Yuki Tanaka", "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150", "Your Japanese is improving so fast!", "Sunday", 0, "offline", "Japanese"),
-            DirectChat("c_4", "Chen Wei", "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150", "Thanks for helping me with English yesterday!", "May 10", 0, "idle", "Chinese")
+            DirectChat("c_1", "Sarah Jenkins", "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200", "Hey! Are you free to practice English now?", "9:41 AM", 2, "online", "English"),
+            DirectChat("c_2", "Park Min-jun", "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200", "Let's join a room together tonight!", "Yesterday", 0, "online", "Korean"),
+            DirectChat("c_3", "Yuki Tanaka", "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200", "Your Japanese is improving so fast!", "Sunday", 0, "offline", "Japanese"),
+            DirectChat("c_4", "Chen Wei", "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200", "Thanks for helping me with English yesterday!", "May 10", 0, "idle", "Chinese"),
+            DirectChat("c_5", "Lucía Morales", "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200", "¡Fue una gran conversación!", "May 8", 0, "offline", "Spanish"),
+            DirectChat("c_6", "Thomas Müller", "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=200", "Want to practice tomorrow?", "May 6", 0, "online", "German")
         )
     }
 

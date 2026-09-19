@@ -1,25 +1,34 @@
 package com.example.ui.screens.home.tabs
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.example.ui.components.*
 import com.example.ui.screens.home.models.DirectChat
 import com.example.ui.theme.GoldAccent
 
@@ -28,98 +37,368 @@ fun ChatsTabContent(
     conversationsList: List<DirectChat>,
     onSelectChat: (DirectChat) -> Unit
 ) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize()
-    ) {
-        item {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.White)
-                    .padding(horizontal = 20.dp, vertical = 16.dp)
-            ) {
-                Text("Conversations", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.Black)
-            }
-        }
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedFilter by remember { mutableStateOf("All") } // "All", "Unread", "Language", "Groups"
 
-        items(conversationsList) { chat ->
+    val filteredList = remember(conversationsList, searchQuery, selectedFilter) {
+        conversationsList.filter { chat ->
+            val matchesSearch = searchQuery.isBlank() ||
+                    chat.name.contains(searchQuery, ignoreCase = true) ||
+                    chat.lastMsg.contains(searchQuery, ignoreCase = true) ||
+                    chat.isNativeLanguage.contains(searchQuery, ignoreCase = true)
+
+            val matchesFilter = when (selectedFilter) {
+                "Unread" -> chat.unreadCount > 0
+                "Language" -> true
+                "Groups" -> false
+                else -> true
+            }
+            matchesSearch && matchesFilter
+        }
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFFCFBF7)),
+        contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)
+    ) {
+        // 1. Top App Header with Brand Name and Actions
+        item {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onSelectChat(chat) }
-                    .background(Color.White)
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box {
-                    AsyncImage(
-                        model = chat.avatar,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
+                // FunkyTalk. Brand Title
+                Text(
+                    text = buildAnnotatedString {
+                        withStyle(
+                            style = SpanStyle(
+                                color = Color.Black,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 24.sp
+                            )
+                        ) {
+                            append("Funky")
+                        }
+                        withStyle(
+                            style = SpanStyle(
+                                color = Color(0xFFF59E0B),
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 24.sp
+                            )
+                        ) {
+                            append("Talk.")
+                        }
+                    }
+                )
+
+                // Top Right Action Buttons
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Search circle icon button
+                    Box(
                         modifier = Modifier
-                            .size(52.dp)
+                            .size(38.dp)
                             .clip(CircleShape)
+                            .background(Color(0xFFF3F4F6))
+                            .clickable { /* Trigger Search Action */ },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        FunkySearchIcon(color = Color.Black, modifier = Modifier.size(18.dp))
+                    }
+
+                    // More circle icon button (...)
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFF3F4F6))
+                            .clickable { /* Trigger More Options */ },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        FunkyMoreIcon(color = Color.Black, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+        }
+
+        // 2. Headline: Conversations & Subtitle with Gold Heart
+        item {
+            Spacer(modifier = Modifier.height(10.dp))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+            ) {
+                Text(
+                    text = "Conversations",
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color.Black,
+                    letterSpacing = (-0.5).sp
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Keep the conversations going ",
+                        fontSize = 15.sp,
+                        color = Color(0xFF6B7280),
+                        fontWeight = FontWeight.Normal
                     )
-                    // Live status node
-                    if (chat.onlineStatus != "offline") {
-                        val nodeColor = if (chat.onlineStatus == "online") Color(0xFF10B981) else Color(0xFFFFB300)
-                        Box(
-                            modifier = Modifier
-                                .size(12.dp)
-                                .align(Alignment.BottomEnd)
-                                .clip(CircleShape)
-                                .background(nodeColor)
-                                .border(2.dp, Color.White, CircleShape)
+                    FunkyHeartIcon(
+                        color = Color(0xFFFFC529),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+
+        // 3. Search Bar
+        item {
+            Spacer(modifier = Modifier.height(18.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .height(52.dp)
+                    .clip(RoundedCornerShape(50.dp))
+                    .background(Color.White)
+                    .border(BorderStroke(1.dp, Color(0xFFE5E7EB)), RoundedCornerShape(50.dp))
+                    .padding(horizontal = 18.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    FunkySearchIcon(
+                        color = Color(0xFF9CA3AF),
+                        modifier = Modifier.size(20.dp)
+                    )
+
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    Box(modifier = Modifier.weight(1f)) {
+                        if (searchQuery.isEmpty()) {
+                            Text(
+                                text = "Search conversations...",
+                                color = Color(0xFF9CA3AF),
+                                fontSize = 15.sp
+                            )
+                        }
+                        BasicTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            singleLine = true,
+                            textStyle = TextStyle(
+                                color = Color.Black,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Normal
+                            ),
+                            cursorBrush = SolidColor(Color.Black),
+                            modifier = Modifier.fillMaxWidth()
                         )
                     }
                 }
+            }
+        }
 
-                Spacer(modifier = Modifier.width(16.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(chat.name, fontWeight = FontWeight.Bold, color = Color.Black, fontSize = 16.sp)
-                        Text(chat.time, color = Color.Gray, fontSize = 11.sp)
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier.fillMaxWidth()
+        // 4. Filter Chips Row ("All", "Unread", "Language", "Groups")
+        item {
+            Spacer(modifier = Modifier.height(18.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                listOf("All", "Unread", "Language", "Groups").forEach { chipText ->
+                    val isSelected = selectedFilter == chipText
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50.dp))
+                            .background(
+                                if (isSelected) Color(0xFFFFC529) else Color(0xFFF3F4F6)
+                            )
+                            .clickable { selectedFilter = chipText }
+                            .padding(horizontal = 20.dp, vertical = 10.dp),
+                        contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = chat.lastMsg,
-                            color = if (chat.unreadCount > 0) Color.Black else Color.Gray,
-                            fontWeight = if (chat.unreadCount > 0) FontWeight.Bold else FontWeight.Normal,
-                            fontSize = 13.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
+                            text = chipText,
+                            fontSize = 14.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isSelected) Color.Black else Color(0xFF1F2937)
                         )
-                        if (chat.unreadCount > 0) {
-                            Box(
+                    }
+                }
+            }
+        }
+
+        // 5. Chat Cards List
+        item {
+            Spacer(modifier = Modifier.height(18.dp))
+        }
+
+        items(filteredList, key = { it.id }) { chat ->
+            val flagCode = when (chat.isNativeLanguage.lowercase()) {
+                "english" -> "us"
+                "korean" -> "kr"
+                "japanese" -> "jp"
+                "chinese" -> "cn"
+                "spanish" -> "es"
+                "german" -> "de"
+                "french" -> "fr"
+                "hindi" -> "in"
+                "russian" -> "ru"
+                "arabic" -> "ae"
+                else -> "us"
+            }
+
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 5.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .clickable { onSelectChat(chat) },
+                shape = RoundedCornerShape(20.dp),
+                color = Color.White,
+                border = BorderStroke(1.dp, Color(0xFFF0F0EE)),
+                shadowElevation = 0.dp
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Left Avatar with Status Dot
+                    Box(
+                        modifier = Modifier.size(56.dp)
+                    ) {
+                        AsyncImage(
+                            model = chat.avatar,
+                            contentDescription = chat.name,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(CircleShape)
+                        )
+
+                        // Status dot on bottom right
+                        val statusColor = when (chat.onlineStatus) {
+                            "online" -> Color(0xFF10B981)
+                            "idle" -> Color(0xFFF59E0B)
+                            else -> Color(0xFF9CA3AF)
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .size(14.dp)
+                                .align(Alignment.BottomEnd)
+                                .clip(CircleShape)
+                                .background(statusColor)
+                                .border(2.dp, Color.White, CircleShape)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(14.dp))
+
+                    // Center Details
+                    Column(
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        // Top line: Name & Timestamp
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = chat.name,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
+                                color = Color.Black
+                            )
+
+                            Text(
+                                text = chat.time,
+                                fontSize = 12.sp,
+                                color = Color(0xFF9CA3AF),
+                                fontWeight = FontWeight.Normal
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(2.dp))
+
+                        // Middle line: Flag + Language Name
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CircleFlag(
+                                countryCode = flagCode,
                                 modifier = Modifier
-                                    .size(18.dp)
+                                    .size(13.dp)
                                     .clip(CircleShape)
-                                    .background(GoldAccent),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    "${chat.unreadCount}",
-                                    color = Color.Black,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = chat.isNativeLanguage,
+                                color = Color(0xFF6B7280),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Normal
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        // Bottom line: Last Message & Unread Badge
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = chat.lastMsg,
+                                color = if (chat.unreadCount > 0) Color(0xFF1F2937) else Color(0xFF6B7280),
+                                fontWeight = if (chat.unreadCount > 0) FontWeight.SemiBold else FontWeight.Normal,
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            if (chat.unreadCount > 0) {
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFFFFC529)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "${chat.unreadCount}",
+                                        color = Color.Black,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
-            HorizontalDivider(color = Color.LightGray.copy(alpha = 0.3f), thickness = 0.5.dp)
         }
     }
 }
