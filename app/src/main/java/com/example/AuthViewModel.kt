@@ -1,6 +1,8 @@
 package com.example
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.util.Log
 import android.widget.Toast
 import androidx.lifecycle.ViewModel
@@ -986,6 +988,59 @@ class AuthViewModel : ViewModel() {
             }
         } else {
             Toast.makeText(context, "Error: User not found.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun getVerificationUrl(context: Context): String? {
+        val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
+        val userId = SupabaseSessionManager.getUserId(context) ?: firebaseAuth?.currentUser?.uid ?: return null
+        val token = prefs.getString("auth_token_${userId}", null)
+        var baseUrl = BuildConfig.SUPABASE_URL.trim().trimEnd('/')
+        if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
+            baseUrl = "https://$baseUrl"
+        }
+        return if (!token.isNullOrEmpty()) {
+            "$baseUrl/functions/v1/verify-email?token=$token&uid=$userId"
+        } else {
+            "$baseUrl/functions/v1/verify-email?uid=$userId"
+        }
+    }
+
+    fun openVerificationLinkInBrowser(context: Context) {
+        try {
+            val url = getVerificationUrl(context) ?: "https://mail.google.com"
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            Log.e("AuthViewModel", "Error opening verification link in browser: ${e.message}", e)
+            Toast.makeText(context, "Could not open browser: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun openEmailApp(context: Context) {
+        try {
+            val intent = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_APP_EMAIL)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            val chooser = Intent.createChooser(intent, "Open Email App").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(chooser)
+        } catch (e: Exception) {
+            try {
+                val mailtoIntent = Intent(Intent.ACTION_VIEW, Uri.parse("mailto:")).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(mailtoIntent)
+            } catch (e2: Exception) {
+                val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://mail.google.com")).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(browserIntent)
+            }
         }
     }
 

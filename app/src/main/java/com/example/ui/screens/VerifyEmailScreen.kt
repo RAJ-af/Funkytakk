@@ -3,10 +3,13 @@ package com.example.ui.screens
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.MarkEmailRead
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -72,21 +75,22 @@ fun VerifyEmailScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(24.dp),
+                .padding(horizontal = 24.dp)
+                .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Icon and instruction text block
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.fillMaxWidth()
             ) {
+                Spacer(modifier = Modifier.height(24.dp))
+
                 // Large styled mail icon
                 Box(
                     modifier = Modifier
-                        .size(100.dp)
+                        .size(90.dp)
                         .clip(RoundedCornerShape(24.dp))
                         .background(Color(0xFFFFF4D4)),
                     contentAlignment = Alignment.Center
@@ -95,33 +99,33 @@ fun VerifyEmailScreen(
                         imageVector = if (isVerified) Icons.Default.MarkEmailRead else Icons.Default.Email,
                         contentDescription = "Mail Verification pending",
                         tint = Color(0xFFFFB300),
-                        modifier = Modifier.size(48.dp)
+                        modifier = Modifier.size(44.dp)
                     )
                 }
 
-                Spacer(modifier = Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(24.dp))
 
                 Text(
                     text = "Verify your email",
-                    fontSize = 28.sp,
+                    fontSize = 26.sp,
                     fontWeight = FontWeight.Black,
                     color = Color.Black,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.testTag("verify_email_header")
                 )
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = "We have sent a secure verification link to:\n$userEmail\n\nPlease check your email inbox and click the link to verify your account.",
-                    fontSize = 15.sp,
+                    text = "We have sent a verification link to:\n$userEmail\n\nPlease check your inbox or open directly in your browser to verify your account.",
+                    fontSize = 14.sp,
                     color = Color(0xFF6B6E7B),
-                    lineHeight = 22.sp,
+                    lineHeight = 20.sp,
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(horizontal = 16.dp)
+                    modifier = Modifier.padding(horizontal = 12.dp)
                 )
 
-                Spacer(modifier = Modifier.height(36.dp))
+                Spacer(modifier = Modifier.height(24.dp))
 
                 // Beautiful interactive status check card with automated loading state
                 Card(
@@ -129,29 +133,29 @@ fun VerifyEmailScreen(
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 8.dp)
+                        .padding(horizontal = 4.dp)
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(20.dp),
+                            .padding(16.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         CircularProgressIndicator(
                             color = Color(0xFFFF9E00),
                             strokeWidth = 3.dp,
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(22.dp)
                         )
                         Column {
                             Text(
-                                text = "Awaiting email click...",
+                                text = "Awaiting verification...",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
                                 color = Color.Black
                             )
                             Text(
-                                text = "We are checking automatically.",
+                                text = "Auto-checking every few seconds.",
                                 fontSize = 12.sp,
                                 color = Color(0xFF8E8E93)
                             )
@@ -160,14 +164,69 @@ fun VerifyEmailScreen(
                 }
             }
 
-            // Buttons controller actions
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Action Buttons
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 16.dp),
+                    .padding(bottom = 20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                // Open in External Browser (Chrome) via ACTION_VIEW Intent
+                Button(
+                    onClick = {
+                        viewModel.openVerificationLinkInBrowser(context)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                        .testTag("open_browser_button"),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF141414),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(26.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.OpenInBrowser,
+                        contentDescription = "Browser",
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                    Text(
+                        text = "Open Link in Browser",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                // Open Email Inbox
+                OutlinedButton(
+                    onClick = {
+                        viewModel.openEmailApp(context)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                        .testTag("open_email_app_button"),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = Color(0xFF141414)
+                    ),
+                    shape = RoundedCornerShape(26.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Email,
+                        contentDescription = "Email App",
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                    Text(
+                        text = "Open Email Inbox",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
                 // Check Verification Link Status Now Button
                 Button(
                     onClick = {
@@ -177,13 +236,13 @@ fun VerifyEmailScreen(
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(56.dp)
+                        .height(52.dp)
                         .testTag("verify_otp_button"),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color(0xFFFF9E00),
                         contentColor = Color.White
                     ),
-                    shape = RoundedCornerShape(28.dp)
+                    shape = RoundedCornerShape(26.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Refresh,
@@ -192,7 +251,7 @@ fun VerifyEmailScreen(
                     )
                     Text(
                         text = "I have clicked the link",
-                        fontSize = 16.sp,
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -208,7 +267,7 @@ fun VerifyEmailScreen(
                     enabled = cooldownSeconds == 0,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(56.dp)
+                        .height(52.dp)
                         .testTag("resend_email_button"),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (cooldownSeconds == 0) Color(0xFFF5F5F7) else Color(0xFFF1F5F9),
@@ -216,12 +275,12 @@ fun VerifyEmailScreen(
                         disabledContainerColor = Color(0xFFF1F5F9),
                         disabledContentColor = Color.Gray
                     ),
-                    shape = RoundedCornerShape(28.dp),
+                    shape = RoundedCornerShape(26.dp),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
                 ) {
                     Text(
                         text = if (cooldownSeconds > 0) "Resend link in ${cooldownSeconds}s" else "Resend Verification Link",
-                        fontSize = 15.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
