@@ -992,7 +992,6 @@ class AuthViewModel : ViewModel() {
     fun loginWithGoogle(
         context: Context, 
         idToken: String, 
-        isSignUpMode: Boolean = false, 
         onSuccess: () -> Unit
     ) {
         _authState.value = AuthState.Loading
@@ -1002,19 +1001,8 @@ class AuthViewModel : ViewModel() {
             val credential = com.google.firebase.auth.GoogleAuthProvider.getCredential(idToken, null)
             auth.signInWithCredential(credential)
                 .addOnSuccessListener { result ->
-                    val isNewUser = result.additionalUserInfo?.isNewUser ?: false
                     val user = result.user
                     if (user != null) {
-                        if (isSignUpMode && !isNewUser) {
-                            // User attempted to Sign Up with Google, but this account was already registered!
-                            auth.signOut()
-                            _authState.value = AuthState.AccountCollision(
-                                email = user.email ?: "",
-                                message = "An account with this email address already exists. Only 1 account is permitted per email address."
-                            )
-                            return@addOnSuccessListener
-                        }
-
                         user.getIdToken(true).addOnSuccessListener { tokenResult ->
                             val firebaseIdToken = tokenResult.token
                             if (!firebaseIdToken.isNullOrEmpty()) {
