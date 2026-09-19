@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.widget.Toast
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.*
@@ -397,87 +398,89 @@ fun HomeScreen(
         )
     }
 
-    activeChatWindowContact?.let { contact ->
-        val currentThread = chatMessagesStorage[contact.id] ?: emptyList()
-        DirectChatDialog(
-            contact = contact,
-            messages = currentThread,
-            onDismiss = { activeChatWindowContact = null },
-            onSendMessage = { text ->
-                val updated = currentThread + (text to true)
-                chatMessagesStorage[contact.id] = updated
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            containerColor = Color.White,
+            bottomBar = {
+                HomeBottomBar(
+                    activeTab = activeTab,
+                    onTabSelected = { activeTab = it }
+                )
             }
-        )
-    }
-
-    Scaffold(
-        containerColor = Color.White,
-        bottomBar = {
-            HomeBottomBar(
-                activeTab = activeTab,
-                onTabSelected = { activeTab = it }
-            )
-        }
-    ) { innerPadding ->
-        Crossfade(
-            targetState = activeTab,
-            label = "HomeSubNavigation",
-            modifier = Modifier.padding(innerPadding)
-        ) { currentTab ->
-            when (currentTab) {
-                "home" -> {
-                    HomeTabContent(
-                        currentUserProfile = currentUserProfile,
-                        activeFriendsList = activeFriendsList,
-                        roomsList = roomsList,
-                        searchQuery = searchQuery,
-                        onSearchQueryChange = { searchQuery = it },
-                        selectedLanguageFilter = selectedLanguageFilter,
-                        onLanguageSelected = { selectedLanguageFilter = it },
-                        filterOnlyLive = filterOnlyLive,
-                        filterByLevel = filterByLevel,
-                        selectedSortOption = selectedSortOption,
-                        onOpenEvents = { showAmusementEventsDialog = true },
-                        onCreateRoom = { showCreateRoomBottomSheet = true },
-                        onOpenFilter = { showFilterDialog = true },
-                        onJoinRoom = { room ->
-                            Toast.makeText(context, "Welcome to ${room.title}! Connecting audio...", Toast.LENGTH_LONG).show()
-                            viewModel.joinRoom(room.id, room.title)
-                            onRoomClick()
-                        }
-                    )
-                }
-                "rooms" -> {
-                    RoomsTabContent(
-                        onCreateRoom = { showCreateRoomBottomSheet = true }
-                    )
-                }
-                "moments" -> {
-                    MomentsTabContent(
-                        momentsPosts = momentsPosts,
-                        onToggleLike = { post ->
-                            val index = momentsPosts.indexOf(post)
-                            if (index != -1) {
-                                momentsPosts[index] = post.copy(isLiked = !post.isLiked)
+        ) { innerPadding ->
+            Crossfade(
+                targetState = activeTab,
+                label = "HomeSubNavigation",
+                modifier = Modifier.padding(innerPadding)
+            ) { currentTab ->
+                when (currentTab) {
+                    "home" -> {
+                        HomeTabContent(
+                            currentUserProfile = currentUserProfile,
+                            activeFriendsList = activeFriendsList,
+                            roomsList = roomsList,
+                            searchQuery = searchQuery,
+                            onSearchQueryChange = { searchQuery = it },
+                            selectedLanguageFilter = selectedLanguageFilter,
+                            onLanguageSelected = { selectedLanguageFilter = it },
+                            filterOnlyLive = filterOnlyLive,
+                            filterByLevel = filterByLevel,
+                            selectedSortOption = selectedSortOption,
+                            onOpenEvents = { showAmusementEventsDialog = true },
+                            onCreateRoom = { showCreateRoomBottomSheet = true },
+                            onOpenFilter = { showFilterDialog = true },
+                            onJoinRoom = { room ->
+                                Toast.makeText(context, "Welcome to ${room.title}! Connecting audio...", Toast.LENGTH_LONG).show()
+                                viewModel.joinRoom(room.id, room.title)
+                                onRoomClick()
                             }
-                        }
-                    )
-                }
-                "chats" -> {
-                    ChatsTabContent(
-                        conversationsList = conversationsList,
-                        onSelectChat = { chat ->
-                            activeChatWindowContact = chat
-                        }
-                    )
-                }
-                "profile" -> {
-                    ProfileTabContent(
-                        currentUserProfile = currentUserProfile,
-                        onLogoutClick = { showLogoutDialog = true }
-                    )
+                        )
+                    }
+                    "rooms" -> {
+                        RoomsTabContent(
+                            onCreateRoom = { showCreateRoomBottomSheet = true }
+                        )
+                    }
+                    "moments" -> {
+                        MomentsTabContent(
+                            momentsPosts = momentsPosts,
+                            onToggleLike = { post ->
+                                val index = momentsPosts.indexOf(post)
+                                if (index != -1) {
+                                    momentsPosts[index] = post.copy(isLiked = !post.isLiked)
+                                }
+                            }
+                        )
+                    }
+                    "chats" -> {
+                        ChatsTabContent(
+                            conversationsList = conversationsList,
+                            onSelectChat = { chat ->
+                                activeChatWindowContact = chat
+                            }
+                        )
+                    }
+                    "profile" -> {
+                        ProfileTabContent(
+                            currentUserProfile = currentUserProfile,
+                            onLogoutClick = { showLogoutDialog = true }
+                        )
+                    }
                 }
             }
+        }
+
+        activeChatWindowContact?.let { contact ->
+            val currentThread = chatMessagesStorage[contact.id] ?: emptyList()
+            DirectChatDialog(
+                contact = contact,
+                messages = currentThread,
+                onDismiss = { activeChatWindowContact = null },
+                onSendMessage = { text ->
+                    val updated = currentThread + (text to true)
+                    chatMessagesStorage[contact.id] = updated
+                }
+            )
         }
     }
 
