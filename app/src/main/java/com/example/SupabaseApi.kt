@@ -91,6 +91,16 @@ data class SupabaseVoiceRoom(
 )
 
 @JsonClass(generateAdapter = true)
+data class UpdateVoiceRoomRequest(
+    val title: String? = null,
+    val description: String? = null,
+    val language: String? = null,
+    val tag: String? = null,
+    val is_private: Boolean? = null,
+    val join_code: String? = null
+)
+
+@JsonClass(generateAdapter = true)
 data class SupabaseRoomParticipant(
     val room_id: String,
     val user_id: String,
@@ -313,9 +323,10 @@ interface SupabaseApi {
     suspend fun updateVoiceRoom(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String,
+        @Header("Prefer") prefer: String = "return=representation",
         @Query("id") idEq: String,
-        @Body updates: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<Unit>
+        @Body updates: UpdateVoiceRoomRequest
+    ): Response<ResponseBody>
 
     @GET("rest/v1/room_participants?select=*")
     suspend fun getRoomParticipants(

@@ -422,7 +422,7 @@ fun HomeScreen(
                             onOpenFilter = { showFilterDialog = true },
                             onJoinRoom = { room ->
                                 Toast.makeText(context, "Welcome to ${room.title}! Connecting audio...", Toast.LENGTH_LONG).show()
-                                viewModel.joinRoom(room.id, room.title)
+                                viewModel.joinRoom(room.id, room.title, context)
                                 onRoomClick()
                             }
                         )

@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.widget.Toast
+import com.example.UpdateVoiceRoomRequest
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -1817,32 +1818,58 @@ fun VoiceRoomScreen(
                 onJoinCodeChange = { joinCodeState = it },
                 isHost = (roomHostId == currentUserId),
                 onApplyChanges = {
+                    val newTitle = roomTitle
+                    val newDesc = roomDescription
+                    val newLang = roomLanguage
+                    val newTag = roomTags
+                    val newPrivate = isPrivateRoomState
+                    val newCode = joinCodeState
+
+                    // Update active title in ViewModel immediately
+                    viewModel?.updateActiveRoomTitle(newTitle)
+
                     scope.launch(Dispatchers.IO) {
-                        try {
-                            val token = SupabaseSessionManager.getBearerToken(context)
-                            val updates = mapOf(
-                                "title" to roomTitle,
-                                "description" to roomDescription,
-                                "is_private" to isPrivateRoomState,
-                                "join_code" to if (isPrivateRoomState) joinCodeState else null
-                            )
-                            val res = SupabaseClient.api.updateVoiceRoom(
-                                auth = token,
-                                idEq = "eq.$activeRoomId",
-                                updates = updates
-                            )
-                            withContext(Dispatchers.Main) {
+                        val isUuidFormat = activeRoomId.length >= 32 && activeRoomId.contains("-")
+                        if (isUuidFormat) {
+                            try {
+                                val token = SupabaseSessionManager.getBearerToken(context)
+                                val request = UpdateVoiceRoomRequest(
+                                    title = newTitle,
+                                    description = newDesc,
+                                    language = newLang,
+                                    tag = newTag,
+                                    is_private = newPrivate,
+                                    join_code = if (newPrivate) newCode else null
+                                )
+                                val res = SupabaseClient.api.updateVoiceRoom(
+                                    auth = token,
+                                    idEq = "eq.$activeRoomId",
+                                    updates = request
+                                )
                                 if (res.isSuccessful) {
-                                    Toast.makeText(context, "Room settings updated successfully!", Toast.LENGTH_SHORT).show()
+                                    Log.d("VoiceRoomScreen", "Supabase room updated successfully: $activeRoomId")
                                 } else {
-                                    Toast.makeText(context, "Failed to update room settings.", Toast.LENGTH_SHORT).show()
+                                    Log.w("VoiceRoomScreen", "Supabase update status: ${res.code()}")
                                 }
+                            } catch (e: Exception) {
+                                Log.e("VoiceRoomScreen", "Supabase update error", e)
                             }
-                        } catch (e: Exception) {
-                            withContext(Dispatchers.Main) {
-                                Log.e("VoiceRoomScreen", "Failed to update room settings", e)
-                                Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
-                            }
+                        }
+
+                        // Broadcast room setting change via WebSocket realtime
+                        try {
+                            VoiceRoomRealtimeManager.broadcastRoomMessage(
+                                roomId = activeRoomId,
+                                message = "Room updated: $newTitle",
+                                userId = currentUserId,
+                                senderName = "System",
+                                senderAvatar = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200",
+                                messageId = "sys_${System.currentTimeMillis()}"
+                            )
+                        } catch (_: Exception) {}
+
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, "Room settings updated successfully!", Toast.LENGTH_SHORT).show()
                         }
                     }
                     showEditRoomSheet = false

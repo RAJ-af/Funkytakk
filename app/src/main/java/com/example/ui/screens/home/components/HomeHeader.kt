@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.components.FunkyHomeIcon
 import com.example.ui.screens.home.models.GraySubtitle
 import com.example.ui.theme.GoldAccent
 
@@ -114,26 +115,19 @@ fun HomeHeader(
                 )
             }
 
-            // Create Room cute yellow pill button
-            Button(
-                onClick = onCreateRoom,
-                colors = ButtonDefaults.buttonColors(containerColor = GoldAccent),
-                shape = RoundedCornerShape(100.dp),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                modifier = Modifier.height(40.dp)
+            // Simple clean room icon button (home-like, matching the header circular styling)
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(GoldAccent)
+                    .clickable { onCreateRoom() },
+                contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = null,
-                    tint = Color.Black,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = "Create Room",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color.Black
+                FunkyHomeIcon(
+                    color = Color.Black,
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.0f
                 )
             }
         }

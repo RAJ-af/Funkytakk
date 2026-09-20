@@ -76,6 +76,10 @@ class AuthViewModel : ViewModel() {
     private val _activeRoomTitle = MutableStateFlow<String?>(null)
     val activeRoomTitle: StateFlow<String?> = _activeRoomTitle
 
+    fun updateActiveRoomTitle(title: String) {
+        _activeRoomTitle.value = title
+    }
+
     fun joinRoom(roomId: String, title: String, context: Context? = null) {
         _activeRoomId.value = roomId
         _activeRoomTitle.value = title

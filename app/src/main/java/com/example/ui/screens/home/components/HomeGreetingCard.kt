@@ -1,228 +1,283 @@
 package com.example.ui.screens.home.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.UserProfile
+import java.util.Calendar
+
+private enum class TimeOfDay {
+    MORNING, AFTERNOON, EVENING, NIGHT
+}
+
+private data class GreetingConfig(
+    val greeting: String,
+    val subtitle: String,
+    val accentColor: Color,
+    val containerBg: Color,
+    val borderColor: Color,
+    val timeOfDay: TimeOfDay
+)
 
 @Composable
 fun HomeGreetingCard(
     currentUserProfile: UserProfile,
-    greetingText: String = "Good Morning"
+    greetingText: String? = null
 ) {
+    val calendar = remember { Calendar.getInstance() }
+    val hour = calendar.get(Calendar.HOUR_OF_DAY)
+
+    val config = remember(hour) {
+        when {
+            hour in 5..11 -> GreetingConfig(
+                greeting = "Good Morning",
+                subtitle = "Start your day with a fun conversation ✨",
+                accentColor = Color(0xFFF59E0B),
+                containerBg = Color(0xFFFFFBEB),
+                borderColor = Color(0xFFFDE68A).copy(alpha = 0.7f),
+                timeOfDay = TimeOfDay.MORNING
+            )
+            hour in 12..16 -> GreetingConfig(
+                greeting = "Good Afternoon",
+                subtitle = "Take a break and practice with friends ☕",
+                accentColor = Color(0xFFD97706),
+                containerBg = Color(0xFFFFFDF5),
+                borderColor = Color(0xFFFCD34D).copy(alpha = 0.6f),
+                timeOfDay = TimeOfDay.AFTERNOON
+            )
+            hour in 17..20 -> GreetingConfig(
+                greeting = "Good Evening",
+                subtitle = "Unwind and connect in lively voice circles 🌇",
+                accentColor = Color(0xFFEA580C),
+                containerBg = Color(0xFFFFF7ED),
+                borderColor = Color(0xFFFED7AA).copy(alpha = 0.7f),
+                timeOfDay = TimeOfDay.EVENING
+            )
+            else -> GreetingConfig(
+                greeting = "Good Night",
+                subtitle = "Night owls are practicing speaking right now 🌙",
+                accentColor = Color(0xFF6366F1),
+                containerBg = Color(0xFFF6F6FD),
+                borderColor = Color(0xFFE0E7FF).copy(alpha = 0.8f),
+                timeOfDay = TimeOfDay.NIGHT
+            )
+        }
+    }
+
+    val finalGreeting = if (!greetingText.isNullOrBlank() && greetingText != "Good Morning") {
+        greetingText
+    } else {
+        config.greeting
+    }
+
+    val displayGreetName = (currentUserProfile.displayName?.ifBlank { null }
+        ?: currentUserProfile.username?.ifBlank { null }
+        ?: "Friend")
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .height(120.dp)
-            .padding(horizontal = 18.dp, vertical = 8.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF9E6)),
-        shape = RoundedCornerShape(28.dp)
+            .padding(horizontal = 18.dp, vertical = 6.dp),
+        colors = CardDefaults.cardColors(containerColor = config.containerBg),
+        shape = RoundedCornerShape(24.dp),
+        border = BorderStroke(1.dp, config.borderColor)
     ) {
         Row(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 20.dp, vertical = 8.dp),
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // LEFT: Circular outlined sun icon in yellow
+            // Minimalist Time-of-day Icon Container
             Box(
-                modifier = Modifier.size(56.dp),
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .background(config.accentColor.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center
             ) {
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    val center = androidx.compose.ui.geometry.Offset(size.width / 2, size.height / 2)
-                    // Draw outer circle dashed/outlined
-                    drawCircle(
-                        color = Color(0xFFFDE68A),
-                        radius = size.width / 2 - 2.dp.toPx(),
-                        style = Stroke(
-                            width = 1.5.dp.toPx(),
-                            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(12f, 12f), 0f)
-                        )
-                    )
-                    // Draw center sun circle
-                    drawCircle(
-                        color = Color(0xFFFFB300),
-                        radius = 12.dp.toPx()
-                    )
-                    // Draw 8 rays
-                    val numRays = 8
-                    val rayLength = 6.dp.toPx()
-                    val rayStart = 15.dp.toPx()
-                    for (i in 0 until numRays) {
-                        val angle = (i * 360f / numRays) * (Math.PI / 180f)
-                        val startX = center.x + rayStart * Math.cos(angle).toFloat()
-                        val startY = center.y + rayStart * Math.sin(angle).toFloat()
-                        val endX = center.x + (rayStart + rayLength) * Math.cos(angle).toFloat()
-                        val endY = center.y + (rayStart + rayLength) * Math.sin(angle).toFloat()
-                        drawLine(
-                            color = Color(0xFFFFB300),
-                            start = androidx.compose.ui.geometry.Offset(startX, startY),
-                            end = androidx.compose.ui.geometry.Offset(endX, endY),
-                            strokeWidth = 2.dp.toPx(),
-                            cap = androidx.compose.ui.graphics.StrokeCap.Round
-                        )
+                Canvas(modifier = Modifier.size(28.dp)) {
+                    val w = size.width
+                    val h = size.height
+                    val center = Offset(w / 2, h / 2)
+
+                    when (config.timeOfDay) {
+                        TimeOfDay.MORNING, TimeOfDay.AFTERNOON -> {
+                            // Minimalist Geometric Sun
+                            val sunRadius = w * 0.26f
+                            drawCircle(
+                                color = config.accentColor,
+                                radius = sunRadius,
+                                center = center
+                            )
+                            val rayCount = 8
+                            val innerRay = sunRadius + 2.5.dp.toPx()
+                            val outerRay = sunRadius + 5.5.dp.toPx()
+                            for (i in 0 until rayCount) {
+                                val angle = (i * 360f / rayCount) * (Math.PI / 180f)
+                                val sx = center.x + innerRay * Math.cos(angle).toFloat()
+                                val sy = center.y + innerRay * Math.sin(angle).toFloat()
+                                val ex = center.x + outerRay * Math.cos(angle).toFloat()
+                                val ey = center.y + outerRay * Math.sin(angle).toFloat()
+                                drawLine(
+                                    color = config.accentColor,
+                                    start = Offset(sx, sy),
+                                    end = Offset(ex, ey),
+                                    strokeWidth = 1.8.dp.toPx(),
+                                    cap = StrokeCap.Round
+                                )
+                            }
+                        }
+                        TimeOfDay.EVENING -> {
+                            // Minimalist Sunset Horizon
+                            val sunRadius = w * 0.28f
+                            // Upper semi-circle
+                            drawArc(
+                                color = config.accentColor,
+                                startAngle = 180f,
+                                sweepAngle = 180f,
+                                useCenter = true,
+                                topLeft = Offset(center.x - sunRadius, center.y - sunRadius),
+                                size = Size(sunRadius * 2, sunRadius * 2)
+                            )
+                            // Horizon line
+                            drawLine(
+                                color = config.accentColor,
+                                start = Offset(w * 0.12f, center.y + 1.dp.toPx()),
+                                end = Offset(w * 0.88f, center.y + 1.dp.toPx()),
+                                strokeWidth = 2.dp.toPx(),
+                                cap = StrokeCap.Round
+                            )
+                            // Water reflection dash
+                            drawLine(
+                                color = config.accentColor.copy(alpha = 0.5f),
+                                start = Offset(w * 0.25f, center.y + 5.dp.toPx()),
+                                end = Offset(w * 0.75f, center.y + 5.dp.toPx()),
+                                strokeWidth = 1.5.dp.toPx(),
+                                cap = StrokeCap.Round
+                            )
+                        }
+                        TimeOfDay.NIGHT -> {
+                            // Minimalist Crescent Moon & Star
+                            val moonPath = Path().apply {
+                                moveTo(w * 0.65f, h * 0.15f)
+                                cubicTo(
+                                    w * 0.25f, h * 0.25f,
+                                    w * 0.25f, h * 0.75f,
+                                    w * 0.65f, h * 0.85f
+                                )
+                                cubicTo(
+                                    w * 0.40f, h * 0.70f,
+                                    w * 0.40f, h * 0.30f,
+                                    w * 0.65f, h * 0.15f
+                                )
+                                close()
+                            }
+                            drawPath(
+                                path = moonPath,
+                                color = config.accentColor
+                            )
+                            // Delicate star
+                            val starX = w * 0.78f
+                            val starY = h * 0.32f
+                            drawLine(
+                                color = config.accentColor,
+                                start = Offset(starX - 2.5.dp.toPx(), starY),
+                                end = Offset(starX + 2.5.dp.toPx(), starY),
+                                strokeWidth = 1.5.dp.toPx(),
+                                cap = StrokeCap.Round
+                            )
+                            drawLine(
+                                color = config.accentColor,
+                                start = Offset(starX, starY - 2.5.dp.toPx()),
+                                end = Offset(starX, starY + 2.5.dp.toPx()),
+                                strokeWidth = 1.5.dp.toPx(),
+                                cap = StrokeCap.Round
+                            )
+                        }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.width(16.dp))
+            Spacer(modifier = Modifier.width(14.dp))
 
-            // CENTER: Text Section
+            // Center Clean Typography Section
             Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.Center
+                modifier = Modifier.weight(1f)
             ) {
-                val displayGreetName = (currentUserProfile.displayName?.ifBlank { "Batto" } 
-                    ?: currentUserProfile.username?.ifBlank { "Batto" } 
-                    ?: "Batto")
-                
-                // Text 1 (Bold 30sp): Good Morning, {UserName}!
-                Text(
-                    text = "$greetingText, $displayGreetName!",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 30.sp,
-                    color = Color(0xFF453000),
-                    lineHeight = 34.sp
-                )
-                
-                Spacer(modifier = Modifier.height(2.dp))
-                
-                // Text 2 (18sp) & Text 3 with fluency. ✨ highlighted
-                val annotatedText = buildAnnotatedString {
-                    append("Every conversation you have today\nbrings you one step closer to ")
-                    withStyle(style = SpanStyle(color = Color(0xFFF6C945), fontWeight = FontWeight.Bold)) {
-                        append("fluency.")
-                    }
-                    append(" ✨")
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = finalGreeting,
+                        fontSize = 19.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF1F2937)
+                    )
+                    Text(
+                        text = ", $displayGreetName",
+                        fontSize = 19.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = config.accentColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
                 }
+
+                Spacer(modifier = Modifier.height(3.dp))
+
                 Text(
-                    text = annotatedText,
-                    fontSize = 18.sp,
-                    lineHeight = 22.sp,
+                    text = config.subtitle,
+                    fontSize = 13.sp,
+                    lineHeight = 17.sp,
+                    fontWeight = FontWeight.Medium,
                     color = Color(0xFF4B5563)
                 )
             }
 
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(10.dp))
 
-            // RIGHT: Yellow paper plane, flight path, hearts, faded globe
+            // Minimalist decorative plane / icon flourish
             Box(
                 modifier = Modifier
-                    .width(100.dp)
-                    .fillMaxHeight(),
-                contentAlignment = Alignment.CenterEnd
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .background(config.accentColor.copy(alpha = 0.08f)),
+                contentAlignment = Alignment.Center
             ) {
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    val w = size.width
-                    val h = size.height
-                    val centerX = w * 0.7f
-                    val centerY = h * 0.5f
-                    val radius = h * 0.45f
-                    
-                    // Draw the globe outline (faded yellow)
-                    drawCircle(
-                        color = Color(0xFFFFB300).copy(alpha = 0.08f),
-                        radius = radius,
-                        center = androidx.compose.ui.geometry.Offset(centerX, centerY)
-                    )
-                    // Draw grid lines on the globe
-                    drawArc(
-                        color = Color(0xFFFFB300).copy(alpha = 0.06f),
-                        startAngle = 0f,
-                        sweepAngle = 360f,
-                        useCenter = false,
-                        topLeft = androidx.compose.ui.geometry.Offset(centerX - radius, centerY - radius * 0.5f),
-                        size = androidx.compose.ui.geometry.Size(radius * 2f, radius),
-                        style = Stroke(width = 1.dp.toPx())
-                    )
-                    drawArc(
-                        color = Color(0xFFFFB300).copy(alpha = 0.06f),
-                        startAngle = 0f,
-                        sweepAngle = 360f,
-                        useCenter = false,
-                        topLeft = androidx.compose.ui.geometry.Offset(centerX - radius * 0.5f, centerY - radius),
-                        size = androidx.compose.ui.geometry.Size(radius, radius * 2f),
-                        style = Stroke(width = 1.dp.toPx())
-                    )
-                    
-                    // Flight path (S-curve dashed line)
-                    val path = Path().apply {
-                        moveTo(w * 0.1f, h * 0.8f)
-                        cubicTo(
-                            w * 0.4f, h * 1.1f,
-                            w * 0.1f, h * 0.2f,
-                            w * 0.9f, h * 0.4f
-                        )
-                    }
-                    drawPath(
-                        path = path,
-                        color = Color(0xFF6B7280).copy(alpha = 0.4f),
-                        style = Stroke(
-                            width = 1.5.dp.toPx(),
-                            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(8f, 8f), 0f)
-                        )
-                    )
-                }
-
-                // Hearts positioned around path
-                Icon(
-                    imageVector = Icons.Default.Favorite,
-                    contentDescription = null,
-                    tint = Color(0xFFFFB300),
-                    modifier = Modifier
-                        .size(8.dp)
-                        .align(Alignment.CenterStart)
-                        .offset(x = 10.dp, y = (-15).dp)
-                )
-                Icon(
-                    imageVector = Icons.Default.Favorite,
-                    contentDescription = null,
-                    tint = Color(0xFFFFB300),
-                    modifier = Modifier
-                        .size(10.dp)
-                        .align(Alignment.BottomCenter)
-                        .offset(x = (-10).dp, y = (-20).dp)
-                )
-                Icon(
-                    imageVector = Icons.Default.Favorite,
-                    contentDescription = null,
-                    tint = Color(0xFFFFB300),
-                    modifier = Modifier
-                        .size(6.dp)
-                        .align(Alignment.TopCenter)
-                        .offset(x = 15.dp, y = 15.dp)
-                )
-
-                // Yellow paper plane (Send icon rotated)
                 Icon(
                     imageVector = Icons.Default.Send,
-                    contentDescription = "Paper plane",
-                    tint = Color(0xFFFFB300),
+                    contentDescription = null,
+                    tint = config.accentColor.copy(alpha = 0.85f),
                     modifier = Modifier
-                        .size(28.dp)
-                        .align(Alignment.TopEnd)
-                        .offset(x = 5.dp, y = 20.dp)
+                        .size(16.dp)
                         .rotate(-35f)
                 )
             }
