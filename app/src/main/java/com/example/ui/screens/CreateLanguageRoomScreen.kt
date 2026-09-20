@@ -153,6 +153,21 @@ object BannerPack {
         BannerOption("Fantasy Forest Meadow", "https://images.unsplash.com/photo-1447752875215-b2761acb3c5d?w=800")
     )
 
+    val animeAndAnimated = listOf(
+        BannerOption("✨ Cyberpunk Anime Girl", "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=800"),
+        BannerOption("🌸 Ghibli Sakura Sky", "https://images.unsplash.com/photo-1524413840807-0c3cb6fa808d?w=800"),
+        BannerOption("🌙 Lofi Anime Room Night", "https://images.unsplash.com/photo-1518531933037-91b2f5f229cc?w=800"),
+        BannerOption("⛩️ Kyoto Anime Torii Shrine", "https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?w=800"),
+        BannerOption("🚄 Sunset Anime Train Crossing", "https://images.unsplash.com/photo-1528164344705-47542687000d?w=800"),
+        BannerOption("🌆 Akihabara Neon Lights", "https://images.unsplash.com/photo-1542051841857-5f90071e7989?w=800"),
+        BannerOption("🌌 Anime Constellation Galaxy", "https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=800"),
+        BannerOption("☕ Cozy Lofi Study Nook", "https://images.unsplash.com/photo-1544640808-32ca72ac7f37?w=800"),
+        BannerOption("🌧️ Rainy Tokyo Alley Sunset", "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=800"),
+        BannerOption("🎨 Vaporwave Synth Horizon", "https://images.unsplash.com/photo-1550684848-fac1c5b4e853?w=800"),
+        BannerOption("💫 Neon Anime Matrix", "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=800"),
+        BannerOption("🌊 Great Wave Aesthetic Art", "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800")
+    )
+
     // Programmatically generated exactly 100 stunning live gradients
     val gradients: List<BannerOption> = listOf(
         // Curated beautiful gradient combinations
@@ -1356,7 +1371,7 @@ fun CreateLanguageRoomScreen(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 contentPadding = PaddingValues(horizontal = 2.dp)
                             ) {
-                                val categoriesList = listOf("Recommended", "Worldwide Travel", "Cozy Lounges", "Cyberpunk & Art", "100 Live Gradients")
+                                val categoriesList = listOf("Recommended", "Anime & Animated", "Worldwide Travel", "Cozy Lounges", "Cyberpunk & Art", "100 Live Gradients")
                                 items(categoriesList) { cat ->
                                     val isSel = selectedCategory == cat
                                     Box(
@@ -1379,9 +1394,10 @@ fun CreateLanguageRoomScreen(
                             // Dynamic help text inside selector dialog depending on active category
                             val subLabel = when (selectedCategory) {
                                 "Recommended" -> "Specifically matching for ${selectedLanguage.name} rooms."
+                                "Anime & Animated" -> "Vibrant anime art, lo-fi aesthetic rooms, and animated scenery."
                                 "Worldwide Travel" -> "Breathtaking worldwide landmarks and iconic travel cities."
                                 "Cozy Lounges" -> "Cozy coffee houses, libraries, and soft ambient spots."
-                                "Cyberpunk & Art" -> "Neon gridways, vaporwave landscapes, and anime-styled horizons."
+                                "Cyberpunk & Art" -> "Neon gridways, vaporwave landscapes, and futuristic horizons."
                                 else -> "100 premium hand-crafted dynamic backgrounds with real-time live glow."
                             }
                             Text(
@@ -1394,6 +1410,7 @@ fun CreateLanguageRoomScreen(
                             // Banners display container and scrolling list
                             val bannersToDisplay = when (selectedCategory) {
                                 "Recommended" -> currentLanguageBanners
+                                "Anime & Animated" -> BannerPack.animeAndAnimated
                                 "Worldwide Travel" -> BannerPack.worldwideScenics
                                 "Cozy Lounges" -> BannerPack.cozyVibes
                                 "Cyberpunk & Art" -> BannerPack.cyberpunkAndArt
@@ -1567,37 +1584,50 @@ fun CreateLanguageRoomScreen(
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            // Action: apply banner
-                            Button(
-                                onClick = {
-                                    appliedBannerUrl = temporarySelectedBanner
-                                    showBannerOverlay = false
-                                },
+                            // Action: apply banner bottom footer bar
+                            Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(50.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFC107)),
-                                shape = RoundedCornerShape(25.dp)
+                                    .padding(top = 8.dp),
+                                color = Color.White,
+                                shadowElevation = 8.dp
                             ) {
-                                Text(
-                                    text = "Apply This Banner",
-                                    color = Color.Black,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp
-                                )
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 8.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            appliedBannerUrl = temporarySelectedBanner
+                                            showBannerOverlay = false
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(50.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFC107)),
+                                        shape = RoundedCornerShape(25.dp)
+                                    ) {
+                                        Text(
+                                            text = "Apply This Banner",
+                                            color = Color.Black,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp
+                                        )
+                                    }
+                                    
+                                    Spacer(modifier = Modifier.height(4.dp))
+
+                                    Text(
+                                        text = "You can change it anytime",
+                                        fontSize = 11.sp,
+                                        color = Color.Gray,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
                             }
-                            
-                            Text(
-                                text = "You can change it anytime",
-                                fontSize = 11.sp,
-                                color = Color.Gray,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 4.dp)
-                            )
                         }
                     }
                 }

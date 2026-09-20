@@ -54,13 +54,6 @@ fun JoinPrivateRoomDialog(
 ) {
     val context = LocalContext.current
     var code by remember { mutableStateOf("") }
-    val focusRequester = remember { FocusRequester() }
-
-    LaunchedEffect(Unit) {
-        try {
-            focusRequester.requestFocus()
-        } catch (_: Exception) {}
-    }
 
     // Auto submit when 6 digits are reached
     LaunchedEffect(code) {
@@ -225,41 +218,9 @@ fun JoinPrivateRoomDialog(
 
                         // 6-Digit Visual Code Boxes
                         Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null
-                                ) {
-                                    focusRequester.requestFocus()
-                                },
+                            modifier = Modifier.fillMaxWidth(),
                             contentAlignment = Alignment.Center
                         ) {
-                            // Invisible text field to capture keyboard input
-                            BasicTextField(
-                                value = code,
-                                onValueChange = { input ->
-                                    val filtered = input.filter { it.isDigit() }
-                                    if (filtered.length <= 6) {
-                                        code = filtered
-                                    }
-                                },
-                                keyboardOptions = KeyboardOptions(
-                                    keyboardType = KeyboardType.Number,
-                                    imeAction = if (code.length == 6) ImeAction.Done else ImeAction.None
-                                ),
-                                keyboardActions = KeyboardActions(
-                                    onDone = {
-                                        if (code.length == 6 && !isLoading) {
-                                            onJoin(code)
-                                        }
-                                    }
-                                ),
-                                modifier = Modifier
-                                    .focusRequester(focusRequester)
-                                    .size(1.dp),
-                                singleLine = true
-                            )
 
                             // 6 Distinct OTP Digit Tiles
                             Row(
