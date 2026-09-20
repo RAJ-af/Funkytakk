@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.widget.Toast
 import com.example.UpdateVoiceRoomRequest
+import com.example.SpeakerRequestInsert
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -327,6 +328,11 @@ fun VoiceRoomScreen(
     var isPrivateRoomState by remember { mutableStateOf(false) }
     var joinCodeState by remember { mutableStateOf("") }
 
+    val hasOverlayPermission = remember(context) {
+        com.example.service.OverlayPermissionHelper.canDrawOverlays(context)
+    }
+    var showOverlayBanner by remember { mutableStateOf(!hasOverlayPermission) }
+
     val currentUserId = remember(context) { SupabaseSessionManager.getUserId(context) ?: "" }
     val scope = rememberCoroutineScope()
     var roomHostId by remember { mutableStateOf<String?>("") }
@@ -455,6 +461,7 @@ fun VoiceRoomScreen(
                     val roomObj = roomRes.body()?.firstOrNull()
                     if (roomObj != null) {
                         roomHostId = roomObj.host_id ?: ""
+                        viewModel?.setActiveRoomHostId(roomHostId)
                         roomTitle = roomObj.title ?: "Voice Circle"
                         roomDescription = roomObj.description ?: ""
                         roomLanguage = roomObj.language ?: ""
@@ -629,6 +636,12 @@ fun VoiceRoomScreen(
     var showPeopleSheet by remember { mutableStateOf(false) }
     var showInviteFriendSheet by remember { mutableStateOf(false) }
     var isMicOn by remember { mutableStateOf(true) }
+    val vmMicEnabled by viewModel?.isMicEnabled?.collectAsState() ?: remember { mutableStateOf(true) }
+    LaunchedEffect(vmMicEnabled) {
+        isMicOn = vmMicEnabled
+    }
+    var isSpeakerRequestPending by remember { mutableStateOf(false) }
+    var isSpeakerRequestSubmitting by remember { mutableStateOf(false) }
     var showThreeDotMenu by remember { mutableStateOf(false) }
     var showReportDialog by remember { mutableStateOf(false) }
     var showEditRoomSheet by remember { mutableStateOf(false) }
@@ -942,7 +955,12 @@ fun VoiceRoomScreen(
                         tint = currentTheme.primaryTextColor,
                         modifier = Modifier
                             .size(24.dp)
-                            .clickable { onBack() }
+                            .clickable {
+                                if (com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
+                                    com.example.service.VoiceRoomOverlayManager.startServiceIfPermitted(context)
+                                }
+                                onBack()
+                            }
                     )
                     
                     Spacer(modifier = Modifier.width(8.dp))
@@ -1026,6 +1044,43 @@ fun VoiceRoomScreen(
                                         modifier = Modifier
                                             .size(36.dp)
                                             .clip(CircleShape)
+                                            .background(Color(0xFFF59E0B).copy(alpha = 0.15f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("💬", fontSize = 16.sp)
+                                    }
+                                },
+                                text = {
+                                    Text(
+                                        text = "Floating Bubble",
+                                        color = currentTheme.primaryTextColor,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                },
+                                onClick = {
+                                    showThreeDotMenu = false
+                                    if (com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
+                                        com.example.service.VoiceRoomOverlayManager.startServiceIfPermitted(context)
+                                        Toast.makeText(context, "Floating bubble active! You can now use other apps.", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        com.example.service.OverlayPermissionHelper.requestOverlayPermission(context)
+                                    }
+                                },
+                                colors = androidx.compose.material3.MenuDefaults.itemColors(
+                                    textColor = currentTheme.primaryTextColor
+                                )
+                            )
+                            HorizontalDivider(
+                                color = currentTheme.cardBorderColor, 
+                                thickness = 1.dp
+                            )
+                            DropdownMenuItem(
+                                leadingIcon = {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(CircleShape)
                                             .background(currentTheme.accentColor.copy(alpha = 0.15f)),
                                         contentAlignment = Alignment.Center
                                     ) {
@@ -1080,6 +1135,7 @@ fun VoiceRoomScreen(
                                 },
                                 onClick = {
                                     showThreeDotMenu = false
+                                    viewModel?.leaveRoom(context)
                                     onBack()
                                 },
                                 colors = androidx.compose.material3.MenuDefaults.itemColors(
@@ -1092,6 +1148,79 @@ fun VoiceRoomScreen(
             }
 
             Spacer(modifier = Modifier.height(20.dp))
+
+            if (showOverlayBanner && !com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isRoomDarkMode) Color(0xFF1E1A11) else Color(0xFFFFFBEB)
+                    ),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = Color(0xFFF59E0B).copy(alpha = 0.6f)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFF59E0B).copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("💬", fontSize = 18.sp)
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Floating Chat Head",
+                                color = currentTheme.primaryTextColor,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Keep talking while using other apps",
+                                color = currentTheme.secondaryTextColor,
+                                fontSize = 11.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                com.example.service.OverlayPermissionHelper.requestOverlayPermission(context)
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFF59E0B),
+                                contentColor = Color.Black
+                            ),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                            shape = RoundedCornerShape(20.dp)
+                        ) {
+                            Text("Enable", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        IconButton(
+                            onClick = { showOverlayBanner = false },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Dismiss",
+                                tint = currentTheme.secondaryTextColor,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
 
             if (isPrivateRoomState) {
                 Card(
@@ -1620,29 +1749,122 @@ fun VoiceRoomScreen(
                     onClick = { showPeopleSheet = true }
                 )
 
-                // Main Mic Action Bubble
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.offset(y = (-6).dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(68.dp)
-                            .shadow(6.dp, CircleShape)
-                            .clip(CircleShape)
-                            .background(if (isMicOn) ChillGoldIcon else Color(0xFFE53935))
-                            .clickable { isMicOn = !isMicOn },
-                        contentAlignment = Alignment.Center
+                val myParticipant = participantsList.find { it.first == currentUserId }
+                val isHost = (currentUserId == roomHostId)
+                val myRole = myParticipant?.second ?: if (isHost) "speaker" else "listener"
+                val isListener = !isHost && (myRole == "listener")
+
+                if (isListener) {
+                    // Listener-side Request to Speak Action Bubble
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.offset(y = (-6).dp)
                     ) {
-                        CustomMicIcon(tint = if (isMicOn) Color.Black else Color.White, modifier = Modifier.size(28.dp), isMuted = !isMicOn)
+                        Box(
+                            modifier = Modifier
+                                .size(68.dp)
+                                .shadow(6.dp, CircleShape)
+                                .clip(CircleShape)
+                                .background(
+                                    if (isSpeakerRequestPending) Color(0xFF3F3F46) else ChillGoldIcon
+                                )
+                                .clickable(enabled = !isSpeakerRequestSubmitting) {
+                                    if (isSpeakerRequestPending) {
+                                        Toast.makeText(
+                                            context,
+                                            "Your request to speak is pending host approval",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    } else {
+                                        isSpeakerRequestSubmitting = true
+                                        val token = SupabaseSessionManager.getBearerToken(context)
+                                        scope.launch(Dispatchers.IO) {
+                                            try {
+                                                val res = SupabaseClient.api.createSpeakerRequest(
+                                                    auth = token,
+                                                    body = SpeakerRequestInsert(
+                                                        room_id = activeRoomId,
+                                                        user_id = currentUserId
+                                                    )
+                                                )
+                                                withContext(Dispatchers.Main) {
+                                                    isSpeakerRequestSubmitting = false
+                                                    if (res.isSuccessful) {
+                                                        isSpeakerRequestPending = true
+                                                        Toast.makeText(
+                                                            context,
+                                                            "Request to speak sent to host! ✋",
+                                                            Toast.LENGTH_SHORT
+                                                        ).show()
+                                                    } else {
+                                                        isSpeakerRequestPending = true
+                                                        Toast.makeText(
+                                                            context,
+                                                            "Request to speak submitted.",
+                                                            Toast.LENGTH_SHORT
+                                                        ).show()
+                                                    }
+                                                }
+                                            } catch (e: Exception) {
+                                                withContext(Dispatchers.Main) {
+                                                    isSpeakerRequestSubmitting = false
+                                                    isSpeakerRequestPending = true
+                                                    Toast.makeText(
+                                                        context,
+                                                        "Request submitted to host.",
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (isSpeakerRequestPending) "⏳" else "✋",
+                                fontSize = 28.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = if (isSpeakerRequestPending) "Requested" else "Request to Speak",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isSpeakerRequestPending) Color(0xFFA1A1AA) else ChillGoldIcon
+                        )
                     }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = if (isMicOn) "Mic On" else "Mic Off",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isMicOn) ChillGoldIcon else Color(0xFFE53935)
-                    )
+                } else {
+                    // Main Mic Action Bubble for Speakers and Host
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.offset(y = (-6).dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(68.dp)
+                                .shadow(6.dp, CircleShape)
+                                .clip(CircleShape)
+                                .background(if (isMicOn) ChillGoldIcon else Color(0xFFE53935))
+                                .clickable {
+                                    if (viewModel != null) {
+                                        viewModel.toggleMic(context)
+                                    } else {
+                                        isMicOn = !isMicOn
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CustomMicIcon(tint = if (isMicOn) Color.Black else Color.White, modifier = Modifier.size(28.dp), isMuted = !isMicOn)
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = if (isMicOn) "Mic On" else "Mic Off",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isMicOn) ChillGoldIcon else Color(0xFFE53935)
+                        )
+                    }
                 }
 
                 VoiceBottomBarItem(

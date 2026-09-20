@@ -28,6 +28,14 @@ sealed class RealtimeTableEvent {
         val senderName: String,
         val senderAvatar: String
     ) : RealtimeTableEvent()
+    data class SpeakerRequestChanged(
+        val eventType: String,
+        val record: JSONObject?,
+        val roomId: String?,
+        val userId: String?,
+        val status: String?,
+        val requestId: String?
+    ) : RealtimeTableEvent()
 }
 
 object VoiceRoomRealtimeManager {
@@ -154,6 +162,25 @@ object VoiceRoomRealtimeManager {
         }
         ws.send(joinRoomMessages.toString())
 
+        // Subscribe to speaker_requests changes
+        val joinSpeakerRequests = JSONObject().apply {
+            put("topic", "realtime:public:speaker_requests")
+            put("event", "phx_join")
+            put("payload", JSONObject().apply {
+                put("config", JSONObject().apply {
+                    put("postgres_changes", org.json.JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("event", "*")
+                            put("schema", "public")
+                            put("table", "speaker_requests")
+                        })
+                    })
+                })
+            })
+            put("ref", refCounter.getAndIncrement().toString())
+        }
+        ws.send(joinSpeakerRequests.toString())
+
         // Resubscribe to any active room broadcast channels
         subscribedRoomChannels.forEach { roomId ->
             sendJoinRoomChannel(ws, roomId)
@@ -232,6 +259,21 @@ object VoiceRoomRealtimeManager {
                 } else if (table == "room_participants" || topic.contains("room_participants")) {
                     val roomId = record?.optString("room_id")
                     _events.tryEmit(RealtimeTableEvent.ParticipantChanged(eventType, record, roomId))
+                } else if (table == "speaker_requests" || topic.contains("speaker_requests")) {
+                    val roomId = record?.optString("room_id")
+                    val userId = record?.optString("user_id")
+                    val status = record?.optString("status")
+                    val reqId = record?.optString("id")
+                    _events.tryEmit(
+                        RealtimeTableEvent.SpeakerRequestChanged(
+                            eventType = eventType,
+                            record = record,
+                            roomId = roomId,
+                            userId = userId,
+                            status = status,
+                            requestId = reqId
+                        )
+                    )
                 }
             }
         } catch (e: Exception) {

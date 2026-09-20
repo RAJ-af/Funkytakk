@@ -18,6 +18,16 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.example.realtime.VoiceRoomRealtimeManager
+import com.example.realtime.RealtimeTableEvent
+
+data class SpeakerRequestItem(
+    val id: String,
+    val roomId: String,
+    val userId: String,
+    val requesterName: String,
+    val requesterAvatar: String
+)
 
 sealed class AuthState {
     object Idle : AuthState()
@@ -76,14 +86,76 @@ class AuthViewModel : ViewModel() {
     private val _activeRoomTitle = MutableStateFlow<String?>(null)
     val activeRoomTitle: StateFlow<String?> = _activeRoomTitle
 
+    private val _activeRoomHostId = MutableStateFlow<String?>(null)
+    val activeRoomHostId: StateFlow<String?> = _activeRoomHostId
+
+    private val _isMicEnabled = MutableStateFlow<Boolean>(true)
+    val isMicEnabled: StateFlow<Boolean> = _isMicEnabled
+
+    private val _activeRoomSpeakers = MutableStateFlow<List<UserProfile>>(emptyList())
+    val activeRoomSpeakers: StateFlow<List<UserProfile>> = _activeRoomSpeakers
+
+    private val _pendingSpeakerRequest = MutableStateFlow<SpeakerRequestItem?>(null)
+    val pendingSpeakerRequest: StateFlow<SpeakerRequestItem?> = _pendingSpeakerRequest
+
+    init {
+        viewModelScope.launch {
+            VoiceRoomRealtimeManager.events.collect { event ->
+                when (event) {
+                    is RealtimeTableEvent.SpeakerRequestChanged -> {
+                        val currentRoomId = _activeRoomId.value
+                        if (currentRoomId != null && event.roomId == currentRoomId) {
+                            val hostId = _activeRoomHostId.value
+                            val myUid = (authState.value as? AuthState.Success)?.user?.uid
+                            val isHost = hostId != null && myUid == hostId
+
+                            if (isHost && event.status == "pending") {
+                                val user = _supabaseProfiles.value.find { it.uid == event.userId }
+                                val name = user?.displayName ?: user?.username ?: "Listener"
+                                val avatar = user?.avatar ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400"
+                                _pendingSpeakerRequest.value = SpeakerRequestItem(
+                                    id = event.requestId ?: "req_${System.currentTimeMillis()}",
+                                    roomId = currentRoomId,
+                                    userId = event.userId ?: "",
+                                    requesterName = name,
+                                    requesterAvatar = avatar
+                                )
+                            } else if (event.status in listOf("accepted", "declined") || event.eventType == "DELETE") {
+                                if (_pendingSpeakerRequest.value?.id == event.requestId || _pendingSpeakerRequest.value?.userId == event.userId) {
+                                    _pendingSpeakerRequest.value = null
+                                }
+                            }
+                        }
+                    }
+                    is RealtimeTableEvent.ParticipantChanged -> {
+                        val currentRoomId = _activeRoomId.value
+                        if (currentRoomId != null && (event.roomId == currentRoomId || event.roomId == null)) {
+                            refreshActiveRoomSpeakers(currentRoomId)
+                        }
+                    }
+                    else -> {}
+                }
+            }
+        }
+    }
+
     fun updateActiveRoomTitle(title: String) {
         _activeRoomTitle.value = title
     }
 
-    fun joinRoom(roomId: String, title: String, context: Context? = null) {
-        _activeRoomId.value = roomId
-        _activeRoomTitle.value = title
-        
+    fun setActiveRoomHostId(hostId: String?) {
+        _activeRoomHostId.value = hostId
+    }
+
+    fun toggleMic(context: Context? = null) {
+        val newState = !_isMicEnabled.value
+        setMicEnabled(newState, context)
+    }
+
+    fun setMicEnabled(enabled: Boolean, context: Context? = null) {
+        _isMicEnabled.value = enabled
+        com.example.service.VoiceRoomOverlayManager.setMicEnabled(enabled)
+        val roomId = _activeRoomId.value ?: return
         val ctx = context
         val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
         val uid = ctx?.let { SupabaseSessionManager.getUserId(it) }
@@ -92,16 +164,142 @@ class AuthViewModel : ViewModel() {
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                val res = SupabaseClient.api.updateRoomParticipantMic(
+                    auth = token,
+                    roomIdEq = "eq.$roomId",
+                    userIdEq = "eq.$uid",
+                    body = UpdateParticipantMicRequest(is_mic_enabled = enabled)
+                )
+                Log.d("AuthViewModel", "Participant mic updated: $enabled (code ${res.code()})")
+            } catch (e: Exception) {
+                Log.e("AuthViewModel", "Error updating participant mic", e)
+            }
+        }
+    }
+
+    fun respondToSpeakerRequest(requestId: String, accept: Boolean, context: Context? = null) {
+        val ctx = context
+        val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+        _pendingSpeakerRequest.value = null
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val res = SupabaseClient.api.respondToSpeakerRequest(
+                    auth = token,
+                    body = RespondSpeakerRequestBody(request_id = requestId, accept = accept)
+                )
+                Log.d("AuthViewModel", "respondToSpeakerRequest: $requestId, accept=$accept, code=${res.code()}")
+                _activeRoomId.value?.let { refreshActiveRoomSpeakers(it, context) }
+            } catch (e: Exception) {
+                Log.e("AuthViewModel", "Error calling respondToSpeakerRequest", e)
+            }
+        }
+    }
+
+    fun refreshActiveRoomSpeakers(roomId: String, context: Context? = null) {
+        val ctx = context
+        val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val res = SupabaseClient.api.getRoomParticipants(auth = token, roomIdEq = "eq.$roomId")
+                if (res.isSuccessful) {
+                    val list = res.body() ?: emptyList()
+                    val speakerUserIds = list.filter { it.role == "speaker" }.map { it.user_id }
+                    val currentProfiles = _supabaseProfiles.value
+                    val speakers = speakerUserIds.mapNotNull { uid ->
+                        currentProfiles.find { it.uid == uid } ?: UserProfile(
+                            uid = uid,
+                            email = "",
+                            displayName = "Speaker",
+                            isEmailVerified = false,
+                            avatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400"
+                        )
+                    }
+                    _activeRoomSpeakers.value = speakers
+                }
+            } catch (e: Exception) {
+                Log.e("AuthViewModel", "Error refreshing active room speakers", e)
+            }
+        }
+    }
+
+    fun checkPendingSpeakerRequestsForHost(roomId: String, context: Context? = null) {
+        val ctx = context
+        val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val res = SupabaseClient.api.getPendingSpeakerRequests(auth = token, roomIdEq = "eq.$roomId")
+                if (res.isSuccessful) {
+                    val list = res.body() ?: emptyList()
+                    val firstPending = list.firstOrNull()
+                    if (firstPending != null) {
+                        val user = _supabaseProfiles.value.find { it.uid == firstPending.user_id }
+                        val name = user?.displayName ?: user?.username ?: "Listener"
+                        val avatar = user?.avatar ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400"
+                        _pendingSpeakerRequest.value = SpeakerRequestItem(
+                            id = firstPending.id,
+                            roomId = roomId,
+                            userId = firstPending.user_id,
+                            requesterName = name,
+                            requesterAvatar = avatar
+                        )
+                    } else {
+                        _pendingSpeakerRequest.value = null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("AuthViewModel", "Error checking pending speaker requests", e)
+            }
+        }
+    }
+
+    fun joinRoom(
+        roomId: String,
+        title: String,
+        context: Context? = null,
+        role: String = "speaker",
+        hostId: String? = null
+    ) {
+        _activeRoomId.value = roomId
+        _activeRoomTitle.value = title
+        _isMicEnabled.value = (role == "speaker")
+        if (hostId != null) {
+            _activeRoomHostId.value = hostId
+        }
+        
+        val ctx = context
+        val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+        val uid = ctx?.let { SupabaseSessionManager.getUserId(it) }
+            ?: (authState.value as? AuthState.Success)?.user?.uid
+            ?: return
+
+        refreshActiveRoomSpeakers(roomId, context)
+        if (hostId == uid || _activeRoomHostId.value == uid) {
+            checkPendingSpeakerRequestsForHost(roomId, context)
+        }
+
+        val userAvatar = (authState.value as? AuthState.Success)?.user?.avatar
+        com.example.service.VoiceRoomOverlayManager.updateSession(
+            roomId = roomId,
+            roomTitle = title,
+            avatarUrl = userAvatar,
+            isMicEnabled = (role == "speaker")
+        )
+        com.example.service.VoiceRoomOverlayManager.onToggleMicAction = { toggleMic(context) }
+        com.example.service.VoiceRoomOverlayManager.onLeaveRoomAction = { leaveRoom(context) }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
                 SupabaseClient.api.joinRoomParticipant(
                     auth = token,
                     participant = SupabaseRoomParticipant(
                         room_id = roomId,
                         user_id = uid,
-                        role = "speaker",
-                        is_mic_enabled = true
+                        role = role,
+                        is_mic_enabled = (role == "speaker")
                     )
                 )
-                Log.d("AuthViewModel", "User $uid joined room $roomId via Supabase room_participants")
+                Log.d("AuthViewModel", "User $uid joined room $roomId as $role via Supabase room_participants")
             } catch (e: Exception) {
                 Log.e("AuthViewModel", "Error joining room $roomId in Supabase", e)
             }
@@ -117,6 +315,14 @@ class AuthViewModel : ViewModel() {
 
         _activeRoomId.value = null
         _activeRoomTitle.value = null
+        _activeRoomHostId.value = null
+        _pendingSpeakerRequest.value = null
+        _activeRoomSpeakers.value = emptyList()
+
+        if (ctx != null) {
+            com.example.service.VoiceRoomOverlayManager.stopService(ctx)
+        }
+        com.example.service.VoiceRoomOverlayManager.clear()
 
         if (roomId != null && uid != null) {
             viewModelScope.launch(Dispatchers.IO) {

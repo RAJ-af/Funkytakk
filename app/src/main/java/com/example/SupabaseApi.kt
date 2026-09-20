@@ -101,6 +101,32 @@ data class UpdateVoiceRoomRequest(
 )
 
 @JsonClass(generateAdapter = true)
+data class UpdateParticipantMicRequest(
+    val is_mic_enabled: Boolean
+)
+
+@JsonClass(generateAdapter = true)
+data class SpeakerRequestInsert(
+    val room_id: String,
+    val user_id: String
+)
+
+@JsonClass(generateAdapter = true)
+data class SupabaseSpeakerRequest(
+    val id: String,
+    val room_id: String,
+    val user_id: String,
+    val status: String = "pending",
+    val created_at: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class RespondSpeakerRequestBody(
+    val request_id: String,
+    val accept: Boolean
+)
+
+@JsonClass(generateAdapter = true)
 data class SupabaseRoomParticipant(
     val room_id: String,
     val user_id: String,
@@ -363,6 +389,38 @@ interface SupabaseApi {
         @Query("room_id") roomIdEq: String,
         @Query("user_id") userIdEq: String
     ): Response<Unit>
+
+    @PATCH("rest/v1/room_participants")
+    suspend fun updateRoomParticipantMic(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Header("Prefer") prefer: String = "return=representation",
+        @Query("room_id") roomIdEq: String,
+        @Query("user_id") userIdEq: String,
+        @Body body: UpdateParticipantMicRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/speaker_requests")
+    suspend fun createSpeakerRequest(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Header("Prefer") prefer: String = "return=representation",
+        @Body body: SpeakerRequestInsert
+    ): Response<ResponseBody>
+
+    @GET("rest/v1/speaker_requests?select=*&status=eq.pending")
+    suspend fun getPendingSpeakerRequests(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("room_id") roomIdEq: String
+    ): Response<List<SupabaseSpeakerRequest>>
+
+    @POST("rest/v1/rpc/respond_to_speaker_request")
+    suspend fun respondToSpeakerRequest(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: RespondSpeakerRequestBody
+    ): Response<ResponseBody>
 
     @POST("rest/v1/rpc/execute_moderator_action")
     suspend fun executeModeratorAction(

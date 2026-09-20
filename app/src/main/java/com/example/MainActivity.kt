@@ -9,22 +9,28 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import com.example.ui.screens.*
+import com.example.ui.components.DynamicIslandOverlay
 import com.example.ui.theme.MyApplicationTheme
 
 class MainActivity : ComponentActivity() {
     private val authViewModel: AuthViewModel by viewModels()
     private var pendingDeepLinkUri by mutableStateOf<Uri?>(null)
+    private var pendingNavigateTo by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         authViewModel.initializeFirebaseIfNeeded(applicationContext)
         handleDeepLinkIntent(intent)
+        intent?.getStringExtra("navigate_to")?.let {
+            pendingNavigateTo = it
+        }
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
@@ -33,6 +39,13 @@ class MainActivity : ComponentActivity() {
                     color = Color(0xFFFAFAEE)
                 ) {
                     var currentScreen by rememberSaveable { mutableStateOf("welcome") }
+
+                    LaunchedEffect(pendingNavigateTo) {
+                        pendingNavigateTo?.let { target ->
+                            currentScreen = target
+                            pendingNavigateTo = null
+                        }
+                    }
 
                     val authState by authViewModel.authState.collectAsState()
 
@@ -101,8 +114,9 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    Crossfade(
-                        targetState = currentScreen,
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        Crossfade(
+                            targetState = currentScreen,
                         label = "screen_routing"
                     ) { screen ->
                         when (screen) {
@@ -283,12 +297,23 @@ class MainActivity : ComponentActivity() {
                             "voice_room" -> VoiceRoomScreen(
                                 viewModel = authViewModel,
                                 onBack = {
-                                    authViewModel.leaveRoom()
                                     currentScreen = "home"
                                 }
                             )
                         }
                     }
+
+                    // Floating Dynamic Island Overlay (when in active room but navigated elsewhere)
+                    val activeRoomId by authViewModel.activeRoomId.collectAsState()
+                    if (activeRoomId != null && currentScreen != "voice_room") {
+                        DynamicIslandOverlay(
+                            viewModel = authViewModel,
+                            onNavigateToRoom = {
+                                currentScreen = "voice_room"
+                            }
+                        )
+                    }
+                }
                 }
             }
         }
@@ -298,6 +323,18 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleDeepLinkIntent(intent)
+        intent.getStringExtra("navigate_to")?.let {
+            pendingNavigateTo = it
+        }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (authViewModel.activeRoomId.value != null &&
+            com.example.service.OverlayPermissionHelper.canDrawOverlays(this)
+        ) {
+            com.example.service.VoiceRoomOverlayManager.startServiceIfPermitted(this)
+        }
     }
 
     private fun handleDeepLinkIntent(intent: Intent?) {
