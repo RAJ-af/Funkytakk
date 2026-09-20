@@ -33,7 +33,15 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.AuthState
 import com.example.AuthViewModel
+import com.example.SupabaseClient
+import com.example.SupabaseSessionManager
+import com.example.SupabaseVoiceRoom
 import com.example.ui.components.CircleFlag
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.*
 
 // Pre-defined high quality banners depending on selected language
 data class BannerOption(val name: String, val url: String)
@@ -322,50 +330,60 @@ fun CreateLanguageRoomScreen(
             ) {
                 Button(
                     onClick = {
-                        val db = viewModel.firestoreDb
-                        if (db != null) {
-                            val hostId = userProfile?.uid ?: "guest"
-                            val generatedRoomId = "FT${(1000..9999).random()}"
-                            
-                            val newRoomMap = mapOf(
-                                "roomId" to generatedRoomId,
-                                "title" to roomTitle.ifBlank { "Let's talk in ${selectedLanguage.name}!" },
-                                "description" to roomDescription.ifBlank { "Daily conversation practice in ${selectedLanguage.name}" },
-                                "language" to selectedLanguage.name,
-                                "languageCode" to selectedLanguage.flagCode,
-                                "languageFlag" to "", // flagCode is bound to CircleFlag
-                                "bannerImageUrl" to appliedBannerUrl,
-                                "cardBackgroundType" to "image",
-                                "levelTag" to selectedLevel,
-                                "statusTag" to "NEW",
-                                "speakingCount" to 1,
-                                "listeningCount" to 0,
-                                "totalParticipants" to 1,
-                                "previewAvatars" to listOf(userAvatar),
-                                "status" to "active",
-                                "isLive" to true,
-                                "hostId" to hostId,
-                                "hostIsVip" to (hostIsVipLocal || isVipBadgeEnabled),
-                                "hostIsVerified" to false,
-                                "createdAt" to System.currentTimeMillis(),
-                                "lastActivityAt" to System.currentTimeMillis(),
-                                "last1HourJoins" to 0,
-                                "last2HourGrowthRate" to 0.0,
-                                "totalVisits24h" to 1
-                            )
+                        val hostId = SupabaseSessionManager.getUserId(context)
+                            ?: userProfile?.uid
+                            ?: UUID.randomUUID().toString()
+                        val bearerToken = SupabaseSessionManager.getBearerToken(context)
+                        val roomUuid = UUID.randomUUID().toString()
 
-                            db.collection("rooms").document(generatedRoomId).set(newRoomMap)
-                                .addOnSuccessListener {
-                                    Toast.makeText(context, "Voice Room Created Successfully!", Toast.LENGTH_SHORT).show()
-                                    onCreate()
-                                }
-                                .addOnFailureListener {
-                                    Toast.makeText(context, "Created Room locally!", Toast.LENGTH_SHORT).show()
-                                    onCreate()
-                                }
-                        } else {
-                            onCreate()
+                        val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+                            timeZone = TimeZone.getTimeZone("UTC")
                         }
+                        val nowIso = isoFormat.format(Date())
+
+                        val newRoom = SupabaseVoiceRoom(
+                            id = roomUuid,
+                            title = roomTitle.ifBlank { "Let's talk in ${selectedLanguage.name}!" },
+                            language = selectedLanguage.name,
+                            host_id = hostId,
+                            participants = 1,
+                            created_at = nowIso,
+                            country_code = selectedLanguage.flagCode,
+                            tag = selectedLevel,
+                            room_type = "voice",
+                            description = roomDescription.ifBlank { "Daily conversation practice in ${selectedLanguage.name}" },
+                            banner_image_url = appliedBannerUrl,
+                            card_background_type = "image",
+                            host_is_verified = false,
+                            host_is_vip = (hostIsVipLocal || isVipBadgeEnabled),
+                            is_live = true,
+                            language_code = selectedLanguage.flagCode,
+                            language_flag = "",
+                            level_tag = selectedLevel,
+                            listening_count = 0,
+                            speaking_count = 1,
+                            preview_avatars = listOf(userAvatar),
+                            status = "active",
+                            status_tag = "NEW",
+                            total_visits_24h = 1,
+                            last_1h_joins = 0,
+                            last_2h_growth_rate = 0.0,
+                            last_activity_at = nowIso
+                        )
+
+                        CoroutineScope(Dispatchers.IO).launch {
+                            try {
+                                SupabaseClient.api.createVoiceRoom(
+                                    auth = bearerToken,
+                                    room = newRoom
+                                )
+                            } catch (e: Exception) {
+                                android.util.Log.e("CreateRoom", "Failed to insert room to Supabase: ${e.message}")
+                            }
+                        }
+                        viewModel.joinRoom(roomUuid, newRoom.title ?: "", context)
+                        Toast.makeText(context, "Voice Room Created Successfully!", Toast.LENGTH_SHORT).show()
+                        onCreate()
                     },
                     modifier = Modifier
                         .fillMaxWidth()

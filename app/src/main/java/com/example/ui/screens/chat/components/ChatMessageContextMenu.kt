@@ -35,7 +35,7 @@ fun ChatMessageContextMenuOverlay(
     onMoreActions: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val quickEmojis = listOf("❤️", "😂", "👍", "😮", "😢")
+    val quickEmojis = listOf("❤️", "😂", "👍", "😮", "😢", "🔥")
 
     // Full screen dimmed backdrop
     Box(

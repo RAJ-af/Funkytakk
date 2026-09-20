@@ -317,20 +317,14 @@ fun ChatsTabContent(
                                 .clip(CircleShape)
                         )
 
-                        // Status dot on bottom right
-                        val statusColor = when (chat.onlineStatus) {
-                            "online" -> Color(0xFF10B981)
-                            "idle" -> Color(0xFFF59E0B)
-                            else -> Color(0xFF9CA3AF)
-                        }
-
-                        Box(
+                        // Circular Country Flag icon on bottom right replacing the green dot
+                        CircleFlag(
+                            countryCode = flagCode,
                             modifier = Modifier
-                                .size(14.dp)
+                                .size(18.dp)
                                 .align(Alignment.BottomEnd)
                                 .clip(CircleShape)
-                                .background(statusColor)
-                                .border(2.dp, Color.White, CircleShape)
+                                .border(1.5.dp, Color.White, CircleShape)
                         )
                     }
 

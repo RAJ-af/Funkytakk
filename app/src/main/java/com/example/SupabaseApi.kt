@@ -53,10 +53,55 @@ data class UpdateEmailVerificationRequest(
 
 @JsonClass(generateAdapter = true)
 data class SendVerificationRequest(
-    val uid: String,
-    val email: String,
-    val displayName: String?,
-    val token: String
+    val displayName: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class SupabaseVoiceRoom(
+    val id: String? = null,
+    val title: String? = null,
+    val language: String? = null,
+    val host_id: String? = null,
+    val participants: Int? = 1,
+    val created_at: String? = null,
+    val country_code: String? = null,
+    val tag: String? = null,
+    val room_type: String? = "voice",
+    val description: String? = null,
+    val banner_image_url: String? = null,
+    val card_background_type: String? = "image",
+    val host_is_verified: Boolean? = false,
+    val host_is_vip: Boolean? = false,
+    val is_live: Boolean? = true,
+    val language_code: String? = null,
+    val language_flag: String? = null,
+    val level_tag: String? = null,
+    val listening_count: Int? = 0,
+    val speaking_count: Int? = 1,
+    val preview_avatars: List<String>? = emptyList(),
+    val status: String? = "active",
+    val status_tag: String? = "LIVE",
+    val total_visits_24h: Int? = 1,
+    val last_1h_joins: Int? = 0,
+    val last_2h_growth_rate: Double? = 0.0,
+    val last_activity_at: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class SupabaseRoomParticipant(
+    val room_id: String,
+    val user_id: String,
+    val role: String = "speaker",
+    val is_mic_enabled: Boolean = true,
+    val joined_at: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class ModeratorActionRequest(
+    val target_user_id: String,
+    val action_type: String,
+    val room_id: String? = null,
+    val reason: String = ""
 )
 
 @JsonClass(generateAdapter = true)
@@ -91,6 +136,9 @@ data class SupabaseProfile(
     val age: Int? = null,
     val gender: String? = null,
     val country: String? = null,
+    val country_code: String? = null,
+    val bio: String? = null,
+    val email: String? = null,
     val native_languages: List<String>? = null,
     val learning_languages: List<String>? = null,
     val hobbies: List<String>? = null,
@@ -151,19 +199,32 @@ interface SupabaseApi {
         @Part file: MultipartBody.Part
     ): Response<Unit>
 
-    @GET("rest/v1/users")
+    @GET("rest/v1/users?select=*")
     suspend fun getUser(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
         @Query("uid") uidEq: String // e.g. "eq.123-abc"
     ): Response<List<SupabaseUser>>
 
-    @GET("rest/v1/users")
+    @GET("rest/v1/users?select=uid,username")
     suspend fun getUserByUsername(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
-        @Query("username") usernameEq: String // e.g. "eq.Raj"
+        @Query("username") usernameEq: String // e.g. "ilike.Raj" or "eq.Raj"
     ): Response<List<SupabaseUser>>
+
+    @GET("rest/v1/profiles?select=*")
+    suspend fun getProfileByUsername(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
+        @Query("username") usernameEq: String // e.g. "ilike.Raj" or "eq.Raj"
+    ): Response<List<SupabaseProfile>>
+
+    @GET("rest/v1/profiles")
+    suspend fun getAllProfiles(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+    ): Response<List<SupabaseProfile>>
 
     @GET("rest/v1/users")
     suspend fun getAllUsers(
@@ -193,4 +254,76 @@ interface SupabaseApi {
         @Header("Prefer") prefer: String = "resolution=merge-duplicates",
         @Body profile: SupabaseProfile
     ): Response<Unit>
+
+    @GET("rest/v1/voice_rooms?select=*&order=created_at.desc")
+    suspend fun getVoiceRooms(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+    ): Response<List<SupabaseVoiceRoom>>
+
+    @GET("rest/v1/voice_rooms?select=*")
+    suspend fun getVoiceRoomById(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
+        @Query("id") idEq: String // e.g. "eq.<uuid>"
+    ): Response<List<SupabaseVoiceRoom>>
+
+    @POST("rest/v1/voice_rooms")
+    suspend fun createVoiceRoom(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Header("Prefer") prefer: String = "return=representation",
+        @Body room: SupabaseVoiceRoom
+    ): Response<List<SupabaseVoiceRoom>>
+
+    @PATCH("rest/v1/voice_rooms")
+    suspend fun updateVoiceRoom(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("id") idEq: String,
+        @Body updates: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<Unit>
+
+    @GET("rest/v1/room_participants?select=*")
+    suspend fun getRoomParticipants(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
+        @Query("room_id") roomIdEq: String // e.g. "eq.<uuid>"
+    ): Response<List<SupabaseRoomParticipant>>
+
+    @GET("rest/v1/room_participants?select=*")
+    suspend fun getAllRoomParticipants(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+    ): Response<List<SupabaseRoomParticipant>>
+
+    @GET("rest/v1/room_participants?select=*")
+    suspend fun getUserRoomParticipants(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
+        @Query("user_id") userIdEq: String // e.g. "eq.<uuid>"
+    ): Response<List<SupabaseRoomParticipant>>
+
+    @POST("rest/v1/room_participants")
+    suspend fun joinRoomParticipant(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Header("Prefer") prefer: String = "resolution=merge-duplicates",
+        @Body participant: SupabaseRoomParticipant
+    ): Response<Unit>
+
+    @DELETE("rest/v1/room_participants")
+    suspend fun leaveRoomParticipant(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("room_id") roomIdEq: String,
+        @Query("user_id") userIdEq: String
+    ): Response<Unit>
+
+    @POST("rest/v1/rpc/execute_moderator_action")
+    suspend fun executeModeratorAction(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body request: ModeratorActionRequest
+    ): Response<Map<String, @JvmSuppressWildcards Any?>>
 }

@@ -10,8 +10,6 @@ import androidx.lifecycle.viewModelScope
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.ListenerRegistration
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
 import kotlinx.coroutines.delay
@@ -78,60 +76,61 @@ class AuthViewModel : ViewModel() {
     private val _activeRoomTitle = MutableStateFlow<String?>(null)
     val activeRoomTitle: StateFlow<String?> = _activeRoomTitle
 
-    fun joinRoom(roomId: String, title: String) {
+    fun joinRoom(roomId: String, title: String, context: Context? = null) {
         _activeRoomId.value = roomId
         _activeRoomTitle.value = title
         
-        val uid = (authState.value as? AuthState.Success)?.user?.uid ?: return
-        val db = firestore ?: return
-        
-        // 1. Add current user as speaker in rooms/{roomId}/userids/{userId}
-        db.collection("rooms").document(roomId).collection("userids").document(uid).set(mapOf("action" to "speaker"))
-            .addOnSuccessListener {
-                Log.d("AuthViewModel", "User added to rooms/$roomId/userids/$uid")
+        val ctx = context
+        val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+        val uid = ctx?.let { SupabaseSessionManager.getUserId(it) }
+            ?: (authState.value as? AuthState.Success)?.user?.uid
+            ?: return
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                SupabaseClient.api.joinRoomParticipant(
+                    auth = token,
+                    participant = SupabaseRoomParticipant(
+                        room_id = roomId,
+                        user_id = uid,
+                        role = "speaker",
+                        is_mic_enabled = true
+                    )
+                )
+                Log.d("AuthViewModel", "User $uid joined room $roomId via Supabase room_participants")
+            } catch (e: Exception) {
+                Log.e("AuthViewModel", "Error joining room $roomId in Supabase", e)
             }
-            .addOnFailureListener { e ->
-                Log.e("AuthViewModel", "Error adding user to rooms/$roomId/userids/$uid", e)
-            }
-            
-        // 2. Update users/{userId} status to "speaking", currentRoomId, isInVoiceRoom
-        val userUpdate = mapOf(
-            "status" to "speaking",
-            "currentRoomId" to roomId,
-            "isInVoiceRoom" to true
-        )
-        db.collection("users").document(uid).update(userUpdate)
-            .addOnSuccessListener {
-                Log.d("AuthViewModel", "User status updated to active room $roomId")
-            }
+        }
     }
 
-    fun leaveRoom() {
+    fun leaveRoom(context: Context? = null) {
         val roomId = _activeRoomId.value
-        val uid = (authState.value as? AuthState.Success)?.user?.uid
-        val db = firestore
-        
-        if (roomId != null && uid != null && db != null) {
-            // 1. Remove current user from rooms/{roomId}/userids/{userId}
-            db.collection("rooms").document(roomId).collection("userids").document(uid).delete()
-            
-            // 2. Clear user's status inside users/{userId}
-            val userUpdate = mapOf(
-                "status" to "online",
-                "currentRoomId" to null,
-                "isInVoiceRoom" to false
-            )
-            db.collection("users").document(uid).update(userUpdate)
-        }
-        
+        val ctx = context
+        val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+        val uid = ctx?.let { SupabaseSessionManager.getUserId(it) }
+            ?: (authState.value as? AuthState.Success)?.user?.uid
+
         _activeRoomId.value = null
         _activeRoomTitle.value = null
+
+        if (roomId != null && uid != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    SupabaseClient.api.leaveRoomParticipant(
+                        auth = token,
+                        roomIdEq = "eq.$roomId",
+                        userIdEq = "eq.$uid"
+                    )
+                    Log.d("AuthViewModel", "User $uid left room $roomId in Supabase room_participants")
+                } catch (e: Exception) {
+                    Log.e("AuthViewModel", "Error leaving room $roomId in Supabase", e)
+                }
+            }
+        }
     }
 
     private var firebaseAuth: FirebaseAuth? = null
-    private var firestore: FirebaseFirestore? = null
-    val firestoreDb: FirebaseFirestore? get() = firestore
-    private var sessionListener: ListenerRegistration? = null
 
     fun initializeFirebaseIfNeeded(context: Context) {
         if (firebaseAuth != null) return
@@ -155,7 +154,6 @@ class AuthViewModel : ViewModel() {
 
             if (app != null) {
                 firebaseAuth = FirebaseAuth.getInstance()
-                firestore = FirebaseFirestore.getInstance()
                 checkCurrentUser(context)
                 Log.i("AuthViewModel", "Firebase dynamically initialized with google-services.json credentials successfully!")
             }
@@ -239,25 +237,7 @@ class AuthViewModel : ViewModel() {
             Log.e("AuthViewModel", "Remote boot check Supabase failed: ${e.message}")
         }
 
-        // 2. Check Firestore
-        val firestoreDb = firestore
-        if (firestoreDb != null) {
-            try {
-                val docExists = withContext(Dispatchers.IO) {
-                    val docTask = firestoreDb.collection("users").document(userId).get()
-                    val doc = com.google.android.gms.tasks.Tasks.await(docTask)
-                    doc.exists() && doc.getBoolean("customEmailVerified") == true
-                }
-                if (docExists) {
-                    val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
-                    prefs.edit().putBoolean("custom_email_verified_${userId}", true).apply()
-                    return true
-                }
-            } catch (e: Exception) {
-                Log.e("AuthViewModel", "Remote boot check Firestore failed: ${e.message}")
-            }
-        }
-        
+        // Supabase is the sole source of truth
         return false
     }
 
@@ -287,18 +267,6 @@ class AuthViewModel : ViewModel() {
                     }
                 } else {
                     // True unverified account older than 2 hours: Delete!
-                    val firestoreDb = firestore
-                    if (firestoreDb != null) {
-                        try {
-                            withContext(Dispatchers.IO) {
-                                val task = firestoreDb.collection("users").document(user.uid).delete()
-                                com.google.android.gms.tasks.Tasks.await(task)
-                            }
-                        } catch (e: Exception) {
-                            Log.e("AuthViewModel", "Error cleaning up Firestore unverified user: ${e.message}")
-                        }
-                    }
-                    
                     prefs.edit().apply {
                         remove("auth_token_${user.uid}")
                         remove("custom_email_verified_${user.uid}")
@@ -383,42 +351,20 @@ class AuthViewModel : ViewModel() {
                                                         userId = userId
                                                     )
 
-                                                    // STEP 4: Generate verification token & UPDATE public.users (auth.uid() = user_id)
-                                                    val randomToken = java.util.UUID.randomUUID().toString()
-                                                    val bearerAuth = "Bearer $accessToken"
-                                                    val patchReq = UpdateEmailVerificationRequest(
-                                                        email_verification_token = randomToken,
-                                                        custom_email_verified = false
-                                                    )
-
-                                                    val patchRes = withContext(Dispatchers.IO) {
-                                                        SupabaseClient.api.updateEmailVerification(
-                                                            auth = bearerAuth,
-                                                            uidEq = "eq.$userId",
-                                                            request = patchReq
-                                                        )
-                                                    }
-
-                                                    if (!patchRes.isSuccessful) {
-                                                        Log.w("AuthViewModel", "PATCH users email_verification_token returned: ${patchRes.code()} ${patchRes.message()}")
-                                                    }
-
-                                                    // Also sync token locally
-                                                    saveUserToFirestore(firebaseUser, token = randomToken)
+                                                    // Save user locally
+                                                    saveUserToFirestore(firebaseUser)
                                                     val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
                                                     prefs.edit()
-                                                        .putString("auth_token_${userId}", randomToken)
                                                         .putBoolean("custom_email_verified_${userId}", false)
                                                         .putLong("last_verification_send_time_${userId}", System.currentTimeMillis())
                                                         .putInt("verification_resend_count_${userId}", 0)
                                                         .apply()
 
-                                                    // STEP 5: Call send-verification-email with Authorization: Bearer <access_token>
+                                                    // Call send-verification-email with Authorization: Bearer <access_token>
+                                                    // The edge function generates token server-side and derives uid from JWT
+                                                    val bearerAuth = "Bearer $accessToken"
                                                     val sendReq = SendVerificationRequest(
-                                                        uid = userId,
-                                                        email = cleanEmail,
-                                                        displayName = firebaseUser.displayName,
-                                                        token = randomToken
+                                                        displayName = firebaseUser.displayName
                                                     )
 
                                                     val sendRes = withContext(Dispatchers.IO) {
@@ -810,72 +756,22 @@ class AuthViewModel : ViewModel() {
     }
 
     fun registerAndStartSession(context: Context, uid: String) {
-        val firestoreDb = firestore ?: return
         val newSessionId = java.util.UUID.randomUUID().toString()
-        
         val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
         prefs.edit().putString("active_session_id_${uid}", newSessionId).apply()
-        
-        val userDoc = firestoreDb.collection("users").document(uid)
-        val initialUpdates = mapOf(
-            "activeSessionId" to newSessionId,
-            "status" to "online",
-            "isInVoiceRoom" to false,
-            "currentRoomId" to ""
-        )
-        userDoc.update(initialUpdates)
-            .addOnSuccessListener {
-                Log.d("AuthViewModel", "Successfully updated activeSessionId & online status in Firestore: $newSessionId")
-                startSessionListener(context, uid)
-            }
-            .addOnFailureListener {
-                userDoc.set(initialUpdates, com.google.firebase.firestore.SetOptions.merge())
-                    .addOnSuccessListener {
-                        Log.d("AuthViewModel", "Successfully merged activeSessionId & online status in Firestore: $newSessionId")
-                        startSessionListener(context, uid)
-                    }
-                    .addOnFailureListener { e ->
-                        Log.e("AuthViewModel", "Failed to write activeSessionId to Firestore: ${e.message}")
-                    }
-            }
+        Log.d("AuthViewModel", "Registered active session: $newSessionId")
     }
 
     fun startSessionListener(context: Context, uid: String) {
-        sessionListener?.remove()
-        
-        val firestoreDb = firestore ?: return
         val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
         val localSessionId = prefs.getString("active_session_id_${uid}", null)
-        
         if (localSessionId == null) {
             registerAndStartSession(context, uid)
-            return
         }
-        
-        sessionListener = firestoreDb.collection("users").document(uid)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    Log.e("AuthViewModel", "Real-time session tracker error", error)
-                    return@addSnapshotListener
-                }
-                if (snapshot != null && snapshot.exists()) {
-                    if (snapshot.metadata.isFromCache) {
-                        return@addSnapshotListener
-                    }
-                    val remoteSessionId = snapshot.getString("activeSessionId")
-                    if (remoteSessionId != null && remoteSessionId != localSessionId) {
-                        Log.w("AuthViewModel", "Session mismatch detected. Local: $localSessionId, Remote: $remoteSessionId.")
-                        logoutDueToSessionMismatch(context, uid)
-                    }
-                }
-            }
     }
 
     private fun logoutDueToSessionMismatch(context: Context, uid: String) {
         viewModelScope.launch(Dispatchers.Main) {
-            sessionListener?.remove()
-            sessionListener = null
-            
             withContext(Dispatchers.IO) {
                 firebaseAuth?.signOut()
                 val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
@@ -894,40 +790,16 @@ class AuthViewModel : ViewModel() {
 
     fun triggerSupabaseVerificationEmail(
         context: Context,
-        email: String,
         displayName: String?,
-        token: String,
-        uid: String,
         onComplete: () -> Unit
     ) {
         viewModelScope.launch {
             try {
                 val bearerAuth = SupabaseSessionManager.getBearerToken(context)
 
-                // Update email_verification_token on existing record
-                val patchReq = UpdateEmailVerificationRequest(
-                    email_verification_token = token,
-                    custom_email_verified = false
-                )
-
-                withContext(Dispatchers.IO) {
-                    try {
-                        SupabaseClient.api.updateEmailVerification(
-                            auth = bearerAuth,
-                            uidEq = "eq.$uid",
-                            request = patchReq
-                        )
-                    } catch (e: Exception) {
-                        Log.e("AuthViewModel", "Error updating token in Supabase: ${e.message}")
-                    }
-                }
-
                 val response = withContext(Dispatchers.IO) {
                     val req = SendVerificationRequest(
-                        uid = uid,
-                        email = email,
-                        displayName = displayName ?: "FunkyTalk Learner",
-                        token = token
+                        displayName = displayName ?: "FunkyTalk Learner"
                     )
                     SupabaseClient.api.sendVerificationEmail(
                         auth = bearerAuth,
@@ -974,16 +846,14 @@ class AuthViewModel : ViewModel() {
                 return
             }
             
-            val token = java.util.UUID.randomUUID().toString()
-            saveUserToFirestore(user, token = token)
+            saveUserToFirestore(user)
             
             prefs.edit()
-                .putString("auth_token_${supabaseUserId}", token)
                 .putLong("last_verification_send_time_${supabaseUserId}", currentTime)
                 .putInt("verification_resend_count_${supabaseUserId}", resendCount + 1)
                 .apply()
 
-            triggerSupabaseVerificationEmail(context, user.email ?: "", user.displayName, token, supabaseUserId) {
+            triggerSupabaseVerificationEmail(context, user.displayName) {
                 Toast.makeText(context, "Verification email resent successfully!", Toast.LENGTH_SHORT).show()
             }
         } else {
@@ -1179,22 +1049,6 @@ class AuthViewModel : ViewModel() {
 
     fun logout(context: Context? = null) {
         val uid = firebaseAuth?.currentUser?.uid ?: ""
-        sessionListener?.remove()
-        sessionListener = null
-        
-        if (firestore != null && uid.isNotEmpty()) {
-            val offlineUpdates = mapOf(
-                "activeSessionId" to null,
-                "status" to "offline",
-                "isInVoiceRoom" to false,
-                "currentRoomId" to ""
-            )
-            firestore?.collection("users")?.document(uid)?.update(offlineUpdates)
-                ?.addOnFailureListener {
-                    Log.e("AuthViewModel", "Failed to clear active session and offline status during logout")
-                }
-        }
-        
         firebaseAuth?.signOut()
         _authState.value = AuthState.Idle
         
@@ -1591,36 +1445,69 @@ class AuthViewModel : ViewModel() {
                     return@launch
                 }
                 
-                // Let's check Supabase by username (case-insensitive exact match using 'ilike')
-                val response = SupabaseClient.api.getUserByUsername(usernameEq = "ilike.$trimmedUsername")
-                if (response.isSuccessful) {
-                    val users = response.body() ?: emptyList()
-                    var isUnique = true
-                    for (user in users) {
-                        if (user.uid != currentUserId) {
-                            isUnique = false
-                            break
-                        }
-                    }
-                    callback(isUnique)
-                } else {
-                    Log.e("AuthViewModel", "Supabase checkUsernameUnique with ilike failed, trying eq: ${response.code()} ${response.message()}")
-                    val retryResponse = SupabaseClient.api.getUserByUsername(usernameEq = "eq.$trimmedUsername")
-                    if (retryResponse.isSuccessful) {
-                        val users = retryResponse.body() ?: emptyList()
-                        var isUnique = true
-                        for (user in users) {
-                            if (user.uid != currentUserId) {
-                                isUnique = false
-                                break
-                            }
-                        }
-                        callback(isUnique)
-                    } else {
-                        Log.e("AuthViewModel", "Retry checkUsernameUnique with eq failed")
-                        callback(true)
+                // 1. Check Supabase users table by username (primary table for registered users)
+                val userRes = withContext(Dispatchers.IO) {
+                    try {
+                        SupabaseClient.api.getUserByUsername(usernameEq = "ilike.$trimmedUsername")
+                    } catch (e: Exception) {
+                        null
                     }
                 }
+                
+                if (userRes != null && userRes.isSuccessful) {
+                    val users = userRes.body() ?: emptyList()
+                    val conflict = users.any { it.uid != currentUserId }
+                    callback(!conflict)
+                    return@launch
+                }
+
+                // Retry with eq on users table if ilike failed
+                val userEqRes = withContext(Dispatchers.IO) {
+                    try {
+                        SupabaseClient.api.getUserByUsername(usernameEq = "eq.$trimmedUsername")
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
+                if (userEqRes != null && userEqRes.isSuccessful) {
+                    val users = userEqRes.body() ?: emptyList()
+                    val conflict = users.any { it.uid != currentUserId }
+                    callback(!conflict)
+                    return@launch
+                }
+
+                // 2. Fallback to profiles table
+                val profileRes = withContext(Dispatchers.IO) {
+                    try {
+                        SupabaseClient.api.getProfileByUsername(usernameEq = "ilike.$trimmedUsername")
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
+                if (profileRes != null && profileRes.isSuccessful) {
+                    val profiles = profileRes.body() ?: emptyList()
+                    val conflict = profiles.any { it.auth_user_id != currentUserId }
+                    callback(!conflict)
+                    return@launch
+                }
+
+                val profileEqRes = withContext(Dispatchers.IO) {
+                    try {
+                        SupabaseClient.api.getProfileByUsername(usernameEq = "eq.$trimmedUsername")
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
+                if (profileEqRes != null && profileEqRes.isSuccessful) {
+                    val profiles = profileEqRes.body() ?: emptyList()
+                    val conflict = profiles.any { it.auth_user_id != currentUserId }
+                    callback(!conflict)
+                    return@launch
+                }
+
+                // If remote query could not find any conflict or backend does not have the column yet, allow proceeding
+                Log.d("AuthViewModel", "checkUsernameUnique: No existing conflict found or allowed by default")
+                callback(true)
             } catch (e: Exception) {
                 Log.e("AuthViewModel", "Error checking username uniqueness in Supabase", e)
                 callback(true)
@@ -1629,51 +1516,32 @@ class AuthViewModel : ViewModel() {
     }
 
     fun saveUserToFirestore(user: FirebaseUser, code: String? = null, token: String? = null, isVerified: Boolean = false) {
-        val firestoreDb = firestore ?: return
-        val userData = hashMapOf<String, Any>(
-            "uid" to user.uid,
-            "email" to (user.email ?: ""),
-            "createdAt" to System.currentTimeMillis()
-        )
-        if (code != null) {
-            userData["authCode"] = code
-        }
-        if (token != null) {
-            userData["emailVerificationToken"] = token
-        }
-        userData["customEmailVerified"] = isVerified
-        firestoreDb.collection("users").document(user.uid).set(userData, com.google.firebase.firestore.SetOptions.merge())
-            .addOnSuccessListener {
-                Log.d("AuthViewModel", "User document written successfully in Firestore!")
-            }
-            .addOnFailureListener { e ->
-                Log.e("AuthViewModel", "Error adding user document: ", e)
-            }
+        // No-op: Supabase profiles and users tables are the sole source of truth
     }
 
     fun fetchSupabaseProfiles(context: Context) {
         viewModelScope.launch {
             try {
                 val response = withContext(Dispatchers.IO) {
-                    SupabaseClient.api.getAllUsers()
+                    SupabaseClient.api.getAllProfiles()
                 }
                 if (response.isSuccessful) {
-                    val supaUsers = response.body() ?: emptyList()
-                    val profiles = supaUsers.map { supaUser ->
+                    val supaProfiles = response.body() ?: emptyList()
+                    val profiles = supaProfiles.map { supaProfile ->
                         UserProfile(
-                            uid = supaUser.uid,
-                            email = supaUser.email,
-                            displayName = supaUser.display_name ?: "Learner",
-                            isEmailVerified = supaUser.custom_email_verified ?: false,
-                            username = supaUser.username ?: "learner_user",
-                            avatar = supaUser.avatar ?: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150",
-                            dob = supaUser.dob ?: "2000-01-01",
-                            gender = supaUser.gender ?: "Non-binary",
-                            nativeLanguage = supaUser.native_language ?: "Hindi",
-                            learningLanguage = supaUser.learning_language ?: "English",
-                            country = supaUser.country ?: "India",
-                            countryCode = supaUser.country_code ?: "in",
-                            hobbies = supaUser.hobbies ?: emptyList()
+                            uid = supaProfile.auth_user_id ?: "",
+                            email = supaProfile.email ?: "",
+                            displayName = supaProfile.profile_name ?: "Learner",
+                            isEmailVerified = true,
+                            username = supaProfile.username ?: "learner_user",
+                            avatar = supaProfile.avatar_url ?: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150",
+                            dob = "2000-01-01",
+                            gender = supaProfile.gender ?: "Non-binary",
+                            nativeLanguage = supaProfile.native_languages?.joinToString(", ") ?: "Hindi",
+                            learningLanguage = supaProfile.learning_languages?.joinToString(", ") ?: "English",
+                            country = supaProfile.country ?: "India",
+                            countryCode = supaProfile.country_code ?: "in",
+                            hobbies = supaProfile.hobbies ?: emptyList()
                         )
                     }
                     _supabaseProfiles.value = profiles
@@ -1691,7 +1559,5 @@ class AuthViewModel : ViewModel() {
 
     override fun onCleared() {
         super.onCleared()
-        sessionListener?.remove()
-        sessionListener = null
     }
 }

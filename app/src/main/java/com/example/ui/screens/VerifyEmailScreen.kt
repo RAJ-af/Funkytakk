@@ -9,7 +9,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.MarkEmailRead
-import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -117,7 +116,7 @@ fun VerifyEmailScreen(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = "We have sent a verification link to:\n$userEmail\n\nPlease check your inbox or open directly in your browser to verify your account.",
+                    text = "We have sent a verification link to:\n$userEmail\n\nPlease check your email inbox and click the verification link to verify your account.",
                     fontSize = 14.sp,
                     color = Color(0xFF6B6E7B),
                     lineHeight = 20.sp,
@@ -174,35 +173,8 @@ fun VerifyEmailScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Open in External Browser (Chrome) via ACTION_VIEW Intent
-                Button(
-                    onClick = {
-                        viewModel.openVerificationLinkInBrowser(context)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                        .testTag("open_browser_button"),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF141414),
-                        contentColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(26.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.OpenInBrowser,
-                        contentDescription = "Browser",
-                        modifier = Modifier.padding(end = 8.dp)
-                    )
-                    Text(
-                        text = "Open Link in Browser",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
                 // Open Email Inbox
-                OutlinedButton(
+                Button(
                     onClick = {
                         viewModel.openEmailApp(context)
                     },
@@ -210,8 +182,9 @@ fun VerifyEmailScreen(
                         .fillMaxWidth()
                         .height(52.dp)
                         .testTag("open_email_app_button"),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = Color(0xFF141414)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF141414),
+                        contentColor = Color.White
                     ),
                     shape = RoundedCornerShape(26.dp)
                 ) {
@@ -223,7 +196,7 @@ fun VerifyEmailScreen(
                     Text(
                         text = "Open Email Inbox",
                         fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.Bold
                     )
                 }
 

@@ -16,6 +16,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.example.ui.components.CircleFlag
 import com.example.ui.components.FunkyBackArrowIcon
 import com.example.ui.components.FunkyVerticalMoreIcon
 
@@ -24,11 +25,25 @@ fun ChatTopBar(
     partnerName: String = "Yuki Tanaka",
     partnerAvatarUrl: String = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200",
     partnerCountry: String = "Japan",
+    partnerCountryCode: String = "jp",
     isOnline: Boolean = true,
     onBackClick: () -> Unit,
     onMenuClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val cleanFlagCode = when {
+        partnerCountryCode.isNotBlank() -> partnerCountryCode.trim().lowercase()
+        partnerCountry.contains("japan", ignoreCase = true) -> "jp"
+        partnerCountry.contains("korea", ignoreCase = true) -> "kr"
+        partnerCountry.contains("china", ignoreCase = true) -> "cn"
+        partnerCountry.contains("spain", ignoreCase = true) -> "es"
+        partnerCountry.contains("germany", ignoreCase = true) -> "de"
+        partnerCountry.contains("france", ignoreCase = true) -> "fr"
+        partnerCountry.contains("india", ignoreCase = true) -> "in"
+        partnerCountry.contains("russia", ignoreCase = true) -> "ru"
+        else -> "us"
+    }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -49,7 +64,7 @@ fun ChatTopBar(
 
         Spacer(modifier = Modifier.width(6.dp))
 
-        // Partner Avatar with Online Indicator Dot
+        // Partner Avatar with Circular Flag Icon (Replacing green dot)
         Box(modifier = Modifier.size(42.dp)) {
             AsyncImage(
                 model = partnerAvatarUrl,
@@ -61,16 +76,14 @@ fun ChatTopBar(
                 contentScale = ContentScale.Crop
             )
 
-            if (isOnline) {
-                Box(
-                    modifier = Modifier
-                        .size(12.dp)
-                        .align(Alignment.BottomEnd)
-                        .clip(CircleShape)
-                        .background(Color(0xFF22C55E))
-                        .border(2.dp, Color.White, CircleShape)
-                )
-            }
+            CircleFlag(
+                countryCode = cleanFlagCode,
+                modifier = Modifier
+                    .size(16.dp)
+                    .align(Alignment.BottomEnd)
+                    .clip(CircleShape)
+                    .border(1.5.dp, Color.White, CircleShape)
+            )
         }
 
         Spacer(modifier = Modifier.width(12.dp))
@@ -89,26 +102,13 @@ fun ChatTopBar(
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "🇯🇵",
-                    fontSize = 12.sp
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
                     text = "$partnerCountry • ",
                     fontSize = 12.sp,
                     color = Color(0xFF6B7280),
                     fontWeight = FontWeight.Medium
                 )
-                // Green Online Dot
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF22C55E))
-                )
-                Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = "Online",
+                    text = if (isOnline) "Online" else "Offline",
                     fontSize = 12.sp,
                     color = Color(0xFF6B7280),
                     fontWeight = FontWeight.Medium

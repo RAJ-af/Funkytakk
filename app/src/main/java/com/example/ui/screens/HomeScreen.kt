@@ -12,13 +12,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import android.util.Log
 import com.example.AuthState
 import com.example.AuthViewModel
+import com.example.SupabaseClient
 import com.example.UserProfile
+import com.example.realtime.VoiceRoomRealtimeManager
 import com.example.ui.screens.home.components.HomeBottomBar
 import com.example.ui.screens.home.dialogs.*
 import com.example.ui.screens.home.models.*
 import com.example.ui.screens.home.tabs.*
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -138,152 +142,116 @@ fun HomeScreen(
         )
     }
 
-    // Dynamic Rooms list state loaded from Firestore in real-time
+    // Dynamic Rooms list state loaded from Supabase voice_rooms in real-time
     var roomsList by remember { mutableStateOf<List<CustomRoom>>(emptyList()) }
 
-    // Real-time Firestore Subscriptions handling memory safety with DisposableEffect
-    val firestore = viewModel.firestoreDb
     val currentUserId = currentUserProfile.uid
-    DisposableEffect(firestore, currentUserId) {
-        if (firestore == null || currentUserId.isBlank() || currentUserId == "guest") {
-            onDispose {}
-        } else {
-            // Dry seeding to ensure user is greeted with high fidelity database components instantly!
-            seedDefaultRoomsAndStats(firestore)
-            seedDefaultFriends(firestore, currentUserId)
+    LaunchedEffect(currentUserId, supabaseProfiles) {
+        VoiceRoomRealtimeManager.start()
 
-            var masterStatusSub: com.google.firebase.firestore.ListenerRegistration? = null
+        suspend fun refreshRoomsAndFriends() {
+            try {
+                // 1. Fetch voice rooms from Supabase
+                val roomsRes = SupabaseClient.api.getVoiceRooms()
+                val supaRooms = roomsRes.body() ?: emptyList()
 
-            // Subscribe to active friends subcollection (users/{currentUserId}/following_users)
-            val friendsSub = firestore.collection("users").document(currentUserId).collection("following_users")
-                .addSnapshotListener { snapshot, _ ->
-                    if (snapshot != null) {
-                        val staticFriends = snapshot.map { doc ->
-                            FirestoreFriend.fromMap(doc.data)
+                // 2. Fetch room participants from Supabase
+                val participantsRes = SupabaseClient.api.getAllRoomParticipants()
+                val supaParticipants = participantsRes.body() ?: emptyList()
+
+                // 3. Derive friends & presence from room_participants & supabaseProfiles
+                if (supabaseProfiles.isNotEmpty()) {
+                    val otherProfiles = supabaseProfiles.filter {
+                        it.uid != currentUserId
+                    }
+                    val derivedFriends = otherProfiles.take(8).map { p ->
+                        val pId = p.uid
+                        val activePart = supaParticipants.firstOrNull { it.user_id == pId || it.user_id == p.uid }
+                        val isSpeaking = activePart != null && activePart.role == "speaker" && activePart.is_mic_enabled
+                        val statusText = when {
+                            activePart == null -> "Online"
+                            activePart.role == "speaker" -> "Speaking"
+                            else -> "Listening"
                         }
-                        
-                        masterStatusSub?.remove()
-                        masterStatusSub = null
+                        FollowedFriend(
+                            id = pId,
+                            name = p.displayName ?: p.username ?: "Learner",
+                            avatarUrl = p.avatar ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
+                            flagCode = p.countryCode ?: "us",
+                            isSpeaking = isSpeaking,
+                            statusText = statusText,
+                            currentRoomId = activePart?.room_id ?: ""
+                        )
+                    }
+                    if (derivedFriends.isNotEmpty()) {
+                        activeFriends = derivedFriends
+                    }
+                }
 
-                        if (staticFriends.isNotEmpty()) {
-                            val followedIds = staticFriends.map { f -> f.userId.ifBlank { f.userId } }
-                            masterStatusSub = firestore.collection("users")
-                                .whereIn(com.google.firebase.firestore.FieldPath.documentId(), followedIds)
-                                .addSnapshotListener { usersSnapshot, _ ->
-                                    if (usersSnapshot != null) {
-                                        val liveStatusMap = usersSnapshot.documents.associate { doc ->
-                                            doc.id to doc.data
-                                        }
-                                        val liveFriends = staticFriends.map { f ->
-                                            val liveData = liveStatusMap[f.userId]
-                                            val liveStatus = liveData?.get("status") as? String ?: f.status
-                                            val liveRoomId = liveData?.get("currentRoomId") as? String ?: f.currentRoomId ?: ""
-                                            
-                                            val isSpeaking = liveStatus == "speaking"
-                                            val statusText = when (liveStatus) {
-                                                "speaking" -> "Speaking"
-                                                "online" -> "Online"
-                                                else -> "Offline"
-                                            }
-                                            
-                                            FollowedFriend(
-                                                id = f.userId,
-                                                name = f.name,
-                                                avatarUrl = f.avatarUrl,
-                                                flagCode = f.flagCode,
-                                                isSpeaking = isSpeaking,
-                                                statusText = statusText,
-                                                currentRoomId = liveRoomId
-                                            )
-                                        }
-                                        activeFriends = liveFriends
-                                    } else {
-                                        activeFriends = staticFriends.map { f ->
-                                            FollowedFriend(
-                                                id = f.userId,
-                                                name = f.name,
-                                                avatarUrl = f.avatarUrl,
-                                                flagCode = f.flagCode,
-                                                isSpeaking = f.status == "speaking",
-                                                statusText = f.status.replaceFirstChar { it.uppercase() },
-                                                currentRoomId = f.currentRoomId ?: ""
-                                            )
-                                        }
-                                    }
-                                }
+                // 4. Map Supabase voice_rooms to CustomRoom
+                if (supaRooms.isNotEmpty()) {
+                    val mapped = supaRooms.mapIndexed { index, r ->
+                        val rId = r.id ?: "room_$index"
+                        val roomParts = supaParticipants.filter { it.room_id == rId }
+                        val realSpeaking = if (roomParts.isNotEmpty()) {
+                            roomParts.count { it.role == "speaker" }.coerceAtLeast(1)
                         } else {
-                            activeFriends = emptyList()
+                            r.speaking_count ?: 1
                         }
+                        val realListening = if (roomParts.isNotEmpty()) {
+                            roomParts.count { it.role == "listener" }
+                        } else {
+                            r.listening_count ?: 0
+                        }
+
+                        val decidedTag = r.status_tag?.ifBlank { r.tag }?.ifBlank { "LIVE" } ?: "LIVE"
+                        val badgeColor = getBadgeColor(decidedTag)
+                        val overlayVal = when (index % 4) {
+                            0 -> Color(0x22FCD34D)
+                            1 -> Color(0x22D8B4FE)
+                            2 -> Color(0x22FDA4AF)
+                            else -> Color(0x223B82F6)
+                        }
+                        val gradBrush = Brush.linearGradient(listOf(Color(0xFFFFFBEB), Color(0xFFFEF3C7)))
+
+                        val rawAvatars = r.preview_avatars.orEmpty()
+                        val roomAvatars = if (rawAvatars.isNotEmpty()) {
+                            rawAvatars
+                        } else {
+                            supabaseProfiles.shuffled().take(3).mapNotNull { it.avatar }.ifEmpty {
+                                listOf("https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150")
+                            }
+                        }
+
+                        CustomRoom(
+                            id = rId,
+                            title = r.title ?: "Voice Circle",
+                            subtitle = r.description ?: "Practice and speak together",
+                            language = r.language ?: "English",
+                            flagCode = r.language_code.orEmpty().ifBlank { r.country_code.orEmpty() }.ifBlank { "us" },
+                            speakingCount = realSpeaking,
+                            listeningCount = realListening,
+                            tag = r.level_tag.orEmpty().ifBlank { r.tag.orEmpty() }.ifBlank { "All Levels" },
+                            bgGradient = gradBrush,
+                            imageUrl = r.banner_image_url.orEmpty().ifBlank { "https://images.unsplash.com/photo-1524492412937-b28074a5d7da?w=800" },
+                            overlayColor = overlayVal,
+                            badgeText = decidedTag,
+                            badgeColor = badgeColor,
+                            avatars = roomAvatars
+                        )
                     }
+                    roomsList = mapped
                 }
-
-            // Subscribe to active language voice rooms
-            val roomsSub = firestore.collection("rooms")
-                .addSnapshotListener { snapshot, _ ->
-                    if (snapshot != null) {
-                        val rawRooms = snapshot.map { doc ->
-                            FirestoreRoom.fromMap(doc.data)
-                        }
-                        val sortedRaw = rawRooms.sortedByDescending { it.createdAt }
-                        val mapped = sortedRaw.mapIndexed { index, r ->
-                            val decidedTag = decideRoomTag(
-                                room = r,
-                                allRooms = sortedRaw,
-                                userLearningLanguage = currentUserProfile.learningLanguage ?: "English",
-                                userNativeLanguage = currentUserProfile.nativeLanguage ?: "Hindi"
-                            )
-                            val badgeColor = getBadgeColor(decidedTag)
-                            val overlayVal = when (index % 4) {
-                                0 -> Color(0x22FCD34D)
-                                1 -> Color(0x22D8B4FE)
-                                2 -> Color(0x22FDA4AF)
-                                else -> Color(0x223B82F6)
-                            }
-                            val gradBrush = if (r.gradientColors.isNotEmpty()) {
-                                Brush.linearGradient(r.gradientColors.map { parseColorHex(it, Color.White) })
-                            } else {
-                                Brush.linearGradient(listOf(Color(0xFFFFFBEB), Color(0xFFFEF3C7)))
-                            }
-
-                            val roomAvatars = if (supabaseProfiles.isNotEmpty()) {
-                                when (r.roomId) {
-                                    "FT5272" -> supabaseProfiles.filter { it.countryCode == "in" || it.countryCode == "pk" }.mapNotNull { it.avatar }
-                                    "FT1902" -> supabaseProfiles.filter { it.countryCode == "kr" || it.countryCode == "jp" }.mapNotNull { it.avatar }
-                                    "FT8823" -> supabaseProfiles.filter { it.countryCode == "us" || it.countryCode == "ru" }.mapNotNull { it.avatar }
-                                    else -> supabaseProfiles.shuffled().take(3).mapNotNull { it.avatar }
-                                }.ifEmpty { r.previewAvatars }
-                            } else {
-                                r.previewAvatars
-                            }
-
-                            CustomRoom(
-                                id = r.roomId,
-                                title = r.title,
-                                subtitle = r.description,
-                                language = r.language,
-                                flagCode = r.languageCode,
-                                speakingCount = r.speakingCount,
-                                listeningCount = r.listeningCount,
-                                tag = r.levelTag,
-                                bgGradient = gradBrush,
-                                imageUrl = r.bannerImageUrl,
-                                overlayColor = overlayVal,
-                                badgeText = decidedTag,
-                                badgeColor = badgeColor,
-                                avatars = roomAvatars
-                            )
-                        }
-                        if (mapped.isNotEmpty()) {
-                            roomsList = mapped
-                        }
-                    }
-                }
-
-            onDispose {
-                friendsSub.remove()
-                masterStatusSub?.remove()
-                roomsSub.remove()
+            } catch (e: Exception) {
+                Log.e("HomeScreen", "Error refreshing rooms & participants from Supabase", e)
             }
+        }
+
+        refreshRoomsAndFriends()
+
+        // Real-time updates from Supabase postgres_changes
+        VoiceRoomRealtimeManager.events.collect {
+            refreshRoomsAndFriends()
         }
     }
 
@@ -400,7 +368,7 @@ fun HomeScreen(
 
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
-            containerColor = Color.White,
+            containerColor = Color(0xFFFAFAEE),
             bottomBar = {
                 HomeBottomBar(
                     activeTab = activeTab,

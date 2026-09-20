@@ -26,7 +26,7 @@ class MainActivity : ComponentActivity() {
             MyApplicationTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = Color.White
+                    color = Color(0xFFFAFAEE)
                 ) {
                     var currentScreen by rememberSaveable { mutableStateOf("welcome") }
 

@@ -61,6 +61,12 @@ import coil.compose.AsyncImage
 import com.example.R
 import com.example.AuthViewModel
 import com.example.UserProfile
+import com.example.SupabaseClient
+import com.example.realtime.VoiceRoomRealtimeManager
+import com.example.realtime.RealtimeTableEvent
+import android.util.Log
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.collectAsState
 import com.example.ui.components.CircleFlag
 import androidx.compose.foundation.Canvas
@@ -302,33 +308,46 @@ fun VoiceRoomScreen(
 
     val activeRoomId = viewModel?.activeRoomId?.collectAsState()?.value ?: "FT5272"
     val activeRoomTitle = viewModel?.activeRoomTitle?.collectAsState()?.value ?: "Hindi Voice Circle"
-    val firestore = viewModel?.firestoreDb
 
     var roomHostId by remember { mutableStateOf<String?>("") }
     var participantsList by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) } // Pair: userId, action (speaker/listener)
 
-    if (firestore != null) {
-        DisposableEffect(firestore, activeRoomId) {
-            val roomDocListener = firestore.collection("rooms").document(activeRoomId)
-                .addSnapshotListener { snapshot, error ->
-                    if (error == null && snapshot != null) {
-                        roomHostId = snapshot.getString("hostId") ?: ""
+    LaunchedEffect(activeRoomId) {
+        withContext(Dispatchers.IO) {
+            try {
+                val roomRes = SupabaseClient.api.getVoiceRoomById(idEq = "eq.$activeRoomId")
+                if (roomRes.isSuccessful) {
+                    val roomObj = roomRes.body()?.firstOrNull()
+                    if (roomObj != null) {
+                        roomHostId = roomObj.host_id ?: ""
                     }
                 }
-            val listener = firestore.collection("rooms").document(activeRoomId).collection("userids")
-                .addSnapshotListener { snapshot, error ->
-                    if (error == null && snapshot != null) {
-                        val parsed = snapshot.documents.mapNotNull { doc ->
-                            val userId = doc.id
-                            val action = doc.getString("action") ?: "listener"
-                            Pair(userId, action)
+                val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
+                if (partsRes.isSuccessful) {
+                    val list = partsRes.body() ?: emptyList()
+                    participantsList = list.map { Pair(it.user_id, it.role) }
+                }
+            } catch (e: Exception) {
+                Log.e("VoiceRoomScreen", "Error fetching voice room data from Supabase", e)
+            }
+        }
+    }
+
+    LaunchedEffect(activeRoomId) {
+        VoiceRoomRealtimeManager.start()
+        VoiceRoomRealtimeManager.events.collect { event ->
+            if (event is RealtimeTableEvent.ParticipantChanged && event.roomId == activeRoomId) {
+                withContext(Dispatchers.IO) {
+                    try {
+                        val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
+                        if (partsRes.isSuccessful) {
+                            val list = partsRes.body() ?: emptyList()
+                            participantsList = list.map { Pair(it.user_id, it.role) }
                         }
-                        participantsList = parsed
+                    } catch (e: Exception) {
+                        Log.e("VoiceRoomScreen", "Error refreshing participants on realtime event", e)
                     }
                 }
-            onDispose {
-                roomDocListener.remove()
-                listener.remove()
             }
         }
     }

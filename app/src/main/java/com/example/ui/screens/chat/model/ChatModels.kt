@@ -28,7 +28,7 @@ object ChatSampleData {
         return listOf(
             ChatMessage(
                 id = "m1",
-                text = "Hello! Glad we connected here. 😊",
+                text = "Hello! Glad we connected here.",
                 time = "9:12 AM",
                 isMe = false,
                 type = ChatMessageType.TEXT,
@@ -45,14 +45,14 @@ object ChatSampleData {
             ),
             ChatMessage(
                 id = "m3",
-                text = "Thank you! 😊\nI'm trying my best!",
+                text = "Thank you!\nI'm trying my best!",
                 time = "9:14 AM",
                 isMe = true,
                 type = ChatMessageType.TEXT
             ),
             ChatMessage(
                 id = "m4",
-                text = "Do you want to practice a little now? We can talk about travel in Japan! 🇯🇵",
+                text = "Do you want to practice a little now? We can talk about travel in Japan!",
                 time = "9:15 AM",
                 isMe = false,
                 type = ChatMessageType.TEXT,
@@ -93,7 +93,7 @@ object ChatSampleData {
             ),
             ChatMessage(
                 id = "m9",
-                text = "Wow! Amazing 😍\nI haven't been yet, but it's on my list!",
+                text = "Wow! Amazing!\nI haven't been yet, but it's on my list!",
                 time = "9:20 AM",
                 isMe = true,
                 type = ChatMessageType.TEXT
