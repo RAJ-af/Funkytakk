@@ -23,13 +23,30 @@ import com.example.ui.screens.home.dialogs.*
 import com.example.ui.screens.home.models.*
 import com.example.ui.screens.home.tabs.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontWeight
+import com.example.SupabaseSessionManager
+import com.example.ui.theme.GoldAccent
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     viewModel: AuthViewModel,
     onLogoutSuccess: () -> Unit,
-    onCreateLanguageRoom: () -> Unit = {},
+    onCreateLanguageRoom: (isPrivate: Boolean) -> Unit = {},
     onRoomClick: () -> Unit = {}
 ) {
     val authState by viewModel.authState.collectAsState()
@@ -42,6 +59,11 @@ fun HomeScreen(
 
     var showCreateRoomBottomSheet by remember { mutableStateOf(false) }
     var showLogoutDialog by remember { mutableStateOf(false) }
+
+    // Join Code Dialog States
+    var showJoinCodeDialog by remember { mutableStateOf(false) }
+    var joinCodeInputText by remember { mutableStateOf("") }
+    var joinCodeLoading by remember { mutableStateOf(false) }
 
     // Dynamic state trackers
     var activeTab by remember { mutableStateOf("home") } // "home", "rooms", "moments", "chats", "profile"
@@ -242,6 +264,8 @@ fun HomeScreen(
                     }
                     roomsList = mapped
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("HomeScreen", "Error refreshing rooms & participants from Supabase", e)
             }
@@ -396,6 +420,7 @@ fun HomeScreen(
                             selectedSortOption = selectedSortOption,
                             onOpenEvents = { showAmusementEventsDialog = true },
                             onCreateRoom = { showCreateRoomBottomSheet = true },
+                            onJoinWithCode = { showJoinCodeDialog = true },
                             onOpenFilter = { showFilterDialog = true },
                             onJoinRoom = { room ->
                                 Toast.makeText(context, "Welcome to ${room.title}! Connecting audio...", Toast.LENGTH_LONG).show()
@@ -456,9 +481,74 @@ fun HomeScreen(
     if (showCreateRoomBottomSheet) {
         CreateRoomBottomSheet(
             onDismiss = { showCreateRoomBottomSheet = false },
-            onCreateLanguageRoom = {
+            onCreateRoom = { isPrivate ->
                 showCreateRoomBottomSheet = false
-                onCreateLanguageRoom()
+                onCreateLanguageRoom(isPrivate)
+            }
+        )
+    }
+
+    if (showJoinCodeDialog) {
+        val coroutineScope = rememberCoroutineScope()
+        JoinPrivateRoomDialog(
+            onDismiss = {
+                showJoinCodeDialog = false
+                joinCodeInputText = ""
+            },
+            isLoading = joinCodeLoading,
+            onJoin = { enteredPasscode ->
+                joinCodeLoading = true
+                coroutineScope.launch(Dispatchers.IO) {
+                    try {
+                        val token = SupabaseSessionManager.getBearerToken(context)
+                        val response = SupabaseClient.api.joinRoomByCode(
+                            auth = token,
+                            body = mapOf("entered_code" to enteredPasscode)
+                        )
+                        val rawBody = response.body()?.string()?.trim() ?: ""
+                        android.util.Log.d("JoinRoomByCode", "RPC response status: ${response.code()}, body: $rawBody")
+
+                        var targetRoomId: String? = null
+                        var targetRoomTitle: String? = null
+
+                        if (response.isSuccessful && rawBody.isNotBlank() && rawBody != "null") {
+                            if (rawBody.startsWith("{")) {
+                                val json = org.json.JSONObject(rawBody)
+                                targetRoomId = json.optString("room_id").ifBlank { json.optString("id") }
+                                targetRoomTitle = json.optString("title").ifBlank { "Voice Room" }
+                            } else if (rawBody.startsWith("[")) {
+                                val array = org.json.JSONArray(rawBody)
+                                if (array.length() > 0) {
+                                    val json = array.getJSONObject(0)
+                                    targetRoomId = json.optString("room_id").ifBlank { json.optString("id") }
+                                    targetRoomTitle = json.optString("title").ifBlank { "Voice Room" }
+                                }
+                            }
+                        }
+
+                        withContext(Dispatchers.Main) {
+                            joinCodeLoading = false
+                            if (!targetRoomId.isNullOrBlank()) {
+                                val finalTitle = targetRoomTitle ?: "Private Voice Room"
+                                showJoinCodeDialog = false
+                                joinCodeInputText = ""
+                                Toast.makeText(context, "Entering $finalTitle...", Toast.LENGTH_SHORT).show()
+                                viewModel.joinRoom(targetRoomId, finalTitle, context)
+                                onRoomClick()
+                            } else {
+                                Toast.makeText(context, "Invalid or expired room passcode.", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        android.util.Log.e("JoinRoomByCode", "Error joining room by code", e)
+                        withContext(Dispatchers.Main) {
+                            joinCodeLoading = false
+                            Toast.makeText(context, "Invalid or expired room passcode.", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
             }
         )
     }

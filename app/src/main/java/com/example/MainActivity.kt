@@ -43,6 +43,7 @@ class MainActivity : ComponentActivity() {
                     var tempNativeLanguage by rememberSaveable { mutableStateOf("") }
                     var tempLearningLanguage by rememberSaveable { mutableStateOf("") }
                     var tempHobbies by remember { mutableStateOf<List<String>>(emptyList()) }
+                    var createRoomIsPrivate by rememberSaveable { mutableStateOf(false) }
 
                     LaunchedEffect(authState) {
                         if (authState is AuthState.Success) {
@@ -241,7 +242,8 @@ class MainActivity : ComponentActivity() {
                                 onLogoutSuccess = {
                                     currentScreen = "welcome"
                                 },
-                                onCreateLanguageRoom = {
+                                onCreateLanguageRoom = { isPrivate ->
+                                    createRoomIsPrivate = isPrivate
                                     currentScreen = "create_language_room"
                                 },
                                 onRoomClick = {
@@ -250,8 +252,9 @@ class MainActivity : ComponentActivity() {
                             )
                             "create_language_room" -> CreateLanguageRoomScreen(
                                 viewModel = authViewModel,
+                                initialIsPrivate = createRoomIsPrivate,
                                 onBack = { currentScreen = "home" },
-                                onCreate = { currentScreen = "home" }
+                                onCreate = { currentScreen = "voice_room" }
                             )
                             "voice_room" -> VoiceRoomScreen(
                                 viewModel = authViewModel,

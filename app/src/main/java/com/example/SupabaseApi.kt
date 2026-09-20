@@ -2,6 +2,7 @@ package com.example
 
 import com.squareup.moshi.JsonClass
 import okhttp3.MultipartBody
+import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.*
 
@@ -84,7 +85,9 @@ data class SupabaseVoiceRoom(
     val total_visits_24h: Int? = 1,
     val last_1h_joins: Int? = 0,
     val last_2h_growth_rate: Double? = 0.0,
-    val last_activity_at: String? = null
+    val last_activity_at: String? = null,
+    val is_private: Boolean? = false,
+    val join_code: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -326,4 +329,18 @@ interface SupabaseApi {
         @Header("Authorization") auth: String,
         @Body request: ModeratorActionRequest
     ): Response<Map<String, @JvmSuppressWildcards Any?>>
+
+    @POST("rest/v1/rpc/join_room_by_code")
+    suspend fun joinRoomByCode(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String>
+    ): Response<ResponseBody>
 }
+
+@JsonClass(generateAdapter = true)
+data class JoinRoomResponse(
+    val room_id: String,
+    val title: String
+)
+

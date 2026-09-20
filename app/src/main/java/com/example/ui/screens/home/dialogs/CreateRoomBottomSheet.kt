@@ -28,9 +28,8 @@ import com.example.ui.theme.GoldAccent
 @Composable
 fun CreateRoomBottomSheet(
     onDismiss: () -> Unit,
-    onCreateLanguageRoom: () -> Unit
+    onCreateRoom: (isPrivate: Boolean) -> Unit
 ) {
-    val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -76,8 +75,8 @@ fun CreateRoomBottomSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable {
-                        Toast.makeText(context, "Private room generation initialized!", Toast.LENGTH_SHORT).show()
                         onDismiss()
+                        onCreateRoom(true)
                     },
                 colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF7E6)),
                 shape = RoundedCornerShape(16.dp)
@@ -99,15 +98,30 @@ fun CreateRoomBottomSheet(
                     }
                     Spacer(modifier = Modifier.width(16.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Private Room",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp,
-                            color = Color.Black
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Private Room",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp,
+                                color = Color.Black
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = GoldAccent.copy(alpha = 0.25f)
+                            ) {
+                                Text(
+                                    text = "PASSCODE",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = GoldDark,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Only speech exchange partners you invite can join",
+                            text = "Only speech exchange partners with your 6-digit code can join",
                             fontSize = 12.sp,
                             color = Color.Gray
                         )
@@ -132,7 +146,7 @@ fun CreateRoomBottomSheet(
                     .fillMaxWidth()
                     .clickable { 
                         onDismiss()
-                        onCreateLanguageRoom()
+                        onCreateRoom(false)
                     },
                 colors = CardDefaults.cardColors(containerColor = Color(0xFFF3EDFD)),
                 shape = RoundedCornerShape(16.dp)

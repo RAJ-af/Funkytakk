@@ -65,8 +65,11 @@ import com.example.SupabaseClient
 import com.example.realtime.VoiceRoomRealtimeManager
 import com.example.realtime.RealtimeTableEvent
 import android.util.Log
+import com.example.SupabaseSessionManager
+import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.collectAsState
 import com.example.ui.components.CircleFlag
 import androidx.compose.foundation.Canvas
@@ -309,6 +312,16 @@ fun VoiceRoomScreen(
     val activeRoomId = viewModel?.activeRoomId?.collectAsState()?.value ?: "FT5272"
     val activeRoomTitle = viewModel?.activeRoomTitle?.collectAsState()?.value ?: "Hindi Voice Circle"
 
+    // Room Config States (edited by user)
+    var roomTitle by remember { mutableStateOf("Let's chat and play games") }
+    var roomTags by remember { mutableStateOf("Chill") } // default tag chip from mockup
+    var roomDescription by remember { mutableStateOf("A friendly chat room to share good vibes and play music.") }
+    var roomLanguage by remember { mutableStateOf("Hindi + English") } // default from mockup
+    var isPrivateRoomState by remember { mutableStateOf(false) }
+    var joinCodeState by remember { mutableStateOf("") }
+
+    val currentUserId = remember(context) { SupabaseSessionManager.getUserId(context) ?: "" }
+    val scope = rememberCoroutineScope()
     var roomHostId by remember { mutableStateOf<String?>("") }
     var participantsList by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) } // Pair: userId, action (speaker/listener)
 
@@ -320,6 +333,11 @@ fun VoiceRoomScreen(
                     val roomObj = roomRes.body()?.firstOrNull()
                     if (roomObj != null) {
                         roomHostId = roomObj.host_id ?: ""
+                        roomTitle = roomObj.title ?: "Voice Circle"
+                        roomDescription = roomObj.description ?: ""
+                        roomLanguage = roomObj.language ?: ""
+                        isPrivateRoomState = roomObj.is_private ?: false
+                        joinCodeState = roomObj.join_code ?: ""
                     }
                 }
                 val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
@@ -327,6 +345,8 @@ fun VoiceRoomScreen(
                     val list = partsRes.body() ?: emptyList()
                     participantsList = list.map { Pair(it.user_id, it.role) }
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("VoiceRoomScreen", "Error fetching voice room data from Supabase", e)
             }
@@ -344,6 +364,8 @@ fun VoiceRoomScreen(
                             val list = partsRes.body() ?: emptyList()
                             participantsList = list.map { Pair(it.user_id, it.role) }
                         }
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
                     } catch (e: Exception) {
                         Log.e("VoiceRoomScreen", "Error refreshing participants on realtime event", e)
                     }
@@ -515,11 +537,6 @@ fun VoiceRoomScreen(
         )
     }
     
-    // Room Config States (edited by user)
-    var roomTitle by remember { mutableStateOf("Let's chat and play games") }
-    var roomTags by remember { mutableStateOf("Chill") } // default tag chip from mockup
-    var roomDescription by remember { mutableStateOf("A friendly chat room to share good vibes and play music.") }
-    var roomLanguage by remember { mutableStateOf("Hindi + English") } // default from mockup
     var selectedThemeIndex by remember { mutableStateOf(0) } // Default: "Golden Glow" at index 0
     var isRoomDarkMode by remember { mutableStateOf(false) }
     var selectedDarkBgIndex by remember { mutableStateOf(0) }
@@ -866,6 +883,79 @@ fun VoiceRoomScreen(
             }
 
             Spacer(modifier = Modifier.height(20.dp))
+
+            if (isPrivateRoomState) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isRoomDarkMode) Color(0xFF1E293B) else Color(0xFFFFFBEB)
+                    ),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = if (isRoomDarkMode) Color(0xFF334155) else Color(0xFFFEF3C7)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = "Private Room Icon",
+                                tint = if (isRoomDarkMode) Color(0xFFFBBF24) else Color(0xFFB45309),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "Private Room Code",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = if (isRoomDarkMode) Color.LightGray else Color.Gray
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = joinCodeState.ifEmpty { "------" },
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = if (isRoomDarkMode) Color.White else Color.Black,
+                                    letterSpacing = 2.sp
+                                )
+                            }
+                        }
+
+                        // Copy / Share button
+                        androidx.compose.material3.IconButton(
+                            onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                val clip = android.content.ClipData.newPlainText("Join Code", joinCodeState)
+                                clipboard.setPrimaryClip(clip)
+                                Toast.makeText(context, "Join code copied! Share with your friends.", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(if (isRoomDarkMode) Color.White.copy(alpha = 0.1f) else Color.White, CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Share,
+                                contentDescription = "Copy Code",
+                                tint = if (isRoomDarkMode) Color.White else Color.Black,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
 
             // 2. SPEAKERS VISUAL SYSTEM
             Column(
@@ -1439,6 +1529,42 @@ fun VoiceRoomScreen(
                 onThemeChange = { index ->
                     selectedThemeIndex = index
                     isRoomDarkMode = roomThemes[index].isDark
+                },
+                isPrivate = isPrivateRoomState,
+                onPrivateChange = { isPrivateRoomState = it },
+                joinCode = joinCodeState,
+                onJoinCodeChange = { joinCodeState = it },
+                isHost = (roomHostId == currentUserId),
+                onApplyChanges = {
+                    scope.launch(Dispatchers.IO) {
+                        try {
+                            val token = SupabaseSessionManager.getBearerToken(context)
+                            val updates = mapOf(
+                                "title" to roomTitle,
+                                "description" to roomDescription,
+                                "is_private" to isPrivateRoomState,
+                                "join_code" to if (isPrivateRoomState) joinCodeState else null
+                            )
+                            val res = SupabaseClient.api.updateVoiceRoom(
+                                auth = token,
+                                idEq = "eq.$activeRoomId",
+                                updates = updates
+                            )
+                            withContext(Dispatchers.Main) {
+                                if (res.isSuccessful) {
+                                    Toast.makeText(context, "Room settings updated successfully!", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "Failed to update room settings.", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        } catch (e: Exception) {
+                            withContext(Dispatchers.Main) {
+                                Log.e("VoiceRoomScreen", "Failed to update room settings", e)
+                                Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                    showEditRoomSheet = false
                 },
                 onDismiss = { showEditRoomSheet = false }
             )
@@ -3105,6 +3231,12 @@ fun EditRoomBottomSheetContent(
     onLanguageChange: (String) -> Unit,
     selectedThemeIndex: Int,
     onThemeChange: (Int) -> Unit,
+    isPrivate: Boolean,
+    onPrivateChange: (Boolean) -> Unit,
+    joinCode: String,
+    onJoinCodeChange: (String) -> Unit,
+    isHost: Boolean,
+    onApplyChanges: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val scrollState = androidx.compose.foundation.rememberScrollState()
@@ -3497,13 +3629,99 @@ fun EditRoomBottomSheetContent(
             }
         }
 
+        if (isHost) {
+            Spacer(modifier = Modifier.height(24.dp))
+            HorizontalDivider(color = if (isDark) Color.White.copy(alpha = 0.12f) else Color(0xFFE5E7EB), thickness = 1.dp)
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(if (isDark) Color.White.copy(alpha = 0.12f) else Color(0xFFFEF3C7)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = "Lock Icon",
+                        tint = if (isDark) Color.White else Color(0xFFD97706),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Private Room Settings",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isDark) Color.White else Color.Black
+                    )
+                    Text(
+                        text = "Restrict access to your room via join code",
+                        fontSize = 11.sp,
+                        color = if (isDark) Color.White.copy(alpha = 0.6f) else Color.Gray
+                    )
+                }
+                Switch(
+                    checked = isPrivate,
+                    onCheckedChange = { checked ->
+                        onPrivateChange(checked)
+                        if (checked && joinCode.isBlank()) {
+                            onJoinCodeChange((100000..999999).random().toString())
+                        }
+                    },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = if (isDark) currentTheme.themeColor else Color(0xFFF59E0B)
+                    )
+                )
+            }
+
+            if (isPrivate) {
+                Spacer(modifier = Modifier.height(14.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    androidx.compose.material3.OutlinedTextField(
+                        value = joinCode,
+                        onValueChange = { val clean = it.filter { c -> c.isDigit() }; if (clean.length <= 6) onJoinCodeChange(clean) },
+                        placeholder = { Text("Passcode (6 digits)") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = if (isDark) Color.White else Color.Black,
+                            unfocusedTextColor = if (isDark) Color.White else Color.Black,
+                            focusedBorderColor = if (isDark) currentTheme.themeColor else Color(0xFFF59E0B),
+                            unfocusedBorderColor = if (isDark) Color.White.copy(alpha = 0.2f) else Color(0xFFE5E7EB)
+                        )
+                    )
+                    androidx.compose.material3.Button(
+                        onClick = { onJoinCodeChange((100000..999999).random().toString()) },
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                            containerColor = if (isDark) Color.White.copy(alpha = 0.15f) else Color(0xFFF3F4F6)
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Regen", color = if (isDark) Color.White else Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(30.dp))
 
         // Save Bottom Button
         androidx.compose.material3.Button(
             onClick = {
-                Toast.makeText(context, "Room settings updated successfully!", Toast.LENGTH_SHORT).show()
-                onDismiss()
+                if (isPrivate && joinCode.length != 6) {
+                    Toast.makeText(context, "Passcode must be exactly 6 digits!", Toast.LENGTH_SHORT).show()
+                } else {
+                    onApplyChanges()
+                }
             },
             modifier = Modifier
                 .fillMaxWidth()

@@ -1,5 +1,9 @@
 package com.example.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
@@ -217,6 +221,7 @@ object BannerPack {
 @Composable
 fun CreateLanguageRoomScreen(
     viewModel: AuthViewModel,
+    initialIsPrivate: Boolean = false,
     onBack: () -> Unit,
     onCreate: () -> Unit
 ) {
@@ -251,6 +256,16 @@ fun CreateLanguageRoomScreen(
     // VIP benefits state & payment flows
     var hostIsVipLocal by remember { mutableStateOf(false) }
     var isVipBadgeEnabled by remember { mutableStateOf(false) }
+
+    // Private Room Flow States
+    var isPrivateRoom by remember { mutableStateOf(initialIsPrivate) }
+    var joinCodeInput by remember { 
+        mutableStateOf(if (initialIsPrivate) (100000..999999).random().toString() else "") 
+    }
+    var showCreatedSuccessDialog by remember { mutableStateOf(false) }
+    var createdSuccessJoinCode by remember { mutableStateOf("") }
+    var createdSuccessRoomTitle by remember { mutableStateOf("") }
+
     
     // Modal bottoms & Overlay states
     var showLanguageSheet by remember { mutableStateOf(false) }
@@ -330,6 +345,16 @@ fun CreateLanguageRoomScreen(
             ) {
                 Button(
                     onClick = {
+                        if (isPrivateRoom) {
+                            if (joinCodeInput.isBlank()) {
+                                joinCodeInput = (100000..999999).random().toString()
+                            }
+                            if (joinCodeInput.length != 6) {
+                                Toast.makeText(context, "Passcode must be exactly 6 digits!", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                        }
+
                         val hostId = SupabaseSessionManager.getUserId(context)
                             ?: userProfile?.uid
                             ?: UUID.randomUUID().toString()
@@ -341,9 +366,14 @@ fun CreateLanguageRoomScreen(
                         }
                         val nowIso = isoFormat.format(Date())
 
+                        val chosenTitle = roomTitle.ifBlank {
+                            if (isPrivateRoom) "Private ${selectedLanguage.name} Room"
+                            else "Let's talk in ${selectedLanguage.name}!"
+                        }
+
                         val newRoom = SupabaseVoiceRoom(
                             id = roomUuid,
-                            title = roomTitle.ifBlank { "Let's talk in ${selectedLanguage.name}!" },
+                            title = chosenTitle,
                             language = selectedLanguage.name,
                             host_id = hostId,
                             participants = 1,
@@ -368,7 +398,9 @@ fun CreateLanguageRoomScreen(
                             total_visits_24h = 1,
                             last_1h_joins = 0,
                             last_2h_growth_rate = 0.0,
-                            last_activity_at = nowIso
+                            last_activity_at = nowIso,
+                            is_private = isPrivateRoom,
+                            join_code = if (isPrivateRoom) joinCodeInput else null
                         )
 
                         CoroutineScope(Dispatchers.IO).launch {
@@ -382,8 +414,15 @@ fun CreateLanguageRoomScreen(
                             }
                         }
                         viewModel.joinRoom(roomUuid, newRoom.title ?: "", context)
-                        Toast.makeText(context, "Voice Room Created Successfully!", Toast.LENGTH_SHORT).show()
-                        onCreate()
+
+                        if (isPrivateRoom) {
+                            createdSuccessJoinCode = joinCodeInput
+                            createdSuccessRoomTitle = chosenTitle
+                            showCreatedSuccessDialog = true
+                        } else {
+                            Toast.makeText(context, "Voice Room Created Successfully!", Toast.LENGTH_SHORT).show()
+                            onCreate()
+                        }
                     },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -434,14 +473,17 @@ fun CreateLanguageRoomScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Create Language Room",
+                            text = if (isPrivateRoom) "Create Private Room" else "Create Language Room",
                             fontSize = 24.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = Color.Black
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Start a voice room and connect with people\nwho love the same language 💛",
+                            text = if (isPrivateRoom) 
+                                "Start a private voice room with a 6-digit\npasscode for you & your invited guests 🔒" 
+                            else 
+                                "Start a voice room and connect with people\nwho love the same language 💛",
                             fontSize = 13.sp,
                             color = Color.Gray,
                             lineHeight = 18.sp
@@ -942,6 +984,112 @@ fun CreateLanguageRoomScreen(
                                 color = Color(0xFFB45309),
                                 fontWeight = FontWeight.Medium
                             )
+                        }
+                    }
+                }
+
+                // ---------------- STEP 5: Private Room ----------------
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    border = BorderStroke(1.dp, Color(0xFFF3F4F6))
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .background(Color(0xFFFFC107), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "5",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = Color.Black
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Private Room Settings",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = Color.Black
+                            )
+                        }
+
+                        // Toggle row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Make Room Private",
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.sp,
+                                    color = Color.Black
+                                )
+                                Text(
+                                    text = "Only users with the join code can enter",
+                                    fontSize = 11.sp,
+                                    color = Color.Gray
+                                )
+                            }
+                            Switch(
+                                checked = isPrivateRoom,
+                                onCheckedChange = { checked ->
+                                    isPrivateRoom = checked
+                                    if (checked && joinCodeInput.isBlank()) {
+                                        joinCodeInput = (100000..999999).random().toString()
+                                    }
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = Color(0xFFFFC107)
+                                )
+                            )
+                        }
+
+                        if (isPrivateRoom) {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "Join Code (6 Digits)",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = Color.Black
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = joinCodeInput,
+                                    onValueChange = { val clean = it.filter { c -> c.isDigit() }; if (clean.length <= 6) joinCodeInput = clean },
+                                    placeholder = { Text("Enter 6-digit code") },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = Color(0xFFFFC107),
+                                        unfocusedBorderColor = Color(0xFFE5E7EB)
+                                    )
+                                )
+                                Button(
+                                    onClick = { joinCodeInput = (100000..999999).random().toString() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF3F4F6)),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Text("Regen", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
                         }
                     }
                 }
@@ -1753,6 +1901,158 @@ fun CreateLanguageRoomScreen(
                     }
                 }
             }
+        }
+
+        // ================= PRIVATE ROOM CREATED SUCCESS DIALOG =================
+        if (showCreatedSuccessDialog) {
+            AlertDialog(
+                onDismissRequest = { /* Prevent accidental dismiss without entering room */ },
+                containerColor = Color.White,
+                shape = RoundedCornerShape(24.dp),
+                title = {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .background(Color(0xFFFFF7E6), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = null,
+                                tint = Color(0xFFD97706),
+                                modifier = Modifier.size(34.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Room Created!",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 20.sp,
+                            color = Color.Black
+                        )
+                    }
+                },
+                text = {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Share this 6-digit code with your friends or partners so they can join:",
+                            fontSize = 13.sp,
+                            color = Color.DarkGray,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 4.dp)
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Code Container Box
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            color = Color(0xFFFFFBEB),
+                            border = BorderStroke(1.5.dp, Color(0xFFFFC107))
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(vertical = 16.dp, horizontal = 12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "ROOM PASSCODE",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFB45309),
+                                    letterSpacing = 1.sp
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = createdSuccessJoinCode.chunked(3).joinToString(" "),
+                                    fontSize = 32.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color.Black,
+                                    letterSpacing = 3.sp
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Copy Code Button
+                            OutlinedButton(
+                                onClick = {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    val clip = ClipData.newPlainText("FunkyTalk Room Code", createdSuccessJoinCode)
+                                    clipboard.setPrimaryClip(clip)
+                                    Toast.makeText(context, "Code $createdSuccessJoinCode copied to clipboard!", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Black),
+                                border = BorderStroke(1.dp, Color(0xFFE5E7EB))
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Copy Code", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+
+                            // Share Code Button
+                            OutlinedButton(
+                                onClick = {
+                                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(
+                                            Intent.EXTRA_TEXT,
+                                            "Join my private voice room \"$createdSuccessRoomTitle\" on FunkyTalk! Passcode: $createdSuccessJoinCode"
+                                        )
+                                    }
+                                    val shareIntent = Intent.createChooser(sendIntent, "Share Room Code")
+                                    context.startActivity(shareIntent)
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Black),
+                                border = BorderStroke(1.dp, Color(0xFFE5E7EB))
+                            ) {
+                                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Share", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showCreatedSuccessDialog = false
+                            onCreate()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp),
+                        shape = RoundedCornerShape(24.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFC107))
+                    ) {
+                        Text(
+                            text = "Enter Room Now",
+                            color = Color.Black,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp
+                        )
+                    }
+                }
+            )
         }
     }
 }
