@@ -154,18 +154,22 @@ object BannerPack {
     )
 
     val animeAndAnimated = listOf(
-        BannerOption("✨ Cyberpunk Anime Girl", "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=800"),
-        BannerOption("🌸 Ghibli Sakura Sky", "https://images.unsplash.com/photo-1524413840807-0c3cb6fa808d?w=800"),
-        BannerOption("🌙 Lofi Anime Room Night", "https://images.unsplash.com/photo-1518531933037-91b2f5f229cc?w=800"),
-        BannerOption("⛩️ Kyoto Anime Torii Shrine", "https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?w=800"),
-        BannerOption("🚄 Sunset Anime Train Crossing", "https://images.unsplash.com/photo-1528164344705-47542687000d?w=800"),
-        BannerOption("🌆 Akihabara Neon Lights", "https://images.unsplash.com/photo-1542051841857-5f90071e7989?w=800"),
-        BannerOption("🌌 Anime Constellation Galaxy", "https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=800"),
-        BannerOption("☕ Cozy Lofi Study Nook", "https://images.unsplash.com/photo-1544640808-32ca72ac7f37?w=800"),
-        BannerOption("🌧️ Rainy Tokyo Alley Sunset", "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=800"),
-        BannerOption("🎨 Vaporwave Synth Horizon", "https://images.unsplash.com/photo-1550684848-fac1c5b4e853?w=800"),
-        BannerOption("💫 Neon Anime Matrix", "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=800"),
-        BannerOption("🌊 Great Wave Aesthetic Art", "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800")
+        BannerOption("✨ Animated Cyberpunk Anime", "https://i.giphy.com/media/xT9IgzoKnwFNmISR8I/giphy.gif"),
+        BannerOption("🌸 Animated Ghibli Sakura", "https://i.giphy.com/media/3o7TKSjRrfIPjeiVyM/giphy.gif"),
+        BannerOption("🌙 Animated Lofi Study Room", "https://i.giphy.com/media/Lmq2eMv782q88/giphy.gif"),
+        BannerOption("⚡ Animated Neon Synthwave Sunset", "https://i.giphy.com/media/26tn33aiTi1jkl6H6/giphy.gif"),
+        BannerOption("🚄 Animated Sunset Train", "https://i.giphy.com/media/3oKIPnAiaMCws8nOsE/giphy.gif"),
+        BannerOption("⛩️ Animated Kyoto Torii", "https://i.giphy.com/media/l41K3o5fA88P3A156/giphy.gif"),
+        BannerOption("🌧️ Animated Cozy Rainy Tokyo", "https://i.giphy.com/media/xUPGcJ9uOAL2h28vMG/giphy.gif"),
+        BannerOption("🌌 Animated Starry Galaxy", "https://i.giphy.com/media/3oKIPmuu8WUKRM77vG/giphy.gif"),
+        BannerOption("✨ Cyber Anime Warrior", "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=800"),
+        BannerOption("🌸 Ghibli Cherry Blossom Sky", "https://images.unsplash.com/photo-1524413840807-0c3cb6fa808d?w=800"),
+        BannerOption("🌆 Akihabara Neon Street", "https://images.unsplash.com/photo-1542051841857-5f90071e7989?w=800"),
+        BannerOption("🏯 Kyoto Temple Dusk", "https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?w=800"),
+        BannerOption("🏙️ Neo Tokyo Alley Skyline", "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=800"),
+        BannerOption("💫 Anime Constellation Night", "https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=800"),
+        BannerOption("🎨 Vaporwave Retro Sunset", "https://images.unsplash.com/photo-1550684848-fac1c5b4e853?w=800"),
+        BannerOption("🌊 Anime Great Wave Aesthetic", "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800")
     )
 
     // Programmatically generated exactly 100 stunning live gradients
@@ -241,6 +245,18 @@ fun CreateLanguageRoomScreen(
     onCreate: () -> Unit
 ) {
     val context = LocalContext.current
+    val bannerImageLoader = remember(context) {
+        coil.ImageLoader.Builder(context)
+            .components {
+                if (android.os.Build.VERSION.SDK_INT >= 28) {
+                    add(coil.decode.ImageDecoderDecoder.Factory())
+                } else {
+                    add(coil.decode.GifDecoder.Factory())
+                }
+                add(coil.decode.SvgDecoder.Factory())
+            }
+            .build()
+    }
     
     // Core room input state values
     var roomTitle by remember { mutableStateOf("") }
@@ -351,13 +367,14 @@ fun CreateLanguageRoomScreen(
             }
         },
         bottomBar = {
-            // Giant gold-yellow create room action
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(16.dp)
-            ) {
+            if (!showBannerOverlay && !showLanguageSheet && !showVipPaywallSheet) {
+                // Giant gold-yellow create room action
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(16.dp)
+                ) {
                 Button(
                     onClick = {
                         if (isPrivateRoom) {
@@ -464,7 +481,8 @@ fun CreateLanguageRoomScreen(
                     }
                 }
             }
-        },
+        }
+    },
         containerColor = Color(0xFFFAFAFA)
     ) { innerPadding ->
         Box(
@@ -753,10 +771,11 @@ fun CreateLanguageRoomScreen(
                                 )
                             } else {
                                 AsyncImage(
-                                    model = ImageRequest.Builder(LocalContext.current)
+                                    model = ImageRequest.Builder(context)
                                         .data(appliedBannerUrl)
                                         .crossfade(true)
                                         .build(),
+                                    imageLoader = bannerImageLoader,
                                     contentDescription = "Room Banner Preview",
                                     modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Crop
@@ -1293,25 +1312,17 @@ fun CreateLanguageRoomScreen(
 
             // ================= CHOOSE BANNER OVERLAY =================
             if (showBannerOverlay) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.5f))
-                        .clickable { /* Block clicks */ }
+                ModalBottomSheet(
+                    onDismissRequest = { showBannerOverlay = false },
+                    containerColor = Color.White,
+                    tonalElevation = 6.dp
                 ) {
-                    Card(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .fillMaxHeight(0.85f)
-                            .align(Alignment.BottomCenter),
-                        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color.White)
+                            .padding(16.dp)
                     ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(16.dp)
-                        ) {
                             // Top close bar & header
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -1464,6 +1475,7 @@ fun CreateLanguageRoomScreen(
                                                     } else {
                                                         AsyncImage(
                                                             model = banner.url,
+                                                            imageLoader = bannerImageLoader,
                                                             contentDescription = banner.name,
                                                             modifier = Modifier.fillMaxSize(),
                                                             contentScale = ContentScale.Crop
@@ -1629,7 +1641,6 @@ fun CreateLanguageRoomScreen(
                                 }
                             }
                         }
-                    }
                 }
             }
 

@@ -8,6 +8,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import com.example.UpdateVoiceRoomRequest
 import com.example.SpeakerRequestInsert
+import com.example.SupabaseRoomParticipant
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -105,6 +106,25 @@ fun mapFlagEmojiToCode(emoji: String): String {
         else -> {
             if (emoji.length == 2) emoji.lowercase() else "in"
         }
+    }
+}
+
+fun mapCountryCodeToFlagEmoji(countryCode: String): String {
+    return when (countryCode.lowercase()) {
+        "in" -> "🇮🇳"
+        "pk" -> "🇵🇰"
+        "jp" -> "🇯🇵"
+        "us" -> "🇺🇸"
+        "gb" -> "🇬🇧"
+        "ae" -> "🇦🇪"
+        "cn" -> "🇨🇳"
+        "es" -> "🇪🇸"
+        "fr" -> "🇫🇷"
+        "de" -> "🇩🇪"
+        "it" -> "🇮🇹"
+        "ru" -> "🇷🇺"
+        "kr" -> "🇰🇷"
+        else -> "🇮🇳"
     }
 }
 
@@ -358,120 +378,88 @@ fun VoiceRoomScreen(
     val currentUserId = remember(context) { SupabaseSessionManager.getUserId(context) ?: "" }
     val scope = rememberCoroutineScope()
     var roomHostId by remember { mutableStateOf<String?>("") }
-    var participantsList by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) } // Pair: userId, action (speaker/listener)
+    var isMicOn by remember { mutableStateOf(true) }
+    var participantsData by remember { mutableStateOf<List<SupabaseRoomParticipant>>(emptyList()) }
     val messages = remember { mutableStateListOf<ChillRoomMessage>() }
     var renderedMessageCount by remember { mutableStateOf(6) }
     val chatListState = rememberLazyListState()
     val activeReactions = remember { mutableStateListOf<FloatingEmojiId>() }
-    val speakerReactions = remember {
-        mutableStateMapOf<String, List<FloatingEmojiId>>(
-            "Arjun" to emptyList(),
-            "Riya" to emptyList(),
-            "Sara" to emptyList(),
-            "Vihaan" to emptyList(),
-            "Ananya" to emptyList()
-        )
+    val speakerReactions = remember { mutableStateMapOf<String, List<FloatingEmojiId>>() }
+
+    val allRoomSeats = remember(participantsData, supabaseProfiles, roomHostId) {
+        if (participantsData.isEmpty()) {
+            val hostProfile = supabaseProfiles.find { it.uid == roomHostId }
+            listOf(
+                ChillRoomSpeaker(
+                    name = hostProfile?.displayName ?: hostProfile?.username ?: "Host",
+                    imageUrl = hostProfile?.avatar ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400",
+                    flagCode = hostProfile?.countryCode ?: "in",
+                    isMuted = false,
+                    isCenter = true,
+                    gradientColors = listOf(Color(0xFFFFB800), Color(0xFFF59E0B), Color(0xFFFFB800)),
+                    isHost = true
+                )
+            )
+        } else {
+            participantsData.map { p ->
+                val pProfile = supabaseProfiles.find { it.uid == p.user_id }
+                val name = pProfile?.displayName ?: pProfile?.username ?: "User"
+                val avatar = pProfile?.avatar ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400"
+                val flagCode = pProfile?.countryCode ?: "in"
+                val isHost = (p.role == "host") || (p.user_id == roomHostId)
+                ChillRoomSpeaker(
+                    name = name,
+                    imageUrl = avatar,
+                    flagCode = flagCode,
+                    isMuted = !p.is_mic_enabled,
+                    isCenter = isHost,
+                    gradientColors = if (isHost) listOf(Color(0xFFFFB800), Color(0xFFF59E0B), Color(0xFFFFB800)) else listOf(Color(0xFF8B5CF6), Color(0xFFEC4899)),
+                    isHost = isHost
+                )
+            }
+        }
     }
 
-    val speakers = remember(participantsList, supabaseProfiles, roomHostId) {
-        val speakerUserIds = participantsList.filter { it.second == "speaker" }.map { it.first }
-        val mappedList = speakerUserIds.mapIndexed { idx, userId ->
-            val p = supabaseProfiles.find { it.uid == userId }
-            val name = p?.displayName ?: p?.username ?: when (userId) {
-                "supa_user_siddharth" -> "Siddharth"
-                "supa_user_jungkook" -> "Jungkook"
-                "supa_user_dmitry" -> "Dmitry"
-                else -> "Speaker ${idx + 1}"
-            }
-            val avatar = p?.avatar ?: when (userId) {
-                "supa_user_siddharth" -> "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150"
-                "supa_user_jungkook" -> "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150"
-                "supa_user_dmitry" -> "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150"
-                else -> "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400"
-            }
-            val flagCode = p?.countryCode ?: when (userId) {
-                "supa_user_siddharth" -> "in"
-                "supa_user_jungkook" -> "kr"
-                "supa_user_dmitry" -> "ru"
-                else -> "in"
-            }
-            val isHost = (userId == roomHostId) || 
-                         (activeRoomId == "FT5272" && userId == "supa_user_siddharth") ||
-                         (activeRoomId == "FT1902" && userId == "supa_user_jungkook") ||
-                         (idx == 0 && roomHostId.isNullOrBlank())
+    val hostSeat = remember(allRoomSeats, roomHostId) {
+        allRoomSeats.find { it.isHost } ?: allRoomSeats.first()
+    }
 
+    val speakerSeats = remember(participantsData, supabaseProfiles, roomHostId, hostSeat) {
+        participantsData.filter { p ->
+            val isHost = (p.role == "host") || (p.user_id == roomHostId)
+            !isHost && p.role == "speaker"
+        }.sortedBy { it.joined_at ?: "" }.take(4).map { p ->
+            val pProfile = supabaseProfiles.find { it.uid == p.user_id }
+            val name = pProfile?.displayName ?: pProfile?.username ?: "Speaker"
+            val avatar = pProfile?.avatar ?: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400"
+            val flagCode = pProfile?.countryCode ?: "in"
             ChillRoomSpeaker(
                 name = name,
                 imageUrl = avatar,
                 flagCode = flagCode,
-                isMuted = idx == 4 || userId == "supa_user_yuki",
-                isCenter = idx == 1,
-                gradientColors = when (idx % 5) {
-                    0 -> listOf(Color(0xFF8B5CF6), Color(0xFFEC4899))
-                    1 -> listOf(Color(0xFFFFB800), Color(0xFFF59E0B), Color(0xFFFFB800))
-                    2 -> listOf(Color(0xFF8B5CF6), Color(0xFF6366F1))
-                    3 -> listOf(Color(0xFF8B5CF6), Color(0xFFEC4899))
-                    else -> listOf(Color(0xFFD1D5DB), Color(0xFF9CA3AF))
-                },
-                isHost = isHost
-            )
-        }.toMutableList()
-
-        val fallbacks = listOf(
-            ChillRoomSpeaker(
-                name = "Arjun",
-                imageUrl = "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400",
-                flagCode = "in",
-                isMuted = false,
+                isMuted = !p.is_mic_enabled,
+                isCenter = false,
                 gradientColors = listOf(Color(0xFF8B5CF6), Color(0xFFEC4899)),
                 isHost = false
-            ),
-            ChillRoomSpeaker(
-                name = "Riya",
-                imageUrl = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400",
-                flagCode = "in",
-                isMuted = false,
-                isCenter = true,
-                gradientColors = listOf(Color(0xFFFFB800), Color(0xFFF59E0B), Color(0xFFFFB800)),
-                isHost = true
-            ),
-            ChillRoomSpeaker(
-                name = "Sara",
-                imageUrl = "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400",
-                flagCode = "pk",
-                isMuted = false,
-                gradientColors = listOf(Color(0xFF8B5CF6), Color(0xFF6366F1)),
-                isHost = false
-            ),
-            ChillRoomSpeaker(
-                name = "Vihaan",
-                imageUrl = "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400",
-                flagCode = "in",
-                isMuted = false,
-                gradientColors = listOf(Color(0xFF8B5CF6), Color(0xFFEC4899)),
-                isHost = false
-            ),
-            ChillRoomSpeaker(
-                name = "Ananya",
-                imageUrl = "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400",
-                flagCode = "in",
-                isMuted = true,
-                gradientColors = listOf(Color(0xFFD1D5DB), Color(0xFF9CA3AF)),
-                isHost = false
             )
-        )
-        
-        while (mappedList.size < 5) {
-            val fallbackToAdd = fallbacks[mappedList.size % fallbacks.size]
-            val finalFallback = if (mappedList.any { it.name == fallbackToAdd.name }) {
-                fallbackToAdd.copy(name = fallbackToAdd.name + " (Host)")
-            } else {
-                fallbackToAdd
-            }
-            mappedList.add(finalFallback)
         }
-        
-        mappedList
+    }
+
+    val listenerSeats = remember(participantsData, supabaseProfiles, roomHostId) {
+        participantsData.filter { p ->
+            val isHost = (p.role == "host") || (p.user_id == roomHostId)
+            !isHost && p.role != "speaker"
+        }.map { p ->
+            val pProfile = supabaseProfiles.find { it.uid == p.user_id }
+            val name = pProfile?.displayName ?: pProfile?.username ?: "Listener"
+            val avatar = pProfile?.avatar ?: "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400"
+            val flagCode = pProfile?.countryCode ?: "in"
+            Triple(name, avatar, flagCode)
+        }
+    }
+
+    val speakers = remember(hostSeat, speakerSeats) {
+        listOf(hostSeat) + speakerSeats
     }
 
     LaunchedEffect(activeRoomId) {
@@ -494,7 +482,17 @@ fun VoiceRoomScreen(
                 val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
                 if (partsRes.isSuccessful) {
                     val list = partsRes.body() ?: emptyList()
-                    participantsList = list.map { Pair(it.user_id, it.role) }
+                    withContext(Dispatchers.Main) {
+                        participantsData = list
+                        val me = list.find { it.user_id == currentUserId }
+                        if (me != null) {
+                            val newMicState = me.is_mic_enabled
+                            if (isMicOn != newMicState) {
+                                isMicOn = newMicState
+                                com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(!newMicState)
+                            }
+                        }
+                    }
                 }
 
                 // Query existing messages ordered by created_at
@@ -569,7 +567,17 @@ fun VoiceRoomScreen(
                                 val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
                                 if (partsRes.isSuccessful) {
                                     val list = partsRes.body() ?: emptyList()
-                                    participantsList = list.map { Pair(it.user_id, it.role) }
+                                    withContext(Dispatchers.Main) {
+                                        participantsData = list
+                                        val me = list.find { it.user_id == currentUserId }
+                                        if (me != null) {
+                                            val newMicState = me.is_mic_enabled
+                                            if (isMicOn != newMicState) {
+                                                isMicOn = newMicState
+                                                com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(!newMicState)
+                                            }
+                                        }
+                                    }
                                 }
                             } catch (e: kotlinx.coroutines.CancellationException) {
                                 throw e
@@ -657,7 +665,6 @@ fun VoiceRoomScreen(
     var showChatSheet by remember { mutableStateOf(false) }
     var showPeopleSheet by remember { mutableStateOf(false) }
     var showInviteFriendSheet by remember { mutableStateOf(false) }
-    var isMicOn by remember { mutableStateOf(true) }
     val vmMicEnabled by viewModel?.isMicEnabled?.collectAsState() ?: remember { mutableStateOf(true) }
     LaunchedEffect(vmMicEnabled) {
         isMicOn = vmMicEnabled
@@ -1325,85 +1332,303 @@ fun VoiceRoomScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
-                // First Row - 3 Speakers
+                // First Row - Seat 1 (Host), Seat 2 (Speaker 1), Seat 3 (Speaker 2)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.Bottom
                 ) {
+                    // Seat 1: Host
                     VoiceSpeakerItem(
-                        speaker = speakers[0],
-                        reactions = speakerReactions[speakers[0].name] ?: emptyList(),
+                        speaker = hostSeat,
+                        reactions = speakerReactions[hostSeat.name] ?: emptyList(),
                         theme = currentTheme,
                         isDarkMode = isRoomDarkMode,
                         onReactionComplete = { rid ->
-                            speakerReactions[speakers[0].name] = (speakerReactions[speakers[0].name] ?: emptyList()).filter { it.id != rid }
+                            speakerReactions[hostSeat.name] = (speakerReactions[hostSeat.name] ?: emptyList()).filter { it.id != rid }
                         },
                         onClick = {
-                            oneToOneChatUser = PrivateChatItem("1", speakers[0].name, speakers[0].imageUrl, speakers[0].flagCode, "Typing...", "Now", 0, true, false)
+                            oneToOneChatUser = PrivateChatItem("host", hostSeat.name, hostSeat.imageUrl, hostSeat.flagCode, "Host", "Now", 0, true, false)
                             showOneToOneChatSheet = true
                         }
                     )
-                    VoiceSpeakerItem(
-                        speaker = speakers[1],
-                        reactions = speakerReactions[speakers[1].name] ?: emptyList(),
-                        theme = currentTheme,
-                        isDarkMode = isRoomDarkMode,
-                        onReactionComplete = { rid ->
-                            speakerReactions[speakers[1].name] = (speakerReactions[speakers[1].name] ?: emptyList()).filter { it.id != rid }
-                        },
-                        onClick = {
-                            oneToOneChatUser = PrivateChatItem("2", speakers[1].name, speakers[1].imageUrl, speakers[1].flagCode, "", "Now", 0, true, false)
-                            showOneToOneChatSheet = true
+
+                    // Seat 2: Speaker 1 or + Request
+                    val sp1 = speakerSeats.getOrNull(0)
+                    if (sp1 != null) {
+                        VoiceSpeakerItem(
+                            speaker = sp1,
+                            reactions = speakerReactions[sp1.name] ?: emptyList(),
+                            theme = currentTheme,
+                            isDarkMode = isRoomDarkMode,
+                            onReactionComplete = { rid ->
+                                speakerReactions[sp1.name] = (speakerReactions[sp1.name] ?: emptyList()).filter { it.id != rid }
+                            },
+                            onClick = {
+                                oneToOneChatUser = PrivateChatItem("sp1", sp1.name, sp1.imageUrl, sp1.flagCode, "", "Now", 0, true, false)
+                                showOneToOneChatSheet = true
+                            }
+                        )
+                    } else {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.width(82.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(74.dp)
+                                    .drawBehind {
+                                        drawCircle(
+                                            color = currentTheme.accentColor.copy(alpha = 0.45f),
+                                            style = Stroke(
+                                                width = 1.dp.toPx(),
+                                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 12f), 0f)
+                                            )
+                                        )
+                                    }
+                                    .clip(CircleShape)
+                                    .clickable {
+                                        scope.launch(Dispatchers.IO) {
+                                            try {
+                                                val token = SupabaseSessionManager.getBearerToken(context)
+                                                SupabaseClient.api.createSpeakerRequest(
+                                                    auth = token,
+                                                    body = SpeakerRequestInsert(
+                                                        room_id = activeRoomId,
+                                                        user_id = currentUserId
+                                                    )
+                                                )
+                                            } catch (_: Exception) {}
+                                        }
+                                        Toast.makeText(context, "Requested to join as speaker!", Toast.LENGTH_SHORT).show()
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Request slot",
+                                    tint = currentTheme.accentColor,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "+ Request",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = currentTheme.secondaryTextColor
+                            )
                         }
-                    )
-                    VoiceSpeakerItem(
-                        speaker = speakers[2],
-                        reactions = speakerReactions[speakers[2].name] ?: emptyList(),
-                        theme = currentTheme,
-                        isDarkMode = isRoomDarkMode,
-                        onReactionComplete = { rid ->
-                            speakerReactions[speakers[2].name] = (speakerReactions[speakers[2].name] ?: emptyList()).filter { it.id != rid }
-                        },
-                        onClick = {
-                            oneToOneChatUser = PrivateChatItem("3", speakers[2].name, speakers[2].imageUrl, speakers[2].flagCode, "", "Now", 0, true, false)
-                            showOneToOneChatSheet = true
+                    }
+
+                    // Seat 3: Speaker 2 or + Request
+                    val sp2 = speakerSeats.getOrNull(1)
+                    if (sp2 != null) {
+                        VoiceSpeakerItem(
+                            speaker = sp2,
+                            reactions = speakerReactions[sp2.name] ?: emptyList(),
+                            theme = currentTheme,
+                            isDarkMode = isRoomDarkMode,
+                            onReactionComplete = { rid ->
+                                speakerReactions[sp2.name] = (speakerReactions[sp2.name] ?: emptyList()).filter { it.id != rid }
+                            },
+                            onClick = {
+                                oneToOneChatUser = PrivateChatItem("sp2", sp2.name, sp2.imageUrl, sp2.flagCode, "", "Now", 0, true, false)
+                                showOneToOneChatSheet = true
+                            }
+                        )
+                    } else {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.width(82.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(74.dp)
+                                    .drawBehind {
+                                        drawCircle(
+                                            color = currentTheme.accentColor.copy(alpha = 0.45f),
+                                            style = Stroke(
+                                                width = 1.dp.toPx(),
+                                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 12f), 0f)
+                                            )
+                                        )
+                                    }
+                                    .clip(CircleShape)
+                                    .clickable {
+                                        scope.launch(Dispatchers.IO) {
+                                            try {
+                                                val token = SupabaseSessionManager.getBearerToken(context)
+                                                SupabaseClient.api.createSpeakerRequest(
+                                                    auth = token,
+                                                    body = SpeakerRequestInsert(
+                                                        room_id = activeRoomId,
+                                                        user_id = currentUserId
+                                                    )
+                                                )
+                                            } catch (_: Exception) {}
+                                        }
+                                        Toast.makeText(context, "Requested to join as speaker!", Toast.LENGTH_SHORT).show()
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Request slot",
+                                    tint = currentTheme.accentColor,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "+ Request",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = currentTheme.secondaryTextColor
+                            )
                         }
-                    )
+                    }
                 }
 
-                // Second Row - 2 Speakers + Request
+                // Second Row - Seat 4 (Speaker 3), Seat 5 (Speaker 4), Request slot
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.Top
                 ) {
-                    VoiceSpeakerItem(
-                        speaker = speakers[3],
-                        reactions = speakerReactions[speakers[3].name] ?: emptyList(),
-                        theme = currentTheme,
-                        isDarkMode = isRoomDarkMode,
-                        onReactionComplete = { rid ->
-                            speakerReactions[speakers[3].name] = (speakerReactions[speakers[3].name] ?: emptyList()).filter { it.id != rid }
-                        },
-                        onClick = {
-                            oneToOneChatUser = PrivateChatItem("4", speakers[3].name, speakers[3].imageUrl, speakers[3].flagCode, "", "Now", 0, true, false)
-                            showOneToOneChatSheet = true
+                    val sp3 = speakerSeats.getOrNull(2)
+                    if (sp3 != null) {
+                        VoiceSpeakerItem(
+                            speaker = sp3,
+                            reactions = speakerReactions[sp3.name] ?: emptyList(),
+                            theme = currentTheme,
+                            isDarkMode = isRoomDarkMode,
+                            onReactionComplete = { rid ->
+                                speakerReactions[sp3.name] = (speakerReactions[sp3.name] ?: emptyList()).filter { it.id != rid }
+                            },
+                            onClick = {
+                                oneToOneChatUser = PrivateChatItem("sp3", sp3.name, sp3.imageUrl, sp3.flagCode, "", "Now", 0, true, false)
+                                showOneToOneChatSheet = true
+                            }
+                        )
+                    } else {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.width(82.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(74.dp)
+                                    .drawBehind {
+                                        drawCircle(
+                                            color = currentTheme.accentColor.copy(alpha = 0.45f),
+                                            style = Stroke(
+                                                width = 1.dp.toPx(),
+                                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 12f), 0f)
+                                            )
+                                        )
+                                    }
+                                    .clip(CircleShape)
+                                    .clickable {
+                                        scope.launch(Dispatchers.IO) {
+                                            try {
+                                                val token = SupabaseSessionManager.getBearerToken(context)
+                                                SupabaseClient.api.createSpeakerRequest(
+                                                    auth = token,
+                                                    body = SpeakerRequestInsert(
+                                                        room_id = activeRoomId,
+                                                        user_id = currentUserId
+                                                    )
+                                                )
+                                            } catch (_: Exception) {}
+                                        }
+                                        Toast.makeText(context, "Requested to join as speaker!", Toast.LENGTH_SHORT).show()
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Request slot",
+                                    tint = currentTheme.accentColor,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "+ Request",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = currentTheme.secondaryTextColor
+                            )
                         }
-                    )
-                    VoiceSpeakerItem(
-                        speaker = speakers[4],
-                        reactions = speakerReactions[speakers[4].name] ?: emptyList(),
-                        theme = currentTheme,
-                        isDarkMode = isRoomDarkMode,
-                        onReactionComplete = { rid ->
-                            speakerReactions[speakers[4].name] = (speakerReactions[speakers[4].name] ?: emptyList()).filter { it.id != rid }
-                        },
-                        onClick = {
-                            oneToOneChatUser = PrivateChatItem("5", speakers[4].name, speakers[4].imageUrl, speakers[4].flagCode, "", "Now", 0, true, false)
-                            showOneToOneChatSheet = true
+                    }
+
+                    val sp4 = speakerSeats.getOrNull(3)
+                    if (sp4 != null) {
+                        VoiceSpeakerItem(
+                            speaker = sp4,
+                            reactions = speakerReactions[sp4.name] ?: emptyList(),
+                            theme = currentTheme,
+                            isDarkMode = isRoomDarkMode,
+                            onReactionComplete = { rid ->
+                                speakerReactions[sp4.name] = (speakerReactions[sp4.name] ?: emptyList()).filter { it.id != rid }
+                            },
+                            onClick = {
+                                oneToOneChatUser = PrivateChatItem("sp4", sp4.name, sp4.imageUrl, sp4.flagCode, "", "Now", 0, true, false)
+                                showOneToOneChatSheet = true
+                            }
+                        )
+                    } else {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.width(82.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(74.dp)
+                                    .drawBehind {
+                                        drawCircle(
+                                            color = currentTheme.accentColor.copy(alpha = 0.45f),
+                                            style = Stroke(
+                                                width = 1.dp.toPx(),
+                                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 12f), 0f)
+                                            )
+                                        )
+                                    }
+                                    .clip(CircleShape)
+                                    .clickable {
+                                        scope.launch(Dispatchers.IO) {
+                                            try {
+                                                val token = SupabaseSessionManager.getBearerToken(context)
+                                                SupabaseClient.api.createSpeakerRequest(
+                                                    auth = token,
+                                                    body = SpeakerRequestInsert(
+                                                        room_id = activeRoomId,
+                                                        user_id = currentUserId
+                                                    )
+                                                )
+                                            } catch (_: Exception) {}
+                                        }
+                                        Toast.makeText(context, "Requested to join as speaker!", Toast.LENGTH_SHORT).show()
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Request slot",
+                                    tint = currentTheme.accentColor,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "+ Request",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = currentTheme.secondaryTextColor
+                            )
                         }
-                    )
+                    }
 
                     // Request Slot
                     Column(
@@ -1771,9 +1996,9 @@ fun VoiceRoomScreen(
                     onClick = { showPeopleSheet = true }
                 )
 
-                val myParticipant = participantsList.find { it.first == currentUserId }
+                val myParticipant = participantsData.find { it.user_id == currentUserId }
                 val isHost = (currentUserId == roomHostId)
-                val myRole = myParticipant?.second ?: if (isHost) "speaker" else "listener"
+                val myRole = myParticipant?.role ?: if (isHost) "speaker" else "listener"
                 val isListener = !isHost && (myRole == "listener")
 
                 if (isListener) {
@@ -1991,6 +2216,9 @@ fun VoiceRoomScreen(
         ) {
             PeopleBottomSheetContent(
                 selectedThemeIndex = selectedThemeIndex,
+                hostSeat = hostSeat,
+                speakerSeats = speakerSeats,
+                listenerSeats = listenerSeats,
                 onUserClick = { chatUser ->
                     oneToOneChatUser = chatUser
                     showOneToOneChatSheet = true
@@ -2635,7 +2863,7 @@ fun FloatingSpeakerEmoji(url: String, onComplete: () -> Unit) {
     )
     val scale by androidx.compose.animation.core.animateFloatAsState(
         targetValue = if (isStarted) 1.5f else 0.5f, 
-        animationSpec = androidx.compose.animation.core.tween(durationMillis = 1800, easing = androidx.compose.animation.core.EaseOutBack),
+        animationSpec = androidx.compose.animation.core.tween(durationMillis = 1800, easing = androidx.compose.animation.core.FastOutSlowInEasing),
         label = "scale"
     )
     
@@ -3190,37 +3418,18 @@ fun FloatingEmojiAnimation(url: String, onComplete: () -> Unit) {
 @Composable
 fun PeopleBottomSheetContent(
     selectedThemeIndex: Int,
+    hostSeat: ChillRoomSpeaker,
+    speakerSeats: List<ChillRoomSpeaker>,
+    listenerSeats: List<Triple<String, String, String>>,
     onUserClick: (PrivateChatItem) -> Unit = {},
     onInviteClick: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val currentTheme = roomThemes[selectedThemeIndex]
     val isDark = currentTheme.isDark
-    var showAllListeners by remember { mutableStateOf(false) }
-
-    val allExpandedListeners = listOf(
-        Triple("Ananya", "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400", "🇮🇳"),
-        Triple("Vihaan", "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400", "🇯🇵"),
-        Triple("Meera", "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400", "🇺🇸"),
-        Triple("Rahul", "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400", "🇬🇧"),
-        Triple("Kavya", "https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?w=400", "🇮🇳"),
-        Triple("Pranav", "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=400", "🇮🇳"),
-        Triple("Neha", "https://images.unsplash.com/photo-1531123897727-8f129e1688ce?w=400", "🇮🇳"),
-        Triple("Nikhil", "https://images.unsplash.com/photo-1489980508314-941910ded1f4?w=400", "🇮🇳"),
-        Triple("Liam", "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=410", "🇺🇸"),
-        Triple("Sophie", "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=410", "🇫🇷"),
-        Triple("Hiro", "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=410", "🇯🇵"),
-        Triple("Anya", "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=410", "🇷🇺"),
-        Triple("Jose", "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=410", "🇪🇸"),
-        Triple("Fatima", "https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?w=410", "🇦🇪"),
-        Triple("Jack", "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400", "🇬🇧"),
-        Triple("Emily", "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=420", "🇺🇸"),
-        Triple("Chloe", "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=420", "🇫🇷"),
-        Triple("David", "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=420", "🇩🇪"),
-        Triple("Maria", "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=430", "🇮🇹"),
-        Triple("Wei", "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=430", "🇨🇳"),
-        Triple("Jin", "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=430", "🇰🇷")
-    )
+    val totalCount = 1 + speakerSeats.size + listenerSeats.size
+    val speakingCount = 1 + speakerSeats.size
+    val listeningCount = listenerSeats.size
 
     Column(
         modifier = Modifier
@@ -3234,7 +3443,7 @@ fun PeopleBottomSheetContent(
             .padding(horizontal = 24.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        // Header Row: 24 People Title / Close Button
+        // Header Row: Total People / Close Button
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -3254,7 +3463,7 @@ fun PeopleBottomSheetContent(
                 Spacer(modifier = Modifier.width(16.dp))
                 Column {
                     Text(
-                        text = "24 People",
+                        text = "$totalCount People",
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
                         color = if (isDark) Color.White else Color.Black
@@ -3262,7 +3471,7 @@ fun PeopleBottomSheetContent(
                     Spacer(modifier = Modifier.height(2.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = "3 Speaking",
+                            text = "$speakingCount Speaking",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = if (isDark) Color.White.copy(alpha = 0.6f) else Color.Gray
@@ -3274,7 +3483,7 @@ fun PeopleBottomSheetContent(
                                 .background(if (isDark) currentTheme.themeColor else ChillGoldIcon, CircleShape)
                         )
                         Text(
-                            text = "21 Listening",
+                            text = "$listeningCount Listening",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = if (isDark) Color.White.copy(alpha = 0.6f) else Color.Gray
@@ -3311,50 +3520,26 @@ fun PeopleBottomSheetContent(
             )
         }
 
-        // Speakers Row
+        // Host & Speakers Row
+        val allSpeakers = listOf(hostSeat) + speakerSeats
         Row(
             modifier = Modifier.fillMaxWidth().padding(bottom = 28.dp),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
-            // Speaker 1: Riya (Host)
-            PeopleSheetSpeakerItem(
-                name = "Riya",
-                imageUrl = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400",
-                badgeText = "Host",
-                badgeColor = Color(0xFFFEF3C7),
-                isHost = true,
-                flagEmoji = "🇮🇳",
-                isDarkMode = isDark,
-                onClick = {
-                    onUserClick(PrivateChatItem("2", "Riya", "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400", "in", "", "Now", 0, true, false))
-                }
-            )
-            // Speaker 2: Sara (Speaker)
-            PeopleSheetSpeakerItem(
-                name = "Sara",
-                imageUrl = "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400",
-                badgeText = "Speaker",
-                badgeColor = Color(0xFFF3F4F6),
-                isHost = false,
-                flagEmoji = "🇵🇰",
-                isDarkMode = isDark,
-                onClick = {
-                    onUserClick(PrivateChatItem("1", "Sara", "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400", "in", "", "Now", 0, true, false))
-                }
-            )
-            // Speaker 3: Arjun (Speaker)
-            PeopleSheetSpeakerItem(
-                name = "Arjun",
-                imageUrl = "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400",
-                badgeText = "Speaker",
-                badgeColor = Color(0xFFF3F4F6),
-                isHost = false,
-                flagEmoji = "🇮🇳",
-                isDarkMode = isDark,
-                onClick = {
-                    onUserClick(PrivateChatItem("3", "Arjun", "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400", "in", "", "Now", 0, true, false))
-                }
-            )
+            allSpeakers.forEach { sp ->
+                PeopleSheetSpeakerItem(
+                    name = sp.name,
+                    imageUrl = sp.imageUrl,
+                    badgeText = if (sp.isHost) "Host" else "Speaker",
+                    badgeColor = if (sp.isHost) Color(0xFFFEF3C7) else Color(0xFFF3F4F6),
+                    isHost = sp.isHost,
+                    flagEmoji = mapCountryCodeToFlagEmoji(sp.flagCode),
+                    isDarkMode = isDark,
+                    onClick = {
+                        onUserClick(PrivateChatItem(sp.name.hashCode().toString(), sp.name, sp.imageUrl, sp.flagCode, "", "Now", 0, true, false))
+                    }
+                )
+            }
         }
 
         // Listening Section Title
@@ -3365,16 +3550,29 @@ fun PeopleBottomSheetContent(
             CustomHeadphoneIcon(tint = if (isDark) currentTheme.themeColor else ChillGoldIcon, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = if (showAllListeners) "All 21 Listeners" else "Listening",
+                text = "Listening ($listeningCount)",
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
                 color = if (isDark) Color.White.copy(alpha = 0.5f) else Color.Gray
             )
         }
 
-        if (showAllListeners) {
-            val chunkedExpanded = allExpandedListeners.chunked(4)
-            chunkedExpanded.forEach { rowItems ->
+        if (listenerSeats.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "No listeners in the room yet. Invite friends!",
+                    fontSize = 13.sp,
+                    color = if (isDark) Color.White.copy(alpha = 0.5f) else Color.Gray
+                )
+            }
+        } else {
+            val listenerRows = listenerSeats.chunked(4)
+            listenerRows.forEach { rowItems ->
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -3384,10 +3582,22 @@ fun PeopleBottomSheetContent(
                             name = name,
                             imageUrl = imageUrl,
                             modifier = Modifier.weight(1f),
-                            flagEmoji = flagCode,
+                            flagEmoji = mapCountryCodeToFlagEmoji(flagCode),
                             isDarkMode = isDark,
                             onClick = {
-                                onUserClick(PrivateChatItem(name.hashCode().toString(), name, imageUrl, mapFlagEmojiToCode(flagCode), "", "Now", 0, true, false))
+                                onUserClick(
+                                    PrivateChatItem(
+                                        name.hashCode().toString(),
+                                        name,
+                                        imageUrl,
+                                        flagCode,
+                                        "",
+                                        "Now",
+                                        0,
+                                        true,
+                                        false
+                                    )
+                                )
                             }
                         )
                     }
@@ -3395,126 +3605,6 @@ fun PeopleBottomSheetContent(
                         repeat(4 - rowItems.size) {
                             Spacer(modifier = Modifier.weight(1f))
                         }
-                    }
-                }
-            }
-        } else {
-            // Listeners Grid (Rows of 4 items)
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    PeopleSheetListenerItem("Ananya", "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400", Modifier.weight(1f), flagEmoji = "🇮🇳", isDarkMode = isDark, onClick = {
-                        onUserClick(PrivateChatItem("5", "Ananya", "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400", "in", "", "Now", 0, true, false))
-                    })
-                    PeopleSheetListenerItem("Vihaan", "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400", Modifier.weight(1f), flagEmoji = "🇯🇵", isDarkMode = isDark, onClick = {
-                        onUserClick(PrivateChatItem("4", "Vihaan", "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400", "in", "", "Now", 0, true, false))
-                    })
-                    PeopleSheetListenerItem("Meera", "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400", Modifier.weight(1f), flagEmoji = "🇺🇸", isDarkMode = isDark, onClick = {
-                        onUserClick(PrivateChatItem("10", "Meera", "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400", "in", "", "Now", 0, true, false))
-                    })
-                    PeopleSheetListenerItem("Rahul", "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400", Modifier.weight(1f), flagEmoji = "🇬🇧", isDarkMode = isDark, onClick = {
-                        onUserClick(PrivateChatItem("11", "Rahul", "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400", "in", "", "Now", 0, true, false))
-                    })
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    PeopleSheetListenerItem("Kavya", "https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?w=400", Modifier.weight(1f), flagEmoji = "🇮🇳", isDarkMode = isDark, onClick = {
-                        onUserClick(PrivateChatItem("12", "Kavya", "https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?w=400", "in", "", "Now", 0, true, false))
-                    })
-                    PeopleSheetListenerItem("Pranav", "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=400", Modifier.weight(1f), flagEmoji = "🇮🇳", isDarkMode = isDark, onClick = {
-                        onUserClick(PrivateChatItem("13", "Pranav", "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=400", "in", "", "Now", 0, true, false))
-                    })
-                    PeopleSheetListenerItem("Neha", "https://images.unsplash.com/photo-1531123897727-8f129e1688ce?w=400", Modifier.weight(1f), flagEmoji = "🇮🇳", isDarkMode = isDark, onClick = {
-                        onUserClick(PrivateChatItem("14", "Neha", "https://images.unsplash.com/photo-1531123897727-8f129e1688ce?w=400", "in", "", "Now", 0, true, false))
-                    })
-                    PeopleSheetListenerItem("Nikhil", "https://images.unsplash.com/photo-1489980508314-941910ded1f4?w=400", Modifier.weight(1f), flagEmoji = "🇮🇳", isDarkMode = isDark, onClick = {
-                        onUserClick(PrivateChatItem("15", "Nikhil", "https://images.unsplash.com/photo-1489980508314-941910ded1f4?w=400", "in", "", "Now", 0, true, false))
-                    })
-                }
-            }
-
-            Spacer(modifier = Modifier.height(28.dp))
-
-            // Overlapping Listener Avatar Stack
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable { showAllListeners = true }
-                    .padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.height(32.dp).width(120.dp)) {
-                        val faces = listOf(
-                            "https://images.unsplash.com/photo-1524250502761-1ac6f2e30d43?w=200",
-                            "https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=200",
-                            "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200",
-                            "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=200"
-                        )
-                        faces.forEachIndexed { i, imgUrl ->
-                            Box(
-                                modifier = Modifier
-                                    .offset(x = (18 * i).dp)
-                                    .size(32.dp)
-                                    .clip(CircleShape)
-                                    .border(1.5.dp, if (isDark) Color(0xFF1E293B) else Color.White, CircleShape)
-                            ) {
-                                AsyncImage(
-                                    model = imgUrl,
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                        }
-                        Box(
-                            modifier = Modifier
-                                .offset(x = 72.dp)
-                                .size(32.dp)
-                                .background(if (isDark) Color.White.copy(alpha = 0.15f) else Color(0xFFF3F4F6), CircleShape)
-                                .border(1.5.dp, if (isDark) Color(0xFF1E293B) else Color.White, CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "+13",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isDark) Color.White else Color.Gray
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "and 13 more listeners",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = if (isDark) Color.White.copy(alpha = 0.6f) else Color.Gray
-                    )
-                }
-                
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Canvas(modifier = Modifier.size(16.dp)) {
-                        val w = size.width
-                        val h = size.height
-                        val path = Path().apply {
-                            moveTo(w * 0.35f, h * 0.25f)
-                            lineTo(w * 0.6f, h * 0.5f)
-                            lineTo(w * 0.35f, h * 0.75f)
-                        }
-                        drawPath(
-                            path = path,
-                            color = if (isDark) Color.White.copy(alpha = 0.6f) else Color.Gray,
-                            style = Stroke(width = w * 0.12f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-                        )
                     }
                 }
             }
