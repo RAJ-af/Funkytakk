@@ -51,6 +51,7 @@ import com.example.R
 import com.example.SupabaseClient
 import com.example.SupabaseSessionManager
 import com.example.UpdateParticipantMicRequest
+import com.example.ui.components.FloatingBubbleLayout
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -100,6 +101,7 @@ class VoiceRoomOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, 
         createNotificationChannel()
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         updateScreenDimensions()
+        VoiceRoomOverlayManager.setServiceRunning(true)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -119,9 +121,13 @@ class VoiceRoomOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, 
                 return START_NOT_STICKY
             }
             else -> {
-                startForegroundNotification()
-                showOverlayView()
-                observeOverlayState()
+                try {
+                    startForegroundNotification()
+                    showOverlayView()
+                    observeOverlayState()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }
         }
         return START_STICKY
@@ -212,15 +218,56 @@ class VoiceRoomOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, 
             )
             .build()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            ServiceCompat.startForeground(
-                this,
-                NOTIFICATION_ID,
-                notification,
+        val hasRecordAudio = androidx.core.content.ContextCompat.checkSelfPermission(
+            this,
+            android.Manifest.permission.RECORD_AUDIO
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+        val fgsType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            if (hasRecordAudio) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            } else {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (hasRecordAudio) {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            )
+            } else {
+                0
+            }
         } else {
-            startForeground(NOTIFICATION_ID, notification)
+            0
+        }
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && fgsType != 0) {
+                ServiceCompat.startForeground(
+                    this,
+                    NOTIFICATION_ID,
+                    notification,
+                    fgsType
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: SecurityException) {
+            e.printStackTrace()
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    ServiceCompat.startForeground(
+                        this,
+                        NOTIFICATION_ID,
+                        notification,
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                    )
+                } else {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
+            } catch (fallbackEx: Exception) {
+                fallbackEx.printStackTrace()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
@@ -433,6 +480,7 @@ class VoiceRoomOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, 
 
     override fun onDestroy() {
         removeOverlayView()
+        VoiceRoomOverlayManager.setServiceRunning(false)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
@@ -442,228 +490,4 @@ class VoiceRoomOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, 
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
-}
-
-@Composable
-fun FloatingBubbleLayout(
-    avatarUrl: String,
-    isMicEnabled: Boolean,
-    isSpeaking: Boolean,
-    isOptionsOpen: Boolean,
-    isSnappedToRight: Boolean,
-    onToggleOptions: () -> Unit,
-    onShortTap: () -> Unit,
-    onDrag: (Float, Float) -> Unit,
-    onDragEnd: () -> Unit,
-    onToggleMic: () -> Unit,
-    onLeaveRoom: () -> Unit
-) {
-    // Theme Colors matching the user's reference mockup
-    val goldBorder = Color(0xFFF59E0B) // Amber/Gold glowing ring
-    val speakingDotColor = Color(0xFFFBBF24) // Yellow dot at top-right rim
-    val redBorder = Color(0xFFEF4444) // Coral red glow
-
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val glowScale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.08f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(750, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "glowScale"
-    )
-
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
-        modifier = Modifier
-            .wrapContentSize()
-            .padding(10.dp)
-    ) {
-        if (isSnappedToRight && isOptionsOpen) {
-            // Satellite Circles on Left when snapped to Right edge
-            SatelliteOptions(
-                isMicEnabled = isMicEnabled,
-                goldBorder = goldBorder,
-                redBorder = redBorder,
-                onToggleMic = onToggleMic,
-                onLeaveRoom = onLeaveRoom,
-                onClose = onToggleOptions
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-        }
-
-        // Main Bubble Box
-        Box(
-            modifier = Modifier
-                .size(66.dp)
-                .pointerInput(Unit) {
-                    detectDragGestures(
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            onDrag(dragAmount.x, dragAmount.y)
-                        },
-                        onDragEnd = { onDragEnd() }
-                    )
-                }
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onTap = {
-                            if (isOptionsOpen) {
-                                onToggleOptions()
-                            } else {
-                                onShortTap()
-                            }
-                        },
-                        onLongPress = {
-                            onToggleOptions()
-                        }
-                    )
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            // Pulsing golden glow behind avatar when speaking
-            if (isSpeaking) {
-                Box(
-                    modifier = Modifier
-                        .size(64.dp)
-                        .clip(CircleShape)
-                        .background(
-                            Brush.radialGradient(
-                                listOf(goldBorder.copy(alpha = 0.5f), Color.Transparent)
-                            )
-                        )
-                )
-            }
-
-            // Avatar Container with Golden Border
-            Box(
-                modifier = Modifier
-                    .size(58.dp)
-                    .shadow(12.dp, CircleShape, spotColor = goldBorder)
-                    .clip(CircleShape)
-                    .border(BorderStroke(2.5.dp, goldBorder), CircleShape)
-                    .background(Color(0xFF0F0F12)),
-                contentAlignment = Alignment.Center
-            ) {
-                AsyncImage(
-                    model = avatarUrl,
-                    contentDescription = "Floating Voice Avatar",
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(CircleShape),
-                    contentScale = ContentScale.Crop
-                )
-            }
-
-            // Speaking Indicator Dot on top-right rim (exactly matching reference images)
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .offset(x = (-3).dp, y = 3.dp)
-                    .size(13.dp)
-                    .shadow(4.dp, CircleShape, spotColor = speakingDotColor)
-                    .clip(CircleShape)
-                    .background(speakingDotColor)
-                    .border(BorderStroke(1.5.dp, Color(0xFF0F0F12)), CircleShape)
-            )
-        }
-
-        if (!isSnappedToRight && isOptionsOpen) {
-            // Satellite Circles on Right when snapped to Left edge
-            Spacer(modifier = Modifier.width(6.dp))
-            SatelliteOptions(
-                isMicEnabled = isMicEnabled,
-                goldBorder = goldBorder,
-                redBorder = redBorder,
-                onToggleMic = onToggleMic,
-                onLeaveRoom = onLeaveRoom,
-                onClose = onToggleOptions
-            )
-        }
-    }
-}
-
-@Composable
-private fun SatelliteOptions(
-    isMicEnabled: Boolean,
-    goldBorder: Color,
-    redBorder: Color,
-    onToggleMic: () -> Unit,
-    onLeaveRoom: () -> Unit,
-    onClose: () -> Unit
-) {
-    // Organic membrane / connected satellite column
-    Box(
-        modifier = Modifier
-            .wrapContentSize()
-            .drawBehind {
-                // Soft organic gradient aura connecting the satellites
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(Color(0xFF1F1D2B).copy(alpha = 0.85f), Color.Transparent),
-                        center = center,
-                        radius = size.maxDimension / 1.5f
-                    )
-                )
-            },
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(4.dp)
-        ) {
-            // Satellite 1: Mic Toggle (Upper Circle)
-            Box(
-                modifier = Modifier
-                    .size(46.dp)
-                    .shadow(
-                        elevation = if (isMicEnabled) 10.dp else 4.dp,
-                        shape = CircleShape,
-                        spotColor = if (isMicEnabled) goldBorder else Color.Black
-                    )
-                    .clip(CircleShape)
-                    .background(
-                        if (isMicEnabled) Color(0xFF1E1A11) else Color(0xFF18181B)
-                    )
-                    .border(
-                        BorderStroke(
-                            width = if (isMicEnabled) 2.dp else 1.2.dp,
-                            color = if (isMicEnabled) goldBorder else Color(0xFF52525B)
-                        ),
-                        CircleShape
-                    )
-                    .clickable { onToggleMic() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = if (isMicEnabled) Icons.Default.Mic else Icons.Default.MicOff,
-                    contentDescription = if (isMicEnabled) "Mute" else "Unmute",
-                    tint = if (isMicEnabled) Color.White else Color(0xFFA1A1AA),
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-
-            // Satellite 2: Leave Room (Red X Circle - Lower Circle)
-            Box(
-                modifier = Modifier
-                    .size(46.dp)
-                    .shadow(10.dp, CircleShape, spotColor = redBorder)
-                    .clip(CircleShape)
-                    .background(Color(0xFF261214))
-                    .border(BorderStroke(2.dp, redBorder), CircleShape)
-                    .clickable { onLeaveRoom() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Leave Voice Room",
-                    tint = Color.White,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-        }
-    }
 }

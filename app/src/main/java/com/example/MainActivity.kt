@@ -16,7 +16,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import com.example.ui.screens.*
-import com.example.ui.components.DynamicIslandOverlay
+import com.example.ui.components.FloatingBubbleOverlay
 import com.example.ui.theme.MyApplicationTheme
 
 class MainActivity : ComponentActivity() {
@@ -303,10 +303,19 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    // Floating Dynamic Island Overlay (when in active room but navigated elsewhere)
+                    // Floating Bubble Overlay (replacement for Dynamic Island when in active room but navigated elsewhere)
                     val activeRoomId by authViewModel.activeRoomId.collectAsState()
+
+                    LaunchedEffect(currentScreen) {
+                        if (currentScreen == "voice_room") {
+                            com.example.service.VoiceRoomOverlayManager.stopService(this@MainActivity)
+                        } else if (activeRoomId != null && com.example.service.OverlayPermissionHelper.canDrawOverlays(this@MainActivity)) {
+                            com.example.service.VoiceRoomOverlayManager.startServiceIfPermitted(this@MainActivity)
+                        }
+                    }
+
                     if (activeRoomId != null && currentScreen != "voice_room") {
-                        DynamicIslandOverlay(
+                        FloatingBubbleOverlay(
                             viewModel = authViewModel,
                             onNavigateToRoom = {
                                 currentScreen = "voice_room"

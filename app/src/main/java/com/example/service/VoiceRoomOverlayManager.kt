@@ -26,8 +26,15 @@ object VoiceRoomOverlayManager {
     private val _isSpeaking = MutableStateFlow(false)
     val isSpeaking: StateFlow<Boolean> = _isSpeaking.asStateFlow()
 
+    private val _isServiceRunning = MutableStateFlow(false)
+    val isServiceRunning: StateFlow<Boolean> = _isServiceRunning.asStateFlow()
+
     var onToggleMicAction: (() -> Unit)? = null
     var onLeaveRoomAction: (() -> Unit)? = null
+
+    fun setServiceRunning(running: Boolean) {
+        _isServiceRunning.value = running
+    }
 
     fun updateSession(
         roomId: String?,
@@ -61,13 +68,17 @@ object VoiceRoomOverlayManager {
 
     fun startServiceIfPermitted(context: Context) {
         if (!OverlayPermissionHelper.canDrawOverlays(context)) return
-        val intent = Intent(context, VoiceRoomOverlayService::class.java).apply {
-            action = VoiceRoomOverlayService.ACTION_START
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(intent)
-        } else {
-            context.startService(intent)
+        try {
+            val intent = Intent(context, VoiceRoomOverlayService::class.java).apply {
+                action = VoiceRoomOverlayService.ACTION_START
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 

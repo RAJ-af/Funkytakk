@@ -1,6 +1,11 @@
 package com.example.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import com.example.UpdateVoiceRoomRequest
 import com.example.SpeakerRequestInsert
 import androidx.compose.foundation.BorderStroke
@@ -332,6 +337,23 @@ fun VoiceRoomScreen(
         com.example.service.OverlayPermissionHelper.canDrawOverlays(context)
     }
     var showOverlayBanner by remember { mutableStateOf(!hasOverlayPermission) }
+
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            viewModel?.setMicEnabled(true, context)
+            if (com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
+                com.example.service.VoiceRoomOverlayManager.startServiceIfPermitted(context)
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
 
     val currentUserId = remember(context) { SupabaseSessionManager.getUserId(context) ?: "" }
     val scope = rememberCoroutineScope()
@@ -1847,10 +1869,14 @@ fun VoiceRoomScreen(
                                 .clip(CircleShape)
                                 .background(if (isMicOn) ChillGoldIcon else Color(0xFFE53935))
                                 .clickable {
-                                    if (viewModel != null) {
-                                        viewModel.toggleMic(context)
+                                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                                        micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                     } else {
-                                        isMicOn = !isMicOn
+                                        if (viewModel != null) {
+                                            viewModel.toggleMic(context)
+                                        } else {
+                                            isMicOn = !isMicOn
+                                        }
                                     }
                                 },
                             contentAlignment = Alignment.Center
