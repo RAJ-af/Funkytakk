@@ -130,6 +130,157 @@ class AuthViewModel : ViewModel() {
         }
     }
 
+    fun processDeepLinkUri(uri: Uri?, context: Context, onNavigateToRoom: (() -> Unit)? = null) {
+        if (uri == null) return
+        if (uri.scheme?.lowercase() != "funkytalk") return
+
+        val host = uri.host?.lowercase() ?: ""
+        val path = uri.path ?: ""
+        val pathSegments = uri.pathSegments
+
+        Log.d("DeepLink", "Processing deep link: $uri, host=$host, path=$path, segments=$pathSegments")
+
+        // Handle funkytalk://open
+        if (host == "open") {
+            Log.d("DeepLink", "Opened app via funkytalk://open")
+            return
+        }
+
+        // Handle funkytalk://room/{code} or funkytalk://room?code={code} or funkytalk:///room/{code}
+        var roomCode: String? = null
+        if (host == "room") {
+            roomCode = pathSegments.firstOrNull() ?: uri.getQueryParameter("code") ?: uri.getQueryParameter("id")
+        } else if (pathSegments.contains("room")) {
+            val idx = pathSegments.indexOf("room")
+            if (idx >= 0 && idx + 1 < pathSegments.size) {
+                roomCode = pathSegments[idx + 1]
+            }
+        } else if (host.isNotBlank() && host != "open") {
+            // Fallback for funkytalk://{code}
+            roomCode = host
+        }
+
+        val cleanCode = roomCode?.trim()?.removePrefix("/")
+        if (!cleanCode.isNullOrBlank()) {
+            joinRoomByCodeOrDirect(
+                codeOrId = cleanCode,
+                context = context,
+                onSuccess = onNavigateToRoom
+            )
+        }
+    }
+
+    fun joinRoomByCodeOrDirect(
+        codeOrId: String,
+        context: Context,
+        onSuccess: (() -> Unit)? = null
+    ) {
+        val clean = codeOrId.trim()
+        if (clean.isBlank()) return
+
+        viewModelScope.launch(Dispatchers.IO) {
+            withContext(Dispatchers.Main) {
+                Toast.makeText(context, "Opening room $clean...", Toast.LENGTH_SHORT).show()
+            }
+
+            val token = SupabaseSessionManager.getBearerToken(context)
+            var targetRoomId: String? = null
+            var targetRoomTitle: String? = null
+
+            // 1. Try public room lookup by ID first
+            try {
+                val response = SupabaseClient.api.getVoiceRoomById(
+                    auth = token,
+                    idEq = "eq.$clean"
+                )
+                if (response.isSuccessful) {
+                    val room = response.body()?.firstOrNull()
+                    if (room != null && room.is_private != true) {
+                        targetRoomId = room.id
+                        targetRoomTitle = room.title ?: "Voice Room"
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("DeepLink", "Direct room ID lookup failed: ${e.message}")
+            }
+
+            // 2. If not resolved, check all voice rooms for matching join_code or public room ID
+            if (targetRoomId == null) {
+                try {
+                    val allRoomsResp = SupabaseClient.api.getVoiceRooms(auth = token)
+                    if (allRoomsResp.isSuccessful) {
+                        val matchingPublicRoom = allRoomsResp.body()?.find {
+                            (it.id == clean || it.join_code.equals(clean, ignoreCase = true)) && it.is_private != true
+                        }
+                        if (matchingPublicRoom != null) {
+                            targetRoomId = matchingPublicRoom.id
+                            targetRoomTitle = matchingPublicRoom.title ?: "Voice Room"
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w("DeepLink", "All rooms query check failed: ${e.message}")
+                }
+            }
+
+            // 3. If not found or if private, call the existing RPC join_room_by_code
+            if (targetRoomId == null) {
+                try {
+                    val rpcResponse = SupabaseClient.api.joinRoomByCode(
+                        auth = token,
+                        body = mapOf("entered_code" to clean)
+                    )
+                    val rawBody = rpcResponse.body()?.string()?.trim() ?: ""
+                    Log.d("DeepLink", "joinRoomByCode RPC response status: ${rpcResponse.code()}, body: $rawBody")
+
+                    if (rpcResponse.isSuccessful && rawBody.isNotBlank() && rawBody != "null") {
+                        if (rawBody.startsWith("{")) {
+                            val json = org.json.JSONObject(rawBody)
+                            targetRoomId = json.optString("room_id").ifBlank { json.optString("id") }
+                            targetRoomTitle = json.optString("title").ifBlank { "Voice Room" }
+                        } else if (rawBody.startsWith("[")) {
+                            val array = org.json.JSONArray(rawBody)
+                            if (array.length() > 0) {
+                                val json = array.getJSONObject(0)
+                                targetRoomId = json.optString("room_id").ifBlank { json.optString("id") }
+                                targetRoomTitle = json.optString("title").ifBlank { "Voice Room" }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("DeepLink", "Error calling joinRoomByCode for deep link $clean", e)
+                }
+            }
+
+            // 4. Default fallback for preset room IDs
+            if (targetRoomId == null) {
+                val knownRooms = listOf("FT5272", "FT1902", "FT8821", "FT4490", "FT7312", "FT9021")
+                if (knownRooms.any { it.equals(clean, ignoreCase = true) }) {
+                    targetRoomId = clean.uppercase()
+                    targetRoomTitle = when (clean.uppercase()) {
+                        "FT5272" -> "English Speaking Club 🎙️"
+                        "FT1902" -> "Korean Daily Talk 🇰🇷"
+                        "FT8821" -> "Spanish Practice Room 🇪🇸"
+                        "FT4490" -> "Japanese Manga Chat 🇯🇵"
+                        "FT7312" -> "German Grammar & Idioms 🇩🇪"
+                        "FT9021" -> "French Cafe Casual 🇫🇷"
+                        else -> "Voice Room $clean"
+                    }
+                }
+            }
+
+            withContext(Dispatchers.Main) {
+                if (!targetRoomId.isNullOrBlank()) {
+                    val finalTitle = targetRoomTitle ?: "Voice Room"
+                    Toast.makeText(context, "Entering $finalTitle...", Toast.LENGTH_SHORT).show()
+                    joinRoom(targetRoomId, finalTitle, context)
+                    onSuccess?.invoke()
+                } else {
+                    Toast.makeText(context, "Could not join room '$clean'. Room not found or invalid code.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
     private var firebaseAuth: FirebaseAuth? = null
 
     fun initializeFirebaseIfNeeded(context: Context) {

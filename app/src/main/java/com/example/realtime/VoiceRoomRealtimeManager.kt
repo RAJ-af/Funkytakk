@@ -18,6 +18,16 @@ import java.util.concurrent.atomic.AtomicInteger
 sealed class RealtimeTableEvent {
     data class VoiceRoomChanged(val eventType: String, val record: JSONObject?) : RealtimeTableEvent()
     data class ParticipantChanged(val eventType: String, val record: JSONObject?, val roomId: String?) : RealtimeTableEvent()
+    data class RoomMessageInserted(val record: JSONObject?, val roomId: String?) : RealtimeTableEvent()
+    data class RoomEmojiBroadcast(val roomId: String, val emoji: String, val userId: String) : RealtimeTableEvent()
+    data class RoomChatBroadcast(
+        val roomId: String,
+        val messageId: String,
+        val userId: String,
+        val message: String,
+        val senderName: String,
+        val senderAvatar: String
+    ) : RealtimeTableEvent()
 }
 
 object VoiceRoomRealtimeManager {
@@ -31,6 +41,8 @@ object VoiceRoomRealtimeManager {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var heartbeatJob: Job? = null
     private var reconnectJob: Job? = null
+
+    private val subscribedRoomChannels = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     private val _events = MutableSharedFlow<RealtimeTableEvent>(extraBufferCapacity = 64)
     val events: SharedFlow<RealtimeTableEvent> = _events.asSharedFlow()
@@ -122,6 +134,30 @@ object VoiceRoomRealtimeManager {
             put("ref", refCounter.getAndIncrement().toString())
         }
         ws.send(joinParticipants.toString())
+
+        // Subscribe to room_messages INSERT changes
+        val joinRoomMessages = JSONObject().apply {
+            put("topic", "realtime:public:room_messages")
+            put("event", "phx_join")
+            put("payload", JSONObject().apply {
+                put("config", JSONObject().apply {
+                    put("postgres_changes", org.json.JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("event", "INSERT")
+                            put("schema", "public")
+                            put("table", "room_messages")
+                        })
+                    })
+                })
+            })
+            put("ref", refCounter.getAndIncrement().toString())
+        }
+        ws.send(joinRoomMessages.toString())
+
+        // Resubscribe to any active room broadcast channels
+        subscribedRoomChannels.forEach { roomId ->
+            sendJoinRoomChannel(ws, roomId)
+        }
     }
 
     private fun startHeartbeat(ws: WebSocket) {
@@ -151,20 +187,195 @@ object VoiceRoomRealtimeManager {
             val topic = json.optString("topic")
             val payload = json.optJSONObject("payload")
 
-            if (event == "postgres_changes" && payload != null) {
+            // Realtime Broadcast Event on per-room channel (e.g. topic "realtime:room:xyz" or "room:xyz")
+            if (event == "broadcast" || event == "emoji" || event == "chat_message") {
+                val roomId = when {
+                    topic.contains("room:") -> topic.substringAfter("room:").substringBefore(":")
+                    else -> ""
+                }
+                val innerPayload = payload?.optJSONObject("payload") ?: payload
+                val broadcastType = innerPayload?.optString("event") ?: innerPayload?.optString("type") ?: event
+                val emoji = innerPayload?.optString("emoji") ?: ""
+                val chatText = innerPayload?.optString("message") ?: innerPayload?.optString("text") ?: ""
+                val msgId = innerPayload?.optString("id") ?: ""
+                val userId = innerPayload?.optString("user_id") ?: ""
+                val senderName = innerPayload?.optString("sender_name") ?: ""
+                val senderAvatar = innerPayload?.optString("sender_avatar") ?: ""
+
+                if (roomId.isNotBlank() && emoji.isNotBlank() && broadcastType != "chat_message") {
+                    Log.d(TAG, "Received broadcast emoji '$emoji' for room '$roomId' from '$userId'")
+                    _events.tryEmit(RealtimeTableEvent.RoomEmojiBroadcast(roomId, emoji, userId))
+                } else if (roomId.isNotBlank() && chatText.isNotBlank()) {
+                    Log.d(TAG, "Received broadcast chat message for room '$roomId' from '$userId': $chatText")
+                    _events.tryEmit(
+                        RealtimeTableEvent.RoomChatBroadcast(
+                            roomId = roomId,
+                            messageId = msgId.ifBlank { "msg_${System.currentTimeMillis()}" },
+                            userId = userId,
+                            message = chatText,
+                            senderName = senderName,
+                            senderAvatar = senderAvatar
+                        )
+                    )
+                }
+            } else if (event == "postgres_changes" && payload != null) {
                 val data = payload.optJSONObject("data")
                 val record = data?.optJSONObject("record") ?: data?.optJSONObject("old_record")
                 val eventType = data?.optString("type") ?: ""
+                val table = data?.optString("table") ?: ""
 
-                if (topic.contains("voice_rooms")) {
+                if (table == "room_messages" || topic.contains("room_messages")) {
+                    val roomId = record?.optString("room_id")
+                    _events.tryEmit(RealtimeTableEvent.RoomMessageInserted(record, roomId))
+                } else if (table == "voice_rooms" || topic.contains("voice_rooms")) {
                     _events.tryEmit(RealtimeTableEvent.VoiceRoomChanged(eventType, record))
-                } else if (topic.contains("room_participants")) {
+                } else if (table == "room_participants" || topic.contains("room_participants")) {
                     val roomId = record?.optString("room_id")
                     _events.tryEmit(RealtimeTableEvent.ParticipantChanged(eventType, record, roomId))
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error handling message", e)
+        }
+    }
+
+    private fun sendJoinRoomChannel(ws: WebSocket, roomId: String) {
+        try {
+            val joinMsg = JSONObject().apply {
+                put("topic", "realtime:room:$roomId")
+                put("event", "phx_join")
+                put("payload", JSONObject().apply {
+                    put("config", JSONObject().apply {
+                        put("broadcast", JSONObject().apply {
+                            put("self", true)
+                            put("ack", false)
+                        })
+                        put("presence", JSONObject().apply {
+                            put("key", "")
+                        })
+                    })
+                })
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(joinMsg.toString())
+            Log.d(TAG, "Subscribed to broadcast channel realtime:room:$roomId")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error sending join for room channel $roomId", e)
+        }
+    }
+
+    fun subscribeRoomChannel(roomId: String) {
+        if (roomId.isBlank()) return
+        subscribedRoomChannels.add(roomId)
+        val ws = webSocket ?: return
+        sendJoinRoomChannel(ws, roomId)
+    }
+
+    fun leaveRoomChannel(roomId: String) {
+        if (roomId.isBlank()) return
+        subscribedRoomChannels.remove(roomId)
+        val ws = webSocket ?: return
+        try {
+            val leaveMsg = JSONObject().apply {
+                put("topic", "realtime:room:$roomId")
+                put("event", "phx_leave")
+                put("payload", JSONObject())
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(leaveMsg.toString())
+            Log.d(TAG, "Left broadcast channel realtime:room:$roomId")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error sending leave for room channel $roomId", e)
+        }
+    }
+
+    fun broadcastEmoji(roomId: String, emoji: String, userId: String) {
+        if (roomId.isBlank() || emoji.isBlank()) return
+        val ws = webSocket ?: return
+        try {
+            if (!subscribedRoomChannels.contains(roomId)) {
+                subscribeRoomChannel(roomId)
+            }
+            val broadcastMsg = JSONObject().apply {
+                put("topic", "realtime:room:$roomId")
+                put("event", "broadcast")
+                put("payload", JSONObject().apply {
+                    put("type", "broadcast")
+                    put("event", "emoji")
+                    put("payload", JSONObject().apply {
+                        put("emoji", emoji)
+                        put("user_id", userId)
+                    })
+                })
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(broadcastMsg.toString())
+            Log.d(TAG, "Broadcasted emoji '$emoji' to room:$roomId from $userId")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error broadcasting emoji to room $roomId", e)
+        }
+    }
+
+    fun broadcastRoomMessage(
+        roomId: String,
+        message: String,
+        userId: String,
+        senderName: String,
+        senderAvatar: String,
+        messageId: String = "msg_${System.currentTimeMillis()}"
+    ) {
+        if (roomId.isBlank() || message.isBlank()) return
+        val ws = webSocket ?: return
+        try {
+            if (!subscribedRoomChannels.contains(roomId)) {
+                subscribeRoomChannel(roomId)
+            }
+            val broadcastMsg = JSONObject().apply {
+                put("topic", "realtime:room:$roomId")
+                put("event", "broadcast")
+                put("payload", JSONObject().apply {
+                    put("type", "broadcast")
+                    put("event", "chat_message")
+                    put("payload", JSONObject().apply {
+                        put("id", messageId)
+                        put("message", message)
+                        put("user_id", userId)
+                        put("sender_name", senderName)
+                        put("sender_avatar", senderAvatar)
+                    })
+                })
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(broadcastMsg.toString())
+            Log.d(TAG, "Broadcasted chat message to room:$roomId from $userId")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error broadcasting chat message to room $roomId", e)
+        }
+    }
+
+    fun subscribeRoomMessages(roomId: String) {
+        val ws = webSocket ?: return
+        try {
+            val joinMsg = JSONObject().apply {
+                put("topic", "realtime:public:room_messages:room_id=eq.$roomId")
+                put("event", "phx_join")
+                put("payload", JSONObject().apply {
+                    put("config", JSONObject().apply {
+                        put("postgres_changes", org.json.JSONArray().apply {
+                            put(JSONObject().apply {
+                                put("event", "INSERT")
+                                put("schema", "public")
+                                put("table", "room_messages")
+                                put("filter", "room_id=eq.$roomId")
+                            })
+                        })
+                    })
+                })
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(joinMsg.toString())
+        } catch (e: Exception) {
+            Log.e(TAG, "Error subscribing to room messages for $roomId", e)
         }
     }
 

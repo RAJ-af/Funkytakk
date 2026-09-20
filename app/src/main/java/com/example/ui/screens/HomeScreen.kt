@@ -362,7 +362,7 @@ fun HomeScreen(
         }
     }
 
-    if (showAmusementEventsDialog && activeEventsList.isNotEmpty()) {
+    if (showAmusementEventsDialog) {
         AmusementEventsDialog(
             events = activeEventsList,
             onDismiss = { showAmusementEventsDialog = false },
@@ -415,9 +415,7 @@ fun HomeScreen(
                             selectedSortOption = selectedSortOption,
                             hasActiveEvents = activeEventsList.isNotEmpty(),
                             onOpenEvents = {
-                                if (activeEventsList.isNotEmpty()) {
-                                    showAmusementEventsDialog = true
-                                }
+                                showAmusementEventsDialog = true
                             },
                             onCreateRoom = { showCreateRoomBottomSheet = true },
                             onJoinWithCode = { showJoinCodeDialog = true },

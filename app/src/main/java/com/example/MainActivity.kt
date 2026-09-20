@@ -1,5 +1,7 @@
 package com.example
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -17,10 +19,12 @@ import com.example.ui.theme.MyApplicationTheme
 
 class MainActivity : ComponentActivity() {
     private val authViewModel: AuthViewModel by viewModels()
+    private var pendingDeepLinkUri by mutableStateOf<Uri?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         authViewModel.initializeFirebaseIfNeeded(applicationContext)
+        handleDeepLinkIntent(intent)
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
@@ -73,6 +77,26 @@ class MainActivity : ComponentActivity() {
                                     user.learningLanguage.isNullOrBlank() -> "onboarding_learning_language"
                                     else -> "onboarding_hobbies"
                                 }
+                            }
+                        }
+                    }
+
+                    // Process deep links when user is on home screen or voice room, or when deep link arrives
+                    LaunchedEffect(pendingDeepLinkUri, currentScreen, authState) {
+                        val uri = pendingDeepLinkUri
+                        if (uri != null) {
+                            val isUserReady = currentScreen == "home" || currentScreen == "voice_room" ||
+                                (authState is AuthState.Success && (authState as AuthState.Success).user.onboardingComplete)
+
+                            if (isUserReady) {
+                                pendingDeepLinkUri = null
+                                authViewModel.processDeepLinkUri(
+                                    uri = uri,
+                                    context = applicationContext,
+                                    onNavigateToRoom = {
+                                        currentScreen = "voice_room"
+                                    }
+                                )
                             }
                         }
                     }
@@ -267,6 +291,19 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleDeepLinkIntent(intent)
+    }
+
+    private fun handleDeepLinkIntent(intent: Intent?) {
+        val data: Uri? = intent?.data
+        if (data != null && data.scheme?.lowercase() == "funkytalk") {
+            pendingDeepLinkUri = data
         }
     }
 }

@@ -62,6 +62,8 @@ import com.example.R
 import com.example.AuthViewModel
 import com.example.UserProfile
 import com.example.SupabaseClient
+import com.example.SendRoomMessageRequest
+import com.example.SupabaseRoomMessage
 import com.example.realtime.VoiceRoomRealtimeManager
 import com.example.realtime.RealtimeTableEvent
 import android.util.Log
@@ -252,7 +254,10 @@ data class ChillRoomMessage(
     val senderImageUrl: String,
     val badge: String? = null,
     val badgeColor: Color = ChillPurpleAccent,
-    val text: String
+    val text: String,
+    val id: String? = null,
+    val userId: String? = null,
+    val createdAt: String? = null
 )
 
 data class PrivateChatItem(
@@ -324,54 +329,16 @@ fun VoiceRoomScreen(
     val scope = rememberCoroutineScope()
     var roomHostId by remember { mutableStateOf<String?>("") }
     var participantsList by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) } // Pair: userId, action (speaker/listener)
-
-    LaunchedEffect(activeRoomId) {
-        withContext(Dispatchers.IO) {
-            try {
-                val roomRes = SupabaseClient.api.getVoiceRoomById(idEq = "eq.$activeRoomId")
-                if (roomRes.isSuccessful) {
-                    val roomObj = roomRes.body()?.firstOrNull()
-                    if (roomObj != null) {
-                        roomHostId = roomObj.host_id ?: ""
-                        roomTitle = roomObj.title ?: "Voice Circle"
-                        roomDescription = roomObj.description ?: ""
-                        roomLanguage = roomObj.language ?: ""
-                        isPrivateRoomState = roomObj.is_private ?: false
-                        joinCodeState = roomObj.join_code ?: ""
-                    }
-                }
-                val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
-                if (partsRes.isSuccessful) {
-                    val list = partsRes.body() ?: emptyList()
-                    participantsList = list.map { Pair(it.user_id, it.role) }
-                }
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.e("VoiceRoomScreen", "Error fetching voice room data from Supabase", e)
-            }
-        }
-    }
-
-    LaunchedEffect(activeRoomId) {
-        VoiceRoomRealtimeManager.start()
-        VoiceRoomRealtimeManager.events.collect { event ->
-            if (event is RealtimeTableEvent.ParticipantChanged && event.roomId == activeRoomId) {
-                withContext(Dispatchers.IO) {
-                    try {
-                        val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
-                        if (partsRes.isSuccessful) {
-                            val list = partsRes.body() ?: emptyList()
-                            participantsList = list.map { Pair(it.user_id, it.role) }
-                        }
-                    } catch (e: kotlinx.coroutines.CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        Log.e("VoiceRoomScreen", "Error refreshing participants on realtime event", e)
-                    }
-                }
-            }
-        }
+    val messages = remember { mutableStateListOf<ChillRoomMessage>() }
+    val activeReactions = remember { mutableStateListOf<FloatingEmojiId>() }
+    val speakerReactions = remember {
+        mutableStateMapOf<String, List<FloatingEmojiId>>(
+            "Arjun" to emptyList(),
+            "Riya" to emptyList(),
+            "Sara" to emptyList(),
+            "Vihaan" to emptyList(),
+            "Ananya" to emptyList()
+        )
     }
 
     val speakers = remember(participantsList, supabaseProfiles, roomHostId) {
@@ -475,6 +442,174 @@ fun VoiceRoomScreen(
         mappedList
     }
 
+    LaunchedEffect(activeRoomId) {
+        withContext(Dispatchers.IO) {
+            try {
+                val roomRes = SupabaseClient.api.getVoiceRoomById(idEq = "eq.$activeRoomId")
+                if (roomRes.isSuccessful) {
+                    val roomObj = roomRes.body()?.firstOrNull()
+                    if (roomObj != null) {
+                        roomHostId = roomObj.host_id ?: ""
+                        roomTitle = roomObj.title ?: "Voice Circle"
+                        roomDescription = roomObj.description ?: ""
+                        roomLanguage = roomObj.language ?: ""
+                        isPrivateRoomState = roomObj.is_private ?: false
+                        joinCodeState = roomObj.join_code ?: ""
+                    }
+                }
+                val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
+                if (partsRes.isSuccessful) {
+                    val list = partsRes.body() ?: emptyList()
+                    participantsList = list.map { Pair(it.user_id, it.role) }
+                }
+
+                // Query existing messages ordered by created_at
+                val msgsRes = SupabaseClient.api.getRoomMessages(roomIdEq = "eq.$activeRoomId")
+                if (msgsRes.isSuccessful) {
+                    val list = msgsRes.body() ?: emptyList()
+                    val mapped = list.map { msg ->
+                        val p = supabaseProfiles.find { it.uid == msg.user_id }
+                        val isMe = (msg.user_id == currentUserId)
+                        val name = if (isMe) (p?.displayName ?: "You") else (p?.displayName ?: p?.username ?: "User")
+                        val avatar = p?.avatar ?: (if (isMe) "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200" else "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400")
+                        val badge = if (msg.user_id == roomHostId) "Host" else null
+                        ChillRoomMessage(
+                            senderName = name,
+                            senderImageUrl = avatar,
+                            badge = badge,
+                            badgeColor = if (badge == "Host") ChillGoldIcon else ChillPurpleAccent,
+                            text = msg.message,
+                            id = msg.id,
+                            userId = msg.user_id,
+                            createdAt = msg.created_at
+                        )
+                    }
+                    withContext(Dispatchers.Main) {
+                        messages.clear()
+                        messages.addAll(mapped)
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("VoiceRoomScreen", "Error fetching voice room data from Supabase", e)
+            }
+        }
+    }
+
+    LaunchedEffect(activeRoomId) {
+        VoiceRoomRealtimeManager.start()
+        VoiceRoomRealtimeManager.subscribeRoomChannel(activeRoomId)
+        VoiceRoomRealtimeManager.subscribeRoomMessages(activeRoomId)
+        VoiceRoomRealtimeManager.events.collect { event ->
+            when (event) {
+                is RealtimeTableEvent.RoomEmojiBroadcast -> {
+                    if (event.roomId == activeRoomId) {
+                        val emojiUrl = if (event.emoji.startsWith("http")) {
+                            event.emoji
+                        } else {
+                            com.example.ui.components.FluentEmojiAssets.getUrlForEmoji(event.emoji)
+                        }
+                        val reactionId = FloatingEmojiId(emojiUrl, System.currentTimeMillis() + (0..999).random())
+                        withContext(Dispatchers.Main) {
+                            activeReactions.add(reactionId)
+                            val randomSpeaker = speakers.randomOrNull()?.name
+                            if (randomSpeaker != null) {
+                                val current = speakerReactions[randomSpeaker] ?: emptyList()
+                                speakerReactions[randomSpeaker] = current + reactionId
+                            }
+                        }
+                    }
+                }
+                is RealtimeTableEvent.ParticipantChanged -> {
+                    if (event.roomId == activeRoomId) {
+                        withContext(Dispatchers.IO) {
+                            try {
+                                val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
+                                if (partsRes.isSuccessful) {
+                                    val list = partsRes.body() ?: emptyList()
+                                    participantsList = list.map { Pair(it.user_id, it.role) }
+                                }
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                Log.e("VoiceRoomScreen", "Error refreshing participants on realtime event", e)
+                            }
+                        }
+                    }
+                }
+                is RealtimeTableEvent.RoomChatBroadcast -> {
+                    if (event.roomId == activeRoomId) {
+                        withContext(Dispatchers.Main) {
+                            if (messages.none { it.id == event.messageId }) {
+                                val isMe = (event.userId == currentUserId)
+                                val name = if (isMe) "You" else event.senderName.ifBlank { "User" }
+                                val avatar = event.senderAvatar.ifBlank {
+                                    if (isMe) "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200"
+                                    else "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400"
+                                }
+                                val badge = if (event.userId == roomHostId) "Host" else null
+                                messages.add(
+                                    ChillRoomMessage(
+                                        senderName = name,
+                                        senderImageUrl = avatar,
+                                        badge = badge,
+                                        badgeColor = if (badge == "Host") ChillGoldIcon else ChillPurpleAccent,
+                                        text = event.message,
+                                        id = event.messageId,
+                                        userId = event.userId,
+                                        createdAt = null
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+                is RealtimeTableEvent.RoomMessageInserted -> {
+                    val record = event.record
+                    if (record != null) {
+                        val rId = record.optString("room_id")
+                        if (rId == activeRoomId || (event.roomId == activeRoomId)) {
+                            val msgId = record.optString("id")
+                            val userId = record.optString("user_id")
+                            val text = record.optString("message")
+                            val createdAt = record.optString("created_at")
+
+                            withContext(Dispatchers.Main) {
+                                if (msgId.isBlank() || messages.none { it.id == msgId }) {
+                                    val p = supabaseProfiles.find { it.uid == userId }
+                                    val isMe = (userId == currentUserId)
+                                    val name = if (isMe) (p?.displayName ?: "You") else (p?.displayName ?: p?.username ?: "User")
+                                    val avatar = p?.avatar ?: (if (isMe) "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200" else "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400")
+                                    val badge = if (userId == roomHostId) "Host" else null
+                                    messages.add(
+                                        ChillRoomMessage(
+                                            senderName = name,
+                                            senderImageUrl = avatar,
+                                            badge = badge,
+                                            badgeColor = if (badge == "Host") ChillGoldIcon else ChillPurpleAccent,
+                                            text = text,
+                                            id = msgId,
+                                            userId = userId,
+                                            createdAt = createdAt
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                else -> {}
+            }
+        }
+    }
+
+    DisposableEffect(activeRoomId) {
+        onDispose {
+            VoiceRoomRealtimeManager.leaveRoomChannel(activeRoomId)
+        }
+    }
+
     var chatInputValue by remember { mutableStateOf("") }
     var showEmojiPicker by remember { mutableStateOf(false) }
     var showReactionsBar by remember { mutableStateOf(false) }
@@ -541,16 +676,6 @@ fun VoiceRoomScreen(
     var isRoomDarkMode by remember { mutableStateOf(false) }
     var selectedDarkBgIndex by remember { mutableStateOf(0) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
-    val activeReactions = remember { mutableStateListOf<FloatingEmojiId>() }
-    val speakerReactions = remember {
-        mutableStateMapOf<String, List<FloatingEmojiId>>(
-            "Arjun" to emptyList(),
-            "Riya" to emptyList(),
-            "Sara" to emptyList(),
-            "Vihaan" to emptyList(),
-            "Ananya" to emptyList()
-        )
-    }
     
     val privateChats = remember {
         listOf(
@@ -577,12 +702,84 @@ fun VoiceRoomScreen(
         "https://raw.githubusercontent.com/microsoft/fluentui-emoji/main/assets/Ghost/3D/ghost_3d.png" to "👻"
     )
 
-    val messages = remember { mutableStateListOf(
-        ChillRoomMessage("Raj", "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200", "Moderator", ChillPurpleAccent, "Hello everyone! 👋"),
-        ChillRoomMessage("Sara", "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200", "Speaker", ChillPurpleAccent, "Heyyy! Good to see you all ❤️"),
-        ChillRoomMessage("Vihaan", "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200", null, ChillPurpleAccent, "Let's have a fun conversation 🎉"),
-        ChillRoomMessage("Ananya", "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=200", null, ChillPurpleAccent, "Excited to be here! ✨")
-    )}
+    val onSendRoomMessage: (String) -> Unit = { text ->
+        if (text.isNotBlank()) {
+            val msgToSend = text.trim()
+            chatInputValue = ""
+            val localMsgId = "msg_${System.currentTimeMillis()}_${(100..999).random()}"
+            val currentUserProfile = supabaseProfiles.find { it.uid == currentUserId }
+            val senderName = currentUserProfile?.displayName ?: currentUserProfile?.username ?: "You"
+            val senderAvatar = currentUserProfile?.avatar ?: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200"
+            val badge = if (currentUserId == roomHostId) "Host" else null
+
+            // 1. Optimistic UI update: message appears instantly for the local user
+            if (messages.none { it.id == localMsgId }) {
+                messages.add(
+                    ChillRoomMessage(
+                        senderName = "You",
+                        senderImageUrl = senderAvatar,
+                        badge = badge,
+                        badgeColor = if (badge == "Host") ChillGoldIcon else ChillPurpleAccent,
+                        text = msgToSend,
+                        id = localMsgId,
+                        userId = currentUserId,
+                        createdAt = null
+                    )
+                )
+            }
+
+            val uid = currentUserId.ifBlank { SupabaseSessionManager.getUserId(context) ?: "anon_user" }
+
+            // 2. Broadcast via Supabase Realtime WebSocket channel to all participants in this room
+            VoiceRoomRealtimeManager.broadcastRoomMessage(
+                roomId = activeRoomId,
+                message = msgToSend,
+                userId = uid,
+                senderName = senderName,
+                senderAvatar = senderAvatar,
+                messageId = localMsgId
+            )
+
+            // 3. Persist to Postgres room_messages table via REST API
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val token = SupabaseSessionManager.getBearerToken(context)
+                    val requestUid = when {
+                        uid.isNotBlank() && uid != "anon_user" -> uid
+                        currentUserProfile?.uid?.isNotBlank() == true -> currentUserProfile.uid
+                        else -> "00000000-0000-0000-0000-000000000000"
+                    }
+                    val request = SendRoomMessageRequest(
+                        room_id = activeRoomId,
+                        user_id = requestUid,
+                        message = msgToSend
+                    )
+                    val res = SupabaseClient.api.sendRoomMessage(
+                        auth = token,
+                        request = request
+                    )
+                    if (res.isSuccessful) {
+                        val inserted = res.body()?.firstOrNull()
+                        if (inserted != null) {
+                            withContext(Dispatchers.Main) {
+                                val idx = messages.indexOfFirst { it.id == localMsgId }
+                                if (idx >= 0) {
+                                    messages[idx] = messages[idx].copy(
+                                        id = inserted.id ?: localMsgId,
+                                        createdAt = inserted.created_at
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        Log.i("VoiceRoomScreen", "Room message broadcasted via Realtime channel (DB insert status ${res.code()})")
+                    }
+                } catch (e: Exception) {
+                    Log.i("VoiceRoomScreen", "Room message sent locally & broadcasted (DB sync note: ${e.message})")
+                }
+            }
+        }
+    }
 
     val inlineContentMap = remember {
         fluentEmojis.associate { (url, unicode) ->
@@ -1234,10 +1431,7 @@ fun VoiceRoomScreen(
                         ),
                         keyboardActions = androidx.compose.foundation.text.KeyboardActions(
                             onSend = {
-                                if (chatInputValue.isNotBlank()) {
-                                    messages.add(ChillRoomMessage("You", "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200", null, ChillGoldIcon, chatInputValue))
-                                    chatInputValue = ""
-                                }
+                                onSendRoomMessage(chatInputValue)
                             }
                         ),
                         decorationBox = { innerTextField ->
@@ -1257,6 +1451,24 @@ fun VoiceRoomScreen(
                         tint = if (showEmojiPicker) currentTheme.accentColor else currentTheme.secondaryTextColor, 
                         modifier = Modifier.size(24.dp).clickable { showEmojiPicker = !showEmojiPicker }.padding(2.dp)
                     )
+                    if (chatInputValue.isNotBlank()) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(currentTheme.accentColor)
+                                .clickable { onSendRoomMessage(chatInputValue) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Send,
+                                contentDescription = "Send",
+                                tint = Color.White,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
                 }
 
                 Box(
@@ -1295,9 +1507,16 @@ fun VoiceRoomScreen(
                             modifier = Modifier
                                 .size(42.dp)
                                 .clickable {
+                                    val uid = currentUserId.ifBlank { SupabaseSessionManager.getUserId(context) ?: "anon_user" }
+                                    // Ephemeral Supabase Realtime Broadcast to per-room channel realtime:room:{id}
+                                    VoiceRoomRealtimeManager.broadcastEmoji(activeRoomId, url, uid)
+
+                                    val reactionId = FloatingEmojiId(url, System.currentTimeMillis() + index)
+                                    activeReactions.add(reactionId)
+
                                     val randomSpeaker = speakers.random().name
                                     val current = speakerReactions[randomSpeaker] ?: emptyList()
-                                    speakerReactions[randomSpeaker] = current + FloatingEmojiId(url, System.currentTimeMillis() + index)
+                                    speakerReactions[randomSpeaker] = current + reactionId
                                     
                                     // Make the room feel alive by randomly triggering a second speaker occasionally
                                     if (Math.random() > 0.4) {

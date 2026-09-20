@@ -62,28 +62,28 @@ fun HomeHeader(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Amusements/Events icon with badge dot (hidden if zero active events)
-            if (hasActiveEvents) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(Color.White)
-                        .clickable { onOpenEvents() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Campaign,
-                        contentDescription = "Funky Events",
-                        tint = Color.Black,
-                        modifier = Modifier.size(26.dp)
-                    )
+            // Amusements/Events icon with badge dot
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(Color.White)
+                    .clickable { onOpenEvents() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Campaign,
+                    contentDescription = "Funky Events",
+                    tint = Color.Black,
+                    modifier = Modifier.size(24.dp)
+                )
+                if (hasActiveEvents) {
                     // Tiny dynamic badge dot
                     Box(
                         modifier = Modifier
                             .size(8.dp)
                             .align(Alignment.TopEnd)
-                            .offset(x = (-10).dp, y = 10.dp)
+                            .offset(x = (-8).dp, y = 8.dp)
                             .clip(CircleShape)
                             .background(GoldAccent)
                     )

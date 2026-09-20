@@ -114,6 +114,22 @@ data class SupabaseEvent(
 )
 
 @JsonClass(generateAdapter = true)
+data class SupabaseRoomMessage(
+    val id: String? = null,
+    val room_id: String,
+    val user_id: String,
+    val message: String,
+    val created_at: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class SendRoomMessageRequest(
+    val room_id: String,
+    val user_id: String,
+    val message: String
+)
+
+@JsonClass(generateAdapter = true)
 data class ModeratorActionRequest(
     val target_user_id: String,
     val action_type: String,
@@ -349,6 +365,21 @@ interface SupabaseApi {
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
     ): Response<List<SupabaseEvent>>
+
+    @GET("rest/v1/room_messages?select=*&order=created_at.asc")
+    suspend fun getRoomMessages(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
+        @Query("room_id") roomIdEq: String // e.g. "eq.<uuid>"
+    ): Response<List<SupabaseRoomMessage>>
+
+    @POST("rest/v1/room_messages")
+    suspend fun sendRoomMessage(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Header("Prefer") prefer: String = "return=representation",
+        @Body request: SendRoomMessageRequest
+    ): Response<List<SupabaseRoomMessage>>
 
     @POST("rest/v1/rpc/join_room_by_code")
     suspend fun joinRoomByCode(
