@@ -1,13 +1,18 @@
 package com.example.ui.screens.home.dialogs
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -17,19 +22,91 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
-import com.example.ui.screens.home.models.AmusementEvent
+import com.example.SupabaseEvent
+import com.example.ui.theme.GoldAccent
+import java.text.SimpleDateFormat
+import java.time.Instant
+import java.time.OffsetDateTime
+import java.util.*
+
+fun formatEventDateTime(eventTimeIso: String?, timezoneLabel: String?): String {
+    if (eventTimeIso.isNullOrBlank()) {
+        return if (!timezoneLabel.isNullOrBlank()) timezoneLabel else "Upcoming Event"
+    }
+    return try {
+        val clean = eventTimeIso.trim()
+        val parsedDate: Date? = try {
+            OffsetDateTime.parse(clean).let { Date.from(it.toInstant()) }
+        } catch (_: Exception) {
+            try {
+                Instant.parse(clean).let { Date.from(it) }
+            } catch (_: Exception) {
+                val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault()).apply {
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }
+                sdf.parse(clean.substringBefore("+").substringBefore("Z"))
+            }
+        }
+
+        if (parsedDate != null) {
+            val outFormat = SimpleDateFormat("MMM d, yyyy • h:mm a", Locale.getDefault())
+            val formatted = outFormat.format(parsedDate)
+            if (!timezoneLabel.isNullOrBlank()) {
+                "$formatted ($timezoneLabel)"
+            } else {
+                formatted
+            }
+        } else {
+            if (!timezoneLabel.isNullOrBlank()) "$clean ($timezoneLabel)" else clean
+        }
+    } catch (_: Exception) {
+        if (!timezoneLabel.isNullOrBlank()) "$eventTimeIso ($timezoneLabel)" else eventTimeIso
+    }
+}
+
+data class EventCategoryPalette(
+    val darkColor: Color,
+    val lightContainer: Color,
+    val tagBackground: Color
+)
+
+fun getCategoryPalette(categoryTag: String?): EventCategoryPalette {
+    val tag = categoryTag?.lowercase()?.trim() ?: ""
+    return when {
+        tag.contains("mega") || tag.contains("party") || tag.contains("fiesta") ->
+            EventCategoryPalette(Color(0xFFA855F7), Color(0xFFF3E8FF), Color(0xFFFAF5FF))
+        tag.contains("culture") || tag.contains("movie") || tag.contains("cinema") ->
+            EventCategoryPalette(Color(0xFFEF4444), Color(0xFFFEE2E2), Color(0xFFFFF1F2))
+        tag.contains("game") || tag.contains("escape") || tag.contains("trivia") ->
+            EventCategoryPalette(Color(0xFF3B82F6), Color(0xFFEFF6FF), Color(0xFFF0F9FF))
+        tag.contains("music") || tag.contains("karaoke") || tag.contains("song") ->
+            EventCategoryPalette(Color(0xFFEC4899), Color(0xFFFCE7F3), Color(0xFFFDF2F8))
+        tag.contains("grammar") || tag.contains("workshop") || tag.contains("learn") ->
+            EventCategoryPalette(Color(0xFF10B981), Color(0xFFD1FAE5), Color(0xFFECFDF5))
+        tag.contains("vip") || tag.contains("special") ->
+            EventCategoryPalette(Color(0xFFD97706), Color(0xFFFEF3C7), Color(0xFFFFFBEB))
+        else ->
+            EventCategoryPalette(Color(0xFF8B5CF6), Color(0xFFEDE9FE), Color(0xFFF5F3FF))
+    }
+}
 
 @Composable
 fun AmusementEventsDialog(
-    events: List<AmusementEvent>,
+    events: List<SupabaseEvent>,
     onDismiss: () -> Unit,
-    onSelectEvent: (AmusementEvent) -> Unit
+    onSelectEvent: (SupabaseEvent) -> Unit,
+    onJoinEventDirectly: (SupabaseEvent) -> Unit
 ) {
+    if (events.isEmpty()) {
+        return
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -37,7 +114,7 @@ fun AmusementEventsDialog(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.5f))
+                .background(Color.Black.copy(alpha = 0.55f))
                 .clickable { onDismiss() },
             contentAlignment = Alignment.BottomCenter
         ) {
@@ -52,121 +129,245 @@ fun AmusementEventsDialog(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .fillMaxHeight(0.85f)
-                        .padding(24.dp)
+                        .fillMaxHeight(0.88f)
+                        .padding(horizontal = 20.dp, vertical = 20.dp)
                 ) {
-                    // Notch
+                    // Top Drag Notch
                     Box(
                         modifier = Modifier
-                            .width(36.dp)
+                            .width(40.dp)
                             .height(4.dp)
                             .clip(RoundedCornerShape(100.dp))
-                            .background(Color.LightGray.copy(alpha = 0.5f))
+                            .background(Color(0xFFE5E7EB))
                             .align(Alignment.CenterHorizontally)
                     )
-                    Spacer(modifier = Modifier.height(16.dp))
 
-                    // Header
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Header Row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "Funky Events \uD83C\uDF89",
-                            fontSize = 24.sp,
-                            fontWeight = FontWeight.Black,
-                            color = Color.Black
-                        )
-                        IconButton(onClick = onDismiss) {
-                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.Gray)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Funky Events 🎉",
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.Black,
+                                color = Color(0xFF111827)
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Special language events, mega rooms & live workshops",
+                                fontSize = 13.sp,
+                                color = Color(0xFF6B7280),
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(Color(0xFFF3F4F6), CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close",
+                                tint = Color(0xFF4B5563),
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Special language events and mega rooms dropping soon! Don't miss out.",
-                        fontSize = 14.sp,
-                        color = Color.Gray,
-                        fontWeight = FontWeight.Medium,
-                        lineHeight = 20.sp
-                    )
-                    Spacer(modifier = Modifier.height(20.dp))
 
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Events List
                     LazyColumn(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        contentPadding = PaddingValues(bottom = 24.dp)
                     ) {
-                        items(events) { event ->
+                        items(events, key = { it.id ?: it.title }) { event ->
+                            val palette = getCategoryPalette(event.category_tag)
+                            val formattedDate = formatEventDateTime(event.event_time, event.timezone_label)
+                            val hasRoom = !event.join_room_id.isNullOrBlank()
+                            val hasUrl = !event.join_url.isNullOrBlank()
+                            val isActionable = hasRoom || hasUrl
+
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable {
-                                        onSelectEvent(event)
-                                    },
-                                colors = CardDefaults.cardColors(containerColor = event.cardColorLight),
-                                shape = RoundedCornerShape(20.dp)
+                                    .clickable { onSelectEvent(event) },
+                                colors = CardDefaults.cardColors(containerColor = palette.lightContainer),
+                                shape = RoundedCornerShape(22.dp),
+                                border = BorderStroke(1.dp, palette.darkColor.copy(alpha = 0.2f))
                             ) {
                                 Column {
+                                    // Event Banner Image with Scrim & Tag
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .height(120.dp)
+                                            .height(135.dp)
+                                            .background(
+                                                brush = Brush.verticalGradient(
+                                                    colors = listOf(
+                                                        palette.darkColor.copy(alpha = 0.8f),
+                                                        palette.darkColor
+                                                    )
+                                                )
+                                            )
                                     ) {
-                                        AsyncImage(
-                                            model = event.imageUrl,
-                                            contentDescription = event.title,
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier.fillMaxSize()
-                                        )
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.6f))))
-                                        )
-                                        Text(
-                                            text = event.tag,
+                                        if (!event.banner_image_url.isNullOrBlank()) {
+                                            AsyncImage(
+                                                model = event.banner_image_url,
+                                                contentDescription = event.title,
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .background(
+                                                        Brush.verticalGradient(
+                                                            listOf(
+                                                                Color.Transparent,
+                                                                Color.Black.copy(alpha = 0.65f)
+                                                            )
+                                                        )
+                                                    )
+                                            )
+                                        }
+
+                                        // Category Tag Pill
+                                        val tagText = event.category_tag?.ifBlank { "Featured" } ?: "Featured"
+                                        Surface(
                                             modifier = Modifier
                                                 .align(Alignment.TopEnd)
-                                                .padding(12.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(Color.White.copy(alpha = 0.9f))
-                                                .padding(horizontal = 8.dp, vertical = 4.dp),
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = event.cardColorDark
-                                        )
+                                                .padding(12.dp),
+                                            shape = RoundedCornerShape(100.dp),
+                                            color = Color.White.copy(alpha = 0.95f),
+                                            shadowElevation = 2.dp
+                                        ) {
+                                            Text(
+                                                text = tagText,
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = palette.darkColor
+                                            )
+                                        }
                                     }
+
+                                    // Event Content
                                     Column(
                                         modifier = Modifier.padding(16.dp)
                                     ) {
-                                        Text(
-                                            text = event.date,
-                                            color = event.cardColorDark,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            fontSize = 12.sp,
-                                            letterSpacing = 0.5.sp
-                                        )
-                                        Spacer(modifier = Modifier.height(4.dp))
+                                        // Date & Time Row
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.CalendarMonth,
+                                                contentDescription = null,
+                                                tint = palette.darkColor,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = formattedDate,
+                                                color = palette.darkColor,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                fontSize = 12.sp,
+                                                letterSpacing = 0.3.sp
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.height(6.dp))
+
+                                        // Title
                                         Text(
                                             text = event.title,
-                                            color = Color.Black,
+                                            color = Color(0xFF111827),
                                             fontWeight = FontWeight.Black,
-                                            fontSize = 18.sp
+                                            fontSize = 18.sp,
+                                            lineHeight = 22.sp
                                         )
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        Text(
-                                            text = event.description,
-                                            color = Color.DarkGray,
-                                            fontSize = 13.sp,
-                                            lineHeight = 18.sp
-                                        )
+
+                                        // Description
+                                        if (!event.description.isNullOrBlank()) {
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            Text(
+                                                text = event.description,
+                                                color = Color(0xFF4B5563),
+                                                fontSize = 13.sp,
+                                                lineHeight = 18.sp,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.height(14.dp))
+
+                                        // Action Button Row
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "Tap to view details",
+                                                fontSize = 12.sp,
+                                                color = Color(0xFF6B7280),
+                                                fontWeight = FontWeight.Medium
+                                            )
+
+                                            if (isActionable) {
+                                                Button(
+                                                    onClick = { onJoinEventDirectly(event) },
+                                                    shape = RoundedCornerShape(100.dp),
+                                                    colors = ButtonDefaults.buttonColors(
+                                                        containerColor = GoldAccent
+                                                    ),
+                                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                                                    modifier = Modifier.height(36.dp)
+                                                ) {
+                                                    if (hasRoom) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Headphones,
+                                                            contentDescription = null,
+                                                            tint = Color.Black,
+                                                            modifier = Modifier.size(14.dp)
+                                                        )
+                                                        Spacer(modifier = Modifier.width(6.dp))
+                                                        Text(
+                                                            text = "Join Room",
+                                                            color = Color.Black,
+                                                            fontWeight = FontWeight.Bold,
+                                                            fontSize = 12.sp
+                                                        )
+                                                    } else {
+                                                        Icon(
+                                                            imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                                            contentDescription = null,
+                                                            tint = Color.Black,
+                                                            modifier = Modifier.size(14.dp)
+                                                        )
+                                                        Spacer(modifier = Modifier.width(6.dp))
+                                                        Text(
+                                                            text = "Open Link",
+                                                            color = Color.Black,
+                                                            fontWeight = FontWeight.Bold,
+                                                            fontSize = 12.sp
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
-                        }
-                        
-                        item {
-                            Spacer(modifier = Modifier.height(32.dp))
                         }
                     }
                 }

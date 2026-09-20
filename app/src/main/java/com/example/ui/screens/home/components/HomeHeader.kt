@@ -26,6 +26,7 @@ import com.example.ui.theme.GoldAccent
 
 @Composable
 fun HomeHeader(
+    hasActiveEvents: Boolean = false,
     onOpenEvents: () -> Unit,
     onCreateRoom: () -> Unit,
     onJoinWithCode: () -> Unit
@@ -61,30 +62,32 @@ fun HomeHeader(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Amusements/Events icon with little badge dot
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(Color.White)
-                    .clickable { onOpenEvents() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Campaign,
-                    contentDescription = "Amusement Events",
-                    tint = Color.Black,
-                    modifier = Modifier.size(26.dp)
-                )
-                // Tiny dynamic badge dot
+            // Amusements/Events icon with badge dot (hidden if zero active events)
+            if (hasActiveEvents) {
                 Box(
                     modifier = Modifier
-                        .size(8.dp)
-                        .align(Alignment.TopEnd)
-                        .offset(x = (-10).dp, y = 10.dp)
+                        .size(44.dp)
                         .clip(CircleShape)
-                        .background(GoldAccent)
-                )
+                        .background(Color.White)
+                        .clickable { onOpenEvents() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Campaign,
+                        contentDescription = "Funky Events",
+                        tint = Color.Black,
+                        modifier = Modifier.size(26.dp)
+                    )
+                    // Tiny dynamic badge dot
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .align(Alignment.TopEnd)
+                            .offset(x = (-10).dp, y = 10.dp)
+                            .clip(CircleShape)
+                            .background(GoldAccent)
+                    )
+                }
             }
 
             // Join with Code button

@@ -30,6 +30,7 @@ fun HomeTabContent(
     filterOnlyLive: Boolean,
     filterByLevel: String,
     selectedSortOption: String,
+    hasActiveEvents: Boolean = false,
     onOpenEvents: () -> Unit,
     onCreateRoom: () -> Unit,
     onJoinWithCode: () -> Unit,
@@ -43,6 +44,7 @@ fun HomeTabContent(
         // 1. BRAND HEADER & CREATION PILL
         item {
             HomeHeader(
+                hasActiveEvents = hasActiveEvents,
                 onOpenEvents = onOpenEvents,
                 onCreateRoom = onCreateRoom,
                 onJoinWithCode = onJoinWithCode

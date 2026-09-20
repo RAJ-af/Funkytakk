@@ -100,6 +100,20 @@ data class SupabaseRoomParticipant(
 )
 
 @JsonClass(generateAdapter = true)
+data class SupabaseEvent(
+    val id: String? = null,
+    val title: String = "",
+    val description: String? = null,
+    val category_tag: String? = null,
+    val banner_image_url: String? = null,
+    val event_time: String? = null,
+    val timezone_label: String? = null,
+    val join_room_id: String? = null,
+    val join_url: String? = null,
+    val is_active: Boolean? = true
+)
+
+@JsonClass(generateAdapter = true)
 data class ModeratorActionRequest(
     val target_user_id: String,
     val action_type: String,
@@ -329,6 +343,12 @@ interface SupabaseApi {
         @Header("Authorization") auth: String,
         @Body request: ModeratorActionRequest
     ): Response<Map<String, @JvmSuppressWildcards Any?>>
+
+    @GET("rest/v1/events?select=*&is_active=eq.true&order=event_time.asc")
+    suspend fun getActiveEvents(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+    ): Response<List<SupabaseEvent>>
 
     @POST("rest/v1/rpc/join_room_by_code")
     suspend fun joinRoomByCode(

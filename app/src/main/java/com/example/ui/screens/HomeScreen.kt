@@ -16,8 +16,10 @@ import android.util.Log
 import com.example.AuthState
 import com.example.AuthViewModel
 import com.example.SupabaseClient
+import com.example.SupabaseEvent
 import com.example.UserProfile
 import com.example.realtime.VoiceRoomRealtimeManager
+import com.example.util.CustomTabsHelper
 import com.example.ui.screens.home.components.HomeBottomBar
 import com.example.ui.screens.home.dialogs.*
 import com.example.ui.screens.home.models.*
@@ -78,7 +80,8 @@ fun HomeScreen(
     
     // Remote events / Amusements
     var showAmusementEventsDialog by remember { mutableStateOf(false) }
-    var selectedAmusementEvent by remember { mutableStateOf<AmusementEvent?>(null) }
+    var activeEventsList by remember { mutableStateOf<List<SupabaseEvent>>(emptyList()) }
+    var selectedAmusementEvent by remember { mutableStateOf<SupabaseEvent?>(null) }
 
     // Direct Chat active messages thread dialog
     var activeChatWindowContact by remember { mutableStateOf<DirectChat?>(null) }
@@ -129,41 +132,6 @@ fun HomeScreen(
         }
     }
 
-    val amusementEvents = remember {
-        listOf(
-            AmusementEvent(
-                id = "evt_1",
-                title = "Language Fiesta 2026",
-                description = "Join 500+ speakers across 10 languages for an epic mega-room party!",
-                date = "June 16, 2026 - 15:00 UTC",
-                tag = "Mega Event",
-                cardColorDark = Color(0xFFA855F7),
-                cardColorLight = Color(0xFFF3E8FF),
-                imageUrl = "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800"
-            ),
-            AmusementEvent(
-                id = "evt_2",
-                title = "Movie Night: Korean Cinema",
-                description = "Watch and discuss Parasite with native Korean speakers.",
-                date = "June 18, 2026 - 20:00 KST",
-                tag = "Culture",
-                cardColorDark = Color(0xFFEF4444),
-                cardColorLight = Color(0xFFFEE2E2),
-                imageUrl = "https://images.unsplash.com/photo-1485846234645-a62644f84728?w=800"
-            ),
-            AmusementEvent(
-                id = "evt_3",
-                title = "Grammar Escape Room",
-                description = "Solve English grammar and vocabulary puzzles to escape the room!",
-                date = "June 20, 2026 - 10:00 EST",
-                tag = "Game",
-                cardColorDark = Color(0xFF3B82F6),
-                cardColorLight = Color(0xFFEFF6FF),
-                imageUrl = "https://images.unsplash.com/photo-1518609878373-06d740f60d8b?w=800"
-            )
-        )
-    }
-
     // Dynamic Rooms list state loaded from Supabase voice_rooms in real-time
     var roomsList by remember { mutableStateOf<List<CustomRoom>>(emptyList()) }
 
@@ -177,7 +145,19 @@ fun HomeScreen(
                 val roomsRes = SupabaseClient.api.getVoiceRooms()
                 val supaRooms = roomsRes.body() ?: emptyList()
 
-                // 2. Fetch room participants from Supabase
+                // 2. Fetch active events from Supabase events table (ordered by event_time asc)
+                try {
+                    val eventsRes = SupabaseClient.api.getActiveEvents()
+                    if (eventsRes.isSuccessful) {
+                        activeEventsList = eventsRes.body() ?: emptyList()
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.e("HomeScreen", "Error fetching active events from Supabase", e)
+                }
+
+                // 3. Fetch room participants from Supabase
                 val participantsRes = SupabaseClient.api.getAllRoomParticipants()
                 val supaParticipants = participantsRes.body() ?: emptyList()
 
@@ -368,12 +348,29 @@ fun HomeScreen(
         )
     }
 
-    if (showAmusementEventsDialog) {
+    fun handleJoinEvent(event: SupabaseEvent) {
+        selectedAmusementEvent = null
+        showAmusementEventsDialog = false
+        if (!event.join_room_id.isNullOrBlank()) {
+            Toast.makeText(context, "Entering ${event.title}...", Toast.LENGTH_SHORT).show()
+            viewModel.joinRoom(event.join_room_id, event.title, context)
+            onRoomClick()
+        } else if (!event.join_url.isNullOrBlank()) {
+            CustomTabsHelper.openUrl(context, event.join_url)
+        } else {
+            Toast.makeText(context, "No voice room or link available for this event.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    if (showAmusementEventsDialog && activeEventsList.isNotEmpty()) {
         AmusementEventsDialog(
-            events = amusementEvents,
+            events = activeEventsList,
             onDismiss = { showAmusementEventsDialog = false },
             onSelectEvent = { event ->
                 selectedAmusementEvent = event
+            },
+            onJoinEventDirectly = { event ->
+                handleJoinEvent(event)
             }
         )
     }
@@ -383,9 +380,7 @@ fun HomeScreen(
             event = event,
             onDismiss = { selectedAmusementEvent = null },
             onJoinEvent = {
-                Toast.makeText(context, "You are registered for ${event.title}!", Toast.LENGTH_LONG).show()
-                selectedAmusementEvent = null
-                showAmusementEventsDialog = false
+                handleJoinEvent(event)
             }
         )
     }
@@ -418,7 +413,12 @@ fun HomeScreen(
                             filterOnlyLive = filterOnlyLive,
                             filterByLevel = filterByLevel,
                             selectedSortOption = selectedSortOption,
-                            onOpenEvents = { showAmusementEventsDialog = true },
+                            hasActiveEvents = activeEventsList.isNotEmpty(),
+                            onOpenEvents = {
+                                if (activeEventsList.isNotEmpty()) {
+                                    showAmusementEventsDialog = true
+                                }
+                            },
                             onCreateRoom = { showCreateRoomBottomSheet = true },
                             onJoinWithCode = { showJoinCodeDialog = true },
                             onOpenFilter = { showFilterDialog = true },
