@@ -53,6 +53,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -330,6 +331,8 @@ fun VoiceRoomScreen(
     var roomHostId by remember { mutableStateOf<String?>("") }
     var participantsList by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) } // Pair: userId, action (speaker/listener)
     val messages = remember { mutableStateListOf<ChillRoomMessage>() }
+    var renderedMessageCount by remember { mutableStateOf(6) }
+    val chatListState = rememberLazyListState()
     val activeReactions = remember { mutableStateListOf<FloatingEmojiId>() }
     val speakerReactions = remember {
         mutableStateMapOf<String, List<FloatingEmojiId>>(
@@ -443,6 +446,7 @@ fun VoiceRoomScreen(
     }
 
     LaunchedEffect(activeRoomId) {
+        renderedMessageCount = 6
         withContext(Dispatchers.IO) {
             try {
                 val roomRes = SupabaseClient.api.getVoiceRoomById(idEq = "eq.$activeRoomId")
@@ -485,8 +489,15 @@ fun VoiceRoomScreen(
                         )
                     }
                     withContext(Dispatchers.Main) {
-                        messages.clear()
-                        messages.addAll(mapped)
+                        if (messages.isEmpty()) {
+                            messages.addAll(mapped)
+                        } else {
+                            for (m in mapped) {
+                                if (messages.none { it.id == m.id }) {
+                                    messages.add(m)
+                                }
+                            }
+                        }
                     }
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -1286,6 +1297,23 @@ fun VoiceRoomScreen(
             Spacer(modifier = Modifier.weight(1f))
 
             // 3. MINIMAL COMPACT CHAT LOG ROW
+            val renderedMessages = remember(messages.size, renderedMessageCount) {
+                messages.reversed().take(renderedMessageCount)
+            }
+
+            // Paginated lazy scroll detection: when approaching top in reverseLayout (scrolling towards older messages)
+            LaunchedEffect(chatListState, messages.size, renderedMessageCount) {
+                snapshotFlow {
+                    val total = chatListState.layoutInfo.totalItemsCount
+                    val lastVisible = chatListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                    Pair(lastVisible, total)
+                }.collect { (lastVisible, total) ->
+                    if (total > 0 && lastVisible >= total - 2 && renderedMessageCount < messages.size) {
+                        renderedMessageCount = (renderedMessageCount + 6).coerceAtMost(messages.size)
+                    }
+                }
+            }
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1293,11 +1321,15 @@ fun VoiceRoomScreen(
                     .padding(horizontal = 20.dp, vertical = 6.dp)
             ) {
                 androidx.compose.foundation.lazy.LazyColumn(
+                    state = chatListState,
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     reverseLayout = true
                 ) {
-                    items(messages.reversed()) { msg ->
+                    items(
+                        items = renderedMessages,
+                        key = { it.id?.takeIf { k -> k.isNotBlank() } ?: "${it.userId}_${it.text}_${it.createdAt}" }
+                    ) { msg ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.Top
@@ -1342,6 +1374,36 @@ fun VoiceRoomScreen(
                                     fontSize = 14.sp,
                                     color = currentTheme.primaryTextColor,
                                     lineHeight = 24.sp
+                                )
+                            }
+                        }
+                    }
+
+                    if (renderedMessageCount < messages.size) {
+                        item(key = "load_older_cache_trigger") {
+                            LaunchedEffect(Unit) {
+                                if (renderedMessageCount < messages.size) {
+                                    renderedMessageCount = (renderedMessageCount + 6).coerceAtMost(messages.size)
+                                }
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        if (renderedMessageCount < messages.size) {
+                                            renderedMessageCount = (renderedMessageCount + 6).coerceAtMost(messages.size)
+                                        }
+                                    }
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val remaining = messages.size - renderedMessageCount
+                                Text(
+                                    text = "↑ Scroll for older cached messages ($remaining)",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = currentTheme.primaryTextColor.copy(alpha = 0.55f)
                                 )
                             }
                         }
