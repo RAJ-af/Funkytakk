@@ -454,7 +454,8 @@ fun HomeScreen(
                     "profile" -> {
                         ProfileTabContent(
                             currentUserProfile = currentUserProfile,
-                            onLogoutClick = { showLogoutDialog = true }
+                            onLogoutClick = { showLogoutDialog = true },
+                            viewModel = viewModel
                         )
                     }
                 }

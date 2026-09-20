@@ -140,7 +140,7 @@ fun OnboardingProfileScreen(
     val context = LocalContext.current
     val authState by viewModel.authState.collectAsState()
 
-    var username by remember { mutableStateOf(initialUsername) }
+    var username by remember { mutableStateOf(initialUsername.lowercase()) }
     var displayName by remember { mutableStateOf(initialDisplayName) }
     var isCheckingUsername by remember { mutableStateOf(false) }
 
@@ -377,8 +377,8 @@ fun OnboardingProfileScreen(
                         OutlinedTextField(
                             value = username,
                             onValueChange = { input ->
-                                // Restrict username to letters, numbers, underscore
-                                username = input.filter { it.isLetterOrDigit() || it == '_' }
+                                // Restrict username to letters, numbers, underscore and auto-lowercase
+                                username = input.filter { it.isLetterOrDigit() || it == '_' }.lowercase()
                             },
                             placeholder = { Text("Enter your username") },
                             leadingIcon = {
@@ -470,21 +470,22 @@ fun OnboardingProfileScreen(
             // Next Step Action Pill
             Button(
                 onClick = {
-                    if (username.isBlank() || displayName.isBlank()) {
+                    val cleanUsername = username.trim().lowercase()
+                    if (cleanUsername.isBlank() || displayName.isBlank()) {
                         Toast.makeText(context, "Please enter both username and display name.", Toast.LENGTH_SHORT).show()
                         return@Button
                     }
-                    if (username.length < 3) {
+                    if (cleanUsername.length < 3) {
                         Toast.makeText(context, "Username must be at least 3 characters.", Toast.LENGTH_SHORT).show()
                         return@Button
                     }
                     
                     isCheckingUsername = true
                     val currentUserId = (authState as? AuthState.Success)?.user?.uid
-                    viewModel.checkUsernameUnique(username, currentUserId) { isUnique ->
+                    viewModel.checkUsernameUnique(cleanUsername, currentUserId) { isUnique ->
                         isCheckingUsername = false
                         if (isUnique) {
-                            onNext(username, displayName, if (useCustomAvatar) customAvatarPath else AvailableAvatars[selectedAvatarIndex].second)
+                            onNext(cleanUsername, displayName, if (useCustomAvatar) customAvatarPath else AvailableAvatars[selectedAvatarIndex].second)
                         } else {
                             Toast.makeText(context, "This username is already taken. Please choose another one.", Toast.LENGTH_LONG).show()
                         }

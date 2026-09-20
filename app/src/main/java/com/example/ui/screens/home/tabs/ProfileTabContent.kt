@@ -24,6 +24,16 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import com.example.AuthViewModel
 import com.example.UserProfile
 import com.example.ui.components.CircleFlag
 import com.example.ui.screens.home.models.GraySubtitle
@@ -32,8 +42,11 @@ import com.example.ui.theme.GoldAccent
 @Composable
 fun ProfileTabContent(
     currentUserProfile: UserProfile,
-    onLogoutClick: () -> Unit
+    onLogoutClick: () -> Unit,
+    viewModel: AuthViewModel? = null
 ) {
+    val context = LocalContext.current
+    var showEditProfileDialog by remember { mutableStateOf(false) }
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -131,6 +144,25 @@ fun ProfileTabContent(
                         fontWeight = FontWeight.Bold,
                         color = Color.Black
                     )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = { showEditProfileDialog = true },
+                    shape = RoundedCornerShape(100.dp),
+                    border = BorderStroke(1.dp, GoldAccent),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Black),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                    modifier = Modifier.testTag("edit_profile_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = "Edit Profile",
+                        tint = GoldAccent,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Edit Profile", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -332,5 +364,163 @@ fun ProfileTabContent(
                 }
             }
         }
+    }
+
+    if (showEditProfileDialog) {
+        var editUsername by remember { mutableStateOf((currentUserProfile.username ?: "").lowercase()) }
+        var editDisplayName by remember { mutableStateOf(currentUserProfile.displayName ?: "") }
+        var isChecking by remember { mutableStateOf(false) }
+        var errorMessage by remember { mutableStateOf<String?>(null) }
+
+        AlertDialog(
+            onDismissRequest = { showEditProfileDialog = false },
+            title = {
+                Text("Edit Profile", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column {
+                        Text("Username", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        OutlinedTextField(
+                            value = editUsername,
+                            onValueChange = { input ->
+                                errorMessage = null
+                                editUsername = input.filter { it.isLetterOrDigit() || it == '_' }.lowercase()
+                            },
+                            placeholder = { Text("e.g. raj_learner") },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("edit_username_input"),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = GoldAccent,
+                                unfocusedBorderColor = Color.LightGray
+                            )
+                        )
+                        Text(
+                            text = "Usernames must be unique and automatically lowercased",
+                            fontSize = 11.sp,
+                            color = Color.Gray,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+
+                    Column {
+                        Text("Display Name", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        OutlinedTextField(
+                            value = editDisplayName,
+                            onValueChange = { editDisplayName = it },
+                            placeholder = { Text("Enter your display name") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = GoldAccent,
+                                unfocusedBorderColor = Color.LightGray
+                            )
+                        )
+                    }
+
+                    if (errorMessage != null) {
+                        Text(
+                            text = errorMessage!!,
+                            color = Color.Red,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val cleanUsername = editUsername.trim().lowercase()
+                        if (cleanUsername.isBlank() || editDisplayName.isBlank()) {
+                            errorMessage = "Username and display name cannot be blank."
+                            return@Button
+                        }
+                        if (cleanUsername.length < 3) {
+                            errorMessage = "Username must be at least 3 characters."
+                            return@Button
+                        }
+
+                        if (cleanUsername == (currentUserProfile.username ?: "").lowercase()) {
+                            if (viewModel != null) {
+                                viewModel.updateProfile(
+                                    context = context,
+                                    username = cleanUsername,
+                                    displayName = editDisplayName,
+                                    avatar = currentUserProfile.avatar ?: "",
+                                    dob = currentUserProfile.dob ?: "",
+                                    gender = currentUserProfile.gender ?: "",
+                                    nativeLanguage = currentUserProfile.nativeLanguage ?: "",
+                                    learningLanguage = currentUserProfile.learningLanguage ?: "",
+                                    country = currentUserProfile.country ?: "",
+                                    countryCode = currentUserProfile.countryCode ?: "",
+                                    hobbies = currentUserProfile.hobbies,
+                                    onSuccess = {
+                                        Toast.makeText(context, "Profile updated!", Toast.LENGTH_SHORT).show()
+                                        showEditProfileDialog = false
+                                    }
+                                )
+                            } else {
+                                showEditProfileDialog = false
+                            }
+                        } else {
+                            isChecking = true
+                            if (viewModel != null) {
+                                viewModel.checkUsernameUnique(cleanUsername, currentUserProfile.uid) { isUnique ->
+                                    isChecking = false
+                                    if (isUnique) {
+                                        viewModel.updateProfile(
+                                            context = context,
+                                            username = cleanUsername,
+                                            displayName = editDisplayName,
+                                            avatar = currentUserProfile.avatar ?: "",
+                                            dob = currentUserProfile.dob ?: "",
+                                            gender = currentUserProfile.gender ?: "",
+                                            nativeLanguage = currentUserProfile.nativeLanguage ?: "",
+                                            learningLanguage = currentUserProfile.learningLanguage ?: "",
+                                            country = currentUserProfile.country ?: "",
+                                            countryCode = currentUserProfile.countryCode ?: "",
+                                            hobbies = currentUserProfile.hobbies,
+                                            onSuccess = {
+                                                Toast.makeText(context, "Profile updated!", Toast.LENGTH_SHORT).show()
+                                                showEditProfileDialog = false
+                                            }
+                                        )
+                                    } else {
+                                        errorMessage = "This username is already taken. Please pick another."
+                                    }
+                                }
+                            } else {
+                                showEditProfileDialog = false
+                            }
+                        }
+                    },
+                    enabled = !isChecking,
+                    colors = ButtonDefaults.buttonColors(containerColor = GoldAccent),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    if (isChecking) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = Color.Black,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Text("Save Changes", color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditProfileDialog = false }) {
+                    Text("Cancel", color = Color.Gray)
+                }
+            }
+        )
     }
 }
