@@ -79,6 +79,28 @@ data class Language(
 )
 
 object LanguageData {
+    val programmingLanguages = listOf(
+        Language("Python", "Python (AI / Backend / Data)", "prog_python", "py", "Py"),
+        Language("JavaScript", "JavaScript (Web / Fullstack)", "prog_javascript", "js", "JS"),
+        Language("TypeScript", "TypeScript (Type-Safe JS)", "prog_typescript", "ts", "TS"),
+        Language("Kotlin", "Kotlin (Android & Multiplatform)", "prog_kotlin", "kt", "Kt"),
+        Language("Java", "Java (Enterprise / Spring / Android)", "prog_java", "java", "Jv"),
+        Language("C++", "C++ (Game Dev / Systems)", "prog_cpp", "cpp", "C+"),
+        Language("C#", "C# (.NET / Unity Games)", "prog_csharp", "cs", "C#"),
+        Language("C", "C (Systems & Embedded)", "prog_c", "c", "C"),
+        Language("Rust", "Rust (High Performance / Systems)", "prog_rust", "rs", "Rs"),
+        Language("Go (Golang)", "Go (Cloud & Microservices)", "prog_go", "go", "Go"),
+        Language("Swift", "Swift (iOS / macOS / Apple)", "prog_swift", "swift", "Sw"),
+        Language("Dart", "Dart & Flutter (Cross-Platform Mobile)", "prog_dart", "dart", "Dt"),
+        Language("PHP", "PHP (Web Development / Laravel)", "prog_php", "php", "Ph"),
+        Language("Ruby", "Ruby (Ruby on Rails)", "prog_ruby", "rb", "Rb"),
+        Language("SQL", "SQL (Database / PostgreSQL / MySQL)", "prog_sql", "sql", "Sq"),
+        Language("HTML / CSS", "HTML5 & CSS3 (Frontend Design)", "prog_html", "html", "Web"),
+        Language("R", "R (Data Science & Statistics)", "prog_r", "r", "R"),
+        Language("Scala", "Scala (Functional / Big Data)", "prog_scala", "scala", "Sc"),
+        Language("Shell / Bash", "Shell & Bash (DevOps / Linux)", "prog_shell", "sh", "Sh")
+    )
+
     val popularLanguages = listOf(
         Language("Hindi", "हिन्दी", "in", "hi", "हि"),
         Language("English", "English", "us", "en", "En"),
@@ -115,6 +137,7 @@ object LanguageData {
         Language("Belarusian", "беларуская мова", "by", "be", "Бе"),
         Language("Bengali", "বাংলা", "bd", "bn", "বা"),
         Language("Bihari", "बिहारी", "in", "bh", "बि"),
+        Language("Bhojpuri", "भोजपुरी", "in", "bho", "भो"),
         Language("Bislama", "Bislama", "vu", "bi", "Bi"),
         Language("Bodo", "बर'", "in", "brx", "ब"),
         Language("Bosnian", "Bosanski", "ba", "bs", "Bs"),
@@ -420,6 +443,83 @@ object LanguageData {
         Language("Halkomelem", "Halq'eméylem", "ca", "hur", "Ha"),
         Language("Nooksack", "Lhéchalosem", "us", "nok", "Lh"),
         Language("Straits Salish", "Swinomish", "us", "str", "Sw"),
-        Language("Clallam", "Nəxʷsƛ̓ay̓əmúcən", "us", "clm", "Nə")
-    ).distinctBy { it.name.lowercase() + it.code.lowercase() }
+        Language("Clallam", "Nəxʷsƛ̓ay̓əmúcən", "us", "clm", "Nə"),
+        Language("Haryanvi", "हरियाणवी", "in", "bgc", "हरि"),
+        Language("Rajasthani", "राजस्थानी", "in", "raj", "राज")
+    ).plus(programmingLanguages).distinctBy { it.name.lowercase() + it.code.lowercase() }
+
+    fun getFlagCodeForLanguage(languageName: String?): String {
+        if (languageName.isNullOrBlank()) return "us"
+        val clean = languageName.trim()
+        val match = allLanguages.firstOrNull { it.name.equals(clean, ignoreCase = true) }
+            ?: popularLanguages.firstOrNull { it.name.equals(clean, ignoreCase = true) }
+            ?: programmingLanguages.firstOrNull { it.name.equals(clean, ignoreCase = true) }
+        if (match != null) return match.flagCode
+
+        val lower = clean.lowercase()
+        return when {
+            // Programming languages
+            lower.contains("python") -> "prog_python"
+            lower.contains("javascript") || lower == "js" -> "prog_javascript"
+            lower.contains("typescript") || lower == "ts" -> "prog_typescript"
+            lower.contains("kotlin") -> "prog_kotlin"
+            lower.contains("java") && !lower.contains("javascript") -> "prog_java"
+            lower.contains("c++") || lower.contains("cpp") -> "prog_cpp"
+            lower.contains("c#") || lower.contains("csharp") -> "prog_csharp"
+            lower == "c" || lower.startsWith("c ") || lower.contains(" c ") -> "prog_c"
+            lower.contains("rust") -> "prog_rust"
+            lower.contains("golang") || lower == "go" || lower.startsWith("go ") -> "prog_go"
+            lower.contains("swift") -> "prog_swift"
+            lower.contains("dart") || lower.contains("flutter") -> "prog_dart"
+            lower.contains("php") -> "prog_php"
+            lower.contains("ruby") -> "prog_ruby"
+            lower.contains("sql") -> "prog_sql"
+            lower.contains("html") || lower.contains("css") -> "prog_html"
+            lower == "r" || lower.contains("r programming") -> "prog_r"
+            lower.contains("scala") -> "prog_scala"
+            lower.contains("bash") || lower.contains("shell") -> "prog_shell"
+
+            // Spoken languages
+            lower.contains("hindi") || lower.contains("bhojpuri") || lower.contains("punjabi") ||
+            lower.contains("tamil") || lower.contains("telugu") || lower.contains("marathi") ||
+            lower.contains("gujarati") || lower.contains("bengali") || lower.contains("urdu") ||
+            lower.contains("kannada") || lower.contains("malayalam") || lower.contains("odia") ||
+            lower.contains("assamese") || lower.contains("hinglish") || lower.contains("bihari") ||
+            lower.contains("haryanvi") || lower.contains("rajasthani") -> "in"
+            lower.contains("english") -> "us"
+            lower.contains("japanese") || lower.contains("japan") -> "jp"
+            lower.contains("korean") || lower.contains("korea") -> "kr"
+            lower.contains("spanish") || lower.contains("español") -> "es"
+            lower.contains("chinese") || lower.contains("mandarin") -> "cn"
+            lower.contains("french") -> "fr"
+            lower.contains("german") -> "de"
+            lower.contains("arabic") -> "sa"
+            lower.contains("russian") -> "ru"
+            lower.contains("portuguese") -> "br"
+            lower.contains("italian") -> "it"
+            lower.contains("turkish") -> "tr"
+            lower.contains("vietnamese") -> "vn"
+            lower.contains("thai") -> "th"
+            lower.contains("indonesian") -> "id"
+            lower.contains("filipino") || lower.contains("tagalog") -> "ph"
+            else -> "us"
+        }
+    }
+
+    fun resolveFlagCode(languageName: String?, storedCode: String?): String {
+        val cleanStored = storedCode?.trim()?.lowercase() ?: ""
+        val langFlag = getFlagCodeForLanguage(languageName)
+        if (cleanStored.isBlank()) return langFlag
+
+        if (!languageName.isNullOrBlank()) {
+            val cleanLang = languageName.trim()
+            val langMatch = allLanguages.firstOrNull { it.name.equals(cleanLang, ignoreCase = true) }
+                ?: popularLanguages.firstOrNull { it.name.equals(cleanLang, ignoreCase = true) }
+            if (langMatch != null && !cleanStored.equals(langMatch.flagCode, ignoreCase = true)) {
+                return langMatch.flagCode
+            }
+        }
+
+        return cleanStored
+    }
 }

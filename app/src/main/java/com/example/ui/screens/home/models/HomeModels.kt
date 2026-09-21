@@ -267,3 +267,49 @@ fun decideRoomTag(
     return room.statusTag.ifBlank { "LIVE" }
 }
 
+fun decideSupabaseRoomTag(
+    room: com.example.SupabaseVoiceRoom,
+    allRooms: List<com.example.SupabaseVoiceRoom>,
+    realSpeakingCount: Int = 1,
+    realListeningCount: Int = 0,
+    userLearningLanguage: String = "",
+    userNativeLanguage: String = ""
+): String {
+    val totalInRoom = realSpeakingCount + realListeningCount
+    if (totalInRoom >= 5 || (room.last_1h_joins ?: 0) > 4) {
+        return "HOT"
+    }
+    if (room.host_is_vip == true) {
+        return "VIP"
+    }
+    if (room.host_is_verified == true && (room.total_visits_24h ?: 0) > 15) {
+        return "ELITE"
+    }
+    if ((room.last_2h_growth_rate ?: 0.0) > 0.3) {
+        return "TRENDING"
+    }
+    if (realSpeakingCount > 2) {
+        return "LIVE"
+    }
+    if (userLearningLanguage.isNotBlank() && room.language.equals(userLearningLanguage, ignoreCase = true)) {
+        return "RECOMMENDED"
+    }
+    // Check if room was created in the last 24 hours
+    val createdTimeMs = try {
+        room.created_at?.let {
+            java.time.Instant.parse(it).toEpochMilli()
+        } ?: 0L
+    } catch (e: Exception) {
+        0L
+    }
+    val isRecentlyCreated = createdTimeMs > 0L && (System.currentTimeMillis() - createdTimeMs) < 24 * 60 * 60 * 1000
+    if (room.status_tag.equals("NEW", ignoreCase = true) && isRecentlyCreated) {
+        return "NEW"
+    }
+    val maxVisits = allRooms.maxOfOrNull { it.total_visits_24h ?: 0 } ?: 0
+    if (maxVisits > 10 && (room.total_visits_24h ?: 0) >= maxVisits) {
+        return "POPULAR"
+    }
+    return room.status_tag?.ifBlank { "LIVE" } ?: "LIVE"
+}
+

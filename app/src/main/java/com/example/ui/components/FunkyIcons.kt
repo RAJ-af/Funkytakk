@@ -850,3 +850,155 @@ fun FunkyChevronRightIcon(
     }
 }
 
+@Composable
+fun FunkyDiscoverIcon(
+    color: Color = Color.Black,
+    isFilled: Boolean = false,
+    modifier: Modifier = Modifier.size(24.dp),
+    strokeWidth: Float = 1.8f
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val sw = strokeWidth * density
+
+        if (isFilled) {
+            // Main user head
+            drawCircle(
+                color = color,
+                radius = w * 0.16f,
+                center = Offset(w * 0.40f, h * 0.30f)
+            )
+            // Main user body
+            val mainBody = Path().apply {
+                moveTo(w * 0.14f, h * 0.82f)
+                cubicTo(w * 0.15f, h * 0.58f, w * 0.65f, h * 0.58f, w * 0.66f, h * 0.82f)
+                close()
+            }
+            drawPath(mainBody, color = color)
+
+            // Companion user head (behind, to the right)
+            drawCircle(
+                color = color,
+                radius = w * 0.12f,
+                center = Offset(w * 0.72f, h * 0.36f)
+            )
+            // Companion user body
+            val companionBody = Path().apply {
+                moveTo(w * 0.56f, h * 0.82f)
+                cubicTo(w * 0.58f, h * 0.64f, w * 0.90f, h * 0.64f, w * 0.92f, h * 0.82f)
+                close()
+            }
+            drawPath(companionBody, color = color)
+        } else {
+            // Main user head
+            drawCircle(
+                color = color,
+                radius = w * 0.16f,
+                center = Offset(w * 0.40f, h * 0.30f),
+                style = Stroke(width = sw)
+            )
+            // Main user body
+            val mainBody = Path().apply {
+                moveTo(w * 0.15f, h * 0.82f)
+                cubicTo(w * 0.16f, h * 0.60f, w * 0.64f, h * 0.60f, w * 0.65f, h * 0.82f)
+            }
+            drawPath(mainBody, color = color, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+
+            // Companion user head
+            drawCircle(
+                color = color,
+                radius = w * 0.12f,
+                center = Offset(w * 0.72f, h * 0.36f),
+                style = Stroke(width = sw)
+            )
+            // Companion user body
+            val companionBody = Path().apply {
+                moveTo(w * 0.60f, h * 0.74f)
+                cubicTo(w * 0.65f, h * 0.64f, w * 0.87f, h * 0.64f, w * 0.91f, h * 0.82f)
+            }
+            drawPath(companionBody, color = color, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        }
+    }
+}
+
+@Composable
+fun FunkySlidersIcon(
+    color: Color = Color.Black,
+    modifier: Modifier = Modifier.size(20.dp),
+    strokeWidth: Float = 1.8f
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val sw = strokeWidth * density
+
+        // Line 1 (top track)
+        drawLine(color, Offset(w * 0.15f, h * 0.30f), Offset(w * 0.85f, h * 0.30f), strokeWidth = sw, cap = StrokeCap.Round)
+        // Knob 1
+        drawCircle(color = Color.White, radius = w * 0.12f, center = Offset(w * 0.38f, h * 0.30f))
+        drawCircle(color = color, radius = w * 0.12f, center = Offset(w * 0.38f, h * 0.30f), style = Stroke(width = sw))
+
+        // Line 2 (bottom track)
+        drawLine(color, Offset(w * 0.15f, h * 0.70f), Offset(w * 0.85f, h * 0.70f), strokeWidth = sw, cap = StrokeCap.Round)
+        // Knob 2
+        drawCircle(color = Color.White, radius = w * 0.12f, center = Offset(w * 0.65f, h * 0.70f))
+        drawCircle(color = color, radius = w * 0.12f, center = Offset(w * 0.65f, h * 0.70f), style = Stroke(width = sw))
+    }
+}
+
+@Composable
+fun FunkyWaveHandIcon(
+    color: Color = Color.Black,
+    modifier: Modifier = Modifier.size(16.dp),
+    strokeWidth: Float = 1.6f
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val sw = strokeWidth * density
+
+        val handPath = Path().apply {
+            moveTo(w * 0.38f, h * 0.88f)
+            lineTo(w * 0.58f, h * 0.88f)
+            cubicTo(w * 0.64f, h * 0.80f, w * 0.74f, h * 0.64f, w * 0.76f, h * 0.48f)
+            cubicTo(w * 0.76f, h * 0.40f, w * 0.68f, h * 0.40f, w * 0.66f, h * 0.48f)
+            cubicTo(w * 0.66f, h * 0.34f, w * 0.58f, h * 0.34f, w * 0.56f, h * 0.45f)
+            cubicTo(w * 0.56f, h * 0.26f, w * 0.48f, h * 0.26f, w * 0.47f, h * 0.42f)
+            cubicTo(w * 0.47f, h * 0.32f, w * 0.40f, h * 0.32f, w * 0.39f, h * 0.50f)
+            cubicTo(w * 0.33f, h * 0.54f, w * 0.24f, h * 0.60f, w * 0.24f, h * 0.68f)
+            cubicTo(w * 0.24f, h * 0.74f, w * 0.32f, h * 0.76f, w * 0.36f, h * 0.74f)
+            lineTo(w * 0.38f, h * 0.88f)
+            close()
+        }
+        drawPath(
+            path = handPath,
+            color = color,
+            style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+
+        // Wave marks
+        drawArc(
+            color = color,
+            startAngle = 200f,
+            sweepAngle = 60f,
+            useCenter = false,
+            topLeft = Offset(w * 0.12f, h * 0.20f),
+            size = androidx.compose.ui.geometry.Size(w * 0.35f, h * 0.35f),
+            style = Stroke(width = sw, cap = StrokeCap.Round)
+        )
+        drawArc(
+            color = color,
+            startAngle = 195f,
+            sweepAngle = 55f,
+            useCenter = false,
+            topLeft = Offset(w * 0.02f, h * 0.10f),
+            size = androidx.compose.ui.geometry.Size(w * 0.52f, h * 0.52f),
+            style = Stroke(width = sw, cap = StrokeCap.Round)
+        )
+    }
+}
+
+
+
+

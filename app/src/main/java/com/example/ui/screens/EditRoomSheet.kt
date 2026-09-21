@@ -36,6 +36,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.components.CircleFlag
+import com.example.ui.components.RoomLanguageSelectionSheet
 
 @Composable
 fun EditRoomBottomSheetContent(
@@ -47,6 +49,8 @@ fun EditRoomBottomSheetContent(
     onDescriptionChange: (String) -> Unit,
     roomLanguage: String,
     onLanguageChange: (String) -> Unit,
+    roomCountryCode: String = "",
+    onCountryCodeChange: (String) -> Unit = {},
     selectedThemeIndex: Int,
     onThemeChange: (Int) -> Unit,
     isPrivate: Boolean,
@@ -228,9 +232,10 @@ fun EditRoomBottomSheetContent(
                         .background(if (isDark) Color.White.copy(alpha = 0.12f) else Color(0xFFFEF3C7)),
                     contentAlignment = Alignment.Center
                 ) {
-                    CustomLanguageGlobeIcon(
-                        tint = if (isDark) Color.White else Color(0xFFD97706),
-                        modifier = Modifier.size(18.dp)
+                    val activeFlag = roomCountryCode.ifBlank { LanguageData.getFlagCodeForLanguage(roomLanguage) }
+                    CircleFlag(
+                        countryCode = activeFlag,
+                        modifier = Modifier.size(24.dp).clip(CircleShape)
                     )
                 }
                 Spacer(modifier = Modifier.width(12.dp))
@@ -584,66 +589,28 @@ fun EditRoomBottomSheetContent(
         Spacer(modifier = Modifier.height(24.dp))
     }
 
-    // Modal Popup 1: Language Picker Selector (Modern Dialog UI)
+    // Modal Popup 1: Language Picker Selector (Full screen sheet matching Room Creation!)
     if (showLanguagePicker) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showLanguagePicker = false },
-            title = {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(text = "Select Language", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.Black)
-                    androidx.compose.material3.IconButton(onClick = { showLanguagePicker = false }) {
-                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = Color.Gray)
-                    }
-                }
+        RoomLanguageSelectionSheet(
+            selectedLanguageName = roomLanguage,
+            isDark = isDark,
+            onLanguageSelected = { selectedLang ->
+                onLanguageChange(selectedLang.name)
+                onCountryCodeChange(selectedLang.flagCode)
+                showLanguagePicker = false
             },
-            text = {
-                val languages = listOf("Hindi + English", "Hindi Only", "English Only", "Bhojpuri", "Punjabi", "Spanish", "Arabic")
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    languages.forEach { lang ->
-                        val isSelected = roomLanguage == lang
-                        Row(
-                            modifier = Modifier
-                               .fillMaxWidth()
-                               .clip(RoundedCornerShape(12.dp))
-                               .background(if (isSelected) Color(0xFFFFFAEB) else Color.Transparent)
-                               .clickable {
-                                    onLanguageChange(lang)
-                                    showLanguagePicker = false
-                                }
-                               .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = lang,
-                                fontSize = 14.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) Color(0xFFD97706) else Color.DarkGray
-                            )
-                            if (isSelected) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = "Selected",
-                                    tint = Color(0xFFD97706),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {},
-            containerColor = Color.White,
-            shape = RoundedCornerShape(24.dp)
+            onDismiss = { showLanguagePicker = false }
         )
     }
 
     // Modal Popup 2: Choose Theme Dialog (Beautifully matches Picture 6!)
     if (showThemePicker) {
+        val dialogBg = if (isDark) Color(0xFF1E293B) else Color.White
+        val dialogTitleColor = if (isDark) Color.White else Color.Black
+        val dialogSubtitleColor = if (isDark) Color(0xFF94A3B8) else Color.Gray
+        val closeBtnBg = if (isDark) Color.White.copy(alpha = 0.1f) else Color(0xFFF3F4F6)
+        val closeBtnTint = if (isDark) Color.White else Color.DarkGray
+
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { showThemePicker = false },
             title = {
@@ -653,17 +620,17 @@ fun EditRoomBottomSheetContent(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
-                        Text(text = "Choose Theme", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Color.Black)
-                        Text(text = "Pick a theme for your room", fontSize = 11.sp, color = Color.Gray)
+                        Text(text = "Choose Theme", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = dialogTitleColor)
+                        Text(text = "Pick a theme for your room", fontSize = 11.sp, color = dialogSubtitleColor)
                     }
                     androidx.compose.material3.IconButton(
                         onClick = { showThemePicker = false },
                         modifier = Modifier
                             .size(32.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFFF3F4F6))
+                            .background(closeBtnBg)
                     ) {
-                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = Color.DarkGray, modifier = Modifier.size(16.dp))
+                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = closeBtnTint, modifier = Modifier.size(16.dp))
                     }
                 }
             },
@@ -680,10 +647,13 @@ fun EditRoomBottomSheetContent(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(16.dp))
-                                    .background(if (isSelected) Color(0xFFFFFAEB) else Color.Transparent)
+                                    .background(
+                                        if (isSelected) (if (isDark) Color(0xFF78350F).copy(alpha = 0.45f) else Color(0xFFFFFAEB))
+                                        else (if (isDark) Color(0xFF0F172A).copy(alpha = 0.6f) else Color.Transparent)
+                                    )
                                     .border(
                                         width = 1.dp,
-                                        color = if (isSelected) Color(0xFFFBBF24) else Color(0xFFF3F4F6),
+                                        color = if (isSelected) Color(0xFFFBBF24) else (if (isDark) Color.White.copy(alpha = 0.1f) else Color(0xFFF3F4F6)),
                                         shape = RoundedCornerShape(16.dp)
                                     )
                                     .clickable {
@@ -706,12 +676,12 @@ fun EditRoomBottomSheetContent(
                                         text = current.name,
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (isSelected) Color(0xFFD97706) else Color.Black
+                                        color = if (isSelected) Color(0xFFFBBF24) else dialogTitleColor
                                     )
                                     Text(
                                         text = current.description,
                                         fontSize = 10.sp,
-                                        color = Color.Gray,
+                                        color = dialogSubtitleColor,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -720,14 +690,17 @@ fun EditRoomBottomSheetContent(
                                     modifier = Modifier
                                         .size(20.dp)
                                         .clip(CircleShape)
-                                        .background(if (isSelected) Color(0xFFD97706) else Color(0xFFE5E7EB)),
+                                        .background(
+                                            if (isSelected) Color(0xFFFBBF24) 
+                                            else (if (isDark) Color.White.copy(alpha = 0.15f) else Color(0xFFE5E7EB))
+                                        ),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     if (isSelected) {
                                         Icon(
                                             imageVector = Icons.Default.Check,
                                             contentDescription = "Selected",
-                                            tint = Color.White,
+                                            tint = if (isDark) Color(0xFF451A03) else Color.White,
                                             modifier = Modifier.size(12.dp)
                                         )
                                     }
@@ -741,16 +714,22 @@ fun EditRoomBottomSheetContent(
                 androidx.compose.material3.TextButton(
                     onClick = { showThemePicker = false }
                 ) {
-                    Text("Apply Theme", fontWeight = FontWeight.Bold, color = Color(0xFFD97706))
+                    Text("Apply Theme", fontWeight = FontWeight.Bold, color = Color(0xFFFBBF24))
                 }
             },
-            containerColor = Color.White,
+            containerColor = dialogBg,
             shape = RoundedCornerShape(24.dp)
         )
     }
 
     // Modal Popup 3: Add Tags Dialog (Matches Picture 7 Popular Tags exactly!)
     if (showTagPicker) {
+        val dialogBg = if (isDark) Color(0xFF1E293B) else Color.White
+        val dialogTitleColor = if (isDark) Color.White else Color.Black
+        val dialogSubtitleColor = if (isDark) Color(0xFF94A3B8) else Color.Gray
+        val closeBtnBg = if (isDark) Color.White.copy(alpha = 0.1f) else Color(0xFFF3F4F6)
+        val closeBtnTint = if (isDark) Color.White else Color.DarkGray
+
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { showTagPicker = false },
             title = {
@@ -760,24 +739,24 @@ fun EditRoomBottomSheetContent(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
-                        Text(text = "Add Tags", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Color.Black)
-                        Text(text = "Popular Tags", fontSize = 11.sp, color = Color.Gray)
+                        Text(text = "Add Tags", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = dialogTitleColor)
+                        Text(text = "Popular Tags", fontSize = 11.sp, color = dialogSubtitleColor)
                     }
                     androidx.compose.material3.IconButton(
                         onClick = { showTagPicker = false },
                         modifier = Modifier
                             .size(32.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFFF3F4F6))
+                            .background(closeBtnBg)
                     ) {
-                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = Color.DarkGray, modifier = Modifier.size(16.dp))
+                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = closeBtnTint, modifier = Modifier.size(16.dp))
                     }
                 }
             },
             text = {
                 val popularTagsList = listOf(
-                    "Chill", "Music", "Gaming", "Friendship",
-                    "Fun", "Dating", "Study", "Debate",
+                    "Chill", "Coding", "Gaming", "Tech",
+                    "Study", "Python", "Music", "Debate",
                     "Travel", "Poetry", "Anime", "Sports"
                 )
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -796,10 +775,13 @@ fun EditRoomBottomSheetContent(
                                     modifier = Modifier
                                         .weight(1f)
                                         .clip(RoundedCornerShape(50.dp))
-                                        .background(if (isSelected) Color(0xFFFFFAEB) else Color(0xFFF3F4F6))
+                                        .background(
+                                            if (isSelected) (if (isDark) Color(0xFF78350F).copy(alpha = 0.5f) else Color(0xFFFFFAEB))
+                                            else (if (isDark) Color(0xFF0F172A) else Color(0xFFF3F4F6))
+                                        )
                                         .border(
                                             width = 1.dp,
-                                            color = if (isSelected) Color(0xFFFBBF24) else Color.Transparent,
+                                            color = if (isSelected) Color(0xFFFBBF24) else (if (isDark) Color.White.copy(alpha = 0.1f) else Color.Transparent),
                                             shape = RoundedCornerShape(50.dp)
                                         )
                                         .clickable {
@@ -813,7 +795,8 @@ fun EditRoomBottomSheetContent(
                                         text = tag,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (isSelected) Color(0xFFD97706) else Color.DarkGray
+                                        color = if (isSelected) (if (isDark) Color(0xFFFBBF24) else Color(0xFFD97706))
+                                        else (if (isDark) Color(0xFFE2E8F0) else Color.DarkGray)
                                     )
                                 }
                             }
@@ -822,7 +805,7 @@ fun EditRoomBottomSheetContent(
                 }
             },
             confirmButton = {},
-            containerColor = Color.White,
+            containerColor = dialogBg,
             shape = RoundedCornerShape(24.dp)
         )
     }

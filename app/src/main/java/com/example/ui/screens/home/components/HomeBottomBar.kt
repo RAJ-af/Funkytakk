@@ -52,14 +52,17 @@ fun HomeBottomBar(
                 }
             )
 
-            // 2. Rooms
+            // 2. Discover
+            val isDiscoverSelected = activeTab == "discover" || activeTab == "rooms"
             BottomNavItem(
-                label = "Rooms",
-                isSelected = activeTab == "rooms",
-                onClick = { onTabSelected("rooms") },
+                label = "Discover",
+                isSelected = isDiscoverSelected,
+                onClick = { onTabSelected("discover") },
+                usePillBackground = true,
                 icon = {
-                    FunkyMicIcon(
-                        color = if (activeTab == "rooms") Color.Black else Color(0xFF6B7280),
+                    FunkyDiscoverIcon(
+                        color = Color.Black,
+                        isFilled = isDiscoverSelected,
                         modifier = Modifier.size(24.dp)
                     )
                 }

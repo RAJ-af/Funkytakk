@@ -36,6 +36,7 @@ import androidx.compose.ui.platform.testTag
 import com.example.AuthViewModel
 import com.example.UserProfile
 import com.example.ui.components.CircleFlag
+import com.example.ui.screens.home.models.DarkText
 import com.example.ui.screens.home.models.GraySubtitle
 import com.example.ui.theme.GoldAccent
 
@@ -374,8 +375,9 @@ fun ProfileTabContent(
 
         AlertDialog(
             onDismissRequest = { showEditProfileDialog = false },
+            containerColor = Color.White,
             title = {
-                Text("Edit Profile", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                Text("Edit Profile", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = DarkText)
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -388,13 +390,17 @@ fun ProfileTabContent(
                                 errorMessage = null
                                 editUsername = input.filter { it.isLetterOrDigit() || it == '_' }.lowercase()
                             },
-                            placeholder = { Text("e.g. raj_learner") },
+                            placeholder = { Text("e.g. raj_learner", color = Color.Gray) },
                             singleLine = true,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("edit_username_input"),
                             shape = RoundedCornerShape(12.dp),
+                            textStyle = androidx.compose.ui.text.TextStyle(color = DarkText, fontSize = 14.sp),
                             colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = DarkText,
+                                unfocusedTextColor = DarkText,
+                                cursorColor = GoldAccent,
                                 focusedBorderColor = GoldAccent,
                                 unfocusedBorderColor = Color.LightGray
                             )
@@ -413,11 +419,15 @@ fun ProfileTabContent(
                         OutlinedTextField(
                             value = editDisplayName,
                             onValueChange = { editDisplayName = it },
-                            placeholder = { Text("Enter your display name") },
+                            placeholder = { Text("Enter your display name", color = Color.Gray) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
+                            textStyle = androidx.compose.ui.text.TextStyle(color = DarkText, fontSize = 14.sp),
                             colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = DarkText,
+                                unfocusedTextColor = DarkText,
+                                cursorColor = GoldAccent,
                                 focusedBorderColor = GoldAccent,
                                 unfocusedBorderColor = Color.LightGray
                             )

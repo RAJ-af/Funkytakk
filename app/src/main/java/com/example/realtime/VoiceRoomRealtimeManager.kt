@@ -253,6 +253,9 @@ object VoiceRoomRealtimeManager {
 
                 if (table == "room_messages" || topic.contains("room_messages")) {
                     val roomId = record?.optString("room_id")
+                    val msgType = record?.optString("message_type")
+                    val textMsg = record?.optString("message")
+                    Log.d(TAG, "[Realtime] Received room_messages postgres_changes (type=$eventType): roomId=$roomId, message_type='$msgType', text='$textMsg', record=$record")
                     _events.tryEmit(RealtimeTableEvent.RoomMessageInserted(record, roomId))
                 } else if (table == "voice_rooms" || topic.contains("voice_rooms")) {
                     _events.tryEmit(RealtimeTableEvent.VoiceRoomChanged(eventType, record))

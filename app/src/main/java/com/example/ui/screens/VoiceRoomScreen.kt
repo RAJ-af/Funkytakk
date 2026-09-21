@@ -36,6 +36,25 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import com.example.ui.components.Soft3DFloatingBubble
+import com.example.ui.components.Soft3DReportShield
+import com.example.ui.components.Soft3DLeaveDoor
+import com.example.ui.components.Soft3DHarassmentIcon
+import com.example.ui.components.Soft3DSpamIcon
+import com.example.ui.components.Soft3DHateIcon
+import com.example.ui.components.Soft3DSexualContentIcon
+import com.example.ui.components.Soft3DDangerousIcon
+import com.example.ui.components.Soft3DOtherIcon
+import com.example.ui.components.Soft3DMicrophoneIcon
+import com.example.ui.components.Soft3DMessageStackIcon
+import com.example.ui.components.Soft3DUsersGroupIcon
+import com.example.ui.components.Soft3DScreenshotIcon
+import com.example.ui.components.Soft3DVideoCamIcon
+import com.example.ui.components.Soft3DSuccessBadge
+import com.example.ui.components.Soft3DSearchAuditIcon
+import com.example.ui.components.Soft3DRulesActionIcon
+import com.example.ui.components.Soft3DPrivacyLockIcon
+import com.example.ui.components.Soft3DBellNotificationIcon
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -351,6 +370,7 @@ fun VoiceRoomScreen(
     var roomTags by remember { mutableStateOf("Chill") } // default tag chip from mockup
     var roomDescription by remember { mutableStateOf("A friendly chat room to share good vibes and play music.") }
     var roomLanguage by remember { mutableStateOf("Hindi + English") } // default from mockup
+    var roomCountryCode by remember { mutableStateOf("in") }
     var isPrivateRoomState by remember { mutableStateOf(false) }
     var joinCodeState by remember { mutableStateOf("") }
 
@@ -387,13 +407,22 @@ fun VoiceRoomScreen(
     var isMicOn by remember { mutableStateOf(true) }
     var participantsData by remember { mutableStateOf<List<SupabaseRoomParticipant>>(emptyList()) }
     val messages = remember { mutableStateListOf<ChillRoomMessage>() }
-    var renderedMessageCount by remember { mutableStateOf(6) }
+    var renderedMessageCount by remember { mutableStateOf(30) }
     val renderedMessages = remember(messages, renderedMessageCount) {
         derivedStateOf {
             messages.takeLast(renderedMessageCount).reversed()
         }
     }.value
     val chatListState = rememberLazyListState()
+
+    // Auto-scroll to the newest message whenever new messages arrive in the room
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            try {
+                chatListState.animateScrollToItem(0)
+            } catch (_: Exception) {}
+        }
+    }
     val activeReactions = remember { mutableStateListOf<FloatingEmojiId>() }
     val speakerReactions = remember { mutableStateMapOf<String, List<FloatingEmojiId>>() }
 
@@ -486,6 +515,7 @@ fun VoiceRoomScreen(
                         roomTitle = roomObj.title ?: "Voice Circle"
                         roomDescription = roomObj.description ?: ""
                         roomLanguage = roomObj.language ?: ""
+                        roomCountryCode = roomObj.language_code.orEmpty().ifBlank { roomObj.country_code.orEmpty() }.ifBlank { LanguageData.getFlagCodeForLanguage(roomLanguage) }
                         isPrivateRoomState = roomObj.is_private ?: false
                         joinCodeState = roomObj.join_code ?: ""
                     }
@@ -510,7 +540,11 @@ fun VoiceRoomScreen(
                 val msgsRes = SupabaseClient.api.getRoomMessages(roomIdEq = "eq.$activeRoomId")
                 if (msgsRes.isSuccessful) {
                     val list = msgsRes.body() ?: emptyList()
+                    Log.d("VoiceRoomScreen", "[InitialFetch] Fetched ${list.size} room_messages for room $activeRoomId")
                     val mapped = list.map { msg ->
+                        Log.d("VoiceRoomScreen", "[InitialFetch] Message: id=${msg.id}, type=${msg.message_type}, text='${msg.message}', userId=${msg.user_id}, createdAt=${msg.created_at}")
+                        val rawType = msg.message_type
+                        val isSystem = rawType?.equals("system", ignoreCase = true) == true
                         val p = supabaseProfiles.find { it.uid == msg.user_id }
                         val isMe = (msg.user_id == currentUserId)
                         val name = if (isMe) (p?.displayName ?: "You") else (p?.displayName ?: p?.username ?: "User")
@@ -519,13 +553,13 @@ fun VoiceRoomScreen(
                         ChillRoomMessage(
                             senderName = name,
                             senderImageUrl = avatar,
-                            badge = if (msg.user_id == roomHostId) "Host" else null,
+                            badge = badge,
                             badgeColor = if (badge == "Host") ChillGoldIcon else ChillPurpleAccent,
-                            text = msg.message,
+                            text = msg.message ?: "",
                             id = msg.id,
                             userId = msg.user_id,
                             createdAt = msg.created_at,
-                            messageType = msg.message_type ?: "chat"
+                            messageType = if (isSystem) "system" else (rawType ?: "chat")
                         )
                     }
                     withContext(Dispatchers.Main) {
@@ -539,6 +573,8 @@ fun VoiceRoomScreen(
                             }
                         }
                     }
+                } else {
+                    Log.e("VoiceRoomScreen", "[InitialFetch] Failed to fetch room_messages: code=${msgsRes.code()}, error=${msgsRes.errorBody()?.string()}")
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -628,15 +664,19 @@ fun VoiceRoomScreen(
                 }
                 is RealtimeTableEvent.RoomMessageInserted -> {
                     val record = event.record
+                    Log.d("VoiceRoomScreen", "[Realtime] RoomMessageInserted received: record=$record, eventRoomId=${event.roomId}, activeRoomId=$activeRoomId")
                     if (record != null) {
                         val rId = record.optString("room_id")
-                        if (rId == activeRoomId || (event.roomId == activeRoomId)) {
+                        if (rId == activeRoomId || event.roomId == activeRoomId || rId.isBlank()) {
                             val msgId = record.optString("id")
                             val userId = record.optString("user_id")
                             val text = record.optString("message")
                             val createdAt = record.optString("created_at")
                             val msgType = record.optString("message_type")
-                            val messageType = if (msgType.isNullOrBlank()) "chat" else msgType
+                            val isSystem = msgType.equals("system", ignoreCase = true)
+                            val messageType = if (isSystem) "system" else if (msgType.isNullOrBlank()) "chat" else msgType
+
+                            Log.d("VoiceRoomScreen", "[Realtime] Processing message: id=$msgId, type=$messageType (raw=$msgType), text='$text', userId=$userId")
 
                             withContext(Dispatchers.Main) {
                                 if (msgId.isBlank() || messages.none { it.id == msgId }) {
@@ -1075,38 +1115,42 @@ fun VoiceRoomScreen(
                             modifier = Modifier.size(24.dp)
                         )
                         
+                        val menuBg = if (currentTheme.isDark) Color(0xFF1E293B).copy(alpha = 0.98f) else Color.White
+                        val menuBorder = if (currentTheme.isDark) Color.White.copy(alpha = 0.15f) else Color(0xFFE2E8F0)
+                        val menuTitleColor = if (currentTheme.isDark) Color.White else Color(0xFF0F172A)
+                        val menuSubtitleColor = if (currentTheme.isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                        val menuDividerColor = if (currentTheme.isDark) Color.White.copy(alpha = 0.08f) else Color(0xFFF1F5F9)
+
                         DropdownMenu(
                             expanded = showThreeDotMenu,
                             onDismissRequest = { showThreeDotMenu = false },
+                            shape = RoundedCornerShape(20.dp),
+                            containerColor = menuBg,
+                            tonalElevation = 8.dp,
+                            shadowElevation = 14.dp,
+                            border = BorderStroke(1.dp, menuBorder),
                             modifier = Modifier
-                                .background(currentTheme.cardBgColor, RoundedCornerShape(16.dp))
-                                .border(
-                                    width = 1.dp,
-                                    color = currentTheme.cardBorderColor,
-                                    shape = RoundedCornerShape(16.dp)
-                                )
-                                .padding(vertical = 4.dp)
-                                .width(190.dp)
+                                .width(230.dp)
+                                .padding(vertical = 4.dp, horizontal = 4.dp)
                         ) {
                             DropdownMenuItem(
                                 leadingIcon = {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFFF59E0B).copy(alpha = 0.15f)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text("💬", fontSize = 16.sp)
-                                    }
+                                    Soft3DFloatingBubble(modifier = Modifier.size(34.dp))
                                 },
                                 text = {
-                                    Text(
-                                        text = "Floating Bubble",
-                                        color = currentTheme.primaryTextColor,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
+                                    Column {
+                                        Text(
+                                            text = "Floating Bubble",
+                                            color = menuTitleColor,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = "Multitask in background",
+                                            color = menuSubtitleColor,
+                                            fontSize = 11.sp
+                                        )
+                                    }
                                 },
                                 onClick = {
                                     showThreeDotMenu = false
@@ -1117,80 +1161,68 @@ fun VoiceRoomScreen(
                                         com.example.service.OverlayPermissionHelper.requestOverlayPermission(context)
                                     }
                                 },
-                                colors = androidx.compose.material3.MenuDefaults.itemColors(
-                                    textColor = currentTheme.primaryTextColor
-                                )
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                             )
                             HorizontalDivider(
-                                color = currentTheme.cardBorderColor, 
-                                thickness = 1.dp
+                                color = menuDividerColor, 
+                                thickness = 1.dp,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
                             )
                             DropdownMenuItem(
                                 leadingIcon = {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(CircleShape)
-                                            .background(currentTheme.accentColor.copy(alpha = 0.15f)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        CustomFlagIcon(
-                                            tint = currentTheme.accentColor,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
+                                    Soft3DReportShield(modifier = Modifier.size(34.dp))
                                 },
                                 text = { 
-                                    Text(
-                                        text = "Report Room", 
-                                        color = currentTheme.primaryTextColor, 
-                                        fontSize = 14.sp, 
-                                        fontWeight = FontWeight.SemiBold
-                                    ) 
+                                    Column {
+                                        Text(
+                                            text = "Report Room", 
+                                            color = menuTitleColor, 
+                                            fontSize = 14.sp, 
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = "Flag safety concerns",
+                                            color = menuSubtitleColor,
+                                            fontSize = 11.sp
+                                        )
+                                    }
                                 },
                                 onClick = { 
                                     showThreeDotMenu = false
                                     showReportDialog = true
                                 },
-                                colors = androidx.compose.material3.MenuDefaults.itemColors(
-                                    textColor = currentTheme.primaryTextColor
-                                )
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                             )
                             HorizontalDivider(
-                                color = currentTheme.cardBorderColor, 
-                                thickness = 1.dp
+                                color = menuDividerColor, 
+                                thickness = 1.dp,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
                             )
                             DropdownMenuItem(
                                 leadingIcon = {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(CircleShape)
-                                            .background(if (isRoomDarkMode) Color(0xFFEF4444).copy(alpha = 0.15f) else Color(0xFFFEF2F2)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        CustomLeaveIcon(
-                                            tint = Color(0xFFEF4444),
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
+                                    Soft3DLeaveDoor(modifier = Modifier.size(34.dp))
                                 },
                                 text = { 
-                                    Text(
-                                        text = "Leave Room", 
-                                        color = Color(0xFFEF4444), 
-                                        fontSize = 14.sp, 
-                                        fontWeight = FontWeight.Bold
-                                    ) 
+                                    Column {
+                                        Text(
+                                            text = "Leave Room", 
+                                            color = Color(0xFFEF4444), 
+                                            fontSize = 14.sp, 
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = "Exit current circle",
+                                            color = Color(0xFFF87171).copy(alpha = 0.85f),
+                                            fontSize = 11.sp
+                                        )
+                                    }
                                 },
                                 onClick = {
                                     showThreeDotMenu = false
                                     viewModel?.leaveRoom(context)
                                     onBack()
                                 },
-                                colors = androidx.compose.material3.MenuDefaults.itemColors(
-                                    textColor = Color(0xFFEF4444)
-                                )
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                             )
                         }
                     }
@@ -1390,8 +1422,15 @@ fun VoiceRoomScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp, vertical = 4.dp)
-                        .background(Color.White.copy(alpha=0.95f), RoundedCornerShape(20.dp))
-                        .border(1.dp, Color(0xFFF3F4F6), RoundedCornerShape(20.dp))
+                        .background(
+                            if (currentTheme.isDark) Color(0xFF1E293B).copy(alpha = 0.95f) else Color.White.copy(alpha = 0.95f),
+                            RoundedCornerShape(20.dp)
+                        )
+                        .border(
+                            1.dp,
+                            if (currentTheme.isDark) Color.White.copy(alpha = 0.15f) else Color(0xFFF3F4F6),
+                            RoundedCornerShape(20.dp)
+                        )
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
@@ -1512,8 +1551,15 @@ fun VoiceRoomScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp, vertical = 4.dp)
-                        .background(Color.White.copy(alpha=0.95f), RoundedCornerShape(20.dp))
-                        .border(1.dp, Color(0xFFF3F4F6), RoundedCornerShape(20.dp))
+                        .background(
+                            if (currentTheme.isDark) Color(0xFF1E293B).copy(alpha = 0.95f) else Color.White.copy(alpha = 0.95f),
+                            RoundedCornerShape(20.dp)
+                        )
+                        .border(
+                            1.dp,
+                            if (currentTheme.isDark) Color.White.copy(alpha = 0.15f) else Color(0xFFF3F4F6),
+                            RoundedCornerShape(20.dp)
+                        )
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
@@ -1567,11 +1613,12 @@ fun VoiceRoomScreen(
                     hasDot = true,
                     onClick = { showChatSheet = true }
                 )
+                val realPeopleCount = if (participantsData.isNotEmpty()) participantsData.size else allRoomSeats.size.coerceAtLeast(1)
                 VoiceBottomBarItem(
                     icon = { CustomPeopleGroupIcon(tint = inactiveIconTint, modifier = Modifier.size(26.dp)) },
                     label = "People",
                     tint = inactiveIconTint,
-                    badgeText = "24",
+                    badgeText = "$realPeopleCount",
                     onClick = { showPeopleSheet = true }
                 )
 
@@ -1868,7 +1915,12 @@ fun VoiceRoomScreen(
                 roomDescription = roomDescription,
                 onDescriptionChange = { roomDescription = it },
                 roomLanguage = roomLanguage,
-                onLanguageChange = { roomLanguage = it },
+                onLanguageChange = { 
+                    roomLanguage = it
+                    roomCountryCode = LanguageData.getFlagCodeForLanguage(it)
+                },
+                roomCountryCode = roomCountryCode,
+                onCountryCodeChange = { roomCountryCode = it },
                 selectedThemeIndex = selectedThemeIndex,
                 onThemeChange = { index ->
                     selectedThemeIndex = index
@@ -1883,6 +1935,8 @@ fun VoiceRoomScreen(
                     val newTitle = roomTitle
                     val newDesc = roomDescription
                     val newLang = roomLanguage
+                    val newCountryCode = LanguageData.resolveFlagCode(newLang, roomCountryCode)
+                    roomCountryCode = newCountryCode
                     val newTag = roomTags
                     val newPrivate = isPrivateRoomState
                     val newCode = joinCodeState
@@ -1897,6 +1951,9 @@ fun VoiceRoomScreen(
                                 title = newTitle,
                                 description = newDesc,
                                 language = newLang,
+                                country_code = newCountryCode,
+                                language_code = newCountryCode,
+                                language_flag = "",
                                 tag = newTag,
                                 is_private = newPrivate,
                                 join_code = if (newPrivate) newCode else null
@@ -1982,12 +2039,25 @@ fun VoiceRoomScreen(
     // 2) Report Room Bottom Sheet container
     @OptIn(ExperimentalMaterial3Api::class)
     if (showReportDialog) {
-        val currentTheme = roomThemes[selectedThemeIndex]
+        val reportSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        val currentThemeForReport = roomThemes.getOrElse(selectedThemeIndex) { roomThemes[0] }
+        val sheetContainerColor = if (currentThemeForReport.isDark) Color(0xFF0F172A) else Color.White
+        val dragHandleColor = if (currentThemeForReport.isDark) Color.White.copy(alpha = 0.25f) else Color(0xFFE2E8F0)
+
         ModalBottomSheet(
             onDismissRequest = { showReportDialog = false },
-            containerColor = currentTheme.startColor,
-            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-            dragHandle = null
+            sheetState = reportSheetState,
+            containerColor = sheetContainerColor,
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            dragHandle = {
+                Box(
+                    modifier = Modifier
+                        .padding(top = 12.dp, bottom = 6.dp)
+                        .width(44.dp)
+                        .height(5.dp)
+                        .background(dragHandleColor, CircleShape)
+                )
+            }
         ) {
             ReportRoomBottomSheetContent(
                 selectedThemeIndex = selectedThemeIndex,
@@ -2017,12 +2087,25 @@ fun VoiceRoomScreen(
     // 3) Report Submitted Sheet container
     @OptIn(ExperimentalMaterial3Api::class)
     if (showReportSubmittedSheet) {
-        val currentTheme = roomThemes[selectedThemeIndex]
+        val submittedSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        val currentThemeForSubmitted = roomThemes.getOrElse(selectedThemeIndex) { roomThemes[0] }
+        val sheetContainerColor = if (currentThemeForSubmitted.isDark) Color(0xFF0F172A) else Color.White
+        val dragHandleColor = if (currentThemeForSubmitted.isDark) Color.White.copy(alpha = 0.25f) else Color(0xFFE2E8F0)
+
         ModalBottomSheet(
             onDismissRequest = { showReportSubmittedSheet = false },
-            containerColor = currentTheme.startColor,
-            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-            dragHandle = null
+            sheetState = submittedSheetState,
+            containerColor = sheetContainerColor,
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            dragHandle = {
+                Box(
+                    modifier = Modifier
+                        .padding(top = 12.dp, bottom = 6.dp)
+                        .width(44.dp)
+                        .height(5.dp)
+                        .background(dragHandleColor, CircleShape)
+                )
+            }
         ) {
             ReportSubmittedBottomSheetContent(
                 selectedThemeIndex = selectedThemeIndex,
@@ -3993,259 +4076,479 @@ fun ReportRoomBottomSheetContent(
     onDismiss: () -> Unit,
     onSubmit: () -> Unit
 ) {
-    val currentTheme = roomThemes[selectedThemeIndex]
-    val textColor = if (currentTheme.isDark) Color.White else Color.Black
-    val secondaryTextColor = if (currentTheme.isDark) Color.White.copy(alpha = 0.7f) else Color.Gray
+    val currentTheme = roomThemes.getOrElse(selectedThemeIndex) { roomThemes[0] }
+    val isDark = currentTheme.isDark
+    val sheetBg = if (isDark) Color(0xFF0F172A) else Color.White
+    val cardBg = if (isDark) Color(0xFF1E293B) else Color(0xFFF8FAFC)
+    val cardBorder = if (isDark) Color.White.copy(alpha = 0.12f) else Color(0xFFE2E8F0)
+    val titleColor = if (isDark) Color.White else Color(0xFF0F172A)
+    val subtitleColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+    val closeBtnBg = if (isDark) Color.White.copy(alpha = 0.1f) else Color(0xFFF1F5F9)
+    val closeBtnTint = if (isDark) Color.White else Color(0xFF475569)
+
+    data class ReportReasonItem(
+        val title: String,
+        val desc: String,
+        val icon: @Composable () -> Unit
+    )
 
     val reasons = listOf(
-        Triple("Harassment / Abuse", "Bullying, threats, rude or abusive behavior", "😡"),
-        Triple("Spam / Promotion", "Advertising, referral links or repeated spam", "📢"),
-        Triple("Hate Content", "Hate speech, racism, discrimination", "✋"),
-        Triple("Sexual Content", "Nudity, sexual acts or inappropriate content", "💖"),
-        Triple("Dangerous Activity", "Violence, self-harm or illegal activities", "⚠️"),
-        Triple("Other", "Something else not listed above", "💬")
+        ReportReasonItem("Harassment / Abuse", "Bullying, personal attacks, rude or hostile conduct") {
+            Soft3DHarassmentIcon(modifier = Modifier.size(36.dp))
+        },
+        ReportReasonItem("Spam / Promotion", "Commercial ads, unwanted links or repeated spam") {
+            Soft3DSpamIcon(modifier = Modifier.size(36.dp))
+        },
+        ReportReasonItem("Hate Speech", "Discrimination, intolerance or malicious abuse") {
+            Soft3DHateIcon(modifier = Modifier.size(36.dp))
+        },
+        ReportReasonItem("Sexual / Inappropriate", "Unwanted explicit themes or suggestive behavior") {
+            Soft3DSexualContentIcon(modifier = Modifier.size(36.dp))
+        },
+        ReportReasonItem("Dangerous Activity", "Threats of violence, illegal acts or severe harm") {
+            Soft3DDangerousIcon(modifier = Modifier.size(36.dp))
+        },
+        ReportReasonItem("Other Concerns", "Rule violations or safety issues not listed above") {
+            Soft3DOtherIcon(modifier = Modifier.size(36.dp))
+        }
     )
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .fillMaxHeight(0.85f)
-            .background(Brush.verticalGradient(listOf(currentTheme.startColor, currentTheme.endColor)))
-            .padding(16.dp)
+            .background(sheetBg)
+            .padding(horizontal = 20.dp, vertical = 6.dp)
+            .navigationBarsPadding()
             .verticalScroll(rememberScrollState())
     ) {
+        // Header
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .background(Color(0xFFFEE2E2), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(text = "🚩", fontSize = 18.sp)
-                }
-                Spacer(modifier = Modifier.width(12.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                Soft3DReportShield(modifier = Modifier.size(42.dp))
+                Spacer(modifier = Modifier.width(14.dp))
                 Column {
-                    Text(text = "Report Room", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = textColor)
-                    Text(text = "Help keep our community safe", fontSize = 11.sp, color = secondaryTextColor)
+                    Text(
+                        text = "Report Room",
+                        fontSize = 19.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = titleColor
+                    )
+                    Text(
+                        text = "Help maintain a respectful community",
+                        fontSize = 12.sp,
+                        color = subtitleColor
+                    )
                 }
             }
 
-            androidx.compose.material3.IconButton(
+            IconButton(
                 onClick = onDismiss,
                 modifier = Modifier
-                    .size(32.dp)
+                    .size(36.dp)
                     .clip(CircleShape)
-                    .background(if (currentTheme.isDark) Color.White.copy(alpha = 0.1f) else Color(0xFFF3F4F6))
+                    .background(closeBtnBg)
             ) {
-                Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = textColor, modifier = Modifier.size(16.dp))
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Close",
+                    tint = closeBtnTint,
+                    modifier = Modifier.size(18.dp)
+                )
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        Text(text = "Why are you reporting?", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = textColor)
-        Spacer(modifier = Modifier.height(10.dp))
+        // Why are you reporting?
+        Text(
+            text = "Why are you reporting?",
+            fontWeight = FontWeight.Bold,
+            fontSize = 15.sp,
+            color = titleColor
+        )
+        Text(
+            text = "Select the option that best describes the issue",
+            fontSize = 12.sp,
+            color = subtitleColor,
+            modifier = Modifier.padding(top = 2.dp, bottom = 12.dp)
+        )
 
-        reasons.forEachIndexed { index, (title, desc, emoji) ->
+        reasons.forEachIndexed { index, item ->
             val isSelected = selectedReasonIndex == index
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onReasonIndexChange(index) }
+                    .padding(vertical = 4.dp)
+                    .clip(RoundedCornerShape(16.dp))
                     .background(
-                        if (isSelected) (if (currentTheme.isDark) currentTheme.themeColor.copy(alpha = 0.15f) else Color(0xFFFFFAEB))
-                        else Color.Transparent,
-                        RoundedCornerShape(12.dp)
+                        if (isSelected) (if (isDark) Color(0xFF78350F).copy(alpha = 0.45f) else Color(0xFFFFFBEB)) 
+                        else cardBg
                     )
                     .border(
-                        1.dp,
-                        if (isSelected) (if (currentTheme.isDark) currentTheme.themeColor else Color(0xFFFDE68A)) else Color.Transparent,
-                        RoundedCornerShape(12.dp)
+                        width = if (isSelected) 1.5.dp else 1.dp,
+                        color = if (isSelected) Color(0xFFF59E0B) else cardBorder,
+                        shape = RoundedCornerShape(16.dp)
                     )
-                    .padding(12.dp),
+                    .clickable { onReasonIndexChange(index) }
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                    Text(text = emoji, fontSize = 20.sp)
-                    Spacer(modifier = Modifier.width(12.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    item.icon()
+                    Spacer(modifier = Modifier.width(14.dp))
                     Column {
-                        Text(text = title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = textColor)
-                        Text(text = desc, fontSize = 11.sp, color = secondaryTextColor)
+                        Text(
+                            text = item.title,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isSelected) (if (isDark) Color(0xFFFBBF24) else Color(0xFF92400E)) else titleColor
+                        )
+                        Text(
+                            text = item.desc,
+                            fontSize = 11.sp,
+                            color = if (isSelected) (if (isDark) Color(0xFFFCD34D) else Color(0xFFB45309)) else subtitleColor,
+                            lineHeight = 14.sp
+                        )
                     }
                 }
 
+                Spacer(modifier = Modifier.width(8.dp))
+
                 Box(
                     modifier = Modifier
-                        .size(18.dp)
-                        .border(1.5.dp, if (isSelected) (if (currentTheme.isDark) currentTheme.themeColor else Color(0xFFFBBF24)) else Color.LightGray, CircleShape)
-                        .padding(3.dp)
-                        .background(if (isSelected) (if (currentTheme.isDark) currentTheme.themeColor else Color(0xFFFBBF24)) else Color.Transparent, CircleShape)
-                )
+                        .size(22.dp)
+                        .background(
+                            if (isSelected) Color(0xFFF59E0B) else Color.Transparent,
+                            CircleShape
+                        )
+                        .border(
+                            width = if (isSelected) 0.dp else 1.5.dp,
+                            color = if (isSelected) Color.Transparent else (if (isDark) Color.White.copy(alpha = 0.25f) else Color(0xFFCBD5E1)),
+                            shape = CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isSelected) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = null,
+                            tint = if (isDark) Color(0xFF451A03) else Color.White,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
             }
-            Spacer(modifier = Modifier.height(4.dp))
         }
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        Text(text = "Evidence (automatically attached)", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = textColor)
+        // Evidence section
+        Text(
+            text = "Evidence (automatically attached)",
+            fontWeight = FontWeight.Bold,
+            fontSize = 15.sp,
+            color = titleColor
+        )
+        Text(
+            text = "Encrypted telemetry to verify reported incidents",
+            fontSize = 12.sp,
+            color = subtitleColor,
+            modifier = Modifier.padding(top = 2.dp, bottom = 10.dp)
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Card 1
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .background(cardBg, RoundedCornerShape(14.dp))
+                    .border(1.dp, cardBorder, RoundedCornerShape(14.dp))
+                    .padding(vertical = 12.dp, horizontal = 8.dp)
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Soft3DMicrophoneIcon(modifier = Modifier.size(26.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Last 1 min\nAudio Clip",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = titleColor,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        lineHeight = 13.sp
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                if (isDark) Color(0xFF065F46).copy(alpha = 0.5f) else Color(0xFFDCFCE7),
+                                RoundedCornerShape(6.dp)
+                            )
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "✓ Attached",
+                            color = if (isDark) Color(0xFF34D399) else Color(0xFF15803D),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+            }
+
+            // Card 2
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .background(cardBg, RoundedCornerShape(14.dp))
+                    .border(1.dp, cardBorder, RoundedCornerShape(14.dp))
+                    .padding(vertical = 12.dp, horizontal = 8.dp)
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Soft3DMessageStackIcon(modifier = Modifier.size(26.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Recent 20\nMessages",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = titleColor,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        lineHeight = 13.sp
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                if (isDark) Color(0xFF065F46).copy(alpha = 0.5f) else Color(0xFFDCFCE7),
+                                RoundedCornerShape(6.dp)
+                            )
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "✓ Attached",
+                            color = if (isDark) Color(0xFF34D399) else Color(0xFF15803D),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+            }
+
+            // Card 3
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .background(cardBg, RoundedCornerShape(14.dp))
+                    .border(1.dp, cardBorder, RoundedCornerShape(14.dp))
+                    .padding(vertical = 12.dp, horizontal = 8.dp)
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Soft3DUsersGroupIcon(modifier = Modifier.size(26.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Speaker\nActivity Log",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = titleColor,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        lineHeight = 13.sp
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                if (isDark) Color(0xFF065F46).copy(alpha = 0.5f) else Color(0xFFDCFCE7),
+                                RoundedCornerShape(6.dp)
+                            )
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "✓ Attached",
+                            color = if (isDark) Color(0xFF34D399) else Color(0xFF15803D),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // Optional add-ons
+        Text(
+            text = "Add more proof (optional)",
+            fontWeight = FontWeight.Bold,
+            fontSize = 15.sp,
+            color = titleColor
+        )
         Spacer(modifier = Modifier.height(10.dp))
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .background(if (currentTheme.isDark) Color.White.copy(alpha = 0.05f) else Color(0xFFFFFBEB), RoundedCornerShape(12.dp))
-                    .border(1.dp, Color(0xFFFEF3C7), RoundedCornerShape(12.dp))
-                    .padding(8.dp)
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                    Text(text = "🎤", fontSize = 18.sp)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = "Last 1 min\nAudio", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = textColor, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = "✓", color = Color(0xFF16A34A), fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
-                }
-            }
-
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .background(if (currentTheme.isDark) Color.White.copy(alpha = 0.05f) else Color(0xFFFFFBEB), RoundedCornerShape(12.dp))
-                    .border(1.dp, Color(0xFFFEF3C7), RoundedCornerShape(12.dp))
-                    .padding(8.dp)
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                    Text(text = "💬", fontSize = 18.sp)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = "Last 20\nMessages", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = textColor, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = "✓", color = Color(0xFF16A34A), fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
-                }
-            }
-
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .background(if (currentTheme.isDark) Color.White.copy(alpha = 0.05f) else Color(0xFFFFFBEB), RoundedCornerShape(12.dp))
-                    .border(1.dp, Color(0xFFFEF3C7), RoundedCornerShape(12.dp))
-                    .padding(8.dp)
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                    Text(text = "👥", fontSize = 18.sp)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = "Speaker\nActivity", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = textColor, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(text = "✓", color = Color(0xFF16A34A), fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        Text(text = "Add more (optional)", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = textColor)
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Button(
                 onClick = { onScreenshotAttachChange(!screenshotAttached) },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(44.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (screenshotAttached) Color(0xFFE8F5E9) else (if (currentTheme.isDark) Color.White.copy(alpha = 0.07f) else Color(0xFFF3F4F6))
+                    containerColor = if (screenshotAttached) {
+                        if (isDark) Color(0xFF065F46).copy(alpha = 0.5f) else Color(0xFFECFDF5)
+                    } else {
+                        cardBg
+                    }
                 ),
-                border = BorderStroke(1.dp, if (screenshotAttached) Color(0xFF81C784) else Color.Transparent)
+                border = BorderStroke(
+                    1.dp,
+                    if (screenshotAttached) Color(0xFF10B981) else cardBorder
+                ),
+                contentPadding = PaddingValues(horizontal = 10.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = "🖼️", fontSize = 14.sp)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = if (screenshotAttached) "Attached" else "Screenshot", fontSize = 12.sp, color = if (screenshotAttached) Color(0xFF2E7D32) else textColor, fontWeight = FontWeight.Bold)
+                    Soft3DScreenshotIcon(modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (screenshotAttached) "Attached" else "Screenshot",
+                        fontSize = 12.sp,
+                        color = if (screenshotAttached) (if (isDark) Color(0xFF34D399) else Color(0xFF047857)) else titleColor,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
 
             Button(
                 onClick = { onVideoAttachChange(!videoAttached) },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(44.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (videoAttached) Color(0xFFE8F5E9) else (if (currentTheme.isDark) Color.White.copy(alpha = 0.07f) else Color(0xFFF3F4F6))
+                    containerColor = if (videoAttached) {
+                        if (isDark) Color(0xFF065F46).copy(alpha = 0.5f) else Color(0xFFECFDF5)
+                    } else {
+                        cardBg
+                    }
                 ),
-                border = BorderStroke(1.dp, if (videoAttached) Color(0xFF81C784) else Color.Transparent)
+                border = BorderStroke(
+                    1.dp,
+                    if (videoAttached) Color(0xFF10B981) else cardBorder
+                ),
+                contentPadding = PaddingValues(horizontal = 10.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = "📹", fontSize = 14.sp)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = if (videoAttached) "Attached" else "Video (30s)", fontSize = 12.sp, color = if (videoAttached) Color(0xFF2E7D32) else textColor, fontWeight = FontWeight.Bold)
+                    Soft3DVideoCamIcon(modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (videoAttached) "Attached" else "Clip (30s)",
+                        fontSize = 12.sp,
+                        color = if (videoAttached) (if (isDark) Color(0xFF34D399) else Color(0xFF047857)) else titleColor,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        Text(text = "Additional details (optional)", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = textColor)
+        // Additional details
+        Text(
+            text = "Additional details (optional)",
+            fontWeight = FontWeight.Bold,
+            fontSize = 15.sp,
+            color = titleColor
+        )
         Spacer(modifier = Modifier.height(8.dp))
 
         OutlinedTextField(
             value = additionalDetails,
             onValueChange = { if (it.length <= 300) onDetailsChange(it) },
-            placeholder = { Text(text = "Tell us more about what happened...", fontSize = 13.sp, color = secondaryTextColor) },
+            placeholder = {
+                Text(
+                    text = "Provide any specific context that helps our reviewers...",
+                    fontSize = 13.sp,
+                    color = subtitleColor
+                )
+            },
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(14.dp),
+            minLines = 3,
             maxLines = 4,
             colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = textColor,
-                unfocusedTextColor = textColor,
-                focusedBorderColor = if (currentTheme.isDark) currentTheme.themeColor else ChillPurpleAccent,
-                unfocusedBorderColor = if (currentTheme.isDark) Color.White.copy(alpha = 0.2f) else Color(0xFFE5E5EA),
-                focusedLabelColor = if (currentTheme.isDark) currentTheme.themeColor else ChillPurpleAccent
+                focusedTextColor = titleColor,
+                unfocusedTextColor = titleColor,
+                focusedBorderColor = Color(0xFFF59E0B),
+                unfocusedBorderColor = cardBorder,
+                focusedContainerColor = if (isDark) Color(0xFF1E293B) else Color.White,
+                unfocusedContainerColor = if (isDark) Color(0xFF1E293B) else Color(0xFFFAFAFA)
             )
         )
         Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp),
             horizontalArrangement = Arrangement.End
         ) {
-            Text(text = "${additionalDetails.length}/300", fontSize = 11.sp, color = secondaryTextColor)
+            Text(
+                text = "${additionalDetails.length}/300",
+                fontSize = 11.sp,
+                color = subtitleColor
+            )
         }
 
         Spacer(modifier = Modifier.height(20.dp))
 
+        // Submit Button
         Button(
             onClick = onSubmit,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(50.dp),
+                .height(52.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = currentTheme.accentColor
+                containerColor = Color(0xFFF59E0B)
             ),
-            shape = RoundedCornerShape(12.dp)
+            shape = RoundedCornerShape(14.dp),
+            elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.Send, 
-                    contentDescription = null, 
-                    tint = if (currentTheme.isDark) Color(0xFF1E1B4B) else Color.White, 
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
+                Soft3DReportShield(modifier = Modifier.size(24.dp))
+                Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = "Submit Report", 
-                    color = if (currentTheme.isDark) Color(0xFF1E1B4B) else Color.White, 
-                    fontWeight = FontWeight.Bold, 
+                    text = "Submit Report",
+                    color = Color(0xFF451A03),
+                    fontWeight = FontWeight.ExtraBold,
                     fontSize = 15.sp
                 )
             }
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
     }
 }
 
@@ -4254,38 +4557,45 @@ fun ReportSubmittedBottomSheetContent(
     selectedThemeIndex: Int,
     onDismiss: () -> Unit
 ) {
-    val currentTheme = roomThemes[selectedThemeIndex]
-    val textColor = if (currentTheme.isDark) Color.White else Color.Black
-    val secondaryTextColor = if (currentTheme.isDark) Color.White.copy(alpha = 0.7f) else Color.Gray
+    val currentTheme = roomThemes.getOrElse(selectedThemeIndex) { roomThemes[0] }
+    val isDark = currentTheme.isDark
+    val sheetBg = if (isDark) Color(0xFF0F172A) else Color.White
+    val cardBg = if (isDark) Color(0xFF1E293B) else Color(0xFFF8FAFC)
+    val cardBorder = if (isDark) Color.White.copy(alpha = 0.12f) else Color(0xFFE2E8F0)
+    val titleColor = if (isDark) Color.White else Color(0xFF0F172A)
+    val subtitleColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .fillMaxHeight(0.75f)
-            .background(Brush.verticalGradient(listOf(currentTheme.startColor, currentTheme.endColor)))
-            .padding(24.dp),
+            .background(sheetBg)
+            .padding(horizontal = 24.dp, vertical = 12.dp)
+            .navigationBarsPadding(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(
-                modifier = Modifier
-                    .size(72.dp)
-                    .background(Color(0xFFE8F5E9), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(text = "✓", color = Color(0xFF2E7D32), fontSize = 36.sp, fontWeight = FontWeight.Bold)
-            }
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Spacer(modifier = Modifier.height(10.dp))
+            Soft3DSuccessBadge(modifier = Modifier.size(80.dp))
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Text(text = "Report Submitted", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = textColor)
+            Text(
+                text = "Report Submitted",
+                fontSize = 22.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = titleColor
+            )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "Thank you! Your report has been submitted successfully.",
+                text = "Thank you for helping keep our community safe!\nYour report has been sent to our moderation review queue.",
                 fontSize = 13.sp,
-                color = secondaryTextColor,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                color = subtitleColor,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                lineHeight = 18.sp
             )
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -4293,47 +4603,89 @@ fun ReportSubmittedBottomSheetContent(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(if (currentTheme.isDark) Color.White.copy(alpha = 0.05f) else Color(0xFFFFFBEB), RoundedCornerShape(16.dp))
-                    .border(1.dp, if (currentTheme.isDark) Color.White.copy(alpha = 0.1f) else Color(0xFFFEF3C7), RoundedCornerShape(16.dp))
-                    .padding(16.dp)
+                    .background(cardBg, RoundedCornerShape(18.dp))
+                    .border(1.dp, cardBorder, RoundedCornerShape(18.dp))
+                    .padding(18.dp)
             ) {
-                Text(text = "What happens next?", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = textColor)
+                Text(
+                    text = "What happens next?",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    color = titleColor
+                )
                 Spacer(modifier = Modifier.height(12.dp))
 
-                val bulletPoints = listOf(
-                    Triple(Icons.Default.Search, "Our team will review the report", Color(0xFFD97706)),
-                    Triple(Icons.Default.Info, "If it violates our rules, action will be taken", Color(0xFFD97706)),
-                    Triple(Icons.Default.Lock, "Your identity will remain private", Color(0xFFD97706)),
-                    Triple(Icons.Default.Notifications, "You'll get a notification if we take action", Color(0xFFD97706))
+                NextStepReportRow(
+                    text = "Our moderation team reviews the audio and activity log",
+                    textColor = if (isDark) Color(0xFFE2E8F0) else Color(0xFF334155),
+                    icon = { Soft3DSearchAuditIcon(modifier = Modifier.size(22.dp)) }
                 )
-
-                bulletPoints.forEach { (icon, text, col) ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(imageVector = icon, contentDescription = null, tint = col, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(text = text, fontSize = 12.sp, color = textColor, fontWeight = FontWeight.Medium)
-                    }
-                }
+                NextStepReportRow(
+                    text = "If violations are detected, prompt action will be taken",
+                    textColor = if (isDark) Color(0xFFE2E8F0) else Color(0xFF334155),
+                    icon = { Soft3DRulesActionIcon(modifier = Modifier.size(22.dp)) }
+                )
+                NextStepReportRow(
+                    text = "Your reporter identity remains 100% confidential",
+                    textColor = if (isDark) Color(0xFFE2E8F0) else Color(0xFF334155),
+                    icon = { Soft3DPrivacyLockIcon(modifier = Modifier.size(22.dp)) }
+                )
+                NextStepReportRow(
+                    text = "You will receive an in-app notice regarding the decision",
+                    textColor = if (isDark) Color(0xFFE2E8F0) else Color(0xFF334155),
+                    icon = { Soft3DBellNotificationIcon(modifier = Modifier.size(22.dp)) }
+                )
             }
         }
+
+        Spacer(modifier = Modifier.height(28.dp))
 
         Button(
             onClick = onDismiss,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(50.dp),
+                .height(52.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFFFBBF24)
+                containerColor = Color(0xFFF59E0B)
             ),
-            shape = RoundedCornerShape(12.dp)
+            shape = RoundedCornerShape(14.dp),
+            elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
         ) {
-            Text(text = "Got it", color = Color(0xFF78350F), fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            Text(
+                text = "Got it",
+                color = Color(0xFF451A03),
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 15.sp
+            )
         }
+
+        Spacer(modifier = Modifier.height(12.dp))
+    }
+}
+
+@Composable
+private fun NextStepReportRow(
+    text: String,
+    textColor: Color = Color(0xFF334155),
+    icon: @Composable () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(modifier = Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+            icon()
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+            text = text,
+            fontSize = 12.sp,
+            color = textColor,
+            fontWeight = FontWeight.Medium,
+            lineHeight = 16.sp
+        )
     }
 }
 

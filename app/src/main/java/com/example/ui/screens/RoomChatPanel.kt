@@ -84,6 +84,15 @@ fun RoomChatPanel(
         }
     }
 
+    // Auto-scroll to the newest message whenever new messages arrive
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            try {
+                chatListState.animateScrollToItem(0)
+            } catch (_: Exception) {}
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -98,9 +107,10 @@ fun RoomChatPanel(
         ) {
             items(
                 items = renderedMessages,
-                key = { it.id?.takeIf { k -> k.isNotBlank() } ?: "${it.userId}_${it.text}_${it.createdAt}" }
+                key = { it.id?.takeIf { k -> k.isNotBlank() } ?: "${it.userId}_${it.text}_${it.createdAt}_${it.messageType}_${it.hashCode()}" }
             ) { msg ->
-                if (msg.messageType == "system") {
+                val isSystem = msg.messageType?.equals("system", ignoreCase = true) == true
+                if (isSystem) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -108,14 +118,24 @@ fun RoomChatPanel(
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = msg.text,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = if (currentTheme.isDark) Color.LightGray.copy(alpha = 0.6f) else Color.Gray,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(
+                                    if (currentTheme.isDark) Color.White.copy(alpha = 0.08f)
+                                    else Color.Black.copy(alpha = 0.05f)
+                                )
+                                .padding(horizontal = 12.dp, vertical = 4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = msg.text,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = if (currentTheme.isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
                         if (msg.userId == currentUserId) {
                             Spacer(modifier = Modifier.width(6.dp))
                             // Small "+" request-to-speak icon

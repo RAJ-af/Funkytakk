@@ -41,6 +41,7 @@ import com.example.SupabaseClient
 import com.example.SupabaseSessionManager
 import com.example.SupabaseVoiceRoom
 import com.example.ui.components.CircleFlag
+import com.example.ui.components.RoomLanguageSelectionSheet
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -1107,11 +1108,15 @@ fun CreateLanguageRoomScreen(
                                 OutlinedTextField(
                                     value = joinCodeInput,
                                     onValueChange = { val clean = it.filter { c -> c.isDigit() }; if (clean.length <= 6) joinCodeInput = clean },
-                                    placeholder = { Text("Enter 6-digit code") },
+                                    placeholder = { Text("Enter 6-digit code", color = Color.Gray) },
                                     modifier = Modifier.weight(1f),
                                     singleLine = true,
                                     shape = RoundedCornerShape(12.dp),
+                                    textStyle = androidx.compose.ui.text.TextStyle(color = Color.Black, fontSize = 14.sp),
                                     colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = Color.Black,
+                                        unfocusedTextColor = Color.Black,
+                                        cursorColor = Color(0xFFFFC107),
                                         focusedBorderColor = Color(0xFFFFC107),
                                         unfocusedBorderColor = Color(0xFFE5E7EB)
                                     )
@@ -1133,181 +1138,14 @@ fun CreateLanguageRoomScreen(
 
             // ================= SELECT LANGUAGE SHEET =================
             if (showLanguageSheet) {
-                var searchQuery by remember { mutableStateOf("") }
-                val filteredAllLanguages = remember(searchQuery) {
-                    if (searchQuery.isBlank()) {
-                        LanguageData.allLanguages
-                    } else {
-                        LanguageData.allLanguages.filter {
-                            it.name.contains(searchQuery, ignoreCase = true) ||
-                            it.nativeName.contains(searchQuery, ignoreCase = true)
-                        }
-                    }
-                }
-
-                ModalBottomSheet(
-                    onDismissRequest = { showLanguageSheet = false },
-                    containerColor = Color.White,
-                    tonalElevation = 4.dp
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .fillMaxHeight(0.85f)
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        // Title
-                        Text(
-                            text = "Select Language",
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 18.sp,
-                            color = Color.Black,
-                            modifier = Modifier.fillMaxWidth(),
-                            textAlign = TextAlign.Center
-                        )
-
-                        // Search box
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            placeholder = { Text("Search language", color = Color.Gray, fontSize = 13.sp) },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
-                            singleLine = true,
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Default.Search,
-                                    contentDescription = "Search",
-                                    tint = Color.Gray
-                                )
-                            },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                unfocusedBorderColor = Color(0xFFE5E7EB),
-                                focusedBorderColor = Color(0xFFFFC107),
-                                unfocusedContainerColor = Color(0xFFF9FAFB),
-                                focusedContainerColor = Color.White
-                            )
-                        )
-
-                        // Popular languages block (Japanese, Korean, English, Spanish, Chinese)
-                        Text(
-                            text = "Popular Languages",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            color = Color.Black
-                        )
-                        
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            val popularLocales = listOf(
-                                Triple("Japanese", "jp", "日本語"),
-                                Triple("Korean", "kr", "한국어"),
-                                Triple("English", "us", "English"),
-                                Triple("Spanish", "es", "Español"),
-                                Triple("Chinese", "cn", "中文")
-                            )
-
-                            popularLocales.forEach { (name, code, native) ->
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    modifier = Modifier
-                                        .clickable {
-                                            selectedLanguage = LanguageData.popularLanguages.firstOrNull { it.name == name } 
-                                                ?: LanguageData.popularLanguages.first()
-                                            showLanguageSheet = false
-                                        }
-                                        .padding(4.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(54.dp)
-                                            .background(Color(0xFFF9FAFB), RoundedCornerShape(16.dp))
-                                            .border(1.dp, Color(0xFFF3F4F6), RoundedCornerShape(16.dp))
-                                            .padding(10.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        CircleFlag(
-                                            countryCode = code,
-                                            modifier = Modifier.fillMaxSize()
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Text(
-                                        text = name,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = Color.Black
-                                    )
-                                }
-                            }
-                        }
-
-                        Divider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-
-                        // All languages list
-                        Text(
-                            text = "All Languages",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            color = Color.Black
-                        )
-
-                        LazyColumn(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            items(filteredAllLanguages) { language ->
-                                val isChosen = selectedLanguage.name == language.name
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            selectedLanguage = language
-                                            showLanguageSheet = false
-                                        }
-                                        .padding(vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        CircleFlag(
-                                            countryCode = language.flagCode,
-                                            modifier = Modifier
-                                                .size(28.dp)
-                                                .clip(CircleShape)
-                                        )
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Column {
-                                            Text(
-                                                text = language.name,
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = Color.Black
-                                            )
-                                            Text(
-                                                text = "${language.nativeName} · ${language.code}",
-                                                fontSize = 12.sp,
-                                                color = Color.Gray
-                                            )
-                                        }
-                                    }
-                                    
-                                    if (isChosen) {
-                                        Icon(
-                                            imageVector = Icons.Default.CheckCircle,
-                                            contentDescription = "Selected",
-                                            tint = Color(0xFFFFC107),
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                RoomLanguageSelectionSheet(
+                    selectedLanguageName = selectedLanguage.name,
+                    onLanguageSelected = { lang ->
+                        selectedLanguage = lang
+                        showLanguageSheet = false
+                    },
+                    onDismiss = { showLanguageSheet = false }
+                )
             }
 
             // ================= CHOOSE BANNER OVERLAY =================

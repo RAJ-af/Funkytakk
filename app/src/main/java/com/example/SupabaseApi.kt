@@ -95,6 +95,9 @@ data class UpdateVoiceRoomRequest(
     val title: String? = null,
     val description: String? = null,
     val language: String? = null,
+    val country_code: String? = null,
+    val language_code: String? = null,
+    val language_flag: String? = null,
     val tag: String? = null,
     val is_private: Boolean? = null,
     val join_code: String? = null
@@ -152,9 +155,9 @@ data class SupabaseEvent(
 @JsonClass(generateAdapter = true)
 data class SupabaseRoomMessage(
     val id: String? = null,
-    val room_id: String,
-    val user_id: String,
-    val message: String,
+    val room_id: String? = null,
+    val user_id: String? = null,
+    val message: String? = null,
     val created_at: String? = null,
     val message_type: String? = null
 )

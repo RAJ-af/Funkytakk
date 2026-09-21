@@ -14,8 +14,9 @@ fun LogoutConfirmDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = Color.White,
         title = { Text(text = "Sign Out", fontWeight = FontWeight.Bold, color = DarkText) },
-        text = { Text(text = "Are you sure you want to sign out from FunkyTalk?") },
+        text = { Text(text = "Are you sure you want to sign out from FunkyTalk?", color = DarkText) },
         confirmButton = {
             Button(
                 onClick = onConfirm,

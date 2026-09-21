@@ -206,7 +206,12 @@ fun HomeScreen(
                             r.listening_count ?: 0
                         }
 
-                        val decidedTag = r.status_tag?.ifBlank { r.tag }?.ifBlank { "LIVE" } ?: "LIVE"
+                        val decidedTag = decideSupabaseRoomTag(
+                            room = r,
+                            allRooms = supaRooms,
+                            realSpeakingCount = realSpeaking,
+                            realListeningCount = realListening
+                        )
                         val badgeColor = getBadgeColor(decidedTag)
                         val overlayVal = when (index % 4) {
                             0 -> Color(0x22FCD34D)
@@ -230,7 +235,10 @@ fun HomeScreen(
                             title = r.title ?: "Voice Circle",
                             subtitle = r.description ?: "Practice and speak together",
                             language = r.language ?: "English",
-                            flagCode = r.language_code.orEmpty().ifBlank { r.country_code.orEmpty() }.ifBlank { "us" },
+                            flagCode = LanguageData.resolveFlagCode(
+                                languageName = r.language,
+                                storedCode = r.language_code.orEmpty().ifBlank { r.country_code.orEmpty() }
+                            ),
                             speakingCount = realSpeaking,
                             listeningCount = realListening,
                             tag = r.level_tag.orEmpty().ifBlank { r.tag.orEmpty() }.ifBlank { "All Levels" },
@@ -429,9 +437,22 @@ fun HomeScreen(
                             }
                         )
                     }
-                    "rooms" -> {
-                        RoomsTabContent(
-                            onCreateRoom = { showCreateRoomBottomSheet = true }
+                    "discover", "rooms" -> {
+                        DiscoverTabContent(
+                            supabaseProfiles = supabaseProfiles,
+                            onCreateRoom = { showCreateRoomBottomSheet = true },
+                            onStartDirectChat = { name, avatarUrl, flagCode ->
+                                activeChatWindowContact = DirectChat(
+                                    id = name.hashCode().toString(),
+                                    name = name,
+                                    avatar = avatarUrl,
+                                    lastMsg = "Hey! Let's connect 👋",
+                                    time = "Just now",
+                                    unreadCount = 0,
+                                    onlineStatus = "online",
+                                    isNativeLanguage = flagCode
+                                )
+                            }
                         )
                     }
                     "moments" -> {

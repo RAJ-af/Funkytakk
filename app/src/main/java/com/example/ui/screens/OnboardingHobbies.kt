@@ -213,7 +213,11 @@ fun OnboardingHobbiesScreen(
                         onValueChange = { customHobby = it },
                         placeholder = { Text("Add custom hobby...", color = Color.Gray, fontSize = 14.sp) },
                         modifier = Modifier.fillMaxWidth(),
+                        textStyle = androidx.compose.ui.text.TextStyle(color = Color.Black, fontSize = 14.sp),
                         colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.Black,
+                            unfocusedTextColor = Color.Black,
+                            cursorColor = Color.Black,
                             focusedBorderColor = GoldAccent,
                             unfocusedBorderColor = Color(0xFFF1F5F9),
                             focusedContainerColor = Color(0xFFFAFAFA),
