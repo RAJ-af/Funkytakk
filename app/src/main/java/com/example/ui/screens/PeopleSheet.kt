@@ -8,7 +8,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -28,8 +28,12 @@ fun PeopleBottomSheetContent(
     hostSeat: ChillRoomSpeaker,
     speakerSeats: List<ChillRoomSpeaker>,
     listenerSeats: List<Triple<String, String, String>>,
+    listenerUserIds: List<String> = emptyList(),
+    isCurrentUserHost: Boolean = false,
+    currentUserId: String = "",
     onUserClick: (PrivateChatItem) -> Unit = {},
     onInviteClick: () -> Unit = {},
+    onModeratorAction: (targetUserId: String, targetUserName: String, actionType: String) -> Unit = { _, _, _ -> },
     onDismiss: () -> Unit
 ) {
     val currentTheme = roomThemes[selectedThemeIndex]
@@ -38,234 +42,435 @@ fun PeopleBottomSheetContent(
     val speakingCount = 1 + speakerSeats.size
     val listeningCount = listenerSeats.size
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .fillMaxHeight(0.85f)
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(currentTheme.startColor, currentTheme.endColor)
-                )
-            )
-            .padding(horizontal = 24.dp)
-            .verticalScroll(rememberScrollState())
-    ) {
-        // Header Row: Total People / Close Button
-        Row(
+    var selectedUserForAction by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf<ModerationTargetUser?>(null)
+    }
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+                .fillMaxHeight(0.85f)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(currentTheme.startColor, currentTheme.endColor)
+                    )
+                )
+                .padding(horizontal = 24.dp)
+                .verticalScroll(rememberScrollState())
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // Header Row: Total People / Close Button
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .background(if (isDark) currentTheme.themeColor else ChillGoldIcon, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CustomPeopleGroupIcon(tint = if (isDark) Color.White else Color.Black, modifier = Modifier.size(24.dp))
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        Text(
+                            text = "$totalCount People",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isDark) Color.White else Color.Black
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "$speakingCount Speaking",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isDark) Color.White.copy(alpha = 0.6f) else Color.Gray
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .padding(horizontal = 6.dp)
+                                    .size(4.dp)
+                                    .background(if (isDark) currentTheme.themeColor else ChillGoldIcon, CircleShape)
+                            )
+                            Text(
+                                text = "$listeningCount Listening",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isDark) Color.White.copy(alpha = 0.6f) else Color.Gray
+                            )
+                        }
+                    }
+                }
+                
                 Box(
                     modifier = Modifier
-                        .size(48.dp)
-                        .background(if (isDark) currentTheme.themeColor else ChillGoldIcon, CircleShape),
+                        .size(36.dp)
+                        .background(if (isDark) Color.White.copy(alpha = 0.15f) else Color(0xFFF3F4F6), CircleShape)
+                        .clickable { onDismiss() },
                     contentAlignment = Alignment.Center
                 ) {
-                    CustomPeopleGroupIcon(tint = if (isDark) Color.White else Color.Black, modifier = Modifier.size(24.dp))
+                    CustomCloseIcon(tint = if (isDark) Color.White else Color.Black, modifier = Modifier.size(16.dp))
                 }
-                Spacer(modifier = Modifier.width(16.dp))
-                Column {
-                    Text(
-                        text = "$totalCount People",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isDark) Color.White else Color.Black
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Speaking Now Section Title
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(bottom = 16.dp)
+            ) {
+                CustomMicIcon(tint = if (isDark) currentTheme.themeColor else ChillGoldIcon, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Speaking Now",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isDark) Color.White.copy(alpha = 0.5f) else Color.Gray
+                )
+            }
+
+            // Host & Speakers Row
+            val allSpeakers = listOf(hostSeat) + speakerSeats
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 28.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                allSpeakers.forEach { sp ->
+                    PeopleSheetSpeakerItem(
+                        name = sp.name,
+                        imageUrl = sp.imageUrl,
+                        badgeText = if (sp.isHost) "Host" else "Speaker",
+                        badgeColor = if (sp.isHost) Color(0xFFFEF3C7) else Color(0xFFF3F4F6),
+                        isHost = sp.isHost,
+                        flagEmoji = mapCountryCodeToFlagEmoji(sp.flagCode),
+                        isDarkMode = isDark,
+                        onClick = {
+                            if (isCurrentUserHost && !sp.isHost && sp.userId != currentUserId) {
+                                selectedUserForAction = ModerationTargetUser(
+                                    userId = sp.userId,
+                                    name = sp.name,
+                                    imageUrl = sp.imageUrl,
+                                    flagCode = sp.flagCode,
+                                    role = "speaker"
+                                )
+                            } else {
+                                onUserClick(PrivateChatItem(sp.userId.ifBlank { sp.name.hashCode().toString() }, sp.name, sp.imageUrl, sp.flagCode, "", "Now", 0, true, false))
+                            }
+                        }
                     )
-                    Spacer(modifier = Modifier.height(2.dp))
+                }
+            }
+
+            // Listening Section Title
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(vertical = 12.dp)
+            ) {
+                CustomHeadphoneIcon(tint = if (isDark) currentTheme.themeColor else ChillGoldIcon, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Listening ($listeningCount)",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isDark) Color.White.copy(alpha = 0.5f) else Color.Gray
+                )
+            }
+
+            if (listenerSeats.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "No listeners in the room yet. Invite friends!",
+                        fontSize = 13.sp,
+                        color = if (isDark) Color.White.copy(alpha = 0.5f) else Color.Gray
+                    )
+                }
+            } else {
+                val listenerRows = listenerSeats.chunked(4)
+                listenerRows.forEachIndexed { rowIndex, rowItems ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        rowItems.forEachIndexed { colIndex, (name, imageUrl, flagCode) ->
+                            val globalIndex = rowIndex * 4 + colIndex
+                            val targetUserId = if (globalIndex < listenerUserIds.size) listenerUserIds[globalIndex] else ""
+                            PeopleSheetListenerItem(
+                                name = name,
+                                imageUrl = imageUrl,
+                                modifier = Modifier.weight(1f),
+                                flagEmoji = mapCountryCodeToFlagEmoji(flagCode),
+                                isDarkMode = isDark,
+                                onClick = {
+                                    if (isCurrentUserHost && targetUserId.isNotBlank() && targetUserId != currentUserId) {
+                                        selectedUserForAction = ModerationTargetUser(
+                                            userId = targetUserId,
+                                            name = name,
+                                            imageUrl = imageUrl,
+                                            flagCode = flagCode,
+                                            role = "listener"
+                                        )
+                                    } else {
+                                        onUserClick(
+                                            PrivateChatItem(
+                                                targetUserId.ifBlank { name.hashCode().toString() },
+                                                name,
+                                                imageUrl,
+                                                flagCode,
+                                                "",
+                                                "Now",
+                                                0,
+                                                true,
+                                                false
+                                            )
+                                        )
+                                    }
+                                }
+                            )
+                        }
+                        if (rowItems.size < 4) {
+                            repeat(4 - rowItems.size) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // Large prominent "Invite Friend" CTA Button matching the image perfectly
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .background(
+                        if (isDark) currentTheme.themeColor else ChillGoldIcon,
+                        RoundedCornerShape(28.dp)
+                    )
+                    .clickable { onInviteClick() }
+                    .padding(horizontal = 24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        CustomPersonAddIcon(tint = if (isDark) Color.White else Color.Black, modifier = Modifier.size(24.dp))
+                        Spacer(modifier = Modifier.width(12.dp))
                         Text(
-                            text = "$speakingCount Speaking",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (isDark) Color.White.copy(alpha = 0.6f) else Color.Gray
+                            text = "Invite Friend",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isDark) Color.White else Color.Black
                         )
-                        Box(
-                            modifier = Modifier
-                                .padding(horizontal = 6.dp)
-                                .size(4.dp)
-                                .background(if (isDark) currentTheme.themeColor else ChillGoldIcon, CircleShape)
-                        )
+                    }
+                    
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .background(if (isDark) Color.Black.copy(alpha = 0.2f) else Color.White, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Text(
-                            text = "$listeningCount Listening",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (isDark) Color.White.copy(alpha = 0.6f) else Color.Gray
+                            text = "+",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = if (isDark) Color.White else ChillGoldIcon,
+                            modifier = Modifier.offset(y = (-1).dp)
                         )
                     }
                 }
             }
             
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .background(if (isDark) Color.White.copy(alpha = 0.15f) else Color(0xFFF3F4F6), CircleShape)
-                    .clickable { onDismiss() },
-                contentAlignment = Alignment.Center
-            ) {
-                CustomCloseIcon(tint = if (isDark) Color.White else Color.Black, modifier = Modifier.size(16.dp))
-            }
+            Spacer(modifier = Modifier.height(36.dp))
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Speaking Now Section Title
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(bottom = 16.dp)
-        ) {
-            CustomMicIcon(tint = if (isDark) currentTheme.themeColor else ChillGoldIcon, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "Speaking Now",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (isDark) Color.White.copy(alpha = 0.5f) else Color.Gray
-            )
-        }
-
-        // Host & Speakers Row
-        val allSpeakers = listOf(hostSeat) + speakerSeats
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 28.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            allSpeakers.forEach { sp ->
-                PeopleSheetSpeakerItem(
-                    name = sp.name,
-                    imageUrl = sp.imageUrl,
-                    badgeText = if (sp.isHost) "Host" else "Speaker",
-                    badgeColor = if (sp.isHost) Color(0xFFFEF3C7) else Color(0xFFF3F4F6),
-                    isHost = sp.isHost,
-                    flagEmoji = mapCountryCodeToFlagEmoji(sp.flagCode),
-                    isDarkMode = isDark,
-                    onClick = {
-                        onUserClick(PrivateChatItem(sp.name.hashCode().toString(), sp.name, sp.imageUrl, sp.flagCode, "", "Now", 0, true, false))
-                    }
-                )
-            }
-        }
-
-        // Listening Section Title
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(vertical = 12.dp)
-        ) {
-            CustomHeadphoneIcon(tint = if (isDark) currentTheme.themeColor else ChillGoldIcon, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "Listening ($listeningCount)",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (isDark) Color.White.copy(alpha = 0.5f) else Color.Gray
-            )
-        }
-
-        if (listenerSeats.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 24.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "No listeners in the room yet. Invite friends!",
-                    fontSize = 13.sp,
-                    color = if (isDark) Color.White.copy(alpha = 0.5f) else Color.Gray
-                )
-            }
-        } else {
-            val listenerRows = listenerSeats.chunked(4)
-            listenerRows.forEach { rowItems ->
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    rowItems.forEach { (name, imageUrl, flagCode) ->
-                        PeopleSheetListenerItem(
-                            name = name,
-                            imageUrl = imageUrl,
-                            modifier = Modifier.weight(1f),
-                            flagEmoji = mapCountryCodeToFlagEmoji(flagCode),
-                            isDarkMode = isDark,
-                            onClick = {
-                                onUserClick(
-                                    PrivateChatItem(
-                                        name.hashCode().toString(),
-                                        name,
-                                        imageUrl,
-                                        flagCode,
-                                        "",
-                                        "Now",
-                                        0,
-                                        true,
-                                        false
-                                    )
-                                )
-                            }
-                        )
-                    }
-                    if (rowItems.size < 4) {
-                        repeat(4 - rowItems.size) {
-                            Spacer(modifier = Modifier.weight(1f))
-                        }
-                    }
+        // Moderation Action Overlay Sheet
+        selectedUserForAction?.let { target ->
+            ModerationActionDialog(
+                target = target,
+                isDark = isDark,
+                onDismiss = { selectedUserForAction = null },
+                onMessage = {
+                    val uid = target.userId.ifBlank { target.name.hashCode().toString() }
+                    onUserClick(PrivateChatItem(uid, target.name, target.imageUrl, target.flagCode, "", "Now", 0, true, false))
+                    selectedUserForAction = null
+                },
+                onMute = {
+                    onModeratorAction(target.userId, target.name, "mute_mic")
+                    selectedUserForAction = null
+                },
+                onKick = {
+                    onModeratorAction(target.userId, target.name, "kick_from_room")
+                    selectedUserForAction = null
+                },
+                onBan = {
+                    onModeratorAction(target.userId, target.name, "ban_user")
+                    selectedUserForAction = null
                 }
-            }
+            )
         }
+    }
+}
 
-        Spacer(modifier = Modifier.height(28.dp))
+data class ModerationTargetUser(
+    val userId: String,
+    val name: String,
+    val imageUrl: String,
+    val flagCode: String,
+    val role: String
+)
 
-        // Large prominent "Invite Friend" CTA Button matching the image perfectly
-        Box(
+@Composable
+fun ModerationActionDialog(
+    target: ModerationTargetUser,
+    isDark: Boolean,
+    onDismiss: () -> Unit,
+    onMessage: () -> Unit,
+    onMute: () -> Unit,
+    onKick: () -> Unit,
+    onBan: () -> Unit
+) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(56.dp)
-                .background(
-                    if (isDark) currentTheme.themeColor else ChillGoldIcon,
-                    RoundedCornerShape(28.dp)
-                )
-                .clickable { onInviteClick() }
-                .padding(horizontal = 24.dp),
-            contentAlignment = Alignment.Center
+                .clip(RoundedCornerShape(24.dp))
+                .background(if (isDark) Color(0xFF1E1F2E) else Color.White)
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+            // Target User Avatar & Info
+            Box(
+                modifier = Modifier.size(72.dp),
+                contentAlignment = Alignment.Center
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CustomPersonAddIcon(tint = if (isDark) Color.White else Color.Black, modifier = Modifier.size(24.dp))
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        text = "Invite Friend",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isDark) Color.White else Color.Black
-                    )
-                }
-                
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .background(if (isDark) Color.Black.copy(alpha = 0.2f) else Color.White, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "+",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = if (isDark) Color.White else ChillGoldIcon,
-                        modifier = Modifier.offset(y = (-1).dp)
-                    )
-                }
+                AsyncImage(
+                    model = target.imageUrl,
+                    contentDescription = target.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.size(72.dp).clip(CircleShape)
+                )
             }
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = target.name,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isDark) Color.White else Color.Black
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Role: ${target.role.replaceFirstChar { it.uppercase() }}",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = if (isDark) Color.White.copy(alpha = 0.6f) else Color.Gray
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+            
+            // Actions List
+            // 1. Send Direct Message
+            ModerationActionButton(
+                label = "Send Message",
+                iconText = "💬",
+                containerColor = if (isDark) Color(0xFF2A2B3D) else Color(0xFFF3F4F6),
+                textColor = if (isDark) Color.White else Color.Black,
+                onClick = onMessage
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // 2. Mute Microphone
+            if (target.role == "speaker") {
+                ModerationActionButton(
+                    label = "Mute Microphone",
+                    iconText = "🔇",
+                    containerColor = if (isDark) Color(0xFF332A1E) else Color(0xFFFEF3C7),
+                    textColor = Color(0xFFD97706),
+                    onClick = onMute
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            // 3. Kick from Room
+            ModerationActionButton(
+                label = "Kick from Room",
+                iconText = "🚪",
+                containerColor = if (isDark) Color(0xFF3A1F1F) else Color(0xFFFEE2E2),
+                textColor = Color(0xFFDC2626),
+                onClick = onKick
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // 4. Ban User
+            ModerationActionButton(
+                label = "Ban User",
+                iconText = "🚫",
+                containerColor = if (isDark) Color(0xFF451A1A) else Color(0xFFFFE4E6),
+                textColor = Color(0xFFB91C1C),
+                onClick = onBan
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Cancel Button
+            Text(
+                text = "Cancel",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = if (isDark) Color.White.copy(alpha = 0.7f) else Color.Gray,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { onDismiss() }
+                    .padding(horizontal = 24.dp, vertical = 8.dp)
+            )
         }
-        
-        Spacer(modifier = Modifier.height(36.dp))
+    }
+}
+
+@Composable
+fun ModerationActionButton(
+    label: String,
+    iconText: String,
+    containerColor: Color,
+    textColor: Color,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(containerColor)
+            .clickable { onClick() }
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Start
+    ) {
+        Text(text = iconText, fontSize = 18.sp)
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+            text = label,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            color = textColor
+        )
     }
 }
 

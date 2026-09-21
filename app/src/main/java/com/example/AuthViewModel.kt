@@ -1425,15 +1425,18 @@ class AuthViewModel : ViewModel() {
     }
 
     fun logout(context: Context? = null) {
-        val uid = firebaseAuth?.currentUser?.uid ?: ""
+        val supabaseUid = if (context != null) SupabaseSessionManager.getUserId(context) else null
+        val currentProfileUid = (_authState.value as? AuthState.Success)?.user?.uid
+        val effectiveUid = supabaseUid ?: currentProfileUid ?: firebaseAuth?.currentUser?.uid.orEmpty()
+        
         firebaseAuth?.signOut()
         _authState.value = AuthState.Idle
         
         if (context != null) {
             SupabaseSessionManager.clearSession(context)
-            if (uid.isNotEmpty()) {
+            if (effectiveUid.isNotEmpty()) {
                 val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
-                prefs.edit().remove("active_session_id_${uid}").apply()
+                prefs.edit().remove("active_session_id_${effectiveUid}").apply()
             }
         }
     }
@@ -1821,6 +1824,7 @@ class AuthViewModel : ViewModel() {
                     callback(false)
                     return@launch
                 }
+                val resolvedUserId = currentUserId ?: (_authState.value as? AuthState.Success)?.user?.uid
                 
                 // 1. Check Supabase users table by username (primary table for registered users)
                 val userRes = withContext(Dispatchers.IO) {
@@ -1833,7 +1837,7 @@ class AuthViewModel : ViewModel() {
                 
                 if (userRes != null && userRes.isSuccessful) {
                     val users = userRes.body() ?: emptyList()
-                    val conflict = users.any { it.uid != currentUserId }
+                    val conflict = users.any { it.uid != resolvedUserId }
                     callback(!conflict)
                     return@launch
                 }
@@ -1848,7 +1852,7 @@ class AuthViewModel : ViewModel() {
                 }
                 if (userEqRes != null && userEqRes.isSuccessful) {
                     val users = userEqRes.body() ?: emptyList()
-                    val conflict = users.any { it.uid != currentUserId }
+                    val conflict = users.any { it.uid != resolvedUserId }
                     callback(!conflict)
                     return@launch
                 }
@@ -1863,7 +1867,7 @@ class AuthViewModel : ViewModel() {
                 }
                 if (profileRes != null && profileRes.isSuccessful) {
                     val profiles = profileRes.body() ?: emptyList()
-                    val conflict = profiles.any { it.auth_user_id != currentUserId }
+                    val conflict = profiles.any { it.auth_user_id != resolvedUserId }
                     callback(!conflict)
                     return@launch
                 }
@@ -1877,7 +1881,7 @@ class AuthViewModel : ViewModel() {
                 }
                 if (profileEqRes != null && profileEqRes.isSuccessful) {
                     val profiles = profileEqRes.body() ?: emptyList()
-                    val conflict = profiles.any { it.auth_user_id != currentUserId }
+                    val conflict = profiles.any { it.auth_user_id != resolvedUserId }
                     callback(!conflict)
                     return@launch
                 }

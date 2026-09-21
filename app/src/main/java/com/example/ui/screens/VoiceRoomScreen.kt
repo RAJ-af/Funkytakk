@@ -9,6 +9,8 @@ import androidx.core.content.ContextCompat
 import com.example.UpdateVoiceRoomRequest
 import com.example.SpeakerRequestInsert
 import com.example.SupabaseRoomParticipant
+import com.example.ModeratorActionRequest
+import com.example.UpdateParticipantMicRequest
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -293,7 +295,8 @@ data class ChillRoomSpeaker(
     val isMuted: Boolean = false,
     val isCenter: Boolean = false,
     val gradientColors: List<Color>,
-    val isHost: Boolean = false
+    val isHost: Boolean = false,
+    val userId: String = ""
 )
 
 data class ChillRoomMessage(
@@ -437,7 +440,8 @@ fun VoiceRoomScreen(
                     isMuted = false,
                     isCenter = true,
                     gradientColors = listOf(Color(0xFFFFB800), Color(0xFFF59E0B), Color(0xFFFFB800)),
-                    isHost = true
+                    isHost = true,
+                    userId = hostProfile?.uid ?: (roomHostId ?: "")
                 )
             )
         } else {
@@ -454,7 +458,8 @@ fun VoiceRoomScreen(
                     isMuted = !p.is_mic_enabled,
                     isCenter = isHost,
                     gradientColors = if (isHost) listOf(Color(0xFFFFB800), Color(0xFFF59E0B), Color(0xFFFFB800)) else listOf(Color(0xFF8B5CF6), Color(0xFFEC4899)),
-                    isHost = isHost
+                    isHost = isHost,
+                    userId = p.user_id
                 )
             }
         }
@@ -480,7 +485,8 @@ fun VoiceRoomScreen(
                 isMuted = !p.is_mic_enabled,
                 isCenter = false,
                 gradientColors = listOf(Color(0xFF8B5CF6), Color(0xFFEC4899)),
-                isHost = false
+                isHost = false,
+                userId = p.user_id
             )
         }
     }
@@ -496,6 +502,13 @@ fun VoiceRoomScreen(
             val flagCode = pProfile?.countryCode ?: "in"
             Triple(name, avatar, flagCode)
         }
+    }
+
+    val listenerUserIds = remember(participantsData, roomHostId) {
+        participantsData.filter { p ->
+            val isHost = (p.role == "host") || (p.user_id == roomHostId)
+            !isHost && p.role != "speaker"
+        }.map { it.user_id }
     }
 
     val speakers = remember(hostSeat, speakerSeats) {
@@ -1852,6 +1865,9 @@ fun VoiceRoomScreen(
                 hostSeat = hostSeat,
                 speakerSeats = speakerSeats,
                 listenerSeats = listenerSeats,
+                listenerUserIds = listenerUserIds,
+                isCurrentUserHost = (currentUserId == roomHostId && currentUserId.isNotBlank()),
+                currentUserId = currentUserId,
                 onUserClick = { chatUser ->
                     oneToOneChatUser = chatUser
                     showOneToOneChatSheet = true
@@ -1860,6 +1876,88 @@ fun VoiceRoomScreen(
                 onInviteClick = {
                     showInviteFriendSheet = true
                     showPeopleSheet = false
+                },
+                onModeratorAction = { targetUserId, targetUserName, actionType ->
+                    if (targetUserId.isNotBlank()) {
+                        scope.launch(Dispatchers.IO) {
+                            val bearerToken = SupabaseSessionManager.getBearerToken(context)
+                            try {
+                                val req = ModeratorActionRequest(
+                                    target_user_id = targetUserId,
+                                    action_type = actionType,
+                                    room_id = activeRoomId,
+                                    reason = "Host moderation action"
+                                )
+                                val res = SupabaseClient.api.executeModeratorAction(
+                                    auth = bearerToken,
+                                    request = req
+                                )
+                                withContext(Dispatchers.Main) {
+                                    if (res.isSuccessful) {
+                                        val actionDesc = when (actionType) {
+                                            "mute_mic" -> "muted"
+                                            "kick_from_room" -> "removed from the room"
+                                            "ban_user" -> "banned"
+                                            else -> "moderated"
+                                        }
+                                        Toast.makeText(context, "$targetUserName has been $actionDesc.", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        when (actionType) {
+                                            "mute_mic" -> {
+                                                SupabaseClient.api.updateRoomParticipantMic(
+                                                    auth = bearerToken,
+                                                    roomIdEq = "eq.$activeRoomId",
+                                                    userIdEq = "eq.$targetUserId",
+                                                    body = UpdateParticipantMicRequest(is_mic_enabled = false)
+                                                )
+                                                Toast.makeText(context, "$targetUserName has been muted.", Toast.LENGTH_SHORT).show()
+                                            }
+                                            "kick_from_room" -> {
+                                                SupabaseClient.api.leaveRoomParticipant(
+                                                    auth = bearerToken,
+                                                    roomIdEq = "eq.$activeRoomId",
+                                                    userIdEq = "eq.$targetUserId"
+                                                )
+                                                Toast.makeText(context, "$targetUserName has been removed from room.", Toast.LENGTH_SHORT).show()
+                                            }
+                                            else -> {
+                                                Toast.makeText(context, "Action failed: ${res.code()}", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                withContext(Dispatchers.Main) {
+                                    try {
+                                        when (actionType) {
+                                            "mute_mic" -> {
+                                                SupabaseClient.api.updateRoomParticipantMic(
+                                                    auth = bearerToken,
+                                                    roomIdEq = "eq.$activeRoomId",
+                                                    userIdEq = "eq.$targetUserId",
+                                                    body = UpdateParticipantMicRequest(is_mic_enabled = false)
+                                                )
+                                                Toast.makeText(context, "$targetUserName has been muted.", Toast.LENGTH_SHORT).show()
+                                            }
+                                            "kick_from_room" -> {
+                                                SupabaseClient.api.leaveRoomParticipant(
+                                                    auth = bearerToken,
+                                                    roomIdEq = "eq.$activeRoomId",
+                                                    userIdEq = "eq.$targetUserId"
+                                                )
+                                                Toast.makeText(context, "$targetUserName has been removed from room.", Toast.LENGTH_SHORT).show()
+                                            }
+                                            else -> {
+                                                Toast.makeText(context, "Error: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    } catch (e2: Exception) {
+                                        Toast.makeText(context, "Failed: ${e2.localizedMessage}", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
+                        }
+                    }
                 },
                 onDismiss = { showPeopleSheet = false }
             )

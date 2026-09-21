@@ -423,14 +423,16 @@ class VoiceRoomOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, 
             serviceScope.launch(Dispatchers.IO) {
                 try {
                     val token = SupabaseSessionManager.getBearerToken(applicationContext)
-                    val userId = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+                    val userId = SupabaseSessionManager.getUserId(applicationContext)
+                    android.util.Log.d("VoiceRoomOverlayService", "handleToggleMic: roomId=$roomId, userId=$userId, newStatus=$newStatus")
                     if (userId != null) {
-                        SupabaseClient.api.updateRoomParticipantMic(
+                        val res = SupabaseClient.api.updateRoomParticipantMic(
                             auth = token,
                             roomIdEq = "eq.$roomId",
                             userIdEq = "eq.$userId",
                             body = UpdateParticipantMicRequest(is_mic_enabled = newStatus)
                         )
+                        android.util.Log.d("VoiceRoomOverlayService", "updateRoomParticipantMic response code=${res.code()}")
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -447,13 +449,15 @@ class VoiceRoomOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, 
             serviceScope.launch(Dispatchers.IO) {
                 try {
                     val token = SupabaseSessionManager.getBearerToken(context)
-                    val userId = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+                    val userId = SupabaseSessionManager.getUserId(context)
+                    android.util.Log.d("VoiceRoomOverlayService", "handleLeaveRoom: roomId=$roomId, userId=$userId")
                     if (userId != null) {
-                        SupabaseClient.api.leaveRoomParticipant(
+                        val res = SupabaseClient.api.leaveRoomParticipant(
                             auth = token,
                             roomIdEq = "eq.$roomId",
                             userIdEq = "eq.$userId"
                         )
+                        android.util.Log.d("VoiceRoomOverlayService", "leaveRoomParticipant response code=${res.code()}")
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()

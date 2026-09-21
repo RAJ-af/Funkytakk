@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.content.Context
 import android.widget.Toast
+import com.example.SupabaseSessionManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -481,7 +482,7 @@ fun OnboardingProfileScreen(
                     }
                     
                     isCheckingUsername = true
-                    val currentUserId = (authState as? AuthState.Success)?.user?.uid
+                    val currentUserId = SupabaseSessionManager.getUserId(context) ?: (authState as? AuthState.Success)?.user?.uid
                     viewModel.checkUsernameUnique(cleanUsername, currentUserId) { isUnique ->
                         isCheckingUsername = false
                         if (isUnique) {
