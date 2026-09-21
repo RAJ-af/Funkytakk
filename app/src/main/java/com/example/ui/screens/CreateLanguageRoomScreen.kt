@@ -445,7 +445,7 @@ fun CreateLanguageRoomScreen(
                                 android.util.Log.e("CreateRoom", "Failed to insert room to Supabase: ${e.message}")
                             }
                         }
-                        viewModel.joinRoom(roomUuid, newRoom.title ?: "", context)
+                        viewModel.joinRoom(roomUuid, newRoom.title ?: "", context, role = "speaker", hostId = hostId)
 
                         if (isPrivateRoom) {
                             createdSuccessJoinCode = joinCodeInput

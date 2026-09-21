@@ -1,0 +1,452 @@
+package com.example.ui.screens
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import com.example.ui.components.CircleFlag
+
+@Composable
+fun PeopleBottomSheetContent(
+    selectedThemeIndex: Int,
+    hostSeat: ChillRoomSpeaker,
+    speakerSeats: List<ChillRoomSpeaker>,
+    listenerSeats: List<Triple<String, String, String>>,
+    onUserClick: (PrivateChatItem) -> Unit = {},
+    onInviteClick: () -> Unit = {},
+    onDismiss: () -> Unit
+) {
+    val currentTheme = roomThemes[selectedThemeIndex]
+    val isDark = currentTheme.isDark
+    val totalCount = 1 + speakerSeats.size + listenerSeats.size
+    val speakingCount = 1 + speakerSeats.size
+    val listeningCount = listenerSeats.size
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .fillMaxHeight(0.85f)
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(currentTheme.startColor, currentTheme.endColor)
+                )
+            )
+            .padding(horizontal = 24.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        // Header Row: Total People / Close Button
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .background(if (isDark) currentTheme.themeColor else ChillGoldIcon, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CustomPeopleGroupIcon(tint = if (isDark) Color.White else Color.Black, modifier = Modifier.size(24.dp))
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+                Column {
+                    Text(
+                        text = "$totalCount People",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isDark) Color.White else Color.Black
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "$speakingCount Speaking",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (isDark) Color.White.copy(alpha = 0.6f) else Color.Gray
+                        )
+                        Box(
+                            modifier = Modifier
+                                .padding(horizontal = 6.dp)
+                                .size(4.dp)
+                                .background(if (isDark) currentTheme.themeColor else ChillGoldIcon, CircleShape)
+                        )
+                        Text(
+                            text = "$listeningCount Listening",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (isDark) Color.White.copy(alpha = 0.6f) else Color.Gray
+                        )
+                    }
+                }
+            }
+            
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .background(if (isDark) Color.White.copy(alpha = 0.15f) else Color(0xFFF3F4F6), CircleShape)
+                    .clickable { onDismiss() },
+                contentAlignment = Alignment.Center
+            ) {
+                CustomCloseIcon(tint = if (isDark) Color.White else Color.Black, modifier = Modifier.size(16.dp))
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Speaking Now Section Title
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(bottom = 16.dp)
+        ) {
+            CustomMicIcon(tint = if (isDark) currentTheme.themeColor else ChillGoldIcon, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Speaking Now",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isDark) Color.White.copy(alpha = 0.5f) else Color.Gray
+            )
+        }
+
+        // Host & Speakers Row
+        val allSpeakers = listOf(hostSeat) + speakerSeats
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 28.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            allSpeakers.forEach { sp ->
+                PeopleSheetSpeakerItem(
+                    name = sp.name,
+                    imageUrl = sp.imageUrl,
+                    badgeText = if (sp.isHost) "Host" else "Speaker",
+                    badgeColor = if (sp.isHost) Color(0xFFFEF3C7) else Color(0xFFF3F4F6),
+                    isHost = sp.isHost,
+                    flagEmoji = mapCountryCodeToFlagEmoji(sp.flagCode),
+                    isDarkMode = isDark,
+                    onClick = {
+                        onUserClick(PrivateChatItem(sp.name.hashCode().toString(), sp.name, sp.imageUrl, sp.flagCode, "", "Now", 0, true, false))
+                    }
+                )
+            }
+        }
+
+        // Listening Section Title
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(vertical = 12.dp)
+        ) {
+            CustomHeadphoneIcon(tint = if (isDark) currentTheme.themeColor else ChillGoldIcon, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Listening ($listeningCount)",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isDark) Color.White.copy(alpha = 0.5f) else Color.Gray
+            )
+        }
+
+        if (listenerSeats.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "No listeners in the room yet. Invite friends!",
+                    fontSize = 13.sp,
+                    color = if (isDark) Color.White.copy(alpha = 0.5f) else Color.Gray
+                )
+            }
+        } else {
+            val listenerRows = listenerSeats.chunked(4)
+            listenerRows.forEach { rowItems ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    rowItems.forEach { (name, imageUrl, flagCode) ->
+                        PeopleSheetListenerItem(
+                            name = name,
+                            imageUrl = imageUrl,
+                            modifier = Modifier.weight(1f),
+                            flagEmoji = mapCountryCodeToFlagEmoji(flagCode),
+                            isDarkMode = isDark,
+                            onClick = {
+                                onUserClick(
+                                    PrivateChatItem(
+                                        name.hashCode().toString(),
+                                        name,
+                                        imageUrl,
+                                        flagCode,
+                                        "",
+                                        "Now",
+                                        0,
+                                        true,
+                                        false
+                                    )
+                                )
+                            }
+                        )
+                    }
+                    if (rowItems.size < 4) {
+                        repeat(4 - rowItems.size) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(28.dp))
+
+        // Large prominent "Invite Friend" CTA Button matching the image perfectly
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .background(
+                    if (isDark) currentTheme.themeColor else ChillGoldIcon,
+                    RoundedCornerShape(28.dp)
+                )
+                .clickable { onInviteClick() }
+                .padding(horizontal = 24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CustomPersonAddIcon(tint = if (isDark) Color.White else Color.Black, modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "Invite Friend",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isDark) Color.White else Color.Black
+                    )
+                }
+                
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .background(if (isDark) Color.Black.copy(alpha = 0.2f) else Color.White, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "+",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = if (isDark) Color.White else ChillGoldIcon,
+                        modifier = Modifier.offset(y = (-1).dp)
+                    )
+                }
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(36.dp))
+    }
+}
+
+@Composable
+fun PeopleSheetSpeakerItem(
+    name: String,
+    imageUrl: String,
+    badgeText: String,
+    badgeColor: Color,
+    isHost: Boolean,
+    flagEmoji: String = "🇮🇳",
+    isDarkMode: Boolean = false,
+    onClick: () -> Unit = {}
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .width(96.dp)
+            .clickable { onClick() }
+    ) {
+        Box(
+            modifier = Modifier.size(86.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(86.dp)
+                    .clip(CircleShape)
+                    .background(if (isHost) ChillGoldIcon else Color.Transparent)
+                    .padding(if (isHost) 3.dp else 0.dp)
+                    .clip(CircleShape)
+            ) {
+                AsyncImage(
+                    model = imageUrl,
+                    contentDescription = name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .offset(x = (-4).dp, y = (-2).dp)
+                    .size(20.dp)
+                    .background(if (isDarkMode) Color(0xFF1E293B) else Color.White, CircleShape)
+                    .padding(1.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                CircleFlag(
+                    countryCode = mapFlagEmojiToCode(flagEmoji),
+                    modifier = Modifier.fillMaxSize().clip(CircleShape)
+                )
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(10.dp))
+        Text(
+            text = name,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (isDarkMode) Color.White else Color.Black
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Box(
+            modifier = Modifier
+                .background(if (isDarkMode) Color.White.copy(alpha = 0.12f) else badgeColor, RoundedCornerShape(6.dp))
+                .padding(horizontal = 10.dp, vertical = 2.dp)
+        ) {
+            Text(
+                text = badgeText,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isHost) {
+                    if (isDarkMode) ChillGoldIcon else Color(0xFFC2410C)
+                } else {
+                    if (isDarkMode) Color.White.copy(alpha = 0.7f) else Color.Gray
+                }
+            )
+        }
+    }
+}
+
+@Composable
+fun PeopleSheetListenerItem(
+    name: String,
+    imageUrl: String,
+    modifier: Modifier = Modifier,
+    flagEmoji: String = "🇮🇳",
+    isDarkMode: Boolean = false,
+    onClick: () -> Unit = {}
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+            .padding(vertical = 4.dp)
+            .clickable { onClick() }
+    ) {
+        Box(
+            modifier = Modifier.size(68.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(CircleShape)
+            ) {
+                AsyncImage(
+                    model = imageUrl,
+                    contentDescription = name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .offset(x = (-4).dp, y = (-2).dp)
+                    .size(16.dp)
+                    .background(if (isDarkMode) Color(0xFF1E293B) else Color.White, CircleShape)
+                    .padding(1.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                CircleFlag(
+                    countryCode = mapFlagEmojiToCode(flagEmoji),
+                    modifier = Modifier.fillMaxSize().clip(CircleShape)
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = name,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            color = if (isDarkMode) Color.White else Color.Black,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+fun CustomCloseIcon(tint: Color, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        drawLine(color = tint, start = androidx.compose.ui.geometry.Offset(w * 0.25f, h * 0.25f), end = androidx.compose.ui.geometry.Offset(w * 0.75f, h * 0.75f), strokeWidth = w * 0.12f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        drawLine(color = tint, start = androidx.compose.ui.geometry.Offset(w * 0.75f, h * 0.25f), end = androidx.compose.ui.geometry.Offset(w * 0.25f, h * 0.75f), strokeWidth = w * 0.12f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+    }
+}
+
+@Composable
+fun CustomHeadphoneIcon(tint: Color, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = w * 0.12f, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round)
+        val path = androidx.compose.ui.graphics.Path().apply {
+            moveTo(w * 0.2f, h * 0.7f)
+            quadraticTo(w * 0.2f, h * 0.2f, w * 0.5f, h * 0.2f)
+            quadraticTo(w * 0.8f, h * 0.2f, w * 0.8f, h * 0.7f)
+        }
+        drawPath(path, color = tint, style = stroke)
+        drawRoundRect(color = tint, topLeft = androidx.compose.ui.geometry.Offset(w * 0.1f, h * 0.6f), size = androidx.compose.ui.geometry.Size(w * 0.18f, h * 0.25f), cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.05f))
+        drawRoundRect(color = tint, topLeft = androidx.compose.ui.geometry.Offset(w * 0.72f, h * 0.6f), size = androidx.compose.ui.geometry.Size(w * 0.18f, h * 0.25f), cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.05f))
+    }
+}
+
+@Composable
+fun CustomPersonAddIcon(tint: Color, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        drawCircle(color = tint, radius = w * 0.2f, center = androidx.compose.ui.geometry.Offset(w * 0.4f, h * 0.35f))
+        val body = androidx.compose.ui.graphics.Path().apply {
+            moveTo(w * 0.1f, h * 0.85f)
+            quadraticTo(w * 0.15f, h * 0.55f, w * 0.4f, h * 0.55f)
+            quadraticTo(w * 0.65f, h * 0.55f, w * 0.7f, h * 0.85f)
+        }
+        drawPath(body, color = tint)
+        drawLine(color = tint, start = androidx.compose.ui.geometry.Offset(w * 0.75f, h * 0.45f), end = androidx.compose.ui.geometry.Offset(w * 0.95f, h * 0.45f), strokeWidth = w * 0.08f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        drawLine(color = tint, start = androidx.compose.ui.geometry.Offset(w * 0.85f, h * 0.35f), end = androidx.compose.ui.geometry.Offset(w * 0.85f, h * 0.55f), strokeWidth = w * 0.08f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+    }
+}
+

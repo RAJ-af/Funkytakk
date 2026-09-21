@@ -257,7 +257,7 @@ class AuthViewModel : ViewModel() {
         roomId: String,
         title: String,
         context: Context? = null,
-        role: String = "speaker",
+        role: String = "listener",
         hostId: String? = null
     ) {
         _activeRoomId.value = roomId
@@ -300,6 +300,22 @@ class AuthViewModel : ViewModel() {
                     )
                 )
                 Log.d("AuthViewModel", "User $uid joined room $roomId as $role via Supabase room_participants")
+                
+                // Send a system message that the user has joined, so everyone in the room sees it
+                val displayName = (authState.value as? AuthState.Success)?.user?.displayName ?: "Someone"
+                try {
+                    SupabaseClient.api.sendRoomMessage(
+                        auth = token,
+                        request = SendRoomMessageRequest(
+                            room_id = roomId,
+                            user_id = uid,
+                            message = "$displayName joined the room",
+                            message_type = "system"
+                        )
+                    )
+                } catch (msgEx: Exception) {
+                    Log.e("AuthViewModel", "Error sending system join message", msgEx)
+                }
             } catch (e: Exception) {
                 Log.e("AuthViewModel", "Error joining room $roomId in Supabase", e)
             }

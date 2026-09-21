@@ -145,7 +145,8 @@ data class CustomRoom(
     val overlayColor: Color,
     val badgeText: String,
     val badgeColor: Color,
-    val avatars: List<String>
+    val avatars: List<String>,
+    val hostId: String = ""
 )
 
 data class MomentPost(

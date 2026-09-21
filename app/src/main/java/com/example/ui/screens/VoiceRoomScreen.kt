@@ -285,7 +285,8 @@ data class ChillRoomMessage(
     val text: String,
     val id: String? = null,
     val userId: String? = null,
-    val createdAt: String? = null
+    val createdAt: String? = null,
+    val messageType: String? = "chat"
 )
 
 data class PrivateChatItem(
@@ -376,12 +377,22 @@ fun VoiceRoomScreen(
     }
 
     val currentUserId = remember(context) { SupabaseSessionManager.getUserId(context) ?: "" }
+    val currentUserName = remember(supabaseProfiles, currentUserId) {
+        supabaseProfiles.find { it.uid == currentUserId }?.displayName 
+            ?: supabaseProfiles.find { it.uid == currentUserId }?.username 
+            ?: "User"
+    }
     val scope = rememberCoroutineScope()
     var roomHostId by remember { mutableStateOf<String?>("") }
     var isMicOn by remember { mutableStateOf(true) }
     var participantsData by remember { mutableStateOf<List<SupabaseRoomParticipant>>(emptyList()) }
     val messages = remember { mutableStateListOf<ChillRoomMessage>() }
     var renderedMessageCount by remember { mutableStateOf(6) }
+    val renderedMessages = remember(messages, renderedMessageCount) {
+        derivedStateOf {
+            messages.takeLast(renderedMessageCount).reversed()
+        }
+    }.value
     val chatListState = rememberLazyListState()
     val activeReactions = remember { mutableStateListOf<FloatingEmojiId>() }
     val speakerReactions = remember { mutableStateMapOf<String, List<FloatingEmojiId>>() }
@@ -508,12 +519,13 @@ fun VoiceRoomScreen(
                         ChillRoomMessage(
                             senderName = name,
                             senderImageUrl = avatar,
-                            badge = badge,
+                            badge = if (msg.user_id == roomHostId) "Host" else null,
                             badgeColor = if (badge == "Host") ChillGoldIcon else ChillPurpleAccent,
                             text = msg.message,
                             id = msg.id,
                             userId = msg.user_id,
-                            createdAt = msg.created_at
+                            createdAt = msg.created_at,
+                            messageType = msg.message_type ?: "chat"
                         )
                     }
                     withContext(Dispatchers.Main) {
@@ -623,6 +635,8 @@ fun VoiceRoomScreen(
                             val userId = record.optString("user_id")
                             val text = record.optString("message")
                             val createdAt = record.optString("created_at")
+                            val msgType = record.optString("message_type")
+                            val messageType = if (msgType.isNullOrBlank()) "chat" else msgType
 
                             withContext(Dispatchers.Main) {
                                 if (msgId.isBlank() || messages.none { it.id == msgId }) {
@@ -640,7 +654,8 @@ fun VoiceRoomScreen(
                                             text = text,
                                             id = msgId,
                                             userId = userId,
-                                            createdAt = createdAt
+                                            createdAt = createdAt,
+                                            messageType = messageType
                                         )
                                     )
                                 }
@@ -974,7 +989,13 @@ fun VoiceRoomScreen(
                             currentTheme.cardBorderColor,
                             RoundedCornerShape(50.dp)
                         )
-                        .clickable { showEditRoomSheet = true }
+                        .clickable {
+                            if (roomHostId == currentUserId) {
+                                showEditRoomSheet = true
+                            } else {
+                                Toast.makeText(context, "Only the Host can edit room settings!", Toast.LENGTH_SHORT).show()
+                            }
+                        }
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -1325,486 +1346,44 @@ fun VoiceRoomScreen(
             }
 
             // 2. SPEAKERS VISUAL SYSTEM
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp, horizontal = 12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(20.dp)
-            ) {
-                // First Row - Seat 1 (Host), Seat 2 (Speaker 1), Seat 3 (Speaker 2)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    // Seat 1: Host
-                    VoiceSpeakerItem(
-                        speaker = hostSeat,
-                        reactions = speakerReactions[hostSeat.name] ?: emptyList(),
-                        theme = currentTheme,
-                        isDarkMode = isRoomDarkMode,
-                        onReactionComplete = { rid ->
-                            speakerReactions[hostSeat.name] = (speakerReactions[hostSeat.name] ?: emptyList()).filter { it.id != rid }
-                        },
-                        onClick = {
-                            oneToOneChatUser = PrivateChatItem("host", hostSeat.name, hostSeat.imageUrl, hostSeat.flagCode, "Host", "Now", 0, true, false)
-                            showOneToOneChatSheet = true
-                        }
-                    )
-
-                    // Seat 2: Speaker 1 or + Request
-                    val sp1 = speakerSeats.getOrNull(0)
-                    if (sp1 != null) {
-                        VoiceSpeakerItem(
-                            speaker = sp1,
-                            reactions = speakerReactions[sp1.name] ?: emptyList(),
-                            theme = currentTheme,
-                            isDarkMode = isRoomDarkMode,
-                            onReactionComplete = { rid ->
-                                speakerReactions[sp1.name] = (speakerReactions[sp1.name] ?: emptyList()).filter { it.id != rid }
-                            },
-                            onClick = {
-                                oneToOneChatUser = PrivateChatItem("sp1", sp1.name, sp1.imageUrl, sp1.flagCode, "", "Now", 0, true, false)
-                                showOneToOneChatSheet = true
-                            }
-                        )
-                    } else {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.width(82.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(74.dp)
-                                    .drawBehind {
-                                        drawCircle(
-                                            color = currentTheme.accentColor.copy(alpha = 0.45f),
-                                            style = Stroke(
-                                                width = 1.dp.toPx(),
-                                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 12f), 0f)
-                                            )
-                                        )
-                                    }
-                                    .clip(CircleShape)
-                                    .clickable {
-                                        scope.launch(Dispatchers.IO) {
-                                            try {
-                                                val token = SupabaseSessionManager.getBearerToken(context)
-                                                SupabaseClient.api.createSpeakerRequest(
-                                                    auth = token,
-                                                    body = SpeakerRequestInsert(
-                                                        room_id = activeRoomId,
-                                                        user_id = currentUserId
-                                                    )
-                                                )
-                                            } catch (_: Exception) {}
-                                        }
-                                        Toast.makeText(context, "Requested to join as speaker!", Toast.LENGTH_SHORT).show()
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Add,
-                                    contentDescription = "Request slot",
-                                    tint = currentTheme.accentColor,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "+ Request",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = currentTheme.secondaryTextColor
-                            )
-                        }
-                    }
-
-                    // Seat 3: Speaker 2 or + Request
-                    val sp2 = speakerSeats.getOrNull(1)
-                    if (sp2 != null) {
-                        VoiceSpeakerItem(
-                            speaker = sp2,
-                            reactions = speakerReactions[sp2.name] ?: emptyList(),
-                            theme = currentTheme,
-                            isDarkMode = isRoomDarkMode,
-                            onReactionComplete = { rid ->
-                                speakerReactions[sp2.name] = (speakerReactions[sp2.name] ?: emptyList()).filter { it.id != rid }
-                            },
-                            onClick = {
-                                oneToOneChatUser = PrivateChatItem("sp2", sp2.name, sp2.imageUrl, sp2.flagCode, "", "Now", 0, true, false)
-                                showOneToOneChatSheet = true
-                            }
-                        )
-                    } else {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.width(82.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(74.dp)
-                                    .drawBehind {
-                                        drawCircle(
-                                            color = currentTheme.accentColor.copy(alpha = 0.45f),
-                                            style = Stroke(
-                                                width = 1.dp.toPx(),
-                                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 12f), 0f)
-                                            )
-                                        )
-                                    }
-                                    .clip(CircleShape)
-                                    .clickable {
-                                        scope.launch(Dispatchers.IO) {
-                                            try {
-                                                val token = SupabaseSessionManager.getBearerToken(context)
-                                                SupabaseClient.api.createSpeakerRequest(
-                                                    auth = token,
-                                                    body = SpeakerRequestInsert(
-                                                        room_id = activeRoomId,
-                                                        user_id = currentUserId
-                                                    )
-                                                )
-                                            } catch (_: Exception) {}
-                                        }
-                                        Toast.makeText(context, "Requested to join as speaker!", Toast.LENGTH_SHORT).show()
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Add,
-                                    contentDescription = "Request slot",
-                                    tint = currentTheme.accentColor,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "+ Request",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = currentTheme.secondaryTextColor
-                            )
-                        }
-                    }
+            SpeakerSeatsGrid(
+                hostSeat = hostSeat,
+                speakerSeats = speakerSeats,
+                speakerReactions = speakerReactions,
+                currentTheme = currentTheme,
+                isRoomDarkMode = isRoomDarkMode,
+                activeRoomId = activeRoomId,
+                currentUserId = currentUserId,
+                scope = scope,
+                onHostClick = {
+                    oneToOneChatUser = PrivateChatItem("host", hostSeat.name, hostSeat.imageUrl, hostSeat.flagCode, "Host", "Now", 0, true, false)
+                    showOneToOneChatSheet = true
+                },
+                onSpeakerClick = { index, sp ->
+                    oneToOneChatUser = PrivateChatItem("sp${index + 1}", sp.name, sp.imageUrl, sp.flagCode, "", "Now", 0, true, false)
+                    showOneToOneChatSheet = true
                 }
-
-                // Second Row - Seat 4 (Speaker 3), Seat 5 (Speaker 4), Request slot
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.Top
-                ) {
-                    val sp3 = speakerSeats.getOrNull(2)
-                    if (sp3 != null) {
-                        VoiceSpeakerItem(
-                            speaker = sp3,
-                            reactions = speakerReactions[sp3.name] ?: emptyList(),
-                            theme = currentTheme,
-                            isDarkMode = isRoomDarkMode,
-                            onReactionComplete = { rid ->
-                                speakerReactions[sp3.name] = (speakerReactions[sp3.name] ?: emptyList()).filter { it.id != rid }
-                            },
-                            onClick = {
-                                oneToOneChatUser = PrivateChatItem("sp3", sp3.name, sp3.imageUrl, sp3.flagCode, "", "Now", 0, true, false)
-                                showOneToOneChatSheet = true
-                            }
-                        )
-                    } else {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.width(82.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(74.dp)
-                                    .drawBehind {
-                                        drawCircle(
-                                            color = currentTheme.accentColor.copy(alpha = 0.45f),
-                                            style = Stroke(
-                                                width = 1.dp.toPx(),
-                                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 12f), 0f)
-                                            )
-                                        )
-                                    }
-                                    .clip(CircleShape)
-                                    .clickable {
-                                        scope.launch(Dispatchers.IO) {
-                                            try {
-                                                val token = SupabaseSessionManager.getBearerToken(context)
-                                                SupabaseClient.api.createSpeakerRequest(
-                                                    auth = token,
-                                                    body = SpeakerRequestInsert(
-                                                        room_id = activeRoomId,
-                                                        user_id = currentUserId
-                                                    )
-                                                )
-                                            } catch (_: Exception) {}
-                                        }
-                                        Toast.makeText(context, "Requested to join as speaker!", Toast.LENGTH_SHORT).show()
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Add,
-                                    contentDescription = "Request slot",
-                                    tint = currentTheme.accentColor,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "+ Request",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = currentTheme.secondaryTextColor
-                            )
-                        }
-                    }
-
-                    val sp4 = speakerSeats.getOrNull(3)
-                    if (sp4 != null) {
-                        VoiceSpeakerItem(
-                            speaker = sp4,
-                            reactions = speakerReactions[sp4.name] ?: emptyList(),
-                            theme = currentTheme,
-                            isDarkMode = isRoomDarkMode,
-                            onReactionComplete = { rid ->
-                                speakerReactions[sp4.name] = (speakerReactions[sp4.name] ?: emptyList()).filter { it.id != rid }
-                            },
-                            onClick = {
-                                oneToOneChatUser = PrivateChatItem("sp4", sp4.name, sp4.imageUrl, sp4.flagCode, "", "Now", 0, true, false)
-                                showOneToOneChatSheet = true
-                            }
-                        )
-                    } else {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.width(82.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(74.dp)
-                                    .drawBehind {
-                                        drawCircle(
-                                            color = currentTheme.accentColor.copy(alpha = 0.45f),
-                                            style = Stroke(
-                                                width = 1.dp.toPx(),
-                                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 12f), 0f)
-                                            )
-                                        )
-                                    }
-                                    .clip(CircleShape)
-                                    .clickable {
-                                        scope.launch(Dispatchers.IO) {
-                                            try {
-                                                val token = SupabaseSessionManager.getBearerToken(context)
-                                                SupabaseClient.api.createSpeakerRequest(
-                                                    auth = token,
-                                                    body = SpeakerRequestInsert(
-                                                        room_id = activeRoomId,
-                                                        user_id = currentUserId
-                                                    )
-                                                )
-                                            } catch (_: Exception) {}
-                                        }
-                                        Toast.makeText(context, "Requested to join as speaker!", Toast.LENGTH_SHORT).show()
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Add,
-                                    contentDescription = "Request slot",
-                                    tint = currentTheme.accentColor,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "+ Request",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = currentTheme.secondaryTextColor
-                            )
-                        }
-                    }
-
-                    // Request Slot
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.width(82.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(74.dp)
-                                .drawBehind {
-                                    drawCircle(
-                                        color = currentTheme.accentColor.copy(alpha = 0.45f),
-                                        style = Stroke(
-                                            width = 1.dp.toPx(),
-                                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 12f), 0f)
-                                        )
-                                    )
-                                }
-                                .clip(CircleShape)
-                                .clickable {
-                                    Toast.makeText(context, "Requested to join!", Toast.LENGTH_SHORT).show()
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = "Request slot",
-                                tint = currentTheme.accentColor,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Request",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = currentTheme.secondaryTextColor
-                        )
-                    }
-                }
-            }
+            )
 
             Spacer(modifier = Modifier.weight(1f))
 
             // 3. MINIMAL COMPACT CHAT LOG ROW
-            val renderedMessages = remember(messages.size, renderedMessageCount) {
-                messages.reversed().take(renderedMessageCount)
-            }
-
-            // Paginated lazy scroll detection: when approaching top in reverseLayout (scrolling towards older messages)
-            LaunchedEffect(chatListState, messages.size, renderedMessageCount) {
-                snapshotFlow {
-                    val total = chatListState.layoutInfo.totalItemsCount
-                    val lastVisible = chatListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-                    Pair(lastVisible, total)
-                }.collect { (lastVisible, total) ->
-                    if (total > 0 && lastVisible >= total - 2 && renderedMessageCount < messages.size) {
-                        renderedMessageCount = (renderedMessageCount + 6).coerceAtMost(messages.size)
-                    }
-                }
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(210.dp)
-                    .padding(horizontal = 20.dp, vertical = 6.dp)
-            ) {
-                androidx.compose.foundation.lazy.LazyColumn(
-                    state = chatListState,
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    reverseLayout = true
-                ) {
-                    items(
-                        items = renderedMessages,
-                        key = { it.id?.takeIf { k -> k.isNotBlank() } ?: "${it.userId}_${it.text}_${it.createdAt}" }
-                    ) { msg ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            AsyncImage(
-                                model = msg.senderImageUrl,
-                                contentDescription = msg.senderName,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(34.dp)
-                                    .clip(CircleShape)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = msg.senderName,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = msg.badgeColor
-                                    )
-                                    if (msg.badge != null) {
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Box(
-                                            modifier = Modifier
-                                                .background(msg.badgeColor.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
-                                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                                        ) {
-                                            Text(
-                                                text = msg.badge,
-                                                fontSize = 9.sp,
-                                                color = msg.badgeColor,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = msg.text.toFluentAnnotatedString(fluentEmojis),
-                                    inlineContent = inlineContentMap,
-                                    fontSize = 14.sp,
-                                    color = currentTheme.primaryTextColor,
-                                    lineHeight = 24.sp
-                                )
-                            }
-                        }
-                    }
-
-                    if (renderedMessageCount < messages.size) {
-                        item(key = "load_older_cache_trigger") {
-                            LaunchedEffect(Unit) {
-                                if (renderedMessageCount < messages.size) {
-                                    renderedMessageCount = (renderedMessageCount + 6).coerceAtMost(messages.size)
-                                }
-                            }
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        if (renderedMessageCount < messages.size) {
-                                            renderedMessageCount = (renderedMessageCount + 6).coerceAtMost(messages.size)
-                                        }
-                                    }
-                                    .padding(vertical = 4.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                val remaining = messages.size - renderedMessageCount
-                                Text(
-                                    text = "↑ Scroll for older cached messages ($remaining)",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = currentTheme.primaryTextColor.copy(alpha = 0.55f)
-                                )
-                            }
-                        }
-                    }
-                }
-                
-                // Top fading gradient to make it look like older chats disappear
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(55.dp)
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    if (currentTheme.isDark) Color.Black else Color.White,
-                                    (if (currentTheme.isDark) Color.Black else Color.White).copy(alpha = 0.85f),
-                                    (if (currentTheme.isDark) Color.Black else Color.White).copy(alpha = 0.45f),
-                                    Color.Transparent
-                                )
-                            )
-                        )
-                        .align(Alignment.TopCenter)
-                )
-            }
+            RoomChatPanel(
+                chatListState = chatListState,
+                renderedMessages = renderedMessages,
+                messages = messages,
+                renderedMessageCount = renderedMessageCount,
+                onRenderedCountChange = { renderedMessageCount = it },
+                currentTheme = currentTheme,
+                currentUserId = currentUserId,
+                currentUserName = currentUserName,
+                isSpeakerRequestSubmitting = isSpeakerRequestSubmitting,
+                onSpeakerRequestSubmittingChange = { isSpeakerRequestSubmitting = it },
+                isSpeakerRequestPending = isSpeakerRequestPending,
+                onSpeakerRequestPendingChange = { isSpeakerRequestPending = it },
+                activeRoomId = activeRoomId,
+                scope = scope
+            )
 
             androidx.compose.animation.AnimatedVisibility(visible = showEmojiPicker) {
                 androidx.compose.foundation.lazy.LazyRow(
@@ -2040,7 +1619,7 @@ fun VoiceRoomScreen(
                                                         isSpeakerRequestPending = true
                                                         Toast.makeText(
                                                             context,
-                                                            "Request to speak sent to host! ✋",
+                                                            "Request to speak sent to host!",
                                                             Toast.LENGTH_SHORT
                                                         ).show()
                                                     } else {
@@ -2068,10 +1647,17 @@ fun VoiceRoomScreen(
                                 },
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = if (isSpeakerRequestPending) "⏳" else "✋",
-                                fontSize = 28.sp
-                            )
+                            if (isSpeakerRequestPending) {
+                                CustomPendingHourglassIcon(
+                                    tint = Color.White,
+                                    modifier = Modifier.size(30.dp)
+                                )
+                            } else {
+                                CustomRaisedHandIcon(
+                                    tint = Color.White,
+                                    modifier = Modifier.size(30.dp)
+                                )
+                            }
                         }
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
@@ -2305,31 +1891,28 @@ fun VoiceRoomScreen(
                     viewModel?.updateActiveRoomTitle(newTitle)
 
                     scope.launch(Dispatchers.IO) {
-                        val isUuidFormat = activeRoomId.length >= 32 && activeRoomId.contains("-")
-                        if (isUuidFormat) {
-                            try {
-                                val token = SupabaseSessionManager.getBearerToken(context)
-                                val request = UpdateVoiceRoomRequest(
-                                    title = newTitle,
-                                    description = newDesc,
-                                    language = newLang,
-                                    tag = newTag,
-                                    is_private = newPrivate,
-                                    join_code = if (newPrivate) newCode else null
-                                )
-                                val res = SupabaseClient.api.updateVoiceRoom(
-                                    auth = token,
-                                    idEq = "eq.$activeRoomId",
-                                    updates = request
-                                )
-                                if (res.isSuccessful) {
-                                    Log.d("VoiceRoomScreen", "Supabase room updated successfully: $activeRoomId")
-                                } else {
-                                    Log.w("VoiceRoomScreen", "Supabase update status: ${res.code()}")
-                                }
-                            } catch (e: Exception) {
-                                Log.e("VoiceRoomScreen", "Supabase update error", e)
+                        try {
+                            val token = SupabaseSessionManager.getBearerToken(context)
+                            val request = UpdateVoiceRoomRequest(
+                                title = newTitle,
+                                description = newDesc,
+                                language = newLang,
+                                tag = newTag,
+                                is_private = newPrivate,
+                                join_code = if (newPrivate) newCode else null
+                            )
+                            val res = SupabaseClient.api.updateVoiceRoom(
+                                auth = token,
+                                idEq = "eq.$activeRoomId",
+                                updates = request
+                            )
+                            if (res.isSuccessful) {
+                                Log.d("VoiceRoomScreen", "Supabase room updated successfully: $activeRoomId")
+                            } else {
+                                Log.w("VoiceRoomScreen", "Supabase update status: ${res.code()}")
                             }
+                        } catch (e: Exception) {
+                            Log.e("VoiceRoomScreen", "Supabase update error", e)
                         }
 
                         // Broadcast room setting change via WebSocket realtime
@@ -2738,149 +2321,6 @@ fun PrivateChatItemRow(chat: PrivateChatItem, selectedThemeIndex: Int, onClick: 
 }
 
 @Composable
-fun VoiceSpeakerItem(
-    speaker: ChillRoomSpeaker,
-    reactions: List<FloatingEmojiId> = emptyList(),
-    theme: RoomTheme? = null,
-    isDarkMode: Boolean = false,
-    onReactionComplete: (Long) -> Unit = {},
-    onClick: () -> Unit = {}
-) {
-    val size = if (speaker.isCenter) 94.dp else 80.dp
-    val primaryTextColor = theme?.primaryTextColor ?: (if (isDarkMode) Color.White else Color.Black)
-    val micIconTint = theme?.accentColor ?: ChillPurpleAccent
-    
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .width(if (speaker.isCenter) 100.dp else 86.dp)
-            .clickable { onClick() }
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Box(
-                modifier = Modifier
-                    .size(size)
-                    .clip(CircleShape)
-                    .background(Brush.linearGradient(colors = speaker.gradientColors))
-                    .padding(if (speaker.isCenter) 3.5.dp else 2.5.dp)
-            ) {
-                AsyncImage(
-                    model = speaker.imageUrl,
-                    contentDescription = speaker.name,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(CircleShape)
-                        .background(Color.LightGray)
-                )
-            }
-
-            // Host Badge / Crown
-            if (speaker.isHost) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .offset(x = (-4).dp, y = (-4).dp)
-                        .background(Color(0xFFFFD700), RoundedCornerShape(10.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                ) {
-                    Text(
-                        text = "👑 HOST",
-                        color = Color.Black,
-                        fontSize = 8.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
-            // Circular Image Flag
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .offset(x = 2.dp, y = 2.dp)
-                    .size(26.dp)
-                    .shadow(2.dp, CircleShape)
-                    .clip(CircleShape)
-                    .background(Color.White)
-                    .border(1.5.dp, Color.White, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                AsyncImage(
-                    model = "https://flagcdn.com/w40/${speaker.flagCode}.png",
-                    contentDescription = "Flag",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-
-            // Speaker floating reactions overlay starting from avatar center and rising upward beautifully
-            reactions.forEach { reaction ->
-                key(reaction.id) {
-                    FloatingSpeakerEmoji(url = reaction.url, onComplete = { onReactionComplete(reaction.id) })
-                }
-            }
-        }
-        
-        Spacer(modifier = Modifier.height(10.dp))
-        
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
-        ) {
-            Text(
-                text = speaker.name,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = primaryTextColor
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            CustomMicIcon(
-                tint = if (speaker.isMuted) Color.LightGray else micIconTint,
-                modifier = Modifier.size(12.dp)
-            )
-        }
-    }
-}
-
-@Composable
-fun FloatingSpeakerEmoji(url: String, onComplete: () -> Unit) {
-    var isStarted by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        isStarted = true
-        kotlinx.coroutines.delay(1800)
-        onComplete()
-    }
-    
-    val offsetY by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = if (isStarted) -180f else 0f, 
-        animationSpec = androidx.compose.animation.core.tween(durationMillis = 1800, easing = androidx.compose.animation.core.LinearOutSlowInEasing),
-        label = "offsetY"
-    )
-    val alpha by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = if (isStarted) 0f else 1f, 
-        animationSpec = androidx.compose.animation.core.tween(durationMillis = 1800, easing = androidx.compose.animation.core.LinearEasing),
-        label = "alpha"
-    )
-    val scale by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = if (isStarted) 1.5f else 0.5f, 
-        animationSpec = androidx.compose.animation.core.tween(durationMillis = 1800, easing = androidx.compose.animation.core.FastOutSlowInEasing),
-        label = "scale"
-    )
-    
-    val wobbleX = remember { (-25..25).random().dp }
-    
-    AsyncImage(
-        model = url,
-        contentDescription = null,
-        modifier = Modifier
-            .offset(x = wobbleX, y = offsetY.dp)
-            .size(40.dp)
-            .scale(scale)
-            .alpha(alpha)
-    )
-}
-
-@Composable
 fun VoiceBottomBarItem(
     icon: @Composable () -> Unit,
     label: String,
@@ -3127,28 +2567,59 @@ fun CustomRaisedHandIcon(tint: Color, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
-        val palmW = w * 0.6f
-        val palmH = h * 0.45f
-        val palmX = w * 0.2f
-        val palmY = h * 0.4f
-        
+        val r = w * 0.07f // soft, thick rounded radius for fingers
+
+        // Palm base (very rounded)
         drawRoundRect(
             color = tint,
-            topLeft = Offset(palmX, palmY),
-            size = Size(palmW, palmH),
-            cornerRadius = CornerRadius(w * 0.15f)
+            topLeft = Offset(w * 0.26f, h * 0.42f),
+            size = Size(w * 0.48f, h * 0.34f),
+            cornerRadius = CornerRadius(w * 0.18f)
         )
-        
-        val fW = w * 0.14f
-        drawRoundRect(color = tint, topLeft = Offset(w * 0.22f, h * 0.20f), size = Size(fW, h * 0.35f), cornerRadius = CornerRadius(fW))
-        drawRoundRect(color = tint, topLeft = Offset(w * 0.38f, h * 0.10f), size = Size(fW, h * 0.45f), cornerRadius = CornerRadius(fW))
-        drawRoundRect(color = tint, topLeft = Offset(w * 0.54f, h * 0.05f), size = Size(fW, h * 0.50f), cornerRadius = CornerRadius(fW))
-        drawRoundRect(color = tint, topLeft = Offset(w * 0.70f, h * 0.15f), size = Size(fW, h * 0.40f), cornerRadius = CornerRadius(fW))
-        
+
+        // Wrist (soft bottom base)
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(w * 0.36f, h * 0.72f),
+            size = Size(w * 0.28f, h * 0.14f),
+            cornerRadius = CornerRadius(w * 0.06f)
+        )
+
+        // 4 Rounded fingers smoothly rising up with rounded caps
+        // Index
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(w * 0.28f, h * 0.18f),
+            size = Size(w * 0.10f, h * 0.34f),
+            cornerRadius = CornerRadius(r)
+        )
+        // Middle (longest)
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(w * 0.40f, h * 0.12f),
+            size = Size(w * 0.10f, h * 0.40f),
+            cornerRadius = CornerRadius(r)
+        )
+        // Ring
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(w * 0.52f, h * 0.16f),
+            size = Size(w * 0.10f, h * 0.36f),
+            cornerRadius = CornerRadius(r)
+        )
+        // Pinky (shortest)
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(w * 0.64f, h * 0.26f),
+            size = Size(w * 0.10f, h * 0.26f),
+            cornerRadius = CornerRadius(r)
+        )
+
+        // Smooth thumb curved outwards
         val thumbPath = Path().apply {
-            moveTo(w * 0.25f, h * 0.55f)
-            quadraticBezierTo(w * 0.0f, h * 0.65f, w * 0.1f, h * 0.75f)
-            lineTo(w * 0.3f, h * 0.75f)
+            moveTo(w * 0.28f, h * 0.50f)
+            quadraticTo(w * 0.10f, h * 0.52f, w * 0.12f, h * 0.64f)
+            quadraticTo(w * 0.14f, h * 0.72f, w * 0.32f, h * 0.68f)
             close()
         }
         drawPath(thumbPath, color = tint)
@@ -3314,6 +2785,76 @@ fun CustomLanguageGlobeIcon(tint: Color, modifier: Modifier = Modifier) {
 }
 
 @Composable
+fun CustomPendingHourglassIcon(tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val strokeW = w * 0.08f
+        val capCorner = w * 0.06f
+
+        // Top soft cap
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(w * 0.22f, h * 0.15f),
+            size = Size(w * 0.56f, h * 0.08f),
+            cornerRadius = CornerRadius(capCorner)
+        )
+
+        // Bottom soft cap
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(w * 0.22f, h * 0.77f),
+            size = Size(w * 0.56f, h * 0.08f),
+            cornerRadius = CornerRadius(capCorner)
+        )
+
+        // Curved soft glass body
+        val glassPath = Path().apply {
+            moveTo(w * 0.28f, h * 0.23f)
+            // Left curve in to neck, then out to bottom
+            cubicTo(w * 0.28f, h * 0.38f, w * 0.44f, h * 0.46f, w * 0.44f, h * 0.5f)
+            cubicTo(w * 0.44f, h * 0.54f, w * 0.28f, h * 0.62f, w * 0.28f, h * 0.77f)
+            // Bottom line
+            lineTo(w * 0.72f, h * 0.77f)
+            // Right curve back to top
+            cubicTo(w * 0.72f, h * 0.62f, w * 0.56f, h * 0.54f, w * 0.56f, h * 0.5f)
+            cubicTo(w * 0.56f, h * 0.46f, w * 0.72f, h * 0.38f, w * 0.72f, h * 0.23f)
+            close()
+        }
+        drawPath(
+            path = glassPath,
+            color = tint,
+            style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+
+        // Falling sand stream in center
+        drawLine(
+            color = tint,
+            start = Offset(w * 0.5f, h * 0.42f),
+            end = Offset(w * 0.5f, h * 0.58f),
+            strokeWidth = w * 0.04f,
+            cap = StrokeCap.Round
+        )
+
+        // Sand accumulation at bottom (soft triangle/half-circle shape)
+        val bottomSand = Path().apply {
+            moveTo(w * 0.38f, h * 0.74f)
+            quadraticTo(w * 0.5f, h * 0.58f, w * 0.62f, h * 0.74f)
+            close()
+        }
+        drawPath(bottomSand, color = tint)
+
+        // Sand accumulation at top (soft inverted triangle/half-circle shape)
+        val topSand = Path().apply {
+            moveTo(w * 0.34f, h * 0.26f)
+            quadraticTo(w * 0.5f, h * 0.40f, w * 0.66f, h * 0.26f)
+            close()
+        }
+        drawPath(topSand, color = tint)
+    }
+}
+
+@Composable
 fun CustomPaletteIcon(tint: Color, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         val w = size.width
@@ -3381,1261 +2922,6 @@ fun String.toFluentAnnotatedString(fluentEmojis: List<Pair<String, String>>): an
     }
 }
 
-
-@Composable
-fun FloatingEmojiAnimation(url: String, onComplete: () -> Unit) {
-    var isStarted by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        isStarted = true
-        kotlinx.coroutines.delay(2000)
-        onComplete()
-    }
-    
-    val offsetY by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = if (isStarted) -600f else 0f, 
-        animationSpec = androidx.compose.animation.core.tween(durationMillis = 2000, easing = androidx.compose.animation.core.LinearOutSlowInEasing),
-        label = "offsetY"
-    )
-    val alpha by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = if (isStarted) 0f else 1f, 
-        animationSpec = androidx.compose.animation.core.tween(durationMillis = 2000, easing = androidx.compose.animation.core.LinearEasing),
-        label = "alpha"
-    )
-    
-    val startX = remember { (-80..80).random().dp }
-    
-    AsyncImage(
-        model = url,
-        contentDescription = null,
-        modifier = Modifier
-            .offset(x = startX, y = offsetY.dp)
-            .size(48.dp)
-            .alpha(alpha)
-    )
-}
-
-
-@Composable
-fun PeopleBottomSheetContent(
-    selectedThemeIndex: Int,
-    hostSeat: ChillRoomSpeaker,
-    speakerSeats: List<ChillRoomSpeaker>,
-    listenerSeats: List<Triple<String, String, String>>,
-    onUserClick: (PrivateChatItem) -> Unit = {},
-    onInviteClick: () -> Unit = {},
-    onDismiss: () -> Unit
-) {
-    val currentTheme = roomThemes[selectedThemeIndex]
-    val isDark = currentTheme.isDark
-    val totalCount = 1 + speakerSeats.size + listenerSeats.size
-    val speakingCount = 1 + speakerSeats.size
-    val listeningCount = listenerSeats.size
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .fillMaxHeight(0.85f)
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(currentTheme.startColor, currentTheme.endColor)
-                )
-            )
-            .padding(horizontal = 24.dp)
-            .verticalScroll(rememberScrollState())
-    ) {
-        // Header Row: Total People / Close Button
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .background(if (isDark) currentTheme.themeColor else ChillGoldIcon, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CustomPeopleGroupIcon(tint = if (isDark) Color.White else Color.Black, modifier = Modifier.size(24.dp))
-                }
-                Spacer(modifier = Modifier.width(16.dp))
-                Column {
-                    Text(
-                        text = "$totalCount People",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isDark) Color.White else Color.Black
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "$speakingCount Speaking",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (isDark) Color.White.copy(alpha = 0.6f) else Color.Gray
-                        )
-                        Box(
-                            modifier = Modifier
-                                .padding(horizontal = 6.dp)
-                                .size(4.dp)
-                                .background(if (isDark) currentTheme.themeColor else ChillGoldIcon, CircleShape)
-                        )
-                        Text(
-                            text = "$listeningCount Listening",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (isDark) Color.White.copy(alpha = 0.6f) else Color.Gray
-                        )
-                    }
-                }
-            }
-            
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .background(if (isDark) Color.White.copy(alpha = 0.15f) else Color(0xFFF3F4F6), CircleShape)
-                    .clickable { onDismiss() },
-                contentAlignment = Alignment.Center
-            ) {
-                CustomCloseIcon(tint = if (isDark) Color.White else Color.Black, modifier = Modifier.size(16.dp))
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Speaking Now Section Title
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(bottom = 16.dp)
-        ) {
-            CustomMicIcon(tint = if (isDark) currentTheme.themeColor else ChillGoldIcon, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "Speaking Now",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (isDark) Color.White.copy(alpha = 0.5f) else Color.Gray
-            )
-        }
-
-        // Host & Speakers Row
-        val allSpeakers = listOf(hostSeat) + speakerSeats
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 28.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            allSpeakers.forEach { sp ->
-                PeopleSheetSpeakerItem(
-                    name = sp.name,
-                    imageUrl = sp.imageUrl,
-                    badgeText = if (sp.isHost) "Host" else "Speaker",
-                    badgeColor = if (sp.isHost) Color(0xFFFEF3C7) else Color(0xFFF3F4F6),
-                    isHost = sp.isHost,
-                    flagEmoji = mapCountryCodeToFlagEmoji(sp.flagCode),
-                    isDarkMode = isDark,
-                    onClick = {
-                        onUserClick(PrivateChatItem(sp.name.hashCode().toString(), sp.name, sp.imageUrl, sp.flagCode, "", "Now", 0, true, false))
-                    }
-                )
-            }
-        }
-
-        // Listening Section Title
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(vertical = 12.dp)
-        ) {
-            CustomHeadphoneIcon(tint = if (isDark) currentTheme.themeColor else ChillGoldIcon, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "Listening ($listeningCount)",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (isDark) Color.White.copy(alpha = 0.5f) else Color.Gray
-            )
-        }
-
-        if (listenerSeats.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 24.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "No listeners in the room yet. Invite friends!",
-                    fontSize = 13.sp,
-                    color = if (isDark) Color.White.copy(alpha = 0.5f) else Color.Gray
-                )
-            }
-        } else {
-            val listenerRows = listenerSeats.chunked(4)
-            listenerRows.forEach { rowItems ->
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    rowItems.forEach { (name, imageUrl, flagCode) ->
-                        PeopleSheetListenerItem(
-                            name = name,
-                            imageUrl = imageUrl,
-                            modifier = Modifier.weight(1f),
-                            flagEmoji = mapCountryCodeToFlagEmoji(flagCode),
-                            isDarkMode = isDark,
-                            onClick = {
-                                onUserClick(
-                                    PrivateChatItem(
-                                        name.hashCode().toString(),
-                                        name,
-                                        imageUrl,
-                                        flagCode,
-                                        "",
-                                        "Now",
-                                        0,
-                                        true,
-                                        false
-                                    )
-                                )
-                            }
-                        )
-                    }
-                    if (rowItems.size < 4) {
-                        repeat(4 - rowItems.size) {
-                            Spacer(modifier = Modifier.weight(1f))
-                        }
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(28.dp))
-
-        // Large prominent "Invite Friend" CTA Button matching the image perfectly
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp)
-                .background(
-                    if (isDark) currentTheme.themeColor else ChillGoldIcon,
-                    RoundedCornerShape(28.dp)
-                )
-                .clickable { onInviteClick() }
-                .padding(horizontal = 24.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CustomPersonAddIcon(tint = if (isDark) Color.White else Color.Black, modifier = Modifier.size(24.dp))
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        text = "Invite Friend",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isDark) Color.White else Color.Black
-                    )
-                }
-                
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .background(if (isDark) Color.Black.copy(alpha = 0.2f) else Color.White, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "+",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = if (isDark) Color.White else ChillGoldIcon,
-                        modifier = Modifier.offset(y = (-1).dp)
-                    )
-                }
-            }
-        }
-        
-        Spacer(modifier = Modifier.height(36.dp))
-    }
-}
-
-@Composable
-fun CustomCloseIcon(tint: Color, modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        drawLine(color = tint, start = Offset(w * 0.25f, h * 0.25f), end = Offset(w * 0.75f, h * 0.75f), strokeWidth = w * 0.12f, cap = StrokeCap.Round)
-        drawLine(color = tint, start = Offset(w * 0.75f, h * 0.25f), end = Offset(w * 0.25f, h * 0.75f), strokeWidth = w * 0.12f, cap = StrokeCap.Round)
-    }
-}
-
-@Composable
-fun CustomSpeakerWaveBadge(modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .size(24.dp)
-            .background(ChillGoldIcon, CircleShape)
-            .border(2.dp, Color.White, CircleShape),
-        contentAlignment = Alignment.Center
-    ) {
-        Canvas(modifier = Modifier.size(12.dp)) {
-            val w = size.width
-            val h = size.height
-            val strokeW = w * 0.15f
-            val color = Color(0xFFC2410C)
-            
-            drawLine(color = color, start = Offset(w * 0.25f, h * 0.3f), end = Offset(w * 0.25f, h * 0.7f), strokeWidth = strokeW, cap = StrokeCap.Round)
-            drawLine(color = color, start = Offset(w * 0.5f, h * 0.1f), end = Offset(w * 0.5f, h * 0.9f), strokeWidth = strokeW, cap = StrokeCap.Round)
-            drawLine(color = color, start = Offset(w * 0.75f, h * 0.4f), end = Offset(w * 0.75f, h * 0.6f), strokeWidth = strokeW, cap = StrokeCap.Round)
-        }
-    }
-}
-
-@Composable
-fun CustomHeadphoneIcon(tint: Color, modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        val stroke = Stroke(width = w * 0.12f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-        val path = Path().apply {
-            moveTo(w * 0.2f, h * 0.7f)
-            quadraticTo(w * 0.2f, h * 0.2f, w * 0.5f, h * 0.2f)
-            quadraticTo(w * 0.8f, h * 0.2f, w * 0.8f, h * 0.7f)
-        }
-        drawPath(path, color = tint, style = stroke)
-        drawRoundRect(color = tint, topLeft = Offset(w * 0.1f, h * 0.6f), size = Size(w * 0.18f, h * 0.25f), cornerRadius = CornerRadius(w * 0.05f))
-        drawRoundRect(color = tint, topLeft = Offset(w * 0.72f, h * 0.6f), size = Size(w * 0.18f, h * 0.25f), cornerRadius = CornerRadius(w * 0.05f))
-    }
-}
-
-@Composable
-fun CustomPersonAddIcon(tint: Color, modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        drawCircle(color = tint, radius = w * 0.2f, center = Offset(w * 0.4f, h * 0.35f))
-        val body = Path().apply {
-            moveTo(w * 0.1f, h * 0.85f)
-            quadraticTo(w * 0.15f, h * 0.55f, w * 0.4f, h * 0.55f)
-            quadraticTo(w * 0.65f, h * 0.55f, w * 0.7f, h * 0.85f)
-        }
-        drawPath(body, color = tint)
-        drawLine(color = tint, start = Offset(w * 0.75f, h * 0.45f), end = Offset(w * 0.95f, h * 0.45f), strokeWidth = w * 0.08f, cap = StrokeCap.Round)
-        drawLine(color = tint, start = Offset(w * 0.85f, h * 0.35f), end = Offset(w * 0.85f, h * 0.55f), strokeWidth = w * 0.08f, cap = StrokeCap.Round)
-    }
-}
-
-@Composable
-fun PeopleSheetSpeakerItem(
-    name: String,
-    imageUrl: String,
-    badgeText: String,
-    badgeColor: Color,
-    isHost: Boolean,
-    flagEmoji: String = "🇮🇳",
-    isDarkMode: Boolean = false,
-    onClick: () -> Unit = {}
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .width(96.dp)
-            .clickable { onClick() }
-    ) {
-        Box(
-            modifier = Modifier.size(86.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(86.dp)
-                    .clip(CircleShape)
-                    .background(if (isHost) ChillGoldIcon else Color.Transparent)
-                    .padding(if (isHost) 3.dp else 0.dp)
-                    .clip(CircleShape)
-            ) {
-                AsyncImage(
-                    model = imageUrl,
-                    contentDescription = name,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .offset(x = (-4).dp, y = (-2).dp)
-                    .size(20.dp)
-                    .background(if (isDarkMode) Color(0xFF1E293B) else Color.White, CircleShape)
-                    .padding(1.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                CircleFlag(
-                    countryCode = mapFlagEmojiToCode(flagEmoji),
-                    modifier = Modifier.fillMaxSize().clip(CircleShape)
-                )
-            }
-        }
-        
-        Spacer(modifier = Modifier.height(10.dp))
-        Text(
-            text = name,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-            color = if (isDarkMode) Color.White else Color.Black
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-        Box(
-            modifier = Modifier
-                .background(if (isDarkMode) Color.White.copy(alpha = 0.12f) else badgeColor, RoundedCornerShape(6.dp))
-                .padding(horizontal = 10.dp, vertical = 2.dp)
-        ) {
-            Text(
-                text = badgeText,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (isHost) {
-                    if (isDarkMode) ChillGoldIcon else Color(0xFFC2410C)
-                } else {
-                    if (isDarkMode) Color.White.copy(alpha = 0.7f) else Color.Gray
-                }
-            )
-        }
-    }
-}
-
-@Composable
-fun PeopleSheetListenerItem(
-    name: String,
-    imageUrl: String,
-    modifier: Modifier = Modifier,
-    flagEmoji: String = "🇮🇳",
-    isDarkMode: Boolean = false,
-    onClick: () -> Unit = {}
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = modifier
-            .padding(vertical = 4.dp)
-            .clickable { onClick() }
-    ) {
-        Box(
-            modifier = Modifier.size(68.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(64.dp)
-                    .clip(CircleShape)
-            ) {
-                AsyncImage(
-                    model = imageUrl,
-                    contentDescription = name,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .offset(x = (-4).dp, y = (-2).dp)
-                    .size(16.dp)
-                    .background(if (isDarkMode) Color(0xFF1E293B) else Color.White, CircleShape)
-                    .padding(1.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                CircleFlag(
-                    countryCode = mapFlagEmojiToCode(flagEmoji),
-                    modifier = Modifier.fillMaxSize().clip(CircleShape)
-                )
-            }
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = name,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Medium,
-            color = if (isDarkMode) Color.White else Color.Black,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-
-@Composable
-fun EditRoomBottomSheetContent(
-    roomTitle: String,
-    onTitleChange: (String) -> Unit,
-    roomTags: String,
-    onTagsChange: (String) -> Unit,
-    roomDescription: String,
-    onDescriptionChange: (String) -> Unit,
-    roomLanguage: String,
-    onLanguageChange: (String) -> Unit,
-    selectedThemeIndex: Int,
-    onThemeChange: (Int) -> Unit,
-    isPrivate: Boolean,
-    onPrivateChange: (Boolean) -> Unit,
-    joinCode: String,
-    onJoinCodeChange: (String) -> Unit,
-    isHost: Boolean,
-    onApplyChanges: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    val scrollState = androidx.compose.foundation.rememberScrollState()
-    val context = androidx.compose.ui.platform.LocalContext.current
-
-    // Modal state controllers
-    var showLanguagePicker by remember { mutableStateOf(false) }
-    var showThemePicker by remember { mutableStateOf(false) }
-    var showTagPicker by remember { mutableStateOf(false) }
-
-    val currentTheme = roomThemes[selectedThemeIndex]
-    val isDark = currentTheme.isDark
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .verticalScroll(scrollState)
-            .padding(horizontal = 24.dp, vertical = 12.dp)
-    ) {
-        // Sheet Header (Beautiful, matching Picture 4)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(if (isDark) Color.White.copy(alpha = 0.12f) else Color(0xFFFEF3C7)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CustomPencilIcon(
-                        tint = if (isDark) Color.White else Color(0xFFD97706),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
-                    Text(
-                        text = "Edit Room",
-                        fontSize = 19.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = if (isDark) Color.White else Color.Black
-                    )
-                    Text(
-                        text = "Update your room details",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = if (isDark) Color.White.copy(alpha = 0.6f) else Color.Gray
-                    )
-                }
-            }
-            androidx.compose.material3.IconButton(
-                onClick = onDismiss,
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(if (isDark) Color.White.copy(alpha = 0.15f) else Color(0xFFF3F4F6))
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Close",
-                    tint = if (isDark) Color.White else Color.DarkGray,
-                    modifier = Modifier.size(16.dp)
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // 1. Room Name Field (Picture 4)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Room Name",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (isDark) Color.White else Color.Black
-            )
-            Text(
-                text = "${roomTitle.length}/60",
-                fontSize = 12.sp,
-                color = if (roomTitle.length > 50) Color.Red else (if (isDark) Color.White.copy(alpha = 0.6f) else Color.Gray),
-                fontWeight = FontWeight.Medium
-            )
-        }
-        Spacer(modifier = Modifier.height(6.dp))
-        androidx.compose.material3.OutlinedTextField(
-            value = roomTitle,
-            onValueChange = { if (it.length <= 60) onTitleChange(it) },
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(14.dp),
-            singleLine = true,
-            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                focusedTextColor = if (isDark) Color.White else Color.Black,
-                unfocusedTextColor = if (isDark) Color.White else Color.Black,
-                focusedBorderColor = if (isDark) currentTheme.themeColor else Color(0xFFF59E0B),
-                unfocusedBorderColor = if (isDark) Color.White.copy(alpha = 0.2f) else Color(0xFFE5E7EB),
-                focusedContainerColor = if (isDark) Color.Black.copy(alpha = 0.3f) else Color.White,
-                unfocusedContainerColor = if (isDark) Color.Black.copy(alpha = 0.3f) else Color.White,
-                cursorColor = if (isDark) Color.White else Color.Black
-            )
-        )
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // 2. Description Field (Picture 4)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Description",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (isDark) Color.White else Color.Black
-            )
-            Text(
-                text = "${roomDescription.length}/120",
-                fontSize = 12.sp,
-                color = if (roomDescription.length > 100) Color.Red else (if (isDark) Color.White.copy(alpha = 0.6f) else Color.Gray),
-                fontWeight = FontWeight.Medium
-            )
-        }
-        Spacer(modifier = Modifier.height(6.dp))
-        androidx.compose.material3.OutlinedTextField(
-            value = roomDescription,
-            onValueChange = { if (it.length <= 120) onDescriptionChange(it) },
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(14.dp),
-            minLines = 2,
-            maxLines = 3,
-            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                focusedTextColor = if (isDark) Color.White else Color.Black,
-                unfocusedTextColor = if (isDark) Color.White else Color.Black,
-                focusedBorderColor = if (isDark) currentTheme.themeColor else Color(0xFFF59E0B),
-                unfocusedBorderColor = if (isDark) Color.White.copy(alpha = 0.2f) else Color(0xFFE5E7EB),
-                focusedContainerColor = if (isDark) Color.Black.copy(alpha = 0.3f) else Color.White,
-                unfocusedContainerColor = if (isDark) Color.Black.copy(alpha = 0.3f) else Color.White,
-                cursorColor = if (isDark) Color.White else Color.Black
-            )
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // 3. Card Row 1: Language Selection (Picture 4 style)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(if (isDark) Color.Black.copy(alpha = 0.25f) else Color.White)
-                .border(1.dp, if (isDark) Color.White.copy(alpha = 0.15f) else Color(0xFFF3F4F6), RoundedCornerShape(16.dp))
-                .clickable { showLanguagePicker = true }
-                .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(if (isDark) Color.White.copy(alpha = 0.12f) else Color(0xFFFEF3C7)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CustomLanguageGlobeIcon(
-                        tint = if (isDark) Color.White else Color(0xFFD97706),
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
-                    Text(
-                        text = "Language",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isDark) Color.White else Color.Black
-                    )
-                    Text(
-                        text = roomLanguage,
-                        fontSize = 12.sp,
-                        color = if (isDark) Color.White.copy(alpha = 0.6f) else Color.Gray,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-            }
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                contentDescription = "Expand Language",
-                tint = if (isDark) Color.White.copy(alpha = 0.5f) else Color.Gray,
-                modifier = Modifier
-                    .size(24.dp)
-                    .scale(-1f, 1f) // flip arrow horizontally to make it point right
-            )
-        }
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        // 4. Card Row 2: Theme Selection (Picture 4 / 6 style)
-        val selectedTheme = roomThemes[selectedThemeIndex]
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(if (isDark) Color.Black.copy(alpha = 0.25f) else Color.White)
-                .border(1.dp, if (isDark) Color.White.copy(alpha = 0.15f) else Color(0xFFF3F4F6), RoundedCornerShape(16.dp))
-                .clickable { showThemePicker = true }
-                .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(if (isDark) Color.White.copy(alpha = 0.12f) else Color(0xFFFEF3C7)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CustomPaletteIcon(
-                        tint = if (isDark) Color.White else Color(0xFFD97706),
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
-                    Text(
-                        text = "Theme",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isDark) Color.White else Color.Black
-                    )
-                    Text(
-                        text = "${selectedTheme.name} (${if (selectedTheme.isDark) "Immersive Dark" else "Vibrant Light"})",
-                        fontSize = 12.sp,
-                        color = if (isDark) Color.White.copy(alpha = 0.6f) else Color.Gray,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // Color preview circle representing active theme style
-                Box(
-                    modifier = Modifier
-                        .size(18.dp)
-                        .shadow(1.dp, CircleShape)
-                        .clip(CircleShape)
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(selectedTheme.startColor, selectedTheme.endColor)
-                            )
-                        )
-                        .border(1.dp, Color.LightGray.copy(alpha = 0.5f), CircleShape)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                    contentDescription = "Expand Theme",
-                    tint = if (isDark) Color.White.copy(alpha = 0.5f) else Color.Gray,
-                    modifier = Modifier
-                        .size(24.dp)
-                        .scale(-1f, 1f) // point right
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        // 5. Card Row 3: Tags (Replacing Advanced Settings - Picture 8 style)
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(if (isDark) Color.Black.copy(alpha = 0.25f) else Color.White)
-                .border(1.dp, if (isDark) Color.White.copy(alpha = 0.15f) else Color(0xFFF3F4F6), RoundedCornerShape(16.dp))
-                .padding(14.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(if (isDark) Color.White.copy(alpha = 0.12f) else Color(0xFFFEF3C7)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CustomTagsIcon(
-                        tint = if (isDark) Color.White else Color(0xFFD97706),
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
-                    Text(
-                        text = "Tags",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isDark) Color.White else Color.Black
-                    )
-                    Text(
-                        text = "Select one popular tag for your room",
-                        fontSize = 11.sp,
-                        color = if (isDark) Color.White.copy(alpha = 0.6f) else Color.Gray
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Tag List containing selected active tag chip & "+ Add Tag" dashed border button (Picture 8 style)
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                if (roomTags.isNotEmpty()) {
-                    // Selected active tag chip with close button (Picture 8 style)
-                    Box(
-                        modifier = Modifier
-                            .background(
-                                if (isDark) currentTheme.themeColor.copy(alpha = 0.2f) else Color(0xFFFEF3C7),
-                                RoundedCornerShape(50.dp)
-                            )
-                            .border(1.dp, if (isDark) currentTheme.themeColor else Color(0xFFFBBF24), RoundedCornerShape(50.dp))
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = roomTags,
-                                fontSize = 12.sp,
-                                color = if (isDark) Color.White else Color(0xFFD97706),
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Clear Tag",
-                                tint = if (isDark) Color.White else Color(0xFFD97706),
-                                modifier = Modifier
-                                    .size(14.dp)
-                                    .clickable { onTagsChange("") }
-                            )
-                        }
-                    }
-                }
-
-                // Beautiful "+ Add Tag" button with dashed border style
-                Box(
-                    modifier = Modifier
-                        .drawBehind {
-                            val stroke = Stroke(
-                                width = 1.dp.toPx(),
-                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
-                            )
-                            drawRoundRect(
-                                color = if (isDark) Color.White.copy(alpha = 0.4f) else Color(0xFFF59E0B),
-                                style = stroke,
-                                cornerRadius = CornerRadius(50.dp.toPx(), 50.dp.toPx())
-                            )
-                        }
-                        .clip(RoundedCornerShape(50.dp))
-                        .clickable { showTagPicker = true }
-                        .padding(horizontal = 14.dp, vertical = 6.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Add Icon",
-                            tint = if (isDark) Color.White else Color(0xFFF59E0B),
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Add Tag",
-                            fontSize = 12.sp,
-                            color = if (isDark) Color.White else Color(0xFFF59E0B),
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-        }
-
-        if (isHost) {
-            Spacer(modifier = Modifier.height(24.dp))
-            HorizontalDivider(color = if (isDark) Color.White.copy(alpha = 0.12f) else Color(0xFFE5E7EB), thickness = 1.dp)
-            Spacer(modifier = Modifier.height(20.dp))
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(if (isDark) Color.White.copy(alpha = 0.12f) else Color(0xFFFEF3C7)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Lock,
-                        contentDescription = "Lock Icon",
-                        tint = if (isDark) Color.White else Color(0xFFD97706),
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Private Room Settings",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isDark) Color.White else Color.Black
-                    )
-                    Text(
-                        text = "Restrict access to your room via join code",
-                        fontSize = 11.sp,
-                        color = if (isDark) Color.White.copy(alpha = 0.6f) else Color.Gray
-                    )
-                }
-                Switch(
-                    checked = isPrivate,
-                    onCheckedChange = { checked ->
-                        onPrivateChange(checked)
-                        if (checked && joinCode.isBlank()) {
-                            onJoinCodeChange((100000..999999).random().toString())
-                        }
-                    },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = if (isDark) currentTheme.themeColor else Color(0xFFF59E0B)
-                    )
-                )
-            }
-
-            if (isPrivate) {
-                Spacer(modifier = Modifier.height(14.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    androidx.compose.material3.OutlinedTextField(
-                        value = joinCode,
-                        onValueChange = { val clean = it.filter { c -> c.isDigit() }; if (clean.length <= 6) onJoinCodeChange(clean) },
-                        placeholder = { Text("Passcode (6 digits)") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
-                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = if (isDark) Color.White else Color.Black,
-                            unfocusedTextColor = if (isDark) Color.White else Color.Black,
-                            focusedBorderColor = if (isDark) currentTheme.themeColor else Color(0xFFF59E0B),
-                            unfocusedBorderColor = if (isDark) Color.White.copy(alpha = 0.2f) else Color(0xFFE5E7EB)
-                        )
-                    )
-                    androidx.compose.material3.Button(
-                        onClick = { onJoinCodeChange((100000..999999).random().toString()) },
-                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                            containerColor = if (isDark) Color.White.copy(alpha = 0.15f) else Color(0xFFF3F4F6)
-                        ),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text("Regen", color = if (isDark) Color.White else Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(30.dp))
-
-        // Save Bottom Button
-        androidx.compose.material3.Button(
-            onClick = {
-                if (isPrivate && joinCode.length != 6) {
-                    Toast.makeText(context, "Passcode must be exactly 6 digits!", Toast.LENGTH_SHORT).show()
-                } else {
-                    onApplyChanges()
-                }
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp),
-            shape = RoundedCornerShape(100.dp),
-            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                containerColor = if (isDark) currentTheme.themeColor else Color(0xFFF59E0B)
-            )
-        ) {
-            Text(
-                text = "Apply Changes",
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-    }
-
-    // Modal Popup 1: Language Picker Selector (Modern Dialog UI)
-    if (showLanguagePicker) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showLanguagePicker = false },
-            title = {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(text = "Select Language", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.Black)
-                    androidx.compose.material3.IconButton(onClick = { showLanguagePicker = false }) {
-                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = Color.Gray)
-                    }
-                }
-            },
-            text = {
-                val languages = listOf("Hindi + English", "Hindi Only", "English Only", "Bhojpuri", "Punjabi", "Spanish", "Arabic")
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    languages.forEach { lang ->
-                        val isSelected = roomLanguage == lang
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (isSelected) Color(0xFFFFFAEB) else Color.Transparent)
-                                .clickable {
-                                    onLanguageChange(lang)
-                                    showLanguagePicker = false
-                                }
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = lang,
-                                fontSize = 14.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) Color(0xFFD97706) else Color.DarkGray
-                            )
-                            if (isSelected) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = "Selected",
-                                    tint = Color(0xFFD97706),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {},
-            containerColor = Color.White,
-            shape = RoundedCornerShape(24.dp)
-        )
-    }
-
-    // Modal Popup 2: Choose Theme Dialog (Beautifully matches Picture 6!)
-    if (showThemePicker) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showThemePicker = false },
-            title = {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(text = "Choose Theme", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Color.Black)
-                        Text(text = "Pick a theme for your room", fontSize = 11.sp, color = Color.Gray)
-                    }
-                    androidx.compose.material3.IconButton(
-                        onClick = { showThemePicker = false },
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFF3F4F6))
-                    ) {
-                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = Color.DarkGray, modifier = Modifier.size(16.dp))
-                    }
-                }
-            },
-            text = {
-                // High contrast list scrollbox (Picture 6 layout)
-                Box(modifier = Modifier.height(350.dp)) {
-                    androidx.compose.foundation.lazy.LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        items(roomThemes.size) { index ->
-                            val current = roomThemes[index]
-                            val isSelected = selectedThemeIndex == index
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(if (isSelected) Color(0xFFFFFAEB) else Color.Transparent)
-                                    .border(
-                                        width = 1.dp,
-                                        color = if (isSelected) Color(0xFFFBBF24) else Color(0xFFF3F4F6),
-                                        shape = RoundedCornerShape(16.dp)
-                                    )
-                                    .clickable {
-                                        onThemeChange(index)
-                                    }
-                                    .padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                // Dynamic Color Preview Chip Circle
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .shadow(1.dp, CircleShape)
-                                        .clip(CircleShape)
-                                        .background(Brush.verticalGradient(colors = listOf(current.startColor, current.endColor)))
-                                        .border(2.dp, if (isSelected) Color(0xFFD97706) else Color.Transparent, CircleShape)
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = current.name,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (isSelected) Color(0xFFD97706) else Color.Black
-                                    )
-                                    Text(
-                                        text = current.description,
-                                        fontSize = 10.sp,
-                                        color = Color.Gray,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .size(20.dp)
-                                        .clip(CircleShape)
-                                        .background(if (isSelected) Color(0xFFD97706) else Color(0xFFE5E7EB)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (isSelected) {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = "Selected",
-                                            tint = Color.White,
-                                            modifier = Modifier.size(12.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                androidx.compose.material3.TextButton(
-                    onClick = { showThemePicker = false }
-                ) {
-                    Text("Apply Theme", fontWeight = FontWeight.Bold, color = Color(0xFFD97706))
-                }
-            },
-            containerColor = Color.White,
-            shape = RoundedCornerShape(24.dp)
-        )
-    }
-
-    // Modal Popup 3: Add Tags Dialog (Matches Picture 7 Popular Tags exactly!)
-    if (showTagPicker) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showTagPicker = false },
-            title = {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(text = "Add Tags", fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = Color.Black)
-                        Text(text = "Popular Tags", fontSize = 11.sp, color = Color.Gray)
-                    }
-                    androidx.compose.material3.IconButton(
-                        onClick = { showTagPicker = false },
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFF3F4F6))
-                    ) {
-                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = Color.DarkGray, modifier = Modifier.size(16.dp))
-                    }
-                }
-            },
-            text = {
-                val popularTagsList = listOf(
-                    "Chill", "Music", "Gaming", "Friendship",
-                    "Fun", "Dating", "Study", "Debate",
-                    "Travel", "Poetry", "Anime", "Sports"
-                )
-                // Flow Layout/Grid for tags (Picture 7 style)
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    
-                    // Simple structured layout representing a gorgeous visual flow of tags
-                    val rows = popularTagsList.chunked(3)
-                    rows.forEach { row ->
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp)
-                        ) {
-                            row.forEach { tag ->
-                                val isSelected = roomTags == tag
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clip(RoundedCornerShape(50.dp))
-                                        .background(if (isSelected) Color(0xFFFFFAEB) else Color(0xFFF3F4F6))
-                                        .border(
-                                            width = 1.dp,
-                                            color = if (isSelected) Color(0xFFFBBF24) else Color.Transparent,
-                                            shape = RoundedCornerShape(50.dp)
-                                        )
-                                        .clickable {
-                                            onTagsChange(tag)
-                                            showTagPicker = false
-                                        }
-                                        .padding(vertical = 10.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = tag,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (isSelected) Color(0xFFD97706) else Color.DarkGray
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {},
-            containerColor = Color.White,
-            shape = RoundedCornerShape(24.dp)
-        )
-    }
-}
 
 @Composable
 fun CuteStarIcon(modifier: Modifier = Modifier, tint: Color = Color(0xFFFBBF24)) {
@@ -6443,161 +4729,6 @@ fun OneToOneChatBottomSheetContent(
                 Icon(imageVector = Icons.Default.Add, contentDescription = "Call", tint = Color.Gray, modifier = Modifier.size(22.dp).clickable {})
                 CustomGiftBoxIcon(tint = Color(0xFFEC4899), modifier = Modifier.size(22.dp).clickable {})
                 Icon(imageVector = Icons.Default.Star, contentDescription = "Heart", tint = Color(0xFFEC4899), modifier = Modifier.size(22.dp).clickable {})
-            }
-        }
-    }
-}
-
-@Composable
-fun InviteFriendBottomSheetContent(
-    isDarkMode: Boolean,
-    onDismiss: () -> Unit
-) {
-    val textColor = if (isDarkMode) Color.White else Color.Black
-    val bgColors = if (isDarkMode) Color(0xFF1F2937) else Color(0xFFF3F4F6)
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .fillMaxHeight(0.85f)
-            .padding(horizontal = 24.dp, vertical = 8.dp)
-            .padding(bottom = 24.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Invite Friend",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                color = textColor
-            )
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .background(bgColors, CircleShape)
-                    .clickable { onDismiss() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Default.Close, contentDescription = "Close", tint = textColor, modifier = Modifier.size(18.dp))
-            }
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // Share Platforms
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            val platforms = listOf(
-                "Copy Link" to Icons.Default.Share,
-                "WhatsApp" to Icons.Default.Add,
-                "Facebook" to Icons.Default.Face,
-                "More" to Icons.Default.MoreVert
-            )
-            platforms.forEach { (name, icon) ->
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onDismiss() }) {
-                    Box(
-                        modifier = Modifier
-                            .size(52.dp)
-                            .background(bgColors, CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(imageVector = icon, contentDescription = name, tint = textColor, modifier = Modifier.size(24.dp))
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(text = name, fontSize = 12.sp, color = if (isDarkMode) Color.White.copy(alpha=0.7f) else Color.Gray)
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Text(
-            text = "Online Friends",
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-            color = textColor
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        val friends = listOf(
-            "Ananya" to "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400",
-            "Vihaan" to "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400",
-            "Meera" to "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400",
-            "Rahul" to "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400"
-        )
-        
-        Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-            friends.forEach { (name, img) ->
-                var isInvited by remember { mutableStateOf(false) }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(modifier = Modifier.size(48.dp)) {
-                            AsyncImage(
-                                model = img,
-                                contentDescription = name,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .clip(CircleShape)
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .offset(x = 2.dp, y = 2.dp)
-                                    .size(16.dp)
-                                    .background(if (isDarkMode) Color(0xFF1E293B) else Color.White, CircleShape)
-                                    .padding(1.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                val flagCodeOptional = when (name) {
-                                    "Ananya" -> "in"
-                                    "Vihaan" -> "jp"
-                                    "Meera" -> "us"
-                                    "Rahul" -> "gb"
-                                    else -> "in"
-                                }
-                                CircleFlag(
-                                    countryCode = flagCodeOptional,
-                                    modifier = Modifier.fillMaxSize().clip(CircleShape)
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column {
-                            Text(text = name, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = textColor)
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(text = "Online", fontSize = 12.sp, color = Color(0xFF10B981))
-                        }
-                    }
-                    
-                    Button(
-                        onClick = { isInvited = true },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isInvited) bgColors else Color(0xFFFBBF24)
-                        ),
-                        shape = RoundedCornerShape(100.dp),
-                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)
-                    ) {
-                        Text(
-                            text = if (isInvited) "Invited" else "Invite",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isInvited) (if (isDarkMode) Color.White else Color.Gray) else Color(0xFF78350F)
-                        )
-                    }
-                }
             }
         }
     }

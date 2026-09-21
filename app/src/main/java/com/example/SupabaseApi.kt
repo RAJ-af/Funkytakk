@@ -130,8 +130,8 @@ data class RespondSpeakerRequestBody(
 data class SupabaseRoomParticipant(
     val room_id: String,
     val user_id: String,
-    val role: String = "speaker",
-    val is_mic_enabled: Boolean = true,
+    val role: String = "listener",
+    val is_mic_enabled: Boolean = false,
     val joined_at: String? = null
 )
 
@@ -155,14 +155,16 @@ data class SupabaseRoomMessage(
     val room_id: String,
     val user_id: String,
     val message: String,
-    val created_at: String? = null
+    val created_at: String? = null,
+    val message_type: String? = null
 )
 
 @JsonClass(generateAdapter = true)
 data class SendRoomMessageRequest(
     val room_id: String,
     val user_id: String,
-    val message: String
+    val message: String,
+    val message_type: String? = null
 )
 
 @JsonClass(generateAdapter = true)
