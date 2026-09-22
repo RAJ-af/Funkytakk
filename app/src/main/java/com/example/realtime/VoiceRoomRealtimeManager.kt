@@ -215,7 +215,7 @@ object VoiceRoomRealtimeManager {
             val payload = json.optJSONObject("payload")
 
             // Realtime Broadcast Event on per-room channel (e.g. topic "realtime:room:xyz" or "room:xyz")
-            if (event == "broadcast" || event == "emoji" || event == "chat_message") {
+            if (event == "broadcast" || event == "emoji" || event == "chat_message" || event == "participant_update") {
                 val roomId = when {
                     topic.contains("room:") -> topic.substringAfter("room:").substringBefore(":")
                     else -> ""
@@ -229,7 +229,12 @@ object VoiceRoomRealtimeManager {
                 val senderName = innerPayload?.optString("sender_name") ?: ""
                 val senderAvatar = innerPayload?.optString("sender_avatar") ?: ""
 
-                if (roomId.isNotBlank() && emoji.isNotBlank() && broadcastType != "chat_message") {
+                if (broadcastType == "participant_update" || broadcastType == "participant_changed") {
+                    val targetRoomId = innerPayload?.optString("room_id")?.ifBlank { roomId } ?: roomId
+                    val action = innerPayload?.optString("action") ?: "UPDATE"
+                    Log.d(TAG, "Received broadcast participant_update ($action) for room '$targetRoomId' from '$userId'")
+                    _events.tryEmit(RealtimeTableEvent.ParticipantChanged(action, innerPayload, targetRoomId))
+                } else if (roomId.isNotBlank() && emoji.isNotBlank() && broadcastType != "chat_message") {
                     Log.d(TAG, "Received broadcast emoji '$emoji' for room '$roomId' from '$userId'")
                     _events.tryEmit(RealtimeTableEvent.RoomEmojiBroadcast(roomId, emoji, userId))
                 } else if (roomId.isNotBlank() && chatText.isNotBlank()) {
@@ -395,6 +400,42 @@ object VoiceRoomRealtimeManager {
             Log.d(TAG, "Broadcasted chat message to room:$roomId from $userId")
         } catch (e: Exception) {
             Log.e(TAG, "Error broadcasting chat message to room $roomId", e)
+        }
+    }
+
+    fun broadcastParticipantUpdate(
+        roomId: String,
+        userId: String,
+        action: String = "joined",
+        role: String = "listener",
+        isMicEnabled: Boolean = false
+    ) {
+        if (roomId.isBlank()) return
+        val ws = webSocket ?: return
+        try {
+            if (!subscribedRoomChannels.contains(roomId)) {
+                subscribeRoomChannel(roomId)
+            }
+            val broadcastMsg = JSONObject().apply {
+                put("topic", "realtime:room:$roomId")
+                put("event", "broadcast")
+                put("payload", JSONObject().apply {
+                    put("type", "broadcast")
+                    put("event", "participant_update")
+                    put("payload", JSONObject().apply {
+                        put("room_id", roomId)
+                        put("user_id", userId)
+                        put("action", action)
+                        put("role", role)
+                        put("is_mic_enabled", isMicEnabled)
+                    })
+                })
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(broadcastMsg.toString())
+            Log.d(TAG, "Broadcasted participant_update ($action) to room:$roomId for user $userId")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error broadcasting participant_update to room $roomId", e)
         }
     }
 

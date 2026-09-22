@@ -98,6 +98,8 @@ import com.example.realtime.VoiceRoomRealtimeManager
 import com.example.realtime.RealtimeTableEvent
 import android.util.Log
 import com.example.SupabaseSessionManager
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -622,7 +624,7 @@ fun VoiceRoomScreen(
                     }
                 }
                 is RealtimeTableEvent.ParticipantChanged -> {
-                    if (event.roomId == activeRoomId) {
+                    if (event.roomId.isNullOrBlank() || event.roomId == activeRoomId) {
                         withContext(Dispatchers.IO) {
                             try {
                                 val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
@@ -650,6 +652,22 @@ fun VoiceRoomScreen(
                 }
                 is RealtimeTableEvent.RoomChatBroadcast -> {
                     if (event.roomId == activeRoomId) {
+                        if (event.message.contains("joined the room", ignoreCase = true) ||
+                            event.message.contains("left the room", ignoreCase = true) ||
+                            event.senderName.equals("System", ignoreCase = true)
+                        ) {
+                            scope.launch(Dispatchers.IO) {
+                                try {
+                                    val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
+                                    if (partsRes.isSuccessful) {
+                                        val list = partsRes.body() ?: emptyList()
+                                        withContext(Dispatchers.Main) {
+                                            participantsData = list
+                                        }
+                                    }
+                                } catch (_: Exception) {}
+                            }
+                        }
                         withContext(Dispatchers.Main) {
                             if (messages.none { it.id == event.messageId }) {
                                 val isMe = (event.userId == currentUserId)
@@ -688,6 +706,20 @@ fun VoiceRoomScreen(
                             val msgType = record.optString("message_type")
                             val isSystem = msgType.equals("system", ignoreCase = true)
                             val messageType = if (isSystem) "system" else if (msgType.isNullOrBlank()) "chat" else msgType
+
+                            if (isSystem || text.contains("joined the room", ignoreCase = true) || text.contains("left the room", ignoreCase = true)) {
+                                scope.launch(Dispatchers.IO) {
+                                    try {
+                                        val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
+                                        if (partsRes.isSuccessful) {
+                                            val list = partsRes.body() ?: emptyList()
+                                            withContext(Dispatchers.Main) {
+                                                participantsData = list
+                                            }
+                                        }
+                                    } catch (_: Exception) {}
+                                }
+                            }
 
                             Log.d("VoiceRoomScreen", "[Realtime] Processing message: id=$msgId, type=$messageType (raw=$msgType), text='$text', userId=$userId")
 
@@ -733,6 +765,37 @@ fun VoiceRoomScreen(
     var showChatSheet by remember { mutableStateOf(false) }
     var showPeopleSheet by remember { mutableStateOf(false) }
     var showInviteFriendSheet by remember { mutableStateOf(false) }
+
+    LaunchedEffect(showPeopleSheet) {
+        if (showPeopleSheet && activeRoomId.isNotBlank()) {
+            withContext(Dispatchers.IO) {
+                try {
+                    val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
+                    if (partsRes.isSuccessful) {
+                        val list = partsRes.body() ?: emptyList()
+                        withContext(Dispatchers.Main) {
+                            participantsData = list
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    LaunchedEffect(activeRoomId) {
+        while (isActive && activeRoomId.isNotBlank()) {
+            delay(5000)
+            try {
+                val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
+                if (partsRes.isSuccessful) {
+                    val list = partsRes.body() ?: emptyList()
+                    withContext(Dispatchers.Main) {
+                        participantsData = list
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+    }
     val vmMicEnabled by viewModel?.isMicEnabled?.collectAsState() ?: remember { mutableStateOf(true) }
     LaunchedEffect(vmMicEnabled) {
         isMicOn = vmMicEnabled

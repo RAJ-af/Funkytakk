@@ -27,6 +27,8 @@ import com.example.ui.screens.home.tabs.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Column
@@ -262,7 +264,15 @@ fun HomeScreen(
 
         refreshRoomsAndFriends()
 
-        // Real-time updates from Supabase postgres_changes
+        // Background polling fallback every 8 seconds to ensure voice rooms and friends stay in sync
+        launch {
+            while (isActive) {
+                delay(8000)
+                refreshRoomsAndFriends()
+            }
+        }
+
+        // Real-time updates from Supabase postgres_changes and room broadcasts
         VoiceRoomRealtimeManager.events.collect {
             refreshRoomsAndFriends()
         }

@@ -171,6 +171,15 @@ class AuthViewModel : ViewModel() {
                     body = UpdateParticipantMicRequest(is_mic_enabled = enabled)
                 )
                 Log.d("AuthViewModel", "Participant mic updated: $enabled (code ${res.code()})")
+                try {
+                    VoiceRoomRealtimeManager.broadcastParticipantUpdate(
+                        roomId = roomId,
+                        userId = uid,
+                        action = "mic_toggled",
+                        role = if (_isMicEnabled.value) "speaker" else "listener",
+                        isMicEnabled = enabled
+                    )
+                } catch (_: Exception) {}
             } catch (e: Exception) {
                 Log.e("AuthViewModel", "Error updating participant mic", e)
             }
@@ -301,11 +310,24 @@ class AuthViewModel : ViewModel() {
                 )
                 Log.d("AuthViewModel", "User $uid joined room $roomId as $role via Supabase room_participants")
                 
+                // 1. Broadcast participant update via WebSocket realtime so everyone's participant list refreshes immediately
+                try {
+                    VoiceRoomRealtimeManager.broadcastParticipantUpdate(
+                        roomId = roomId,
+                        userId = uid,
+                        action = "joined",
+                        role = role,
+                        isMicEnabled = (role == "speaker")
+                    )
+                } catch (pEx: Exception) {
+                    Log.e("AuthViewModel", "Error broadcasting participant update", pEx)
+                }
+
                 // Send a system message that the user has joined, so everyone in the room sees it
                 val userObj = (authState.value as? AuthState.Success)?.user
                 val username = userObj?.displayName?.ifBlank { null } ?: userObj?.username?.ifBlank { null } ?: "Someone"
 
-                // 1. Broadcast client-side join message via WebSocket realtime for live listeners
+                // 2. Broadcast client-side join message via WebSocket realtime for live listeners
                 try {
                     VoiceRoomRealtimeManager.broadcastRoomMessage(
                         roomId = roomId,
@@ -319,7 +341,7 @@ class AuthViewModel : ViewModel() {
                     Log.e("AuthViewModel", "Error broadcasting join message", bEx)
                 }
 
-                // 2. Persist to Postgres room_messages table via REST API
+                // 3. Persist to Postgres room_messages table via REST API
                 try {
                     SupabaseClient.api.sendRoomMessage(
                         auth = token,
@@ -358,7 +380,31 @@ class AuthViewModel : ViewModel() {
         com.example.service.VoiceRoomOverlayManager.clear()
 
         if (roomId != null && uid != null) {
+            val userObj = (authState.value as? AuthState.Success)?.user
+            val username = userObj?.displayName?.ifBlank { null } ?: userObj?.username?.ifBlank { null } ?: "Someone"
+
             viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    VoiceRoomRealtimeManager.broadcastParticipantUpdate(
+                        roomId = roomId,
+                        userId = uid,
+                        action = "left",
+                        role = "listener",
+                        isMicEnabled = false
+                    )
+                } catch (_: Exception) {}
+
+                try {
+                    VoiceRoomRealtimeManager.broadcastRoomMessage(
+                        roomId = roomId,
+                        message = "$username left the room",
+                        userId = uid,
+                        senderName = "System",
+                        senderAvatar = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200",
+                        messageId = "sys_${System.currentTimeMillis()}"
+                    )
+                } catch (_: Exception) {}
+
                 try {
                     SupabaseClient.api.leaveRoomParticipant(
                         auth = token,
