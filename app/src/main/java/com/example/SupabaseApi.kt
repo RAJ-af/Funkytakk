@@ -100,7 +100,10 @@ data class UpdateVoiceRoomRequest(
     val language_flag: String? = null,
     val tag: String? = null,
     val is_private: Boolean? = null,
-    val join_code: String? = null
+    val join_code: String? = null,
+    val speaking_count: Int? = null,
+    val listening_count: Int? = null,
+    val participants: Int? = null
 )
 
 @JsonClass(generateAdapter = true)

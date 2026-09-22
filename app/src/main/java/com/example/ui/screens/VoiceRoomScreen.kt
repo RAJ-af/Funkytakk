@@ -402,15 +402,22 @@ fun VoiceRoomScreen(
     }
 
     val currentUserId = remember(context) { SupabaseSessionManager.getUserId(context) ?: "" }
+    val currentUserProfile = remember(supabaseProfiles, currentUserId) {
+        supabaseProfiles.find { it.uid == currentUserId }
+    }
     val currentUserName = remember(supabaseProfiles, currentUserId) {
-        supabaseProfiles.find { it.uid == currentUserId }?.displayName 
-            ?: supabaseProfiles.find { it.uid == currentUserId }?.username 
+        currentUserProfile?.displayName 
+            ?: currentUserProfile?.username 
             ?: "User"
     }
-    val scope = rememberCoroutineScope()
-    var roomHostId by remember { mutableStateOf<String?>("") }
-    var isMicOn by remember { mutableStateOf(true) }
     var participantsData by remember { mutableStateOf<List<SupabaseRoomParticipant>>(emptyList()) }
+    var roomHostId by remember { mutableStateOf<String?>("") }
+    val isSpeaker = remember(participantsData, currentUserId, roomHostId) {
+        (currentUserId.isNotBlank() && currentUserId == roomHostId) ||
+        participantsData.any { it.user_id == currentUserId && (it.role == "speaker" || it.role == "host") }
+    }
+    val scope = rememberCoroutineScope()
+    var isMicOn by remember { mutableStateOf(true) }
     val messages = remember { mutableStateListOf<ChillRoomMessage>() }
     var renderedMessageCount by remember { mutableStateOf(30) }
     val renderedMessages = remember(messages, renderedMessageCount) {
@@ -477,12 +484,20 @@ fun VoiceRoomScreen(
             !isHost && p.role == "speaker"
         }.sortedBy { it.joined_at ?: "" }.take(4).map { p ->
             val pProfile = supabaseProfiles.find { it.uid == p.user_id }
-            val name = pProfile?.displayName ?: pProfile?.username ?: "Speaker"
-            val avatar = pProfile?.avatar ?: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400"
-            val flagCode = pProfile?.countryCode ?: "in"
+            val snippet = com.example.realtime.VoiceRoomRealtimeManager.getUserSnippet(p.user_id)
+            val name = pProfile?.displayName?.ifBlank { null }
+                ?: pProfile?.username?.ifBlank { null }
+                ?: snippet?.name?.ifBlank { null }
+                ?: if (p.user_id == currentUserId) (currentUserProfile?.displayName ?: "Speaker") else "Speaker"
+            val avatar = pProfile?.avatar?.ifBlank { null }
+                ?: snippet?.avatar?.ifBlank { null }
+                ?: if (p.user_id == currentUserId) currentUserProfile?.avatar else "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400"
+            val flagCode = pProfile?.countryCode?.ifBlank { null }
+                ?: snippet?.countryCode
+                ?: "in"
             ChillRoomSpeaker(
                 name = name,
-                imageUrl = avatar,
+                imageUrl = avatar ?: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400",
                 flagCode = flagCode,
                 isMuted = !p.is_mic_enabled,
                 isCenter = false,
@@ -499,10 +514,18 @@ fun VoiceRoomScreen(
             !isHost && p.role != "speaker"
         }.map { p ->
             val pProfile = supabaseProfiles.find { it.uid == p.user_id }
-            val name = pProfile?.displayName ?: pProfile?.username ?: "Listener"
-            val avatar = pProfile?.avatar ?: "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400"
-            val flagCode = pProfile?.countryCode ?: "in"
-            Triple(name, avatar, flagCode)
+            val snippet = com.example.realtime.VoiceRoomRealtimeManager.getUserSnippet(p.user_id)
+            val name = pProfile?.displayName?.ifBlank { null }
+                ?: pProfile?.username?.ifBlank { null }
+                ?: snippet?.name?.ifBlank { null }
+                ?: if (p.user_id == currentUserId) (currentUserProfile?.displayName ?: "Listener") else "Listener"
+            val avatar = pProfile?.avatar?.ifBlank { null }
+                ?: snippet?.avatar?.ifBlank { null }
+                ?: if (p.user_id == currentUserId) currentUserProfile?.avatar else "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400"
+            val flagCode = pProfile?.countryCode?.ifBlank { null }
+                ?: snippet?.countryCode
+                ?: "in"
+            Triple(name, avatar ?: "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400", flagCode)
         }
     }
 
@@ -515,6 +538,28 @@ fun VoiceRoomScreen(
 
     val speakers = remember(hostSeat, speakerSeats) {
         listOf(hostSeat) + speakerSeats
+    }
+
+    LaunchedEffect(participantsData.size, roomHostId, activeRoomId) {
+        if (currentUserId.isNotBlank() && currentUserId == roomHostId && activeRoomId.isNotBlank()) {
+            withContext(Dispatchers.IO) {
+                try {
+                    val token = SupabaseSessionManager.getBearerToken(context)
+                    val sCount = (1 + speakerSeats.size).coerceAtLeast(1)
+                    val lCount = listenerSeats.size
+                    val totalP = 1 + speakerSeats.size + listenerSeats.size
+                    SupabaseClient.api.updateVoiceRoom(
+                        auth = token,
+                        idEq = "eq.$activeRoomId",
+                        updates = UpdateVoiceRoomRequest(
+                            speaking_count = sCount,
+                            listening_count = lCount,
+                            participants = totalP
+                        )
+                    )
+                } catch (_: Exception) {}
+            }
+        }
     }
 
     LaunchedEffect(activeRoomId) {
@@ -536,20 +581,52 @@ fun VoiceRoomScreen(
                     }
                 }
                 val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
-                if (partsRes.isSuccessful) {
-                    val list = partsRes.body() ?: emptyList()
-                    withContext(Dispatchers.Main) {
-                        participantsData = list
-                        val me = list.find { it.user_id == currentUserId }
-                        if (me != null) {
-                            val newMicState = me.is_mic_enabled
-                            if (isMicOn != newMicState) {
-                                isMicOn = newMicState
-                                com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(!newMicState)
-                            }
+                val dbList = if (partsRes.isSuccessful) partsRes.body() ?: emptyList() else emptyList()
+                val liveList = com.example.realtime.VoiceRoomRealtimeManager.getLiveParticipants(activeRoomId)
+                val combined = (dbList + liveList).distinctBy { it.user_id }.toMutableList()
+                if (currentUserId.isNotBlank() && combined.none { it.user_id == currentUserId }) {
+                    combined.add(
+                        SupabaseRoomParticipant(
+                            room_id = activeRoomId,
+                            user_id = currentUserId,
+                            role = if (currentUserId == roomHostId) "host" else (if (isSpeaker) "speaker" else "listener"),
+                            is_mic_enabled = isMicOn
+                        )
+                    )
+                }
+                withContext(Dispatchers.Main) {
+                    participantsData = combined
+                    val me = combined.find { it.user_id == currentUserId }
+                    if (me != null) {
+                        val newMicState = me.is_mic_enabled
+                        if (isMicOn != newMicState) {
+                            isMicOn = newMicState
+                            com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(!newMicState)
                         }
                     }
                 }
+
+                // Broadcast presence and ping so everyone in room knows we are here, and replies
+                val myName = currentUserProfile?.displayName ?: currentUserProfile?.username ?: "Learner"
+                val myAvatar = currentUserProfile?.avatar ?: ""
+                val myCountry = currentUserProfile?.countryCode ?: "in"
+                val myRole = if (currentUserId == roomHostId) "host" else (if (isSpeaker) "speaker" else "listener")
+
+                com.example.realtime.VoiceRoomRealtimeManager.broadcastParticipantUpdate(
+                    roomId = activeRoomId,
+                    userId = currentUserId,
+                    action = "joined",
+                    role = myRole,
+                    isMicEnabled = isMicOn,
+                    userName = myName,
+                    userAvatar = myAvatar,
+                    countryCode = myCountry
+                )
+                com.example.realtime.VoiceRoomRealtimeManager.broadcastParticipantUpdate(
+                    roomId = activeRoomId,
+                    userId = currentUserId,
+                    action = "ping"
+                )
 
                 // Query existing messages ordered by created_at
                 val msgsRes = SupabaseClient.api.getRoomMessages(roomIdEq = "eq.$activeRoomId")
@@ -625,33 +702,98 @@ fun VoiceRoomScreen(
                 }
                 is RealtimeTableEvent.ParticipantChanged -> {
                     if (event.roomId.isNullOrBlank() || event.roomId == activeRoomId) {
-                        withContext(Dispatchers.IO) {
+                        val targetUid = event.userId ?: event.record?.optString("user_id").orEmpty()
+                        val action = event.eventType.lowercase()
+                        val targetRole = event.role ?: event.record?.optString("role") ?: "listener"
+                        val targetMic = event.isMicEnabled ?: event.record?.optBoolean("is_mic_enabled", false) ?: false
+
+                        if (action == "ping") {
+                            // Another participant is pinging for presence; reply with our info
+                            if (currentUserId.isNotBlank()) {
+                                val myName = currentUserProfile?.displayName ?: currentUserProfile?.username ?: "Learner"
+                                val myAvatar = currentUserProfile?.avatar ?: ""
+                                val myCountry = currentUserProfile?.countryCode ?: "in"
+                                val myRole = if (currentUserId == roomHostId) "host" else (if (isSpeaker) "speaker" else "listener")
+                                com.example.realtime.VoiceRoomRealtimeManager.broadcastParticipantUpdate(
+                                    roomId = activeRoomId,
+                                    userId = currentUserId,
+                                    action = "sync_presence",
+                                    role = myRole,
+                                    isMicEnabled = isMicOn,
+                                    userName = myName,
+                                    userAvatar = myAvatar,
+                                    countryCode = myCountry
+                                )
+                            }
+                        } else if (action == "left" || action == "delete" || action == "kicked") {
+                            if (targetUid.isNotBlank()) {
+                                withContext(Dispatchers.Main) {
+                                    participantsData = participantsData.filter { it.user_id != targetUid }
+                                }
+                            }
+                        } else if (action in listOf("joined", "sync_presence", "update", "insert")) {
+                            if (targetUid.isNotBlank()) {
+                                val effectiveRole = if (targetUid == roomHostId) "host" else targetRole
+                                withContext(Dispatchers.Main) {
+                                    val existingIndex = participantsData.indexOfFirst { it.user_id == targetUid }
+                                    if (existingIndex >= 0) {
+                                        val updated = participantsData.toMutableList()
+                                        updated[existingIndex] = updated[existingIndex].copy(
+                                            role = effectiveRole,
+                                            is_mic_enabled = targetMic
+                                        )
+                                        participantsData = updated
+                                    } else {
+                                        participantsData = participantsData + SupabaseRoomParticipant(
+                                            room_id = activeRoomId,
+                                            user_id = targetUid,
+                                            role = effectiveRole,
+                                            is_mic_enabled = targetMic
+                                        )
+                                    }
+                                    if (targetUid == currentUserId) {
+                                        if (isMicOn != targetMic) {
+                                            isMicOn = targetMic
+                                            com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(!targetMic)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Also fetch from API in background as fallback
+                        scope.launch(Dispatchers.IO) {
                             try {
                                 val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
                                 if (partsRes.isSuccessful) {
                                     val list = partsRes.body() ?: emptyList()
+                                    val liveList = com.example.realtime.VoiceRoomRealtimeManager.getLiveParticipants(activeRoomId)
+                                    val combined = (list + liveList).distinctBy { it.user_id }
                                     withContext(Dispatchers.Main) {
-                                        participantsData = list
-                                        val me = list.find { it.user_id == currentUserId }
-                                        if (me != null) {
-                                            val newMicState = me.is_mic_enabled
-                                            if (isMicOn != newMicState) {
-                                                isMicOn = newMicState
-                                                com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(!newMicState)
-                                            }
+                                        if (combined.isNotEmpty()) {
+                                            participantsData = combined
                                         }
                                     }
                                 }
-                            } catch (e: kotlinx.coroutines.CancellationException) {
-                                throw e
-                            } catch (e: Exception) {
-                                Log.e("VoiceRoomScreen", "Error refreshing participants on realtime event", e)
-                            }
+                            } catch (_: Exception) {}
                         }
                     }
                 }
                 is RealtimeTableEvent.RoomChatBroadcast -> {
                     if (event.roomId == activeRoomId) {
+                        val senderUid = event.userId
+                        if (senderUid.isNotBlank() && senderUid != "anon_user" && senderUid != "System") {
+                            withContext(Dispatchers.Main) {
+                                if (participantsData.none { it.user_id == senderUid }) {
+                                    participantsData = participantsData + SupabaseRoomParticipant(
+                                        room_id = activeRoomId,
+                                        user_id = senderUid,
+                                        role = if (senderUid == roomHostId) "host" else "listener",
+                                        is_mic_enabled = false
+                                    )
+                                }
+                            }
+                        }
                         if (event.message.contains("joined the room", ignoreCase = true) ||
                             event.message.contains("left the room", ignoreCase = true) ||
                             event.senderName.equals("System", ignoreCase = true)
@@ -661,8 +803,12 @@ fun VoiceRoomScreen(
                                     val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
                                     if (partsRes.isSuccessful) {
                                         val list = partsRes.body() ?: emptyList()
+                                        val liveList = com.example.realtime.VoiceRoomRealtimeManager.getLiveParticipants(activeRoomId)
+                                        val combined = (list + liveList).distinctBy { it.user_id }
                                         withContext(Dispatchers.Main) {
-                                            participantsData = list
+                                            if (combined.isNotEmpty()) {
+                                                participantsData = combined
+                                            }
                                         }
                                     }
                                 } catch (_: Exception) {}
@@ -708,13 +854,29 @@ fun VoiceRoomScreen(
                             val messageType = if (isSystem) "system" else if (msgType.isNullOrBlank()) "chat" else msgType
 
                             if (isSystem || text.contains("joined the room", ignoreCase = true) || text.contains("left the room", ignoreCase = true)) {
+                                if (text.contains("joined the room", ignoreCase = true) && userId.isNotBlank() && userId != "anon_user" && userId != "System") {
+                                    withContext(Dispatchers.Main) {
+                                        if (participantsData.none { it.user_id == userId }) {
+                                            participantsData = participantsData + SupabaseRoomParticipant(
+                                                room_id = activeRoomId,
+                                                user_id = userId,
+                                                role = if (userId == roomHostId) "host" else "listener",
+                                                is_mic_enabled = false
+                                            )
+                                        }
+                                    }
+                                }
                                 scope.launch(Dispatchers.IO) {
                                     try {
                                         val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
                                         if (partsRes.isSuccessful) {
                                             val list = partsRes.body() ?: emptyList()
+                                            val liveList = com.example.realtime.VoiceRoomRealtimeManager.getLiveParticipants(activeRoomId)
+                                            val combined = (list + liveList).distinctBy { it.user_id }
                                             withContext(Dispatchers.Main) {
-                                                participantsData = list
+                                                if (combined.isNotEmpty()) {
+                                                    participantsData = combined
+                                                }
                                             }
                                         }
                                     } catch (_: Exception) {}

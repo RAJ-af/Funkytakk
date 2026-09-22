@@ -159,22 +159,24 @@ fun HomeScreen(
                     Log.e("HomeScreen", "Error fetching active events from Supabase", e)
                 }
 
-                // 3. Fetch room participants from Supabase
+                // 3. Fetch room participants from Supabase and merge with live Realtime participants
                 val participantsRes = SupabaseClient.api.getAllRoomParticipants()
                 val supaParticipants = participantsRes.body() ?: emptyList()
+                val liveParticipants = com.example.realtime.VoiceRoomRealtimeManager.getAllLiveParticipants()
+                val allParticipants = (supaParticipants + liveParticipants).distinctBy { "${it.room_id}_${it.user_id}" }
 
-                // 3. Derive friends & presence from room_participants & supabaseProfiles
+                // 3. Derive friends & presence from allParticipants & supabaseProfiles
                 if (supabaseProfiles.isNotEmpty()) {
                     val otherProfiles = supabaseProfiles.filter {
                         it.uid != currentUserId
                     }
                     val derivedFriends = otherProfiles.take(8).map { p ->
                         val pId = p.uid
-                        val activePart = supaParticipants.firstOrNull { it.user_id == pId || it.user_id == p.uid }
-                        val isSpeaking = activePart != null && activePart.role == "speaker" && activePart.is_mic_enabled
+                        val activePart = allParticipants.firstOrNull { it.user_id == pId || it.user_id == p.uid }
+                        val isSpeaking = activePart != null && (activePart.role == "speaker" || activePart.role == "host") && activePart.is_mic_enabled
                         val statusText = when {
                             activePart == null -> "Online"
-                            activePart.role == "speaker" -> "Speaking"
+                            activePart.role == "speaker" || activePart.role == "host" -> "Speaking"
                             else -> "Listening"
                         }
                         FollowedFriend(
@@ -196,14 +198,14 @@ fun HomeScreen(
                 if (supaRooms.isNotEmpty()) {
                     val mapped = supaRooms.mapIndexed { index, r ->
                         val rId = r.id ?: "room_$index"
-                        val roomParts = supaParticipants.filter { it.room_id == rId }
+                        val roomParts = allParticipants.filter { it.room_id == rId }
                         val realSpeaking = if (roomParts.isNotEmpty()) {
-                            roomParts.count { it.role == "speaker" }.coerceAtLeast(1)
+                            roomParts.count { it.role == "speaker" || it.role == "host" }.coerceAtLeast(1)
                         } else {
                             r.speaking_count ?: 1
                         }
                         val realListening = if (roomParts.isNotEmpty()) {
-                            roomParts.count { it.role == "listener" }
+                            roomParts.count { it.role == "listener" || (it.role != "speaker" && it.role != "host") }
                         } else {
                             r.listening_count ?: 0
                         }
@@ -272,9 +274,16 @@ fun HomeScreen(
             }
         }
 
-        // Real-time updates from Supabase postgres_changes and room broadcasts
-        VoiceRoomRealtimeManager.events.collect {
-            refreshRoomsAndFriends()
+        // Real-time updates from Supabase postgres_changes, live participants, and room broadcasts
+        launch {
+            VoiceRoomRealtimeManager.events.collect {
+                refreshRoomsAndFriends()
+            }
+        }
+        launch {
+            VoiceRoomRealtimeManager.roomLiveParticipants.collect {
+                refreshRoomsAndFriends()
+            }
         }
     }
 

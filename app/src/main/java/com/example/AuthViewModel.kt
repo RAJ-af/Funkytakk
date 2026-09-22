@@ -310,6 +310,11 @@ class AuthViewModel : ViewModel() {
                 )
                 Log.d("AuthViewModel", "User $uid joined room $roomId as $role via Supabase room_participants")
                 
+                // Send a system message that the user has joined, so everyone in the room sees it
+                val userObj = (authState.value as? AuthState.Success)?.user
+                val username = userObj?.displayName?.ifBlank { null } ?: userObj?.username?.ifBlank { null } ?: "Someone"
+                val avatar = userObj?.avatar ?: ""
+
                 // 1. Broadcast participant update via WebSocket realtime so everyone's participant list refreshes immediately
                 try {
                     VoiceRoomRealtimeManager.broadcastParticipantUpdate(
@@ -317,15 +322,13 @@ class AuthViewModel : ViewModel() {
                         userId = uid,
                         action = "joined",
                         role = role,
-                        isMicEnabled = (role == "speaker")
+                        isMicEnabled = (role == "speaker"),
+                        userName = username,
+                        userAvatar = avatar
                     )
                 } catch (pEx: Exception) {
                     Log.e("AuthViewModel", "Error broadcasting participant update", pEx)
                 }
-
-                // Send a system message that the user has joined, so everyone in the room sees it
-                val userObj = (authState.value as? AuthState.Success)?.user
-                val username = userObj?.displayName?.ifBlank { null } ?: userObj?.username?.ifBlank { null } ?: "Someone"
 
                 // 2. Broadcast client-side join message via WebSocket realtime for live listeners
                 try {
@@ -334,7 +337,7 @@ class AuthViewModel : ViewModel() {
                         message = "$username joined the room",
                         userId = uid,
                         senderName = "System",
-                        senderAvatar = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200",
+                        senderAvatar = avatar.ifBlank { "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200" },
                         messageId = "sys_${System.currentTimeMillis()}"
                     )
                 } catch (bEx: Exception) {
@@ -380,6 +383,7 @@ class AuthViewModel : ViewModel() {
         com.example.service.VoiceRoomOverlayManager.clear()
 
         if (roomId != null && uid != null) {
+            VoiceRoomRealtimeManager.removeLiveParticipant(roomId, uid)
             val userObj = (authState.value as? AuthState.Success)?.user
             val username = userObj?.displayName?.ifBlank { null } ?: userObj?.username?.ifBlank { null } ?: "Someone"
 

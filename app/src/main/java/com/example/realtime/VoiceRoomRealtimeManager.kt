@@ -8,16 +8,30 @@ import com.example.SupabaseRoomParticipant
 import com.example.SupabaseVoiceRoom
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import okhttp3.*
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
+data class UserSnippet(val name: String, val avatar: String, val countryCode: String = "in")
+
 sealed class RealtimeTableEvent {
     data class VoiceRoomChanged(val eventType: String, val record: JSONObject?) : RealtimeTableEvent()
-    data class ParticipantChanged(val eventType: String, val record: JSONObject?, val roomId: String?) : RealtimeTableEvent()
+    data class ParticipantChanged(
+        val eventType: String,
+        val record: JSONObject?,
+        val roomId: String?,
+        val userId: String? = null,
+        val role: String? = null,
+        val isMicEnabled: Boolean? = null,
+        val userName: String? = null,
+        val userAvatar: String? = null
+    ) : RealtimeTableEvent()
     data class RoomMessageInserted(val record: JSONObject?, val roomId: String?) : RealtimeTableEvent()
     data class RoomEmojiBroadcast(val roomId: String, val emoji: String, val userId: String) : RealtimeTableEvent()
     data class RoomChatBroadcast(
@@ -51,6 +65,70 @@ object VoiceRoomRealtimeManager {
     private var reconnectJob: Job? = null
 
     private val subscribedRoomChannels = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    private val userSnippets = java.util.concurrent.ConcurrentHashMap<String, UserSnippet>()
+
+    fun recordUserSnippet(userId: String, name: String?, avatar: String?, countryCode: String? = null) {
+        if (userId.isBlank()) return
+        val current = userSnippets[userId]
+        val newName = name?.ifBlank { null } ?: current?.name ?: "Learner"
+        val newAvatar = avatar?.ifBlank { null } ?: current?.avatar ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150"
+        val newCountry = countryCode?.ifBlank { null } ?: current?.countryCode ?: "in"
+        userSnippets[userId] = UserSnippet(newName, newAvatar, newCountry)
+    }
+
+    fun getUserSnippet(userId: String): UserSnippet? = userSnippets[userId]
+
+    private val _roomLiveParticipants = MutableStateFlow<Map<String, List<SupabaseRoomParticipant>>>(emptyMap())
+    val roomLiveParticipants: StateFlow<Map<String, List<SupabaseRoomParticipant>>> = _roomLiveParticipants.asStateFlow()
+
+    fun ensureLiveParticipant(
+        roomId: String,
+        userId: String,
+        role: String = "listener",
+        isMicEnabled: Boolean = false,
+        userName: String? = null,
+        userAvatar: String? = null,
+        countryCode: String? = null
+    ) {
+        if (roomId.isBlank() || userId.isBlank() || userId == "anon_user" || userId == "System") return
+        recordUserSnippet(userId, userName, userAvatar, countryCode)
+        val currentMap = _roomLiveParticipants.value.toMutableMap()
+        val currentList = currentMap[roomId]?.toMutableList() ?: mutableListOf()
+        val index = currentList.indexOfFirst { it.user_id == userId }
+        val updated = SupabaseRoomParticipant(
+            room_id = roomId,
+            user_id = userId,
+            role = role,
+            is_mic_enabled = isMicEnabled
+        )
+        if (index >= 0) {
+            currentList[index] = updated
+        } else {
+            currentList.add(updated)
+        }
+        currentMap[roomId] = currentList
+        _roomLiveParticipants.value = currentMap
+    }
+
+    fun removeLiveParticipant(roomId: String, userId: String) {
+        if (roomId.isBlank() || userId.isBlank()) return
+        val currentMap = _roomLiveParticipants.value.toMutableMap()
+        val currentList = currentMap[roomId]?.toMutableList() ?: return
+        val removed = currentList.removeAll { it.user_id == userId }
+        if (removed) {
+            currentMap[roomId] = currentList
+            _roomLiveParticipants.value = currentMap
+        }
+    }
+
+    fun getLiveParticipants(roomId: String): List<SupabaseRoomParticipant> {
+        return _roomLiveParticipants.value[roomId] ?: emptyList()
+    }
+
+    fun getAllLiveParticipants(): List<SupabaseRoomParticipant> {
+        return _roomLiveParticipants.value.values.flatten().distinctBy { "${it.room_id}_${it.user_id}" }
+    }
 
     private val _events = MutableSharedFlow<RealtimeTableEvent>(extraBufferCapacity = 64)
     val events: SharedFlow<RealtimeTableEvent> = _events.asSharedFlow()
@@ -232,13 +310,43 @@ object VoiceRoomRealtimeManager {
                 if (broadcastType == "participant_update" || broadcastType == "participant_changed") {
                     val targetRoomId = innerPayload?.optString("room_id")?.ifBlank { roomId } ?: roomId
                     val action = innerPayload?.optString("action") ?: "UPDATE"
-                    Log.d(TAG, "Received broadcast participant_update ($action) for room '$targetRoomId' from '$userId'")
-                    _events.tryEmit(RealtimeTableEvent.ParticipantChanged(action, innerPayload, targetRoomId))
+                    val pUserId = innerPayload?.optString("user_id")?.ifBlank { userId } ?: userId
+                    val pRole = innerPayload?.optString("role") ?: "listener"
+                    val pMic = innerPayload?.optBoolean("is_mic_enabled", false) ?: false
+                    val pName = innerPayload?.optString("user_name")?.ifBlank { senderName } ?: senderName
+                    val pAvatar = innerPayload?.optString("user_avatar")?.ifBlank { senderAvatar } ?: senderAvatar
+                    val pCountry = innerPayload?.optString("country_code")
+
+                    if (targetRoomId.isNotBlank() && pUserId.isNotBlank()) {
+                        val actLower = action.lowercase()
+                        if (actLower in listOf("joined", "sync_presence", "update", "insert")) {
+                            ensureLiveParticipant(targetRoomId, pUserId, pRole, pMic, pName, pAvatar, pCountry)
+                        } else if (actLower in listOf("left", "delete", "kicked")) {
+                            removeLiveParticipant(targetRoomId, pUserId)
+                        }
+                    }
+
+                    Log.d(TAG, "Received broadcast participant_update ($action) for room '$targetRoomId' from '$pUserId' (name=$pName, role=$pRole)")
+                    _events.tryEmit(
+                        RealtimeTableEvent.ParticipantChanged(
+                            eventType = action,
+                            record = innerPayload,
+                            roomId = targetRoomId,
+                            userId = pUserId,
+                            role = pRole,
+                            isMicEnabled = pMic,
+                            userName = pName,
+                            userAvatar = pAvatar
+                        )
+                    )
                 } else if (roomId.isNotBlank() && emoji.isNotBlank() && broadcastType != "chat_message") {
                     Log.d(TAG, "Received broadcast emoji '$emoji' for room '$roomId' from '$userId'")
                     _events.tryEmit(RealtimeTableEvent.RoomEmojiBroadcast(roomId, emoji, userId))
                 } else if (roomId.isNotBlank() && chatText.isNotBlank()) {
                     Log.d(TAG, "Received broadcast chat message for room '$roomId' from '$userId': $chatText")
+                    if (userId.isNotBlank() && userId != "anon_user" && userId != "System") {
+                        ensureLiveParticipant(roomId, userId, "listener", false, senderName, senderAvatar)
+                    }
                     _events.tryEmit(
                         RealtimeTableEvent.RoomChatBroadcast(
                             roomId = roomId,
@@ -266,7 +374,26 @@ object VoiceRoomRealtimeManager {
                     _events.tryEmit(RealtimeTableEvent.VoiceRoomChanged(eventType, record))
                 } else if (table == "room_participants" || topic.contains("room_participants")) {
                     val roomId = record?.optString("room_id")
-                    _events.tryEmit(RealtimeTableEvent.ParticipantChanged(eventType, record, roomId))
+                    val pUserId = record?.optString("user_id")
+                    val role = record?.optString("role") ?: "listener"
+                    val isMic = record?.optBoolean("is_mic_enabled", false) ?: false
+                    if (!roomId.isNullOrBlank() && !pUserId.isNullOrBlank()) {
+                        if (eventType.equals("DELETE", ignoreCase = true)) {
+                            removeLiveParticipant(roomId, pUserId)
+                        } else {
+                            ensureLiveParticipant(roomId, pUserId, role, isMic)
+                        }
+                    }
+                    _events.tryEmit(
+                        RealtimeTableEvent.ParticipantChanged(
+                            eventType = eventType,
+                            record = record,
+                            roomId = roomId,
+                            userId = pUserId,
+                            role = role,
+                            isMicEnabled = isMic
+                        )
+                    )
                 } else if (table == "speaker_requests" || topic.contains("speaker_requests")) {
                     val roomId = record?.optString("room_id")
                     val userId = record?.optString("user_id")
@@ -408,32 +535,63 @@ object VoiceRoomRealtimeManager {
         userId: String,
         action: String = "joined",
         role: String = "listener",
-        isMicEnabled: Boolean = false
+        isMicEnabled: Boolean = false,
+        userName: String? = null,
+        userAvatar: String? = null,
+        countryCode: String? = null
     ) {
         if (roomId.isBlank()) return
+
+        val actLower = action.lowercase()
+        if (actLower in listOf("joined", "sync_presence", "update", "insert")) {
+            ensureLiveParticipant(roomId, userId, role, isMicEnabled, userName, userAvatar, countryCode)
+        } else if (actLower in listOf("left", "delete", "kicked")) {
+            removeLiveParticipant(roomId, userId)
+        }
+
         val ws = webSocket ?: return
         try {
             if (!subscribedRoomChannels.contains(roomId)) {
                 subscribeRoomChannel(roomId)
             }
+            val payloadObj = JSONObject().apply {
+                put("room_id", roomId)
+                put("user_id", userId)
+                put("action", action)
+                put("role", role)
+                put("is_mic_enabled", isMicEnabled)
+                if (!userName.isNullOrBlank()) put("user_name", userName)
+                if (!userAvatar.isNullOrBlank()) put("user_avatar", userAvatar)
+                if (!countryCode.isNullOrBlank()) put("country_code", countryCode)
+            }
+
+            // 1. Broadcast to room channel: realtime:room:$roomId
             val broadcastMsg = JSONObject().apply {
                 put("topic", "realtime:room:$roomId")
                 put("event", "broadcast")
                 put("payload", JSONObject().apply {
                     put("type", "broadcast")
                     put("event", "participant_update")
-                    put("payload", JSONObject().apply {
-                        put("room_id", roomId)
-                        put("user_id", userId)
-                        put("action", action)
-                        put("role", role)
-                        put("is_mic_enabled", isMicEnabled)
-                    })
+                    put("payload", payloadObj)
                 })
                 put("ref", refCounter.getAndIncrement().toString())
             }
             ws.send(broadcastMsg.toString())
-            Log.d(TAG, "Broadcasted participant_update ($action) to room:$roomId for user $userId")
+
+            // 2. Also broadcast to public:room_participants for global/HomeScreen visibility
+            val publicBroadcastMsg = JSONObject().apply {
+                put("topic", "realtime:public:room_participants")
+                put("event", "broadcast")
+                put("payload", JSONObject().apply {
+                    put("type", "broadcast")
+                    put("event", "participant_update")
+                    put("payload", payloadObj)
+                })
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(publicBroadcastMsg.toString())
+
+            Log.d(TAG, "Broadcasted participant_update ($action) to room:$roomId for user $userId (name=$userName)")
         } catch (e: Exception) {
             Log.e(TAG, "Error broadcasting participant_update to room $roomId", e)
         }
