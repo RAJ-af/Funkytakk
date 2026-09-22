@@ -26,12 +26,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        authViewModel.initializeFirebaseIfNeeded(applicationContext)
+        enableEdgeToEdge()
         handleDeepLinkIntent(intent)
         intent?.getStringExtra("navigate_to")?.let {
             pendingNavigateTo = it
         }
-        enableEdgeToEdge()
+        authViewModel.initializeFirebaseIfNeeded(applicationContext)
         setContent {
             MyApplicationTheme {
                 Surface(

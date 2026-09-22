@@ -302,14 +302,31 @@ class AuthViewModel : ViewModel() {
                 Log.d("AuthViewModel", "User $uid joined room $roomId as $role via Supabase room_participants")
                 
                 // Send a system message that the user has joined, so everyone in the room sees it
-                val displayName = (authState.value as? AuthState.Success)?.user?.displayName ?: "Someone"
+                val userObj = (authState.value as? AuthState.Success)?.user
+                val username = userObj?.displayName?.ifBlank { null } ?: userObj?.username?.ifBlank { null } ?: "Someone"
+
+                // 1. Broadcast client-side join message via WebSocket realtime for live listeners
+                try {
+                    VoiceRoomRealtimeManager.broadcastRoomMessage(
+                        roomId = roomId,
+                        message = "$username joined the room",
+                        userId = uid,
+                        senderName = "System",
+                        senderAvatar = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200",
+                        messageId = "sys_${System.currentTimeMillis()}"
+                    )
+                } catch (bEx: Exception) {
+                    Log.e("AuthViewModel", "Error broadcasting join message", bEx)
+                }
+
+                // 2. Persist to Postgres room_messages table via REST API
                 try {
                     SupabaseClient.api.sendRoomMessage(
                         auth = token,
                         request = SendRoomMessageRequest(
                             room_id = roomId,
                             user_id = uid,
-                            message = "$displayName joined the room",
+                            message = "$username joined the room",
                             message_type = "system"
                         )
                     )
