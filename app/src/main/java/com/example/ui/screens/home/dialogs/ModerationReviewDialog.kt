@@ -1,0 +1,1292 @@
+package com.example.ui.screens.home.dialogs
+
+import android.widget.Toast
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import coil.compose.AsyncImage
+import com.example.ModerationManager
+import com.example.ReportMessageSnapshot
+import com.example.ReportSpeakerLogItem
+import com.example.RoomReportItem
+import com.example.SupabaseClient
+import com.example.SupabaseSessionManager
+import com.example.UserProfile
+import com.example.ui.screens.home.models.DarkText
+import com.example.ui.screens.home.models.GraySubtitle
+import com.example.ui.theme.GoldPrimary
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.*
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ModerationReviewDialog(
+    onDismiss: () -> Unit,
+    currentUserProfile: UserProfile? = null
+) {
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    val scope = rememberCoroutineScope()
+
+    var reportsList by remember { mutableStateOf<List<RoomReportItem>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedFilter by remember { mutableStateOf("All") }
+    var previewImageUrl by remember { mutableStateOf<String?>(null) }
+    var actionDialogReport by remember { mutableStateOf<RoomReportItem?>(null) }
+    var playingAudioUrl by remember { mutableStateOf<String?>(null) }
+
+    fun fetchReports() {
+        isLoading = true
+        errorMessage = null
+        scope.launch(Dispatchers.IO) {
+            try {
+                // Ensure active Supabase session
+                SupabaseSessionManager.ensureActiveSession(context)
+                val bearerAuth = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                if (bearerAuth == null) {
+                    withContext(Dispatchers.Main) {
+                        reportsList = emptyList()
+                        errorMessage = "Authentication error: Active session required to view incident reports."
+                        isLoading = false
+                    }
+                    return@launch
+                }
+
+                // Check admin authorization via user_roles table
+                val isAdmin = ModerationManager.checkIsAdmin(context)
+                if (!isAdmin) {
+                    withContext(Dispatchers.Main) {
+                        reportsList = emptyList()
+                        errorMessage = "Access Restricted: Your account has role 'user'. In Supabase dashboard, set your role to 'admin' in public.user_roles to view and manage incident reports."
+                        isLoading = false
+                    }
+                    return@launch
+                }
+
+                val response = SupabaseClient.api.getRoomReports(auth = bearerAuth)
+
+                withContext(Dispatchers.Main) {
+                    if (response.isSuccessful) {
+                        reportsList = response.body() ?: emptyList()
+                        errorMessage = null
+                    } else {
+                        reportsList = emptyList()
+                        if (response.code() == 403) {
+                            errorMessage = "Access Restricted: You do not have administrator privileges to view incident reports."
+                        } else {
+                            errorMessage = "Failed to load reports (HTTP ${response.code()})"
+                        }
+                    }
+                    isLoading = false
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    reportsList = emptyList()
+                    errorMessage = "Network error: ${e.localizedMessage ?: "Unable to fetch reports"}"
+                    isLoading = false
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        fetchReports()
+    }
+
+    // Filtered reports
+    val filteredReports = remember(reportsList, searchQuery, selectedFilter) {
+        reportsList.filter { report ->
+            val matchesFilter = when (selectedFilter) {
+                "Pending" -> (report.status ?: "pending").equals("pending", ignoreCase = true)
+                "Solved" -> (report.status ?: "").equals("solved", ignoreCase = true) || (report.status ?: "").equals("resolved", ignoreCase = true)
+                "Urgent" -> (report.category ?: "").contains("Abuse", ignoreCase = true) ||
+                        (report.category ?: "").contains("Harassment", ignoreCase = true)
+                else -> true
+            }
+            val matchesSearch = if (searchQuery.isBlank()) true else {
+                val q = searchQuery.trim().lowercase()
+                (report.room_id?.lowercase()?.contains(q) == true) ||
+                        (report.reporter_id?.lowercase()?.contains(q) == true) ||
+                        (report.category?.lowercase()?.contains(q) == true) ||
+                        (report.reason?.lowercase()?.contains(q) == true) ||
+                        (report.additional_details?.lowercase()?.contains(q) == true)
+            }
+            matchesFilter && matchesSearch
+        }
+    }
+
+    val pendingCount = reportsList.count { (it.status ?: "pending").equals("pending", ignoreCase = true) }
+    val solvedCount = reportsList.count { (it.status ?: "").equals("solved", ignoreCase = true) || (it.status ?: "").equals("resolved", ignoreCase = true) }
+    val urgentCount = reportsList.count { (it.category ?: "").contains("Abuse", ignoreCase = true) || (it.category ?: "").contains("Harassment", ignoreCase = true) }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.55f))
+                .padding(horizontal = 12.dp, vertical = 24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.92f)
+                    .clip(RoundedCornerShape(28.dp)),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFF9FAFB)),
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+            ) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // Header Bar
+                    Surface(
+                        color = Color.White,
+                        shadowElevation = 2.dp,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 18.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(42.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFFFEF3C7)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Shield,
+                                        contentDescription = "Admin Shield",
+                                        tint = Color(0xFFD97706),
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "Moderation Center",
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 18.sp,
+                                            color = DarkText
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(Color(0xFFD1FAE5))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = "ADMIN",
+                                                color = Color(0xFF065F46),
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "Review incident reports & enforce safety",
+                                        color = Color(0xFF6B7280),
+                                        fontSize = 12.sp
+                                    )
+                                }
+                            }
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    onClick = { fetchReports() },
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFFF3F4F6))
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Refresh Reports",
+                                        tint = Color(0xFF374151),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                IconButton(
+                                    onClick = onDismiss,
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFFF3F4F6))
+                                        .testTag("close_moderation_dialog")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Close",
+                                        tint = Color(0xFF374151),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = Color(0xFFE5E7EB), thickness = 1.dp)
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .weight(1f),
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        // Summary Stats Bar
+                        item {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                ModernStatBadge(
+                                    title = "Pending",
+                                    count = pendingCount.toString(),
+                                    icon = Icons.Outlined.PendingActions,
+                                    containerColor = Color(0xFFFFFBEB),
+                                    accentColor = Color(0xFFD97706),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                ModernStatBadge(
+                                    title = "Urgent",
+                                    count = urgentCount.toString(),
+                                    icon = Icons.Outlined.WarningAmber,
+                                    containerColor = Color(0xFFFEF2F2),
+                                    accentColor = Color(0xFFDC2626),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                ModernStatBadge(
+                                    title = "Resolved",
+                                    count = solvedCount.toString(),
+                                    icon = Icons.Outlined.CheckCircle,
+                                    containerColor = Color(0xFFECFDF5),
+                                    accentColor = Color(0xFF059669),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                ModernStatBadge(
+                                    title = "Total",
+                                    count = reportsList.size.toString(),
+                                    icon = Icons.Outlined.Assignment,
+                                    containerColor = Color(0xFFF3F4F6),
+                                    accentColor = Color(0xFF4B5563),
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+
+                        // Search Input
+                        item {
+                            OutlinedTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                placeholder = { Text("Search by Room, User, or Keyword...", fontSize = 13.sp, color = Color(0xFF9CA3AF)) },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Search, contentDescription = "Search", tint = Color(0xFF9CA3AF), modifier = Modifier.size(20.dp))
+                                },
+                                trailingIcon = {
+                                    if (searchQuery.isNotEmpty()) {
+                                        IconButton(onClick = { searchQuery = "" }) {
+                                            Icon(Icons.Default.Clear, contentDescription = "Clear", tint = Color(0xFF9CA3AF), modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                },
+                                singleLine = true,
+                                shape = RoundedCornerShape(14.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedContainerColor = Color.White,
+                                    unfocusedContainerColor = Color.White,
+                                    focusedBorderColor = GoldPrimary,
+                                    unfocusedBorderColor = Color(0xFFE5E7EB)
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(52.dp)
+                            )
+                        }
+
+                        // Filter Chips Row
+                        item {
+                            val filters = listOf("All", "Pending", "Urgent", "Solved")
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                items(filters) { filter ->
+                                    val isSelected = (selectedFilter == filter)
+                                    val chipBg = if (isSelected) Color(0xFF1E293B) else Color.White
+                                    val chipText = if (isSelected) Color.White else Color(0xFF4B5563)
+                                    val chipBorder = if (isSelected) Color(0xFF1E293B) else Color(0xFFE5E7EB)
+
+                                    Surface(
+                                        onClick = { selectedFilter = filter },
+                                        shape = RoundedCornerShape(100.dp),
+                                        color = chipBg,
+                                        border = BorderStroke(1.dp, chipBorder),
+                                        modifier = Modifier.height(34.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier.padding(horizontal = 14.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = filter,
+                                                color = chipText,
+                                                fontSize = 12.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Error Banner
+                        if (errorMessage != null) {
+                            item {
+                                Card(
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF2F2)),
+                                    shape = RoundedCornerShape(16.dp),
+                                    border = BorderStroke(1.dp, Color(0xFFFECACA)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(14.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = Color(0xFFDC2626), modifier = Modifier.size(22.dp))
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = errorMessage!!,
+                                            color = Color(0xFF991B1B),
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Report Cards
+                        if (isLoading) {
+                            item {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(180.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator(color = GoldPrimary, modifier = Modifier.size(32.dp))
+                                }
+                            }
+                        } else if (filteredReports.isEmpty()) {
+                            item {
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 20.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                                    shape = RoundedCornerShape(20.dp),
+                                    border = BorderStroke(1.dp, Color(0xFFE5E7EB))
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(32.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(60.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFFECFDF5)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.CheckCircle,
+                                                contentDescription = null,
+                                                tint = Color(0xFF10B981),
+                                                modifier = Modifier.size(32.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(14.dp))
+                                        Text(
+                                            text = if (errorMessage != null) "Reports Unavailable" else "All Reports Clear!",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 16.sp,
+                                            color = DarkText
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = if (errorMessage != null) "Administrative access required." else "No pending reports matching the selected filter.",
+                                            fontSize = 13.sp,
+                                            color = GraySubtitle
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            items(filteredReports, key = { it.id ?: UUID.randomUUID().toString() }) { report ->
+                                ModernReportCard(
+                                    report = report,
+                                    isPlayingAudio = (playingAudioUrl == report.audio_clip_url && !report.audio_clip_url.isNullOrBlank()),
+                                    onToggleAudio = { url ->
+                                        playingAudioUrl = if (playingAudioUrl == url) null else url
+                                        if (playingAudioUrl != null) {
+                                            Toast.makeText(context, "Playing audio evidence clip...", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    onViewScreenshot = { url ->
+                                        previewImageUrl = url
+                                    },
+                                    onCopyText = { text, label ->
+                                        clipboardManager.setText(AnnotatedString(text))
+                                        Toast.makeText(context, "$label copied", Toast.LENGTH_SHORT).show()
+                                    },
+                                    onTakeAction = {
+                                        actionDialogReport = report
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Modal: Full Screenshot Preview
+    if (previewImageUrl != null) {
+        Dialog(onDismissRequest = { previewImageUrl = null }) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp)),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF111827))
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Screenshot Evidence", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        IconButton(onClick = { previewImageUrl = null }) {
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                        }
+                    }
+                    AsyncImage(
+                        model = previewImageUrl,
+                        contentDescription = "Screenshot Zoom",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 420.dp)
+                            .clip(RoundedCornerShape(12.dp)),
+                        contentScale = ContentScale.Fit
+                    )
+                }
+            }
+        }
+    }
+
+    // Modal: Take Action Dialog
+    if (actionDialogReport != null) {
+        val rep = actionDialogReport!!
+        AdminModerationActionDialog(
+            report = rep,
+            onDismiss = { actionDialogReport = null },
+            onActionApplied = {
+                actionDialogReport = null
+                fetchReports()
+            }
+        )
+    }
+}
+
+@Composable
+private fun AdminModerationActionDialog(
+    report: RoomReportItem,
+    onDismiss: () -> Unit,
+    onActionApplied: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    // Parse offenders from speaker_log
+    val speakerLog = remember(report) { report.speaker_log ?: emptyList() }
+    val validTargets = remember(speakerLog) {
+        speakerLog.filter { SupabaseSessionManager.isValidUuid(it.user_id) }
+    }
+
+    var selectedTargetUserId by remember(validTargets) {
+        mutableStateOf(validTargets.firstOrNull()?.user_id ?: "")
+    }
+
+    var actionType by remember { mutableStateOf("suspend") } // "suspend", "warning", "mute"
+    var durationHours by remember { mutableIntStateOf(24) } // 1..90 for suspend
+    var reasonInput by remember { mutableStateOf("") }
+    var isSubmitting by remember { mutableStateOf(false) }
+
+    Dialog(
+        onDismissRequest = { if (!isSubmitting) onDismiss() }
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp)),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp)
+            ) {
+                // Header
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFFEF2F2)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Gavel, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(20.dp))
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text("Apply Moderation Action", fontWeight = FontWeight.Black, fontSize = 17.sp, color = DarkText)
+                        Text("Room #${report.room_id?.take(8) ?: "N/A"}", fontSize = 12.sp, color = Color(0xFF6B7280))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Target Offender Selection
+                Text("Select Target Offender (from Speaker Log):", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = DarkText)
+                Spacer(modifier = Modifier.height(6.dp))
+
+                if (validTargets.isEmpty()) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFBEB)),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.WarningAmber, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "No offenders captured in speaker log. Cannot apply moderation without a valid user UUID.",
+                                fontSize = 12.sp,
+                                color = Color(0xFF92400E)
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 140.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(validTargets) { item ->
+                            val isSelected = (selectedTargetUserId == item.user_id)
+                            Surface(
+                                onClick = { selectedTargetUserId = item.user_id },
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isSelected) Color(0xFFEFF6FF) else Color(0xFFF9FAFB),
+                                border = BorderStroke(1.dp, if (isSelected) Color(0xFF3B82F6) else Color(0xFFE5E7EB)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        RadioButton(
+                                            selected = isSelected,
+                                            onClick = { selectedTargetUserId = item.user_id },
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Column {
+                                            Text(
+                                                text = item.name.ifBlank { "User" },
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp,
+                                                color = DarkText
+                                            )
+                                            Text(
+                                                text = "Role: ${item.role} • UUID: ${item.user_id.take(8)}...",
+                                                fontSize = 11.sp,
+                                                color = Color(0xFF6B7280)
+                                            )
+                                        }
+                                    }
+                                    if (item.is_mic_enabled) {
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(Color(0xFFDCFCE7))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("Mic ON", color = Color(0xFF15803D), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Action Type Selector
+                Text("Enforcement Type:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = DarkText)
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(
+                        "suspend" to "Suspend",
+                        "warning" to "Warning",
+                        "mute" to "Mute"
+                    ).forEach { (key, label) ->
+                        val isSelected = (actionType == key)
+                        Surface(
+                            onClick = { actionType = key },
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isSelected) Color(0xFF1E293B) else Color(0xFFF3F4F6),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(38.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = label,
+                                    color = if (isSelected) Color.White else Color(0xFF374151),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Action Details / Duration info
+                when (actionType) {
+                    "suspend" -> {
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Suspension Duration:", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = DarkText)
+                                Text("$durationHours hours", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFFDC2626))
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            // Presets
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                listOf(1, 6, 12, 24, 48, 90).forEach { hours ->
+                                    val isSelected = (durationHours == hours)
+                                    Surface(
+                                        onClick = { durationHours = hours },
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = if (isSelected) Color(0xFFDC2626) else Color(0xFFF3F4F6),
+                                        modifier = Modifier.weight(1f).height(30.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(
+                                                text = "${hours}h",
+                                                color = if (isSelected) Color.White else Color(0xFF374151),
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("Blocks voice room access and messaging (1 to 90 hours).", fontSize = 11.sp, color = Color(0xFF6B7280))
+                        }
+                    }
+                    "warning" -> {
+                        Text("⚠️ Fixed 1 hour penalty: Messaging disabled, user cannot send chat messages or replies.", fontSize = 11.sp, color = Color(0xFFB45309))
+                    }
+                    "mute" -> {
+                        Text("🔇 Indefinite Mute: User may remain in room but outgoing messaging is blocked until updated.", fontSize = 11.sp, color = Color(0xFF4B5563))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Reason input
+                OutlinedTextField(
+                    value = reasonInput,
+                    onValueChange = { reasonInput = it },
+                    placeholder = { Text("Reason for moderation (optional)...", fontSize = 12.sp, color = Color(0xFF9CA3AF)) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = GoldPrimary,
+                        unfocusedBorderColor = Color(0xFFE5E7EB)
+                    ),
+                    modifier = Modifier.fillMaxWidth().height(50.dp)
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Submit Buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f).height(44.dp)
+                    ) {
+                        Text("Cancel", color = Color(0xFF6B7280), fontWeight = FontWeight.Bold)
+                    }
+
+                    Button(
+                        onClick = {
+                            if (selectedTargetUserId.isBlank()) {
+                                Toast.makeText(context, "Please select an offender from the speaker log.", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            isSubmitting = true
+                            scope.launch {
+                                val result = ModerationManager.applyModerationAction(
+                                    context = context,
+                                    reportId = report.id!!,
+                                    targetUserId = selectedTargetUserId,
+                                    actionType = actionType,
+                                    durationHours = if (actionType == "suspend") durationHours else null,
+                                    reason = reasonInput.ifBlank { report.reason }
+                                )
+
+                                isSubmitting = false
+                                result.onSuccess { msg ->
+                                    Toast.makeText(context, "✓ $msg", Toast.LENGTH_LONG).show()
+                                    onActionApplied()
+                                }.onFailure { e ->
+                                    Toast.makeText(context, "Error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        },
+                        enabled = !isSubmitting && validTargets.isNotEmpty() && selectedTargetUserId.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1.3f).height(44.dp)
+                    ) {
+                        if (isSubmitting) {
+                            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text("Enforce Action", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModernStatBadge(
+    title: String,
+    count: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    containerColor: Color,
+    accentColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = containerColor),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.2f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 10.dp, horizontal = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(imageVector = icon, contentDescription = null, tint = accentColor, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = count,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Black,
+                color = DarkText
+            )
+            Text(
+                text = title,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF6B7280),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun ModernReportCard(
+    report: RoomReportItem,
+    isPlayingAudio: Boolean,
+    onToggleAudio: (String) -> Unit,
+    onViewScreenshot: (String) -> Unit,
+    onCopyText: (String, String) -> Unit,
+    onTakeAction: () -> Unit
+) {
+    val isSolved = (report.status ?: "").lowercase() in listOf("solved", "resolved", "closed")
+    val isUrgent = (report.category ?: "").contains("Abuse", ignoreCase = true) || (report.category ?: "").contains("Harassment", ignoreCase = true)
+
+    var isSnapshotsExpanded by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(2.dp, RoundedCornerShape(20.dp), spotColor = Color(0x12000000)),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(20.dp),
+        border = BorderStroke(1.dp, if (isUrgent && !isSolved) Color(0xFFFECACA) else Color(0xFFE5E7EB))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            // Header Row: Category Badge + Status Badge
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val (badgeBg, badgeText) = when {
+                        isUrgent -> Color(0xFFFEF2F2) to Color(0xFFDC2626)
+                        (report.category ?: "").contains("Spam", ignoreCase = true) -> Color(0xFFF3E8FF) to Color(0xFF7E22CE)
+                        else -> Color(0xFFFFFBEB) to Color(0xFFD97706)
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(badgeBg)
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = report.category ?: "Report",
+                            color = badgeText,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    if (isUrgent && !isSolved) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFFDC2626))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text("URGENT", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Black)
+                        }
+                    }
+                }
+
+                // Status Badge
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(100.dp))
+                        .background(if (isSolved) Color(0xFFECFDF5) else Color(0xFFFFFBEB))
+                        .border(
+                            1.dp,
+                            if (isSolved) Color(0xFFA7F3D0) else Color(0xFFFDE68A),
+                            RoundedCornerShape(100.dp)
+                        )
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = if (isSolved) "✓ Resolved" else "● Pending",
+                        color = if (isSolved) Color(0xFF047857) else Color(0xFFB45309),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Reason and Details
+            Text(
+                text = report.reason ?: "Unspecified incident",
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+                color = DarkText
+            )
+
+            if (!report.additional_details.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = report.additional_details,
+                    fontSize = 13.sp,
+                    color = Color(0xFF4B5563),
+                    lineHeight = 18.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Room and Reporter ID Chips
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFFF3F4F6))
+                        .clickable { onCopyText(report.room_id ?: "", "Room ID") }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.MeetingRoom, contentDescription = null, tint = Color(0xFF6B7280), modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Room: ${(report.room_id ?: "N/A").take(8)}...", fontSize = 11.sp, color = Color(0xFF374151), fontWeight = FontWeight.Medium)
+                        }
+                        Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy", tint = Color(0xFF9CA3AF), modifier = Modifier.size(11.dp))
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFFF3F4F6))
+                        .clickable { onCopyText(report.reporter_id ?: "", "Reporter ID") }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.Person, contentDescription = null, tint = Color(0xFF6B7280), modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Reporter: ${(report.reporter_id ?: "Anon").take(8)}...", fontSize = 11.sp, color = Color(0xFF374151), fontWeight = FontWeight.Medium)
+                        }
+                        Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy", tint = Color(0xFF9CA3AF), modifier = Modifier.size(11.dp))
+                    }
+                }
+            }
+
+            // Attached Media: Only shown if non-null!
+            val hasScreenshot = !report.screenshot_url.isNullOrBlank()
+            val hasAudio = !report.audio_clip_url.isNullOrBlank()
+
+            if (hasScreenshot || hasAudio) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (hasScreenshot) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(72.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .border(1.dp, Color(0xFFE5E7EB), RoundedCornerShape(12.dp))
+                                .clickable { onViewScreenshot(report.screenshot_url!!) }
+                        ) {
+                            AsyncImage(
+                                model = report.screenshot_url,
+                                contentDescription = "Screenshot",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black.copy(alpha = 0.3f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(Color.Black.copy(alpha = 0.65f))
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Icon(Icons.Default.ZoomIn, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Screenshot", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
+                    if (hasAudio) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(72.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isPlayingAudio) Color(0xFFFFFBEB) else Color(0xFFF9FAFB))
+                                .border(
+                                    1.dp,
+                                    if (isPlayingAudio) Color(0xFFFCD34D) else Color(0xFFE5E7EB),
+                                    RoundedCornerShape(12.dp)
+                                )
+                                .clickable { onToggleAudio(report.audio_clip_url!!) }
+                                .padding(horizontal = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isPlayingAudio) Color(0xFFD97706) else Color(0xFF1E293B)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = if (isPlayingAudio) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                        contentDescription = "Audio Play",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = if (isPlayingAudio) "Playing..." else "Audio Clip",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = DarkText
+                                    )
+                                    AudioWaveformBar(isPlaying = isPlayingAudio)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Evidence: Captured Message & Speaker Snapshots
+            val hasMessages = !report.message_snapshot.isNullOrEmpty()
+            val hasSpeakers = !report.speaker_log.isNullOrEmpty()
+
+            if (hasMessages || hasSpeakers) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Surface(
+                    onClick = { isSnapshotsExpanded = !isSnapshotsExpanded },
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color(0xFFF8FAFC),
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.HistoryEdu, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Captured Evidence (${report.speaker_log?.size ?: 0} speakers, ${report.message_snapshot?.size ?: 0} msgs)",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF475569)
+                                )
+                            }
+                            Icon(
+                                imageVector = if (isSnapshotsExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = null,
+                                tint = Color(0xFF64748B),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        if (isSnapshotsExpanded) {
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Speaker log list
+                            if (hasSpeakers) {
+                                Text("Speakers Captured:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = DarkText)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                report.speaker_log!!.forEach { spk ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            text = "• ${spk.name} (${spk.role})",
+                                            fontSize = 11.sp,
+                                            color = Color(0xFF334155)
+                                        )
+                                        Text(
+                                            text = "ID: ${spk.user_id.take(8)}...",
+                                            fontSize = 10.sp,
+                                            color = Color(0xFF94A3B8)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Message snapshot
+                            if (hasMessages) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text("Chat Messages Snapshot:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = DarkText)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                report.message_snapshot!!.takeLast(5).forEach { msg ->
+                                    Text(
+                                        text = "${msg.sender}: ${msg.text}",
+                                        fontSize = 11.sp,
+                                        color = Color(0xFF475569),
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Action Button
+            Button(
+                onClick = onTakeAction,
+                colors = ButtonDefaults.buttonColors(containerColor = if (isSolved) Color(0xFF475569) else Color(0xFFDC2626)),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(42.dp)
+            ) {
+                Icon(Icons.Default.Gavel, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = if (isSolved) "Review / Update Action" else "Enforce Moderation Action",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AudioWaveformBar(isPlaying: Boolean) {
+    val infiniteTransition = rememberInfiniteTransition(label = "audio_bars")
+    val h1 by infiniteTransition.animateFloat(
+        initialValue = 4f,
+        targetValue = if (isPlaying) 14f else 4f,
+        animationSpec = infiniteRepeatable(tween(300, easing = LinearEasing), RepeatMode.Reverse),
+        label = "h1"
+    )
+    val h2 by infiniteTransition.animateFloat(
+        initialValue = 8f,
+        targetValue = if (isPlaying) 18f else 8f,
+        animationSpec = infiniteRepeatable(tween(400, easing = LinearEasing), RepeatMode.Reverse),
+        label = "h2"
+    )
+    val h3 by infiniteTransition.animateFloat(
+        initialValue = 5f,
+        targetValue = if (isPlaying) 12f else 5f,
+        animationSpec = infiniteRepeatable(tween(350, easing = LinearEasing), RepeatMode.Reverse),
+        label = "h3"
+    )
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        modifier = Modifier.padding(top = 2.dp)
+    ) {
+        Box(modifier = Modifier.width(3.dp).height(h1.dp).clip(RoundedCornerShape(2.dp)).background(if (isPlaying) Color(0xFFD97706) else Color(0xFF9CA3AF)))
+        Box(modifier = Modifier.width(3.dp).height(h2.dp).clip(RoundedCornerShape(2.dp)).background(if (isPlaying) Color(0xFFD97706) else Color(0xFF9CA3AF)))
+        Box(modifier = Modifier.width(3.dp).height(h3.dp).clip(RoundedCornerShape(2.dp)).background(if (isPlaying) Color(0xFFD97706) else Color(0xFF9CA3AF)))
+        Box(modifier = Modifier.width(3.dp).height(h1.dp).clip(RoundedCornerShape(2.dp)).background(if (isPlaying) Color(0xFFD97706) else Color(0xFF9CA3AF)))
+        Spacer(modifier = Modifier.width(4.dp))
+        Text("0:14", fontSize = 10.sp, color = Color(0xFF6B7280))
+    }
+}

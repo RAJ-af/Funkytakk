@@ -7,10 +7,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -26,6 +29,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,6 +40,7 @@ import androidx.compose.ui.platform.testTag
 import com.example.AuthViewModel
 import com.example.UserProfile
 import com.example.ui.components.CircleFlag
+import com.example.ui.screens.home.dialogs.ModerationReviewDialog
 import com.example.ui.screens.home.models.DarkText
 import com.example.ui.screens.home.models.GraySubtitle
 import com.example.ui.theme.GoldAccent
@@ -48,6 +53,13 @@ fun ProfileTabContent(
 ) {
     val context = LocalContext.current
     var showEditProfileDialog by remember { mutableStateOf(false) }
+    var showModerationDialog by remember { mutableStateOf(false) }
+    var isAdmin by remember { mutableStateOf(false) }
+
+    androidx.compose.runtime.LaunchedEffect(currentUserProfile.uid) {
+        isAdmin = com.example.ModerationManager.checkIsAdmin(context)
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -67,6 +79,51 @@ fun ProfileTabContent(
                     ),
                 contentAlignment = Alignment.BottomCenter
             ) {
+                // Top-right Admin Moderation Button (Gated strictly to authorized admins)
+                if (isAdmin) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(top = 16.dp, end = 16.dp),
+                        contentAlignment = Alignment.TopEnd
+                    ) {
+                        Surface(
+                            onClick = { showModerationDialog = true },
+                            shape = RoundedCornerShape(100.dp),
+                            color = Color.White.copy(alpha = 0.95f),
+                            border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+                            shadowElevation = 3.dp,
+                            modifier = Modifier.testTag("profile_admin_moderation_button")
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(7.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF10B981))
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Icon(
+                                    imageVector = Icons.Default.Shield,
+                                    contentDescription = "Admin Moderation",
+                                    tint = Color(0xFFD97706),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Admin Hub",
+                                    color = DarkText,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.offset(y = 20.dp)
@@ -200,6 +257,82 @@ fun ProfileTabContent(
                             Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray, textAlign = TextAlign.Center)
                         }
                     }
+                }
+            }
+        }
+
+        // Admin & Moderation Review Entry Card
+        item {
+            Spacer(modifier = Modifier.height(16.dp))
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .clickable { showModerationDialog = true }
+                    .testTag("admin_moderation_card"),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(20.dp),
+                border = BorderStroke(1.dp, Color(0xFFE5E7EB))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color(0xFFFFFBEB))
+                            .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(14.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shield,
+                            contentDescription = "Admin Shield",
+                            tint = Color(0xFFD97706),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Safety & Moderation Hub",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = DarkText
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0xFFECFDF5))
+                                    .border(1.dp, Color(0xFFA7F3D0), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "ADMIN",
+                                    color = Color(0xFF047857),
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Review incident reports & voice evidence",
+                            fontSize = 12.sp,
+                            color = GraySubtitle
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                        contentDescription = "Open Moderation",
+                        tint = Color(0xFF9CA3AF),
+                        modifier = Modifier.size(16.dp)
+                    )
                 }
             }
         }
@@ -531,6 +664,13 @@ fun ProfileTabContent(
                     Text("Cancel", color = Color.Gray)
                 }
             }
+        )
+    }
+
+    if (showModerationDialog) {
+        ModerationReviewDialog(
+            onDismiss = { showModerationDialog = false },
+            currentUserProfile = currentUserProfile
         )
     }
 }

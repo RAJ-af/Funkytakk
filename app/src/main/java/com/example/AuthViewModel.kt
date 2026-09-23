@@ -612,6 +612,13 @@ class AuthViewModel : ViewModel() {
             if (context != null) {
                 val isGoogleAccount = authUser.providerData.any { it.providerId == "google.com" }
                 val effectiveUid = SupabaseSessionManager.getUserId(context) ?: authUser.uid
+                if (SupabaseSessionManager.getUserId(context).isNullOrBlank()) {
+                    SupabaseSessionManager.setSession(
+                        context = context,
+                        accessToken = SupabaseSessionManager.getAccessToken(context) ?: BuildConfig.SUPABASE_ANON_KEY,
+                        userId = effectiveUid
+                    )
+                }
                 checkAndCleanupUnverifiedAccount(context, authUser) {
                     val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
                     val isCustomVerified = if (isGoogleAccount) true else prefs.getBoolean("custom_email_verified_${effectiveUid}", false)
@@ -1403,6 +1410,16 @@ class AuthViewModel : ViewModel() {
                                         Log.e("AuthViewModel", "Google Supabase session exchange error: ${e.message}")
                                     }
 
+                                    // Ensure Supabase session is at minimum initialized with this user ID
+                                    if (SupabaseSessionManager.getUserId(context).isNullOrBlank()) {
+                                        SupabaseSessionManager.setSession(
+                                            context = context,
+                                            accessToken = supaAccessToken ?: SupabaseSessionManager.getAccessToken(context) ?: BuildConfig.SUPABASE_ANON_KEY,
+                                            refreshToken = null,
+                                            userId = sUserId
+                                        )
+                                    }
+
                                     // For Google Sign-In: Google accounts are pre-verified via Firebase's own email_verified claim.
                                     // DO NOT generate verification token or call send-verification-email.
                                     val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
@@ -1442,6 +1459,11 @@ class AuthViewModel : ViewModel() {
                                 }
                             } else {
                                 val sUserId = user.uid
+                                SupabaseSessionManager.setSession(
+                                    context = context,
+                                    accessToken = SupabaseSessionManager.getAccessToken(context) ?: BuildConfig.SUPABASE_ANON_KEY,
+                                    userId = sUserId
+                                )
                                 val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
                                 prefs.edit().putBoolean("custom_email_verified_${sUserId}", true).apply()
                                 loadUserProfileFromSpOrFirestore(context, sUserId) { finalProfile ->
@@ -1455,6 +1477,11 @@ class AuthViewModel : ViewModel() {
                             }
                         }.addOnFailureListener {
                             val sUserId = user.uid
+                            SupabaseSessionManager.setSession(
+                                context = context,
+                                accessToken = SupabaseSessionManager.getAccessToken(context) ?: BuildConfig.SUPABASE_ANON_KEY,
+                                userId = sUserId
+                            )
                             val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
                             prefs.edit().putBoolean("custom_email_verified_${sUserId}", true).apply()
                             loadUserProfileFromSpOrFirestore(context, sUserId) { finalProfile ->
@@ -1516,13 +1543,27 @@ class AuthViewModel : ViewModel() {
     ) {
         viewModelScope.launch {
             try {
-                val supaUid = SupabaseSessionManager.getUserId(context)
-                val token = SupabaseSessionManager.getBearerToken(context)
+                var supaUid = SupabaseSessionManager.getUserId(context)?.ifBlank { null }
+                    ?: (_authState.value as? AuthState.Success)?.user?.uid?.ifBlank { null }
+                    ?: firebaseAuth?.currentUser?.uid?.ifBlank { null }
+                    ?: try { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid?.ifBlank { null } } catch (e: Exception) { null }
+
                 if (supaUid.isNullOrBlank()) {
                     Log.e("AuthViewModel", "User session not found for patchProfileStep")
                     onSuccess()
                     return@launch
                 }
+
+                // Cache user ID if it wasn't present in session manager
+                if (SupabaseSessionManager.getUserId(context).isNullOrBlank()) {
+                    SupabaseSessionManager.setSession(
+                        context = context,
+                        accessToken = SupabaseSessionManager.getAccessToken(context) ?: BuildConfig.SUPABASE_ANON_KEY,
+                        userId = supaUid
+                    )
+                }
+
+                val token = SupabaseSessionManager.getBearerToken(context)
 
                 val response = SupabaseClient.api.patchProfile(
                     auth = token,

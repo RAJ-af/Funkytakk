@@ -464,11 +464,139 @@ interface SupabaseApi {
         @Header("Authorization") auth: String,
         @Body body: Map<String, String>
     ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/admin_apply_moderation_action")
+    suspend fun adminApplyModerationAction(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: AdminApplyModerationActionRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/get_my_moderation_status")
+    suspend fun getMyModerationStatus(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> = emptyMap()
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/room_reports")
+    suspend fun createRoomReport(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Header("Prefer") prefer: String = "return=minimal",
+        @Body report: CreateRoomReportRequest
+    ): Response<ResponseBody>
+
+    @GET("rest/v1/user_roles?select=user_id,role")
+    suspend fun getMyUserRoles(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String
+    ): Response<List<UserRoleItem>>
+
+    @GET("rest/v1/room_reports?select=*&order=created_at.desc")
+    suspend fun getRoomReports(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String
+    ): Response<List<RoomReportItem>>
+
+    @PATCH("rest/v1/room_reports")
+    suspend fun updateRoomReportStatus(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("id") idFilter: String,
+        @Body body: Map<String, String>
+    ): Response<ResponseBody>
+
+    @DELETE("rest/v1/room_reports")
+    suspend fun deleteRoomReport(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("id") idFilter: String
+    ): Response<ResponseBody>
+
+    @Multipart
+    @POST("storage/v1/object/{bucket}/{filename}")
+    suspend fun uploadStorageFile(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
+        @Path("bucket") bucket: String,
+        @Path("filename") filename: String,
+        @Part file: MultipartBody.Part
+    ): Response<ResponseBody>
 }
+
+@JsonClass(generateAdapter = true)
+data class AdminApplyModerationActionRequest(
+    val p_report_id: String,
+    val p_target_user_id: String,
+    val p_action_type: String, // "suspend", "warning", "mute"
+    val p_duration_hours: Int? = null,
+    val p_reason: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class MyModerationStatus(
+    val action_type: String? = null,
+    val started_at: String? = null,
+    val expires_at: String? = null,
+    val reason: String? = null,
+    val report_id: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class RoomReportItem(
+    val id: String? = null,
+    val room_id: String? = null,
+    val reporter_id: String? = null,
+    val category: String? = null,
+    val reason: String? = null,
+    val message_snapshot: List<ReportMessageSnapshot>? = null,
+    val speaker_log: List<ReportSpeakerLogItem>? = null,
+    val screenshot_url: String? = null,
+    val audio_clip_url: String? = null,
+    val additional_details: String? = null,
+    val status: String? = "pending",
+    val created_at: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class CreateRoomReportRequest(
+    val room_id: String,
+    val reporter_id: String,
+    val category: String,
+    val reason: String? = null,
+    val message_snapshot: List<ReportMessageSnapshot>? = null,
+    val speaker_log: List<ReportSpeakerLogItem>? = null,
+    val screenshot_url: String? = null,
+    val audio_clip_url: String? = null,
+    val additional_details: String? = null,
+    val status: String = "pending"
+)
+
+@JsonClass(generateAdapter = true)
+data class ReportMessageSnapshot(
+    val sender: String = "",
+    val text: String = "",
+    val timestamp: String = ""
+)
+
+@JsonClass(generateAdapter = true)
+data class ReportSpeakerLogItem(
+    val user_id: String = "",
+    val name: String = "",
+    val role: String = "listener",
+    val is_mic_enabled: Boolean = false
+)
 
 @JsonClass(generateAdapter = true)
 data class JoinRoomResponse(
     val room_id: String,
     val title: String
+)
+
+@JsonClass(generateAdapter = true)
+data class UserRoleItem(
+    val user_id: String? = null,
+    val role: String? = null
 )
 

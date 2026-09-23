@@ -11,6 +11,17 @@ import com.example.SpeakerRequestInsert
 import com.example.SupabaseRoomParticipant
 import com.example.ModeratorActionRequest
 import com.example.UpdateParticipantMicRequest
+import com.example.BuildConfig
+import com.example.CreateRoomReportRequest
+import com.example.ModerationManager
+import com.example.MyModerationStatus
+import com.example.ReportMessageSnapshot
+import com.example.ReportSpeakerLogItem
+import com.google.firebase.auth.FirebaseAuth
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -379,6 +390,8 @@ fun VoiceRoomScreen(
     var isPrivateRoomState by remember { mutableStateOf(false) }
     var joinCodeState by remember { mutableStateOf("") }
 
+    var myModerationStatus by remember { mutableStateOf<MyModerationStatus?>(null) }
+
     val hasOverlayPermission = remember(context) {
         com.example.service.OverlayPermissionHelper.canDrawOverlays(context)
     }
@@ -604,6 +617,12 @@ fun VoiceRoomScreen(
                             com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(!newMicState)
                         }
                     }
+                }
+
+                // Authoritative moderation status check from backend
+                val modStatus = ModerationManager.fetchMyModerationStatus(context)
+                withContext(Dispatchers.Main) {
+                    myModerationStatus = modStatus
                 }
 
                 // Broadcast presence and ping so everyone in room knows we are here, and replies
@@ -976,15 +995,133 @@ fun VoiceRoomScreen(
     var selectedGiftMultiplier by remember { mutableStateOf(1) }
     var isChangingGift by remember { mutableStateOf(false) }
 
-    // Report Bottom Sheet Extra States
+    // Report Bottom Sheet States
     var selectedReportReasonIndex by remember { mutableStateOf(0) }
-    var reportEvidenceAudioAttached by remember { mutableStateOf(true) }
-    var reportEvidenceMessagesAttached by remember { mutableStateOf(true) }
-    var reportEvidenceActivityAttached by remember { mutableStateOf(true) }
-    var reportScreenshotAttached by remember { mutableStateOf(false) }
-    var reportVideoAttached by remember { mutableStateOf(false) }
+    var reportScreenshotUrl by remember { mutableStateOf<String?>(null) }
+    var reportAudioClipUrl by remember { mutableStateOf<String?>(null) }
+    var isUploadingScreenshot by remember { mutableStateOf(false) }
+    var isUploadingClip by remember { mutableStateOf(false) }
+    var isSubmittingReport by remember { mutableStateOf(false) }
     var reportAdditionalDetails by remember { mutableStateOf("") }
     var showReportSubmittedSheet by remember { mutableStateOf(false) }
+
+    val reportScreenshotLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            isUploadingScreenshot = true
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val inputStream = context.contentResolver.openInputStream(uri)
+                    val bytes = inputStream?.readBytes()
+                    inputStream?.close()
+                    if (bytes != null && bytes.isNotEmpty()) {
+                        val filename = "report_shot_${System.currentTimeMillis()}.jpg"
+                        val reqFile = bytes.toRequestBody("image/*".toMediaTypeOrNull(), 0, bytes.size)
+                        val part = MultipartBody.Part.createFormData("file", filename, reqFile)
+                        val bearerAuth = SupabaseSessionManager.getBearerToken(context)
+                        var usedBucket = "reports"
+                        var isUploadSuccess = false
+                        val res = SupabaseClient.api.uploadStorageFile(
+                            auth = bearerAuth,
+                            bucket = usedBucket,
+                            filename = filename,
+                            file = part
+                        )
+                        if (res.isSuccessful) {
+                            isUploadSuccess = true
+                        } else {
+                            val fallbackPart = MultipartBody.Part.createFormData("file", filename, reqFile)
+                            val fallbackRes = SupabaseClient.api.uploadAvatar(
+                                auth = bearerAuth,
+                                filename = filename,
+                                file = fallbackPart
+                            )
+                            if (fallbackRes.isSuccessful) {
+                                isUploadSuccess = true
+                                usedBucket = "avatars"
+                            }
+                        }
+                        if (isUploadSuccess) {
+                            val baseUrl = BuildConfig.SUPABASE_URL.trimEnd('/')
+                            val url = if (baseUrl.startsWith("http")) baseUrl else "https://$baseUrl"
+                            reportScreenshotUrl = "$url/storage/v1/object/public/$usedBucket/$filename"
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(context, "Screenshot attached successfully", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(context, "Failed to upload screenshot", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("VoiceRoomScreen", "Screenshot upload failed", e)
+                } finally {
+                    isUploadingScreenshot = false
+                }
+            }
+        }
+    }
+
+    val reportClipLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            isUploadingClip = true
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val inputStream = context.contentResolver.openInputStream(uri)
+                    val bytes = inputStream?.readBytes()
+                    inputStream?.close()
+                    if (bytes != null && bytes.isNotEmpty()) {
+                        val filename = "report_clip_${System.currentTimeMillis()}.mp3"
+                        val reqFile = bytes.toRequestBody("audio/*".toMediaTypeOrNull(), 0, bytes.size)
+                        val part = MultipartBody.Part.createFormData("file", filename, reqFile)
+                        val bearerAuth = SupabaseSessionManager.getBearerToken(context)
+                        var usedBucket = "reports"
+                        var isUploadSuccess = false
+                        val res = SupabaseClient.api.uploadStorageFile(
+                            auth = bearerAuth,
+                            bucket = usedBucket,
+                            filename = filename,
+                            file = part
+                        )
+                        if (res.isSuccessful) {
+                            isUploadSuccess = true
+                        } else {
+                            val fallbackPart = MultipartBody.Part.createFormData("file", filename, reqFile)
+                            val fallbackRes = SupabaseClient.api.uploadAvatar(
+                                auth = bearerAuth,
+                                filename = filename,
+                                file = fallbackPart
+                            )
+                            if (fallbackRes.isSuccessful) {
+                                isUploadSuccess = true
+                                usedBucket = "avatars"
+                            }
+                        }
+                        if (isUploadSuccess) {
+                            val baseUrl = BuildConfig.SUPABASE_URL.trimEnd('/')
+                            val url = if (baseUrl.startsWith("http")) baseUrl else "https://$baseUrl"
+                            reportAudioClipUrl = "$url/storage/v1/object/public/$usedBucket/$filename"
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(context, "Clip attached successfully", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(context, "Failed to upload clip", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("VoiceRoomScreen", "Clip upload failed", e)
+                } finally {
+                    isUploadingClip = false
+                }
+            }
+        }
+    }
 
     // 1-to-1 Chat State Variables
     var showOneToOneChatSheet by remember { mutableStateOf(false) }
@@ -1051,78 +1188,94 @@ fun VoiceRoomScreen(
 
     val onSendRoomMessage: (String) -> Unit = { text ->
         if (text.isNotBlank()) {
-            val msgToSend = text.trim()
-            chatInputValue = ""
-            val localMsgId = "msg_${System.currentTimeMillis()}_${(100..999).random()}"
-            val currentUserProfile = supabaseProfiles.find { it.uid == currentUserId }
-            val senderName = currentUserProfile?.displayName ?: currentUserProfile?.username ?: "You"
-            val senderAvatar = currentUserProfile?.avatar ?: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200"
-            val badge = if (currentUserId == roomHostId) "Host" else null
+            if (ModerationManager.isMessagingBlocked(myModerationStatus)) {
+                val action = myModerationStatus?.action_type ?: "restricted"
+                Toast.makeText(context, "Cannot send message: Your account is under $action moderation.", Toast.LENGTH_LONG).show()
+            } else {
+                val msgToSend = text.trim()
+                chatInputValue = ""
+                val localMsgId = "msg_${System.currentTimeMillis()}_${(100..999).random()}"
+                val currentUserProfile = supabaseProfiles.find { it.uid == currentUserId }
+                val senderName = currentUserProfile?.displayName ?: currentUserProfile?.username ?: "You"
+                val senderAvatar = currentUserProfile?.avatar ?: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200"
+                val badge = if (currentUserId == roomHostId) "Host" else null
 
-            // 1. Optimistic UI update: message appears instantly for the local user
-            if (messages.none { it.id == localMsgId }) {
-                messages.add(
-                    ChillRoomMessage(
-                        senderName = "You",
-                        senderImageUrl = senderAvatar,
-                        badge = badge,
-                        badgeColor = if (badge == "Host") ChillGoldIcon else ChillPurpleAccent,
-                        text = msgToSend,
-                        id = localMsgId,
-                        userId = currentUserId,
-                        createdAt = null
-                    )
-                )
-            }
+                scope.launch(Dispatchers.IO) {
+                    try {
+                        SupabaseSessionManager.ensureActiveSession(context)
+                        val token = SupabaseSessionManager.getBearerToken(context)
+                        val resolvedUuid = SupabaseSessionManager.getUserId(context)
 
-            val uid = currentUserId.ifBlank { SupabaseSessionManager.getUserId(context) ?: "anon_user" }
-
-            // 2. Broadcast via Supabase Realtime WebSocket channel to all participants in this room
-            VoiceRoomRealtimeManager.broadcastRoomMessage(
-                roomId = activeRoomId,
-                message = msgToSend,
-                userId = uid,
-                senderName = senderName,
-                senderAvatar = senderAvatar,
-                messageId = localMsgId
-            )
-
-            // 3. Persist to Postgres room_messages table via REST API
-            scope.launch(Dispatchers.IO) {
-                try {
-                    val token = SupabaseSessionManager.getBearerToken(context)
-                    val requestUid = when {
-                        uid.isNotBlank() && uid != "anon_user" -> uid
-                        currentUserProfile?.uid?.isNotBlank() == true -> currentUserProfile.uid
-                        else -> "00000000-0000-0000-0000-000000000000"
-                    }
-                    val request = SendRoomMessageRequest(
-                        room_id = activeRoomId,
-                        user_id = requestUid,
-                        message = msgToSend
-                    )
-                    val res = SupabaseClient.api.sendRoomMessage(
-                        auth = token,
-                        request = request
-                    )
-                    if (res.isSuccessful) {
-                        val inserted = res.body()?.firstOrNull()
-                        if (inserted != null) {
+                        if (resolvedUuid.isNullOrBlank() || !SupabaseSessionManager.isValidUuid(resolvedUuid)) {
                             withContext(Dispatchers.Main) {
-                                val idx = messages.indexOfFirst { it.id == localMsgId }
-                                if (idx >= 0) {
-                                    messages[idx] = messages[idx].copy(
-                                        id = inserted.id ?: localMsgId,
-                                        createdAt = inserted.created_at
+                                Toast.makeText(context, "Authentication required to send messages", Toast.LENGTH_SHORT).show()
+                            }
+                            return@launch
+                        }
+
+                        val request = SendRoomMessageRequest(
+                            room_id = activeRoomId,
+                            user_id = resolvedUuid,
+                            message = msgToSend
+                        )
+                        val res = SupabaseClient.api.sendRoomMessage(
+                            auth = token,
+                            request = request
+                        )
+
+                        if (res.isSuccessful) {
+                            val inserted = res.body()?.firstOrNull()
+                            val msgId = inserted?.id ?: localMsgId
+                            val createdAt = inserted?.created_at
+
+                            withContext(Dispatchers.Main) {
+                                messages.add(
+                                    ChillRoomMessage(
+                                        senderName = "You",
+                                        senderImageUrl = senderAvatar,
+                                        badge = badge,
+                                        badgeColor = if (badge == "Host") ChillGoldIcon else ChillPurpleAccent,
+                                        text = msgToSend,
+                                        id = msgId,
+                                        userId = resolvedUuid,
+                                        createdAt = createdAt
                                     )
+                                )
+                            }
+
+                            // Broadcast via Supabase Realtime only AFTER successful backend DB persistence
+                            VoiceRoomRealtimeManager.broadcastRoomMessage(
+                                roomId = activeRoomId,
+                                message = msgToSend,
+                                userId = resolvedUuid,
+                                senderName = senderName,
+                                senderAvatar = senderAvatar,
+                                messageId = msgId
+                            )
+                        } else {
+                            val code = res.code()
+                            val errBody = res.errorBody()?.string() ?: ""
+                            Log.e("VoiceRoomScreen", "sendRoomMessage failed: code=$code, err=$errBody")
+                            withContext(Dispatchers.Main) {
+                                if (code == 403) {
+                                    Toast.makeText(context, "Message blocked by moderation policy (403)", Toast.LENGTH_LONG).show()
+                                    scope.launch(Dispatchers.IO) {
+                                        val updatedStatus = ModerationManager.fetchMyModerationStatus(context)
+                                        withContext(Dispatchers.Main) {
+                                            myModerationStatus = updatedStatus
+                                        }
+                                    }
+                                } else {
+                                    Toast.makeText(context, "Failed to send message ($code)", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         }
-                    } else {
-                        Log.i("VoiceRoomScreen", "Room message broadcasted via Realtime channel (DB insert status ${res.code()})")
+                    } catch (e: Exception) {
+                        Log.e("VoiceRoomScreen", "Exception in sendRoomMessage", e)
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, "Network error: message not sent", Toast.LENGTH_SHORT).show()
+                        }
                     }
-                } catch (e: Exception) {
-                    Log.i("VoiceRoomScreen", "Room message sent locally & broadcasted (DB sync note: ${e.message})")
                 }
             }
         }
@@ -1687,7 +1840,64 @@ fun VoiceRoomScreen(
                 }
             }
 
+            // Moderation Banners above chat
+            if (myModerationStatus?.action_type == "warning" && ModerationManager.isActionActive(myModerationStatus)) {
+                Surface(
+                    color = Color(0xFFFEF3C7),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 2.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Community Warning Active (1h): Messaging disabled. ${myModerationStatus?.reason?.let { "($it)" } ?: ""}",
+                            fontSize = 11.sp,
+                            color = Color(0xFF92400E),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            } else if (myModerationStatus?.action_type == "mute" && ModerationManager.isActionActive(myModerationStatus)) {
+                Surface(
+                    color = Color(0xFFF3F4F6),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 2.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Lock, contentDescription = null, tint = Color(0xFF4B5563), modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Moderation Mute: Outgoing messages are disabled.",
+                            fontSize = 11.sp,
+                            color = Color(0xFF374151),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+
             // 4. ACTION BAR / SAY SOMETHING
+            val isChatBlocked = ModerationManager.isMessagingBlocked(myModerationStatus)
+            val chatPlaceholder = when {
+                myModerationStatus?.action_type == "warning" && isChatBlocked -> "Messaging disabled (Warning active)"
+                myModerationStatus?.action_type == "mute" && isChatBlocked -> "Muted by moderation"
+                myModerationStatus?.action_type == "suspend" && isChatBlocked -> "Account suspended"
+                else -> "Say something..."
+            }
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1714,10 +1924,11 @@ fun VoiceRoomScreen(
                     androidx.compose.foundation.text.BasicTextField(
                         value = chatInputValue,
                         onValueChange = { chatInputValue = it },
+                        enabled = !isChatBlocked,
                         modifier = Modifier.weight(1f),
                         textStyle = androidx.compose.ui.text.TextStyle(
                             fontSize = 14.sp,
-                            color = currentTheme.primaryTextColor
+                            color = if (isChatBlocked) Color.Gray else currentTheme.primaryTextColor
                         ),
                         cursorBrush = androidx.compose.ui.graphics.SolidColor(currentTheme.primaryTextColor),
                         singleLine = true,
@@ -1733,7 +1944,7 @@ fun VoiceRoomScreen(
                             Box(contentAlignment = Alignment.CenterStart) {
                                 if (chatInputValue.isEmpty()) {
                                     Text(
-                                        text = "Say something...",
+                                        text = chatPlaceholder,
                                         color = currentTheme.secondaryTextColor,
                                         fontSize = 14.sp
                                     )
@@ -2359,6 +2570,70 @@ fun VoiceRoomScreen(
         }
     }
 
+    // Suspension Modal Dialog (Active moderation enforcement)
+    if (myModerationStatus?.action_type == "suspend" && ModerationManager.isActionActive(myModerationStatus)) {
+        AlertDialog(
+            onDismissRequest = { /* Modal cannot be dismissed without leaving */ },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = "Suspended",
+                    tint = Color(0xFFDC2626),
+                    modifier = Modifier.size(36.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Account Suspended",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = Color(0xFF1E293B)
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Your access to Funkytalk voice rooms has been suspended due to moderation policy violations.",
+                        fontSize = 14.sp,
+                        color = Color(0xFF475569)
+                    )
+                    Surface(
+                        color = Color(0xFFFEF2F2),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(
+                                text = "Reason: ${myModerationStatus?.reason ?: "Violation of Community Guidelines"}",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF991B1B)
+                            )
+                            if (!myModerationStatus?.expires_at.isNullOrBlank()) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Suspension expires: ${myModerationStatus?.expires_at}",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFFB91C1C)
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { onBack() },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                ) {
+                    Text("Leave Room", color = Color.White)
+                }
+            },
+            shape = RoundedCornerShape(20.dp),
+            containerColor = Color.White
+        )
+    }
+
     // 2) Report Room Bottom Sheet container
     @OptIn(ExperimentalMaterial3Api::class)
     if (showReportDialog) {
@@ -2382,26 +2657,151 @@ fun VoiceRoomScreen(
                 )
             }
         ) {
+            val reportCategories = listOf(
+                "Harassment / Abuse",
+                "Spam / Promotion",
+                "Hate Speech",
+                "Sexual / Inappropriate",
+                "Dangerous Activity",
+                "Other Concerns"
+            )
+            val recentMsgsSnapshot = messages.takeLast(20).map { msg ->
+                ReportMessageSnapshot(
+                    sender = msg.senderName,
+                    text = msg.text,
+                    timestamp = msg.createdAt ?: ""
+                )
+            }
+            val speakerLogsSnapshot = participantsData.map { part ->
+                val p = supabaseProfiles.find { it.uid == part.user_id }
+                val isMe = (part.user_id == currentUserId)
+                val name = if (isMe) (p?.displayName ?: "You") else (p?.displayName ?: p?.username ?: "User")
+                val targetUuid = if (isMe) {
+                    SupabaseSessionManager.getUserId(context) ?: part.user_id
+                } else {
+                    part.user_id
+                }
+                ReportSpeakerLogItem(
+                    user_id = targetUuid,
+                    name = name,
+                    role = part.role ?: "listener",
+                    is_mic_enabled = part.is_mic_enabled ?: false
+                )
+            }
+
             ReportRoomBottomSheetContent(
                 selectedThemeIndex = selectedThemeIndex,
                 selectedReasonIndex = selectedReportReasonIndex,
                 onReasonIndexChange = { selectedReportReasonIndex = it },
-                audioAttached = reportEvidenceAudioAttached,
-                onAudioAttachChange = { reportEvidenceAudioAttached = it },
-                messagesAttached = reportEvidenceMessagesAttached,
-                onMessagesAttachChange = { reportEvidenceMessagesAttached = it },
-                activityAttached = reportEvidenceActivityAttached,
-                onActivityAttachChange = { reportEvidenceActivityAttached = it },
-                screenshotAttached = reportScreenshotAttached,
-                onScreenshotAttachChange = { reportScreenshotAttached = it },
-                videoAttached = reportVideoAttached,
-                onVideoAttachChange = { reportVideoAttached = it },
+                recentMessageCount = recentMsgsSnapshot.size,
+                activeParticipantsCount = speakerLogsSnapshot.size,
+                screenshotUrl = reportScreenshotUrl,
+                isUploadingScreenshot = isUploadingScreenshot,
+                onAttachScreenshot = { reportScreenshotLauncher.launch("image/*") },
+                onRemoveScreenshot = { reportScreenshotUrl = null },
+                clipUrl = reportAudioClipUrl,
+                isUploadingClip = isUploadingClip,
+                onAttachClip = { reportClipLauncher.launch("audio/*") },
+                onRemoveClip = { reportAudioClipUrl = null },
                 additionalDetails = reportAdditionalDetails,
                 onDetailsChange = { reportAdditionalDetails = it },
+                isSubmitting = isSubmittingReport,
                 onDismiss = { showReportDialog = false },
                 onSubmit = {
-                    showReportDialog = false
-                    showReportSubmittedSheet = true
+                    val category = reportCategories.getOrElse(selectedReportReasonIndex) { "Other Concerns" }
+                    isSubmittingReport = true
+                    scope.launch(Dispatchers.IO) {
+                        try {
+                            // Ensure session is fresh and extract Supabase auth UUID
+                            val reporterId = SupabaseSessionManager.ensureActiveSession(context)
+                            val firebaseUser = FirebaseAuth.getInstance().currentUser
+                            val firebaseUid = firebaseUser?.uid
+                            val hasSession = SupabaseSessionManager.hasValidAuthenticatedSession(context)
+                            val token = SupabaseSessionManager.getAccessToken(context)
+                            val jwtSub = SupabaseSessionManager.extractUserIdFromJwt(token)
+                            val effectiveReporterId = if (SupabaseSessionManager.isValidUuid(jwtSub)) jwtSub!! else (reporterId ?: "")
+
+                            // Diagnostic Logging required by prompt
+                            Log.d("VoiceRoomReport", "=== Report Submission Diagnostic ===")
+                            Log.d("VoiceRoomReport", "1. Firebase UID: $firebaseUid")
+                            Log.d("VoiceRoomReport", "2. Supabase session exists: $hasSession")
+                            Log.d("VoiceRoomReport", "3. Supabase session user.id: $effectiveReporterId")
+                            Log.d("VoiceRoomReport", "4. reporter_id being inserted: $effectiveReporterId")
+                            Log.d("VoiceRoomReport", "5. room_id: $activeRoomId")
+
+                            val bearerAuth = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                            if (bearerAuth == null || effectiveReporterId.isBlank() || !SupabaseSessionManager.isValidUuid(effectiveReporterId)) {
+                                Log.e("VoiceRoomReport", "Report blocked: No valid Supabase auth UUID or active JWT available")
+                                withContext(Dispatchers.Main) {
+                                    isSubmittingReport = false
+                                    Toast.makeText(context, "Authentication error: Active Supabase session required to submit report. Please log in again.", Toast.LENGTH_LONG).show()
+                                }
+                                return@launch
+                            }
+
+                            val details = reportAdditionalDetails.trim().ifEmpty { null }
+
+                            // Persist to Supabase backend room_reports table
+                            val req = CreateRoomReportRequest(
+                                room_id = activeRoomId,
+                                reporter_id = effectiveReporterId,
+                                reason = category,
+                                category = category,
+                                message_snapshot = recentMsgsSnapshot,
+                                speaker_log = speakerLogsSnapshot,
+                                screenshot_url = reportScreenshotUrl,
+                                audio_clip_url = reportAudioClipUrl,
+                                additional_details = details,
+                                status = "pending"
+                            )
+                            val res = SupabaseClient.api.createRoomReport(
+                                auth = bearerAuth,
+                                prefer = "return=minimal",
+                                report = req
+                            )
+
+                            if (res.isSuccessful) {
+                                Log.i("VoiceRoomReport", "Report room persisted successfully: code=${res.code()}")
+                                
+                                // Broadcast report event via Realtime websocket after persistence
+                                VoiceRoomRealtimeManager.broadcastRoomReport(
+                                    roomId = activeRoomId,
+                                    reporterId = effectiveReporterId,
+                                    category = category,
+                                    reason = category,
+                                    details = details
+                                )
+
+                                withContext(Dispatchers.Main) {
+                                    isSubmittingReport = false
+                                    showReportDialog = false
+                                    showReportSubmittedSheet = true
+                                    reportAdditionalDetails = ""
+                                    reportScreenshotUrl = null
+                                    reportAudioClipUrl = null
+                                    Toast.makeText(context, "Report submitted to moderation team", Toast.LENGTH_SHORT).show()
+                                }
+                            } else {
+                                val errBody = res.errorBody()?.string() ?: res.message()
+                                Log.e("VoiceRoomReport", "6. Supabase error code=${res.code()}: $errBody")
+                                withContext(Dispatchers.Main) {
+                                    isSubmittingReport = false
+                                    val errToast = if (res.code() == 403) {
+                                        "Report submission failed: 403 Forbidden (RLS policy check failed)"
+                                    } else {
+                                        "Report submission failed: HTTP ${res.code()}"
+                                    }
+                                    Toast.makeText(context, errToast, Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.e("VoiceRoomReport", "Report submission exception", e)
+                            withContext(Dispatchers.Main) {
+                                isSubmittingReport = false
+                                Toast.makeText(context, "Network error: ${e.localizedMessage ?: "Unable to submit report"}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
                 }
             )
         }
@@ -4384,18 +4784,19 @@ fun ReportRoomBottomSheetContent(
     selectedThemeIndex: Int,
     selectedReasonIndex: Int,
     onReasonIndexChange: (Int) -> Unit,
-    audioAttached: Boolean,
-    onAudioAttachChange: (Boolean) -> Unit,
-    messagesAttached: Boolean,
-    onMessagesAttachChange: (Boolean) -> Unit,
-    activityAttached: Boolean,
-    onActivityAttachChange: (Boolean) -> Unit,
-    screenshotAttached: Boolean,
-    onScreenshotAttachChange: (Boolean) -> Unit,
-    videoAttached: Boolean,
-    onVideoAttachChange: (Boolean) -> Unit,
+    recentMessageCount: Int,
+    activeParticipantsCount: Int,
+    screenshotUrl: String?,
+    isUploadingScreenshot: Boolean,
+    onAttachScreenshot: () -> Unit,
+    onRemoveScreenshot: () -> Unit,
+    clipUrl: String?,
+    isUploadingClip: Boolean,
+    onAttachClip: () -> Unit,
+    onRemoveClip: () -> Unit,
     additionalDetails: String,
     onDetailsChange: (String) -> Unit,
+    isSubmitting: Boolean,
     onDismiss: () -> Unit,
     onSubmit: () -> Unit
 ) {
@@ -4578,7 +4979,7 @@ fun ReportRoomBottomSheetContent(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // Evidence section
+        // Evidence section (Accurate & genuine telemetry)
         Text(
             text = "Evidence (automatically attached)",
             fontWeight = FontWeight.Bold,
@@ -4586,7 +4987,7 @@ fun ReportRoomBottomSheetContent(
             color = titleColor
         )
         Text(
-            text = "Encrypted telemetry to verify reported incidents",
+            text = "Live telemetry captured on device to verify reported incident",
             fontSize = 12.sp,
             color = subtitleColor,
             modifier = Modifier.padding(top = 2.dp, bottom = 10.dp)
@@ -4594,29 +4995,29 @@ fun ReportRoomBottomSheetContent(
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Card 1
+            // Card 1: Recent Messages Snapshot
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .background(cardBg, RoundedCornerShape(14.dp))
                     .border(1.dp, cardBorder, RoundedCornerShape(14.dp))
-                    .padding(vertical = 12.dp, horizontal = 8.dp)
+                    .padding(vertical = 12.dp, horizontal = 10.dp)
             ) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Soft3DMicrophoneIcon(modifier = Modifier.size(26.dp))
+                    Soft3DMessageStackIcon(modifier = Modifier.size(28.dp))
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Last 1 min\nAudio Clip",
-                        fontSize = 10.sp,
+                        text = "Recent Messages\nSnapshot",
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = titleColor,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        lineHeight = 13.sp
+                        lineHeight = 14.sp
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Box(
@@ -4628,7 +5029,7 @@ fun ReportRoomBottomSheetContent(
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
-                            text = "✓ Attached",
+                            text = "✓ $recentMessageCount Attached",
                             color = if (isDark) Color(0xFF34D399) else Color(0xFF15803D),
                             fontSize = 9.sp,
                             fontWeight = FontWeight.ExtraBold
@@ -4637,27 +5038,27 @@ fun ReportRoomBottomSheetContent(
                 }
             }
 
-            // Card 2
+            // Card 2: Speaker & People Activity Log
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .background(cardBg, RoundedCornerShape(14.dp))
                     .border(1.dp, cardBorder, RoundedCornerShape(14.dp))
-                    .padding(vertical = 12.dp, horizontal = 8.dp)
+                    .padding(vertical = 12.dp, horizontal = 10.dp)
             ) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Soft3DMessageStackIcon(modifier = Modifier.size(26.dp))
+                    Soft3DUsersGroupIcon(modifier = Modifier.size(28.dp))
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Recent 20\nMessages",
-                        fontSize = 10.sp,
+                        text = "Speaker & People\nActivity Log",
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = titleColor,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        lineHeight = 13.sp
+                        lineHeight = 14.sp
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Box(
@@ -4669,48 +5070,7 @@ fun ReportRoomBottomSheetContent(
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
-                            text = "✓ Attached",
-                            color = if (isDark) Color(0xFF34D399) else Color(0xFF15803D),
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                    }
-                }
-            }
-
-            // Card 3
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .background(cardBg, RoundedCornerShape(14.dp))
-                    .border(1.dp, cardBorder, RoundedCornerShape(14.dp))
-                    .padding(vertical = 12.dp, horizontal = 8.dp)
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Soft3DUsersGroupIcon(modifier = Modifier.size(26.dp))
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "Speaker\nActivity Log",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = titleColor,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        lineHeight = 13.sp
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Box(
-                        modifier = Modifier
-                            .background(
-                                if (isDark) Color(0xFF065F46).copy(alpha = 0.5f) else Color(0xFFDCFCE7),
-                                RoundedCornerShape(6.dp)
-                            )
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = "✓ Attached",
+                            text = "✓ $activeParticipantsCount Members",
                             color = if (isDark) Color(0xFF34D399) else Color(0xFF15803D),
                             fontSize = 9.sp,
                             fontWeight = FontWeight.ExtraBold
@@ -4735,65 +5095,153 @@ fun ReportRoomBottomSheetContent(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Button(
-                onClick = { onScreenshotAttachChange(!screenshotAttached) },
+            // Screenshot Button
+            Box(
                 modifier = Modifier
                     .weight(1f)
-                    .height(44.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (screenshotAttached) {
-                        if (isDark) Color(0xFF065F46).copy(alpha = 0.5f) else Color(0xFFECFDF5)
-                    } else {
-                        cardBg
-                    }
-                ),
-                border = BorderStroke(
-                    1.dp,
-                    if (screenshotAttached) Color(0xFF10B981) else cardBorder
-                ),
-                contentPadding = PaddingValues(horizontal = 10.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Soft3DScreenshotIcon(modifier = Modifier.size(20.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = if (screenshotAttached) "Attached" else "Screenshot",
-                        fontSize = 12.sp,
-                        color = if (screenshotAttached) (if (isDark) Color(0xFF34D399) else Color(0xFF047857)) else titleColor,
-                        fontWeight = FontWeight.Bold
+                    .height(44.dp)
+                    .background(
+                        color = if (screenshotUrl != null) {
+                            if (isDark) Color(0xFF065F46).copy(alpha = 0.5f) else Color(0xFFECFDF5)
+                        } else cardBg,
+                        shape = RoundedCornerShape(12.dp)
                     )
+                    .border(
+                        1.dp,
+                        if (screenshotUrl != null) Color(0xFF10B981) else cardBorder,
+                        RoundedCornerShape(12.dp)
+                    )
+                    .clickable {
+                        if (!isUploadingScreenshot) {
+                            if (screenshotUrl != null) onRemoveScreenshot() else onAttachScreenshot()
+                        }
+                    }
+                    .padding(horizontal = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                if (isUploadingScreenshot) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = titleColor,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Uploading...",
+                            fontSize = 11.sp,
+                            color = subtitleColor
+                        )
+                    }
+                } else if (screenshotUrl != null) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Soft3DScreenshotIcon(modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "✓ Screenshot",
+                                fontSize = 11.sp,
+                                color = if (isDark) Color(0xFF34D399) else Color(0xFF047857),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Remove Screenshot",
+                            tint = if (isDark) Color(0xFF34D399) else Color(0xFF047857),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Soft3DScreenshotIcon(modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Screenshot",
+                            fontSize = 12.sp,
+                            color = titleColor,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
 
-            Button(
-                onClick = { onVideoAttachChange(!videoAttached) },
+            // Clip Button
+            Box(
                 modifier = Modifier
                     .weight(1f)
-                    .height(44.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (videoAttached) {
-                        if (isDark) Color(0xFF065F46).copy(alpha = 0.5f) else Color(0xFFECFDF5)
-                    } else {
-                        cardBg
-                    }
-                ),
-                border = BorderStroke(
-                    1.dp,
-                    if (videoAttached) Color(0xFF10B981) else cardBorder
-                ),
-                contentPadding = PaddingValues(horizontal = 10.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Soft3DVideoCamIcon(modifier = Modifier.size(20.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = if (videoAttached) "Attached" else "Clip (30s)",
-                        fontSize = 12.sp,
-                        color = if (videoAttached) (if (isDark) Color(0xFF34D399) else Color(0xFF047857)) else titleColor,
-                        fontWeight = FontWeight.Bold
+                    .height(44.dp)
+                    .background(
+                        color = if (clipUrl != null) {
+                            if (isDark) Color(0xFF065F46).copy(alpha = 0.5f) else Color(0xFFECFDF5)
+                        } else cardBg,
+                        shape = RoundedCornerShape(12.dp)
                     )
+                    .border(
+                        1.dp,
+                        if (clipUrl != null) Color(0xFF10B981) else cardBorder,
+                        RoundedCornerShape(12.dp)
+                    )
+                    .clickable {
+                        if (!isUploadingClip) {
+                            if (clipUrl != null) onRemoveClip() else onAttachClip()
+                        }
+                    }
+                    .padding(horizontal = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                if (isUploadingClip) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = titleColor,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Uploading...",
+                            fontSize = 11.sp,
+                            color = subtitleColor
+                        )
+                    }
+                } else if (clipUrl != null) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Soft3DVideoCamIcon(modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "✓ Clip",
+                                fontSize = 11.sp,
+                                color = if (isDark) Color(0xFF34D399) else Color(0xFF047857),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Remove Clip",
+                            tint = if (isDark) Color(0xFF34D399) else Color(0xFF047857),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Soft3DVideoCamIcon(modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Clip (Audio)",
+                            fontSize = 12.sp,
+                            color = titleColor,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
         }
@@ -4850,24 +5298,41 @@ fun ReportRoomBottomSheetContent(
         // Submit Button
         Button(
             onClick = onSubmit,
+            enabled = !isSubmitting,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0xFFF59E0B)
+                containerColor = Color(0xFFF59E0B),
+                disabledContainerColor = Color(0xFFF59E0B).copy(alpha = 0.5f)
             ),
             shape = RoundedCornerShape(14.dp),
             elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Soft3DReportShield(modifier = Modifier.size(24.dp))
+            if (isSubmitting) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    color = Color(0xFF451A03),
+                    strokeWidth = 2.dp
+                )
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = "Submit Report",
+                    text = "Submitting Report...",
                     color = Color(0xFF451A03),
                     fontWeight = FontWeight.ExtraBold,
                     fontSize = 15.sp
                 )
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Soft3DReportShield(modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "Submit Report",
+                        color = Color(0xFF451A03),
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 15.sp
+                    )
+                }
             }
         }
 
@@ -4939,7 +5404,7 @@ fun ReportSubmittedBottomSheetContent(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 NextStepReportRow(
-                    text = "Our moderation team reviews the audio and activity log",
+                    text = "Our moderation team reviews the chat snapshots and activity log",
                     textColor = if (isDark) Color(0xFFE2E8F0) else Color(0xFF334155),
                     icon = { Soft3DSearchAuditIcon(modifier = Modifier.size(22.dp)) }
                 )

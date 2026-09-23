@@ -530,6 +530,44 @@ object VoiceRoomRealtimeManager {
         }
     }
 
+    fun broadcastRoomReport(
+        roomId: String,
+        reporterId: String,
+        category: String,
+        reason: String? = null,
+        details: String? = null
+    ) {
+        if (roomId.isBlank()) return
+        val ws = webSocket ?: return
+        try {
+            if (!subscribedRoomChannels.contains(roomId)) {
+                subscribeRoomChannel(roomId)
+            }
+            val payloadObj = JSONObject().apply {
+                put("room_id", roomId)
+                put("reporter_id", reporterId)
+                put("category", category)
+                if (!reason.isNullOrBlank()) put("reason", reason)
+                if (!details.isNullOrBlank()) put("details", details)
+                put("timestamp", System.currentTimeMillis())
+            }
+            val broadcastMsg = JSONObject().apply {
+                put("topic", "realtime:room:$roomId")
+                put("event", "broadcast")
+                put("payload", JSONObject().apply {
+                    put("type", "broadcast")
+                    put("event", "room_reported")
+                    put("payload", payloadObj)
+                })
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(broadcastMsg.toString())
+            Log.d(TAG, "Broadcasted room_reported to room:$roomId by $reporterId")
+        } catch (e: Exception) {
+            Log.w(TAG, "Error broadcasting room_reported to room $roomId: ${e.message}")
+        }
+    }
+
     fun broadcastParticipantUpdate(
         roomId: String,
         userId: String,
