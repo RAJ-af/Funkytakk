@@ -703,8 +703,11 @@ fun VoiceRoomScreen(
     }
 
     LaunchedEffect(activeRoomId) {
+        val currentToken = SupabaseSessionManager.getAccessToken(context)
+        VoiceRoomRealtimeManager.setAuthToken(currentToken)
         VoiceRoomRealtimeManager.start()
         VoiceRoomRealtimeManager.subscribeRoomChannel(activeRoomId)
+        VoiceRoomRealtimeManager.subscribeRoomSpeakerRequests(activeRoomId)
         VoiceRoomRealtimeManager.subscribeRoomMessages(activeRoomId)
         VoiceRoomRealtimeManager.events.collect { event ->
             when (event) {
@@ -1006,16 +1009,27 @@ fun VoiceRoomScreen(
         }
     }
 
-    LaunchedEffect(activeRoomId) {
+    LaunchedEffect(activeRoomId, roomHostId, currentUserId) {
         while (isActive && activeRoomId.isNotBlank()) {
-            delay(5000)
+            delay(4000)
             try {
                 val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
                 if (partsRes.isSuccessful) {
                     val list = partsRes.body() ?: emptyList()
+                    val liveList = com.example.realtime.VoiceRoomRealtimeManager.getLiveParticipants(activeRoomId)
+                    val combined = (list + liveList).distinctBy { it.user_id }
                     withContext(Dispatchers.Main) {
-                        participantsData = list
+                        if (combined.isNotEmpty()) {
+                            participantsData = combined
+                        }
                     }
+                }
+                val uid = SupabaseSessionManager.getUserId(context) ?: currentUserId
+                val isHost = (uid.isNotBlank() && !roomHostId.isNullOrBlank() && uid.equals(roomHostId, ignoreCase = true))
+                if (isHost) {
+                    viewModel?.checkPendingSpeakerRequestsForHost(activeRoomId, context)
+                } else {
+                    viewModel?.checkMySpeakerRequest(activeRoomId, context)
                 }
             } catch (_: Exception) {}
         }
@@ -1104,6 +1118,17 @@ fun VoiceRoomScreen(
                             isSpeakerRequestSubmitting = false
                             if (res.isSuccessful || res.code() == 409) {
                                 isSpeakerRequestPending = true
+                                val myName = currentUserProfile?.displayName ?: currentUserProfile?.username ?: "Learner"
+                                val myAvatar = currentUserProfile?.avatar ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400"
+                                com.example.realtime.VoiceRoomRealtimeManager.broadcastSpeakerRequest(
+                                    roomId = activeRoomId,
+                                    requestId = "req_${System.currentTimeMillis()}",
+                                    userId = uid,
+                                    action = "requested",
+                                    status = "pending",
+                                    userName = myName,
+                                    userAvatar = myAvatar
+                                )
                                 Toast.makeText(context, "Request to speak sent to host!", Toast.LENGTH_SHORT).show()
                             } else {
                                 Toast.makeText(context, "Could not submit speaker request.", Toast.LENGTH_SHORT).show()

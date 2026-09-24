@@ -11,7 +11,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material3.*
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -20,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -29,18 +34,32 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.example.ui.components.*
+import com.example.SupportChatManager
+import com.example.ui.components.CircleFlag
+import com.example.ui.components.FunkyHeartIcon
+import com.example.ui.components.FunkyMoreIcon
+import com.example.ui.components.FunkySearchIcon
 import com.example.ui.screens.home.models.DirectChat
+import com.example.ui.theme.GoldAccent
 
 @Composable
 fun ChatsTabContent(
     conversationsList: List<DirectChat>,
-    onSelectChat: (DirectChat) -> Unit
+    onSelectChat: (DirectChat) -> Unit,
+    onOpenSupportChat: (reportId: String?) -> Unit = {}
 ) {
     val context = LocalContext.current
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf("All") } // "All", "Unread", "Language", "Groups"
     var showOptionsMenu by remember { mutableStateOf(false) }
+
+    val supportPreview by SupportChatManager.latestMessagePreview.collectAsState()
+    val supportTime by SupportChatManager.latestMessageTime.collectAsState()
+    val supportUnreadCount by SupportChatManager.unreadCount.collectAsState()
+
+    LaunchedEffect(Unit) {
+        SupportChatManager.init(context)
+    }
 
     // Dynamic list that can be updated (e.g., mark all as read)
     var localConversations by remember(conversationsList) {
@@ -62,6 +81,19 @@ fun ChatsTabContent(
             }
             matchesSearch && matchesFilter
         }
+    }
+
+    val showSupportInSearch = remember(searchQuery, selectedFilter, supportUnreadCount) {
+        val matchesSearch = searchQuery.isBlank() ||
+                "FunkyTalk".contains(searchQuery, ignoreCase = true) ||
+                "Support".contains(searchQuery, ignoreCase = true) ||
+                (supportPreview ?: "").contains(searchQuery, ignoreCase = true)
+        val matchesFilter = when (selectedFilter) {
+            "Unread" -> supportUnreadCount > 0
+            "Groups" -> false
+            else -> true
+        }
+        matchesSearch && matchesFilter
     }
 
     LazyColumn(
@@ -130,12 +162,10 @@ fun ChatsTabContent(
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("New conversation", color = Color.Black, fontSize = 14.sp) },
+                            text = { Text("Contact Support", color = Color.Black, fontSize = 14.sp) },
                             onClick = {
                                 showOptionsMenu = false
-                                if (localConversations.isNotEmpty()) {
-                                    onSelectChat(localConversations.first())
-                                }
+                                onOpenSupportChat(null)
                             }
                         )
                         DropdownMenuItem(
@@ -267,9 +297,174 @@ fun ChatsTabContent(
             }
         }
 
-        // 5. Chat Cards List
+        // 5. PINNED OFFICIAL FUNKYTALK SUPPORT ENTRY (ALWAYS AT TOP)
+        if (showSupportInSearch) {
+            item {
+                Spacer(modifier = Modifier.height(16.dp))
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .clip(RoundedCornerShape(22.dp))
+                        .clickable { onOpenSupportChat(null) }
+                        .testTag("pinned_support_chat_item"),
+                    shape = RoundedCornerShape(22.dp),
+                    color = Color.White,
+                    border = BorderStroke(1.5.dp, Color(0xFFFDE68A)),
+                    shadowElevation = 1.dp
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Left Avatar: FunkyTalk Official Avatar with Verified Badge
+                        Box(
+                            modifier = Modifier.size(56.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(CircleShape)
+                                    .background(GoldAccent),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "FT",
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 20.sp,
+                                    color = Color.Black
+                                )
+                            }
+
+                            // Circular Verified check badge
+                            Box(
+                                modifier = Modifier
+                                    .size(18.dp)
+                                    .align(Alignment.BottomEnd)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF3B82F6))
+                                    .border(1.5.dp, Color.White, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = "Official",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(14.dp))
+
+                        // Center Details
+                        Column(
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            // Top line: Name & Timestamp & Official badge
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "FunkyTalk",
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 16.sp,
+                                        color = Color.Black
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(Color(0xFFFFFBEB))
+                                            .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(6.dp))
+                                            .padding(horizontal = 6.dp, vertical = 1.dp)
+                                    ) {
+                                        Text(
+                                            text = "SUPPORT",
+                                            color = Color(0xFFB45309),
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Black
+                                        )
+                                    }
+                                }
+
+                                Text(
+                                    text = supportTime ?: "",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF9CA3AF),
+                                    fontWeight = FontWeight.Normal
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(2.dp))
+
+                            // Middle line: Subtitle
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.SupportAgent,
+                                    contentDescription = null,
+                                    tint = Color(0xFF10B981),
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Official Support Channel",
+                                    color = Color(0xFF047857),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            // Bottom line: Last Message & Unread Badge
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = supportPreview ?: "How can we help you today? Tap to chat.",
+                                    color = if (supportUnreadCount > 0) Color(0xFF1F2937) else Color(0xFF6B7280),
+                                    fontWeight = if (supportUnreadCount > 0) FontWeight.Bold else FontWeight.Normal,
+                                    fontSize = 13.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+
+                                if (supportUnreadCount > 0) {
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .clip(CircleShape)
+                                            .background(GoldAccent),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "$supportUnreadCount",
+                                            color = Color.Black,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Black
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 6. Regular Chat Cards List
         item {
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(6.dp))
         }
 
         items(filteredList, key = { it.id }) { chat ->
@@ -418,3 +613,4 @@ fun ChatsTabContent(
         }
     }
 }
+

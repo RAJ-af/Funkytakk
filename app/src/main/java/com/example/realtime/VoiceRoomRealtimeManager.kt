@@ -56,6 +56,16 @@ sealed class RealtimeTableEvent {
         val actionType: String,
         val reason: String?
     ) : RealtimeTableEvent()
+    data class NotificationChanged(
+        val eventType: String,
+        val record: JSONObject?,
+        val userId: String? = null
+    ) : RealtimeTableEvent()
+    data class SupportMessageChanged(
+        val eventType: String,
+        val record: JSONObject?,
+        val conversationId: String? = null
+    ) : RealtimeTableEvent()
     data class Reconnected(val timestamp: Long = System.currentTimeMillis()) : RealtimeTableEvent()
 }
 
@@ -142,6 +152,31 @@ object VoiceRoomRealtimeManager {
 
     @Volatile
     private var isConnected = false
+    @Volatile
+    private var currentAuthToken: String? = null
+
+    fun setAuthToken(token: String?) {
+        val cleanToken = if (token == BuildConfig.SUPABASE_ANON_KEY) null else token
+        if (currentAuthToken != cleanToken) {
+            currentAuthToken = cleanToken
+            val ws = webSocket
+            if (ws != null && isConnected && cleanToken != null) {
+                try {
+                    val authMsg = JSONObject().apply {
+                        put("topic", "realtime:public:speaker_requests")
+                        put("event", "access_token")
+                        put("payload", JSONObject().apply {
+                            put("access_token", cleanToken)
+                        })
+                        put("ref", refCounter.getAndIncrement().toString())
+                    }
+                    ws.send(authMsg.toString())
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error sending access_token update: ${e.message}")
+                }
+            }
+        }
+    }
 
     fun start() {
         if (isConnected || webSocket != null) return
@@ -151,7 +186,8 @@ object VoiceRoomRealtimeManager {
     private fun connect() {
         try {
             val host = BuildConfig.SUPABASE_URL.replace("https://", "").replace("http://", "").trimEnd('/')
-            val wsUrl = "wss://$host/realtime/v1/websocket?apikey=${BuildConfig.SUPABASE_ANON_KEY}&vsn=1.0.0"
+            val tokenParam = currentAuthToken?.let { "&token=$it" } ?: ""
+            val wsUrl = "wss://$host/realtime/v1/websocket?apikey=${BuildConfig.SUPABASE_ANON_KEY}$tokenParam&vsn=1.0.0"
 
             val request = Request.Builder()
                 .url(wsUrl)
@@ -191,11 +227,16 @@ object VoiceRoomRealtimeManager {
     }
 
     private fun subscribeToTopics(ws: WebSocket) {
+        val token = currentAuthToken
+
         // Subscribe to voice_rooms changes
         val joinVoiceRooms = JSONObject().apply {
             put("topic", "realtime:public:voice_rooms")
             put("event", "phx_join")
             put("payload", JSONObject().apply {
+                if (!token.isNullOrBlank()) {
+                    put("access_token", token)
+                }
                 put("config", JSONObject().apply {
                     put("postgres_changes", org.json.JSONArray().apply {
                         put(JSONObject().apply {
@@ -215,6 +256,9 @@ object VoiceRoomRealtimeManager {
             put("topic", "realtime:public:room_participants")
             put("event", "phx_join")
             put("payload", JSONObject().apply {
+                if (!token.isNullOrBlank()) {
+                    put("access_token", token)
+                }
                 put("config", JSONObject().apply {
                     put("postgres_changes", org.json.JSONArray().apply {
                         put(JSONObject().apply {
@@ -234,6 +278,9 @@ object VoiceRoomRealtimeManager {
             put("topic", "realtime:public:room_messages")
             put("event", "phx_join")
             put("payload", JSONObject().apply {
+                if (!token.isNullOrBlank()) {
+                    put("access_token", token)
+                }
                 put("config", JSONObject().apply {
                     put("postgres_changes", org.json.JSONArray().apply {
                         put(JSONObject().apply {
@@ -253,6 +300,9 @@ object VoiceRoomRealtimeManager {
             put("topic", "realtime:public:speaker_requests")
             put("event", "phx_join")
             put("payload", JSONObject().apply {
+                if (!token.isNullOrBlank()) {
+                    put("access_token", token)
+                }
                 put("config", JSONObject().apply {
                     put("postgres_changes", org.json.JSONArray().apply {
                         put(JSONObject().apply {
@@ -267,9 +317,54 @@ object VoiceRoomRealtimeManager {
         }
         ws.send(joinSpeakerRequests.toString())
 
+        // Subscribe to public notifications table changes
+        val joinNotifications = JSONObject().apply {
+            put("topic", "realtime:public:notifications")
+            put("event", "phx_join")
+            put("payload", JSONObject().apply {
+                if (!token.isNullOrBlank()) {
+                    put("access_token", token)
+                }
+                put("config", JSONObject().apply {
+                    put("postgres_changes", org.json.JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("event", "*")
+                            put("schema", "public")
+                            put("table", "notifications")
+                        })
+                    })
+                })
+            })
+            put("ref", refCounter.getAndIncrement().toString())
+        }
+        ws.send(joinNotifications.toString())
+
+        // Subscribe to support_messages table changes
+        val joinSupportMessages = JSONObject().apply {
+            put("topic", "realtime:public:support_messages")
+            put("event", "phx_join")
+            put("payload", JSONObject().apply {
+                if (!token.isNullOrBlank()) {
+                    put("access_token", token)
+                }
+                put("config", JSONObject().apply {
+                    put("postgres_changes", org.json.JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("event", "*")
+                            put("schema", "public")
+                            put("table", "support_messages")
+                        })
+                    })
+                })
+            })
+            put("ref", refCounter.getAndIncrement().toString())
+        }
+        ws.send(joinSupportMessages.toString())
+
         // Resubscribe to any active room broadcast channels
         subscribedRoomChannels.forEach { roomId ->
             sendJoinRoomChannel(ws, roomId)
+            sendJoinRoomSpeakerRequestsChannel(ws, roomId)
         }
     }
 
@@ -301,7 +396,7 @@ object VoiceRoomRealtimeManager {
             val payload = json.optJSONObject("payload")
 
             // Realtime Broadcast Event on per-room channel (e.g. topic "realtime:room:xyz" or "room:xyz")
-            if (event == "broadcast" || event == "emoji" || event == "chat_message" || event == "participant_update") {
+            if (event == "broadcast" || event == "emoji" || event == "chat_message" || event == "participant_update" || event == "speaker_request" || event == "speaker_request_update") {
                 val roomId = when {
                     topic.contains("room:") -> topic.substringAfter("room:").substringBefore(":")
                     else -> ""
@@ -315,7 +410,31 @@ object VoiceRoomRealtimeManager {
                 val senderName = innerPayload?.optString("sender_name") ?: ""
                 val senderAvatar = innerPayload?.optString("sender_avatar") ?: ""
 
-                if (broadcastType == "participant_update" || broadcastType == "participant_changed") {
+                if (broadcastType == "speaker_request" || broadcastType == "speaker_request_update" || broadcastType == "speaker_request_changed") {
+                    val targetRoomId = innerPayload?.optString("room_id")?.ifBlank { roomId } ?: roomId
+                    val reqId = innerPayload?.optString("request_id")?.ifBlank { innerPayload?.optString("id") } ?: ""
+                    val pUserId = innerPayload?.optString("user_id")?.ifBlank { userId } ?: userId
+                    val pStatus = innerPayload?.optString("status") ?: "pending"
+                    val action = innerPayload?.optString("action") ?: "requested"
+                    val pName = innerPayload?.optString("user_name")?.ifBlank { senderName } ?: senderName
+                    val pAvatar = innerPayload?.optString("user_avatar")?.ifBlank { senderAvatar } ?: senderAvatar
+
+                    if (pUserId.isNotBlank()) {
+                        recordUserSnippet(pUserId, pName, pAvatar)
+                    }
+
+                    Log.d(TAG, "Received broadcast speaker_request ($action / $pStatus) for room '$targetRoomId' reqId='$reqId' user='$pUserId' (name=$pName)")
+                    _events.tryEmit(
+                        RealtimeTableEvent.SpeakerRequestChanged(
+                            eventType = action,
+                            record = innerPayload,
+                            roomId = targetRoomId,
+                            userId = pUserId,
+                            status = pStatus,
+                            requestId = reqId
+                        )
+                    )
+                } else if (broadcastType == "participant_update" || broadcastType == "participant_changed") {
                     val targetRoomId = innerPayload?.optString("room_id")?.ifBlank { roomId } ?: roomId
                     val action = innerPayload?.optString("action") ?: "UPDATE"
                     val pUserId = innerPayload?.optString("user_id")?.ifBlank { userId } ?: userId
@@ -433,10 +552,94 @@ object VoiceRoomRealtimeManager {
                             requestId = reqId
                         )
                     )
+                } else if (table == "notifications" || topic.contains("notifications")) {
+                    val userId = record?.optString("user_id")
+                    Log.d(TAG, "[Realtime] Received notifications event ($eventType) for user $userId: $record")
+                    _events.tryEmit(
+                        RealtimeTableEvent.NotificationChanged(
+                            eventType = eventType,
+                            record = record,
+                            userId = userId
+                        )
+                    )
+                } else if (table == "support_messages" || topic.contains("support_messages")) {
+                    val conversationId = record?.optString("conversation_id")
+                    Log.d(TAG, "[Realtime] Received support_messages event ($eventType) for conversation $conversationId: $record")
+                    _events.tryEmit(
+                        RealtimeTableEvent.SupportMessageChanged(
+                            eventType = eventType,
+                            record = record,
+                            conversationId = conversationId
+                        )
+                    )
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error handling message", e)
+        }
+    }
+
+    fun subscribeUserNotifications(userId: String) {
+        if (userId.isBlank()) return
+        val ws = webSocket ?: return
+        try {
+            val token = currentAuthToken
+            val joinMsg = JSONObject().apply {
+                put("topic", "realtime:public:notifications:user_id=eq.$userId")
+                put("event", "phx_join")
+                put("payload", JSONObject().apply {
+                    if (!token.isNullOrBlank()) {
+                        put("access_token", token)
+                    }
+                    put("config", JSONObject().apply {
+                        put("postgres_changes", org.json.JSONArray().apply {
+                            put(JSONObject().apply {
+                                put("event", "*")
+                                put("schema", "public")
+                                put("table", "notifications")
+                                put("filter", "user_id=eq.$userId")
+                            })
+                        })
+                    })
+                })
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(joinMsg.toString())
+            Log.d(TAG, "Subscribed to postgres_changes notifications for user:$userId")
+        } catch (e: Exception) {
+            Log.w(TAG, "Error sending join for notifications user channel $userId: ${e.message}")
+        }
+    }
+
+    fun subscribeSupportMessages(conversationId: String) {
+        if (conversationId.isBlank()) return
+        val ws = webSocket ?: return
+        try {
+            val token = currentAuthToken
+            val joinMsg = JSONObject().apply {
+                put("topic", "realtime:public:support_messages:conversation_id=eq.$conversationId")
+                put("event", "phx_join")
+                put("payload", JSONObject().apply {
+                    if (!token.isNullOrBlank()) {
+                        put("access_token", token)
+                    }
+                    put("config", JSONObject().apply {
+                        put("postgres_changes", org.json.JSONArray().apply {
+                            put(JSONObject().apply {
+                                put("event", "*")
+                                put("schema", "public")
+                                put("table", "support_messages")
+                                put("filter", "conversation_id=eq.$conversationId")
+                            })
+                        })
+                    })
+                })
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(joinMsg.toString())
+            Log.d(TAG, "Subscribed to postgres_changes support_messages for conversation:$conversationId")
+        } catch (e: Exception) {
+            Log.w(TAG, "Error sending join for support_messages channel $conversationId: ${e.message}")
         }
     }
 
@@ -465,11 +668,48 @@ object VoiceRoomRealtimeManager {
         }
     }
 
+    private fun sendJoinRoomSpeakerRequestsChannel(ws: WebSocket, roomId: String) {
+        try {
+            val token = currentAuthToken
+            val joinMsg = JSONObject().apply {
+                put("topic", "realtime:public:speaker_requests:room_id=eq.$roomId")
+                put("event", "phx_join")
+                put("payload", JSONObject().apply {
+                    if (!token.isNullOrBlank()) {
+                        put("access_token", token)
+                    }
+                    put("config", JSONObject().apply {
+                        put("postgres_changes", org.json.JSONArray().apply {
+                            put(JSONObject().apply {
+                                put("event", "*")
+                                put("schema", "public")
+                                put("table", "speaker_requests")
+                                put("filter", "room_id=eq.$roomId")
+                            })
+                        })
+                    })
+                })
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(joinMsg.toString())
+            Log.d(TAG, "Subscribed to postgres_changes speaker_requests for room:$roomId")
+        } catch (e: Exception) {
+            Log.w(TAG, "Error sending join for speaker_requests room channel $roomId: ${e.message}")
+        }
+    }
+
+    fun subscribeRoomSpeakerRequests(roomId: String) {
+        if (roomId.isBlank()) return
+        val ws = webSocket ?: return
+        sendJoinRoomSpeakerRequestsChannel(ws, roomId)
+    }
+
     fun subscribeRoomChannel(roomId: String) {
         if (roomId.isBlank()) return
         subscribedRoomChannels.add(roomId)
         val ws = webSocket ?: return
         sendJoinRoomChannel(ws, roomId)
+        sendJoinRoomSpeakerRequestsChannel(ws, roomId)
     }
 
     fun leaveRoomChannel(roomId: String) {
@@ -693,6 +933,67 @@ object VoiceRoomRealtimeManager {
             Log.d(TAG, "Broadcasted participant_update ($action) to room:$roomId for user $userId (name=$userName)")
         } catch (e: Exception) {
             Log.e(TAG, "Error broadcasting participant_update to room $roomId", e)
+        }
+    }
+
+    fun broadcastSpeakerRequest(
+        roomId: String,
+        requestId: String,
+        userId: String,
+        action: String = "requested",
+        status: String = "pending",
+        userName: String? = null,
+        userAvatar: String? = null
+    ) {
+        if (roomId.isBlank()) return
+        if (userId.isNotBlank()) {
+            recordUserSnippet(userId, userName, userAvatar)
+        }
+        val ws = webSocket ?: return
+        try {
+            if (!subscribedRoomChannels.contains(roomId)) {
+                subscribeRoomChannel(roomId)
+            }
+            val payloadObj = JSONObject().apply {
+                put("room_id", roomId)
+                put("request_id", requestId)
+                put("user_id", userId)
+                put("action", action)
+                put("status", status)
+                if (!userName.isNullOrBlank()) put("user_name", userName)
+                if (!userAvatar.isNullOrBlank()) put("user_avatar", userAvatar)
+                put("timestamp", System.currentTimeMillis())
+            }
+
+            // 1. Broadcast to room channel: realtime:room:$roomId
+            val broadcastMsg = JSONObject().apply {
+                put("topic", "realtime:room:$roomId")
+                put("event", "broadcast")
+                put("payload", JSONObject().apply {
+                    put("type", "broadcast")
+                    put("event", "speaker_request")
+                    put("payload", payloadObj)
+                })
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(broadcastMsg.toString())
+
+            // 2. Also broadcast to public:speaker_requests channel
+            val publicBroadcastMsg = JSONObject().apply {
+                put("topic", "realtime:public:speaker_requests")
+                put("event", "broadcast")
+                put("payload", JSONObject().apply {
+                    put("type", "broadcast")
+                    put("event", "speaker_request")
+                    put("payload", payloadObj)
+                })
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(publicBroadcastMsg.toString())
+
+            Log.d(TAG, "Broadcasted speaker_request ($action / $status) to room:$roomId for user $userId (reqId=$requestId)")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error broadcasting speaker_request to room $roomId", e)
         }
     }
 

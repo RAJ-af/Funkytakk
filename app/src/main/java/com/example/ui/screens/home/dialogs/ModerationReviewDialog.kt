@@ -270,11 +270,14 @@ class ReportAudioPlayerState(
 @Composable
 fun ModerationReviewDialog(
     onDismiss: () -> Unit,
-    currentUserProfile: UserProfile? = null
+    currentUserProfile: UserProfile? = null,
+    supabaseProfiles: List<UserProfile> = emptyList()
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
+
+    val adminUnreadSupportCount by com.example.AdminSupportManager.unreadConversationsCount.collectAsState()
 
     val audioPlayer = remember(scope) { ReportAudioPlayerState(context, scope) }
 
@@ -546,6 +549,33 @@ fun ModerationReviewDialog(
                                 }
                             }
                         )
+                        Tab(
+                            selected = selectedAdminTab == 2,
+                            onClick = { selectedAdminTab = 2 },
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.SupportAgent, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Support Inbox", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    if (adminUnreadSupportCount > 0) {
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(CircleShape)
+                                                .background(Color(0xFFDC2626))
+                                                .padding(horizontal = 5.dp, vertical = 1.dp)
+                                        ) {
+                                            Text(
+                                                text = "$adminUnreadSupportCount",
+                                                color = Color.White,
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Black
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        )
                     }
 
                     HorizontalDivider(color = Color(0xFFE5E7EB), thickness = 1.dp)
@@ -768,7 +798,7 @@ fun ModerationReviewDialog(
                                 }
                             }
                         }
-                    } else {
+                    } else if (selectedAdminTab == 1) {
                         // Active Restrictions Tab
                         LazyColumn(
                             modifier = Modifier
@@ -946,6 +976,20 @@ fun ModerationReviewDialog(
                                     }
                                 }
                             }
+                        }
+                    } else if (selectedAdminTab == 2) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .weight(1f)
+                        ) {
+                            AdminSupportInboxView(
+                                supabaseProfiles = supabaseProfiles,
+                                onOpenReport = { reportId ->
+                                    selectedAdminTab = 0
+                                    searchQuery = reportId
+                                }
+                            )
                         }
                     }
                 }

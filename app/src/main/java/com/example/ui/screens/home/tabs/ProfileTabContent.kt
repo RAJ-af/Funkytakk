@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -31,10 +32,12 @@ import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.flow.MutableStateFlow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import com.example.AuthViewModel
@@ -49,7 +52,8 @@ import com.example.ui.theme.GoldAccent
 fun ProfileTabContent(
     currentUserProfile: UserProfile,
     onLogoutClick: () -> Unit,
-    viewModel: AuthViewModel? = null
+    viewModel: AuthViewModel? = null,
+    onOpenSupportChat: (reportId: String?) -> Unit = {}
 ) {
     val context = LocalContext.current
     var showEditProfileDialog by remember { mutableStateOf(false) }
@@ -257,6 +261,82 @@ fun ProfileTabContent(
                             Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray, textAlign = TextAlign.Center)
                         }
                     }
+                }
+            }
+        }
+
+        // Contact Support Entry Card
+        item {
+            Spacer(modifier = Modifier.height(16.dp))
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .clickable { onOpenSupportChat(null) }
+                    .testTag("profile_contact_support_card"),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(20.dp),
+                border = BorderStroke(1.dp, Color(0xFFE5E7EB))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color(0xFFFFFBEB))
+                            .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(14.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SupportAgent,
+                            contentDescription = "Contact Support",
+                            tint = Color(0xFFB45309),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Contact Support",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = DarkText
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0xFFFFFBEB))
+                                    .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "OFFICIAL",
+                                    color = Color(0xFFB45309),
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "24/7 Official FunkyTalk Assistance & Appeals",
+                            fontSize = 12.sp,
+                            color = GraySubtitle
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                        contentDescription = "Open Support Chat",
+                        tint = Color(0xFF9CA3AF),
+                        modifier = Modifier.size(16.dp)
+                    )
                 }
             }
         }
@@ -668,9 +748,11 @@ fun ProfileTabContent(
     }
 
     if (showModerationDialog) {
+        val supabaseProfiles by (viewModel?.supabaseProfiles ?: MutableStateFlow(emptyList())).collectAsState()
         ModerationReviewDialog(
             onDismiss = { showModerationDialog = false },
-            currentUserProfile = currentUserProfile
+            currentUserProfile = currentUserProfile,
+            supabaseProfiles = supabaseProfiles
         )
     }
 }

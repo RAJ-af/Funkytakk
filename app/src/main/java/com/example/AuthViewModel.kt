@@ -154,11 +154,14 @@ class AuthViewModel : ViewModel() {
 
                             val isHost = hostId != null && myUid != null && hostId.equals(myUid, ignoreCase = true)
 
-                            Log.d("HostSpeakerRequests", "[Realtime Event] SpeakerRequestChanged: status=${event.status}, reqId=${event.requestId}, user=${event.userId}, isHost=$isHost")
+                            Log.d("HostSpeakerRequests", "[Realtime Event] SpeakerRequestChanged: status=${event.status}, eventType=${event.eventType}, reqId=${event.requestId}, user=${event.userId}, isHost=$isHost, currentRoom=$currentRoomId")
 
                             // 1. HOST Handling: Immediately query and refresh pending requests list from Supabase
                             if (isHost) {
-                                if (event.status == "pending") {
+                                val isPendingState = event.status == "pending" || event.eventType == "requested" || event.eventType == "INSERT"
+                                val isResolvedState = event.status in listOf("accepted", "declined") || event.eventType in listOf("DELETE", "accepted", "declined")
+
+                                if (isPendingState && !isResolvedState) {
                                     val user = _supabaseProfiles.value.find { it.uid == event.userId }
                                     val snippet = com.example.realtime.VoiceRoomRealtimeManager.getUserSnippet(event.userId ?: "")
                                     val name = user?.displayName?.ifBlank { null }
@@ -169,20 +172,20 @@ class AuthViewModel : ViewModel() {
                                         ?: snippet?.avatar?.ifBlank { null }
                                         ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400"
                                     val newItem = SpeakerRequestItem(
-                                        id = event.requestId ?: "req_${System.currentTimeMillis()}",
+                                        id = event.requestId?.ifBlank { null } ?: "req_${System.currentTimeMillis()}",
                                         roomId = currentRoomId,
                                         userId = event.userId ?: "",
                                         requesterName = name,
                                         requesterAvatar = avatar
                                     )
-                                    val updated = (listOf(newItem) + _pendingSpeakerRequests.value.filter { it.id != newItem.id && it.userId != newItem.userId })
+                                    val updated = (listOf(newItem) + _pendingSpeakerRequests.value.filter { it.id != newItem.id && (it.userId.isBlank() || it.userId != newItem.userId) })
                                     _pendingSpeakerRequests.value = updated
                                     _pendingSpeakerRequest.value = updated.firstOrNull()
-                                } else if (event.status in listOf("accepted", "declined") || event.eventType == "DELETE") {
+                                } else if (isResolvedState) {
                                     val updated = _pendingSpeakerRequests.value.filterNot { it.id == event.requestId || (it.userId.isNotBlank() && it.userId == event.userId) }
                                     _pendingSpeakerRequests.value = updated
                                     _pendingSpeakerRequest.value = updated.firstOrNull()
-                                    if (event.status == "accepted") {
+                                    if (event.status == "accepted" || event.eventType == "accepted") {
                                         refreshActiveRoomSpeakers(currentRoomId, appContext)
                                     }
                                 }
@@ -191,8 +194,8 @@ class AuthViewModel : ViewModel() {
 
                             // 2. LISTENER Handling: Update requester's local state
                             if (myUid != null && event.userId == myUid) {
-                                when (event.status) {
-                                    "pending" -> {
+                                when (event.status ?: event.eventType) {
+                                    "pending", "requested" -> {
                                         _mySpeakerRequestStatus.value = "pending"
                                     }
                                     "accepted" -> {
@@ -288,10 +291,38 @@ class AuthViewModel : ViewModel() {
         val ctx = context ?: FunkyTalkApplication.appContext
         val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
         
+        // Find target user from current pending list before removing
+        val targetItem = _pendingSpeakerRequests.value.find { it.id == requestId }
+        val targetUserId = targetItem?.userId ?: ""
+
         // Optimistically remove from pending list
         val remaining = _pendingSpeakerRequests.value.filter { it.id != requestId }
         _pendingSpeakerRequests.value = remaining
         _pendingSpeakerRequest.value = remaining.firstOrNull()
+
+        val currentRoom = _activeRoomId.value
+
+        // Broadcast decision immediately to room so listener gets notified instantly
+        if (currentRoom != null && targetUserId.isNotBlank()) {
+            com.example.realtime.VoiceRoomRealtimeManager.broadcastSpeakerRequest(
+                roomId = currentRoom,
+                requestId = requestId,
+                userId = targetUserId,
+                action = if (accept) "accepted" else "declined",
+                status = if (accept) "accepted" else "declined"
+            )
+            if (accept) {
+                com.example.realtime.VoiceRoomRealtimeManager.broadcastParticipantUpdate(
+                    roomId = currentRoom,
+                    userId = targetUserId,
+                    action = "speaker_promoted",
+                    role = "speaker",
+                    isMicEnabled = true,
+                    userName = targetItem?.requesterName,
+                    userAvatar = targetItem?.requesterAvatar
+                )
+            }
+        }
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -300,7 +331,6 @@ class AuthViewModel : ViewModel() {
                     body = RespondSpeakerRequestBody(request_id = requestId, accept = accept)
                 )
                 Log.d("AuthViewModel", "respondToSpeakerRequest: $requestId, accept=$accept, code=${res.code()}")
-                val currentRoom = _activeRoomId.value
                 if (currentRoom != null) {
                     checkPendingSpeakerRequestsForHost(currentRoom, ctx)
                     refreshActiveRoomSpeakers(currentRoom, ctx)
@@ -483,6 +513,14 @@ class AuthViewModel : ViewModel() {
             return
         }
 
+        val myProfile = _supabaseProfiles.value.find { it.uid == uid }
+            ?: (authState.value as? AuthState.Success)?.user
+        val myName = myProfile?.displayName?.ifBlank { null }
+            ?: myProfile?.username?.ifBlank { null }
+            ?: "Learner"
+        val myAvatar = myProfile?.avatar?.ifBlank { null }
+            ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400"
+
         val token = SupabaseSessionManager.getBearerToken(context)
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -494,15 +532,58 @@ class AuthViewModel : ViewModel() {
                         status = "pending"
                     )
                 )
+                var reqId = "req_${System.currentTimeMillis()}"
+                if (res.isSuccessful) {
+                    try {
+                        val rawBody = res.body()?.string()
+                        if (!rawBody.isNullOrBlank()) {
+                            if (rawBody.trim().startsWith("[")) {
+                                val arr = org.json.JSONArray(rawBody)
+                                if (arr.length() > 0) {
+                                    val obj = arr.getJSONObject(0)
+                                    val idFromObj = obj.optString("id")
+                                    if (!idFromObj.isNullOrBlank()) reqId = idFromObj
+                                }
+                            } else if (rawBody.trim().startsWith("{")) {
+                                val obj = org.json.JSONObject(rawBody)
+                                val idFromObj = obj.optString("id")
+                                if (!idFromObj.isNullOrBlank()) reqId = idFromObj
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
                 withContext(Dispatchers.Main) {
                     if (res.isSuccessful) {
                         _mySpeakerRequestStatus.value = "pending"
+
+                        // Broadcast speaker request live to room & host
+                        com.example.realtime.VoiceRoomRealtimeManager.broadcastSpeakerRequest(
+                            roomId = roomId,
+                            requestId = reqId,
+                            userId = uid,
+                            action = "requested",
+                            status = "pending",
+                            userName = myName,
+                            userAvatar = myAvatar
+                        )
+
                         onResult?.invoke(true, "Request to join as speaker sent to host!")
                     } else {
                         val code = res.code()
                         if (code == 409) {
                             // Already exists as pending
                             _mySpeakerRequestStatus.value = "pending"
+
+                            com.example.realtime.VoiceRoomRealtimeManager.broadcastSpeakerRequest(
+                                roomId = roomId,
+                                requestId = "req_${System.currentTimeMillis()}",
+                                userId = uid,
+                                action = "requested",
+                                status = "pending",
+                                userName = myName,
+                                userAvatar = myAvatar
+                            )
+
                             onResult?.invoke(true, "Request already pending host approval.")
                         } else if (code == 404 || code == 410) {
                             onResult?.invoke(false, "This room is no longer active.")

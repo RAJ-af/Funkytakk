@@ -87,6 +87,7 @@ class MainActivity : ComponentActivity() {
                     var tempLearningLanguage by rememberSaveable { mutableStateOf("") }
                     var tempHobbies by remember { mutableStateOf<List<String>>(emptyList()) }
                     var createRoomIsPrivate by rememberSaveable { mutableStateOf(false) }
+                    var activeSupportReportId by rememberSaveable { mutableStateOf<String?>(null) }
 
                     LaunchedEffect(authState) {
                         if (authState is AuthState.Success) {
@@ -129,13 +130,24 @@ class MainActivity : ComponentActivity() {
 
                             if (isUserReady) {
                                 pendingDeepLinkUri = null
-                                authViewModel.processDeepLinkUri(
-                                    uri = uri,
-                                    context = applicationContext,
-                                    onNavigateToRoom = {
-                                        currentScreen = "voice_room"
+                                when (uri.host?.lowercase()) {
+                                    "notifications" -> {
+                                        currentScreen = "notifications"
                                     }
-                                )
+                                    "support" -> {
+                                        activeSupportReportId = uri.getQueryParameter("report_id")
+                                        currentScreen = "support_chat"
+                                    }
+                                    else -> {
+                                        authViewModel.processDeepLinkUri(
+                                            uri = uri,
+                                            context = applicationContext,
+                                            onNavigateToRoom = {
+                                                currentScreen = "voice_room"
+                                            }
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -320,7 +332,25 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onRoomClick = {
                                     currentScreen = "voice_room"
+                                },
+                                onOpenNotifications = {
+                                    currentScreen = "notifications"
+                                },
+                                onOpenSupportChat = { reportId ->
+                                    activeSupportReportId = reportId
+                                    currentScreen = "support_chat"
                                 }
+                            )
+                            "notifications" -> NotificationsScreen(
+                                onBack = { currentScreen = "home" },
+                                onOpenSupportChat = { reportId ->
+                                    activeSupportReportId = reportId
+                                    currentScreen = "support_chat"
+                                }
+                            )
+                            "support_chat" -> SupportChatScreen(
+                                reportId = activeSupportReportId,
+                                onBack = { currentScreen = "home" }
                             )
                             "create_language_room" -> CreateLanguageRoomScreen(
                                 viewModel = authViewModel,

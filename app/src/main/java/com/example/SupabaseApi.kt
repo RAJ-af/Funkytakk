@@ -580,6 +580,74 @@ interface SupabaseApi {
         @Path("bucket") bucket: String,
         @Path(value = "filename", encoded = true) filename: String
     ): Response<ResponseBody>
+
+    // ----------------------------------------------------
+    // IN-APP NOTIFICATIONS (Feature 1)
+    // ----------------------------------------------------
+    @GET("rest/v1/notifications?select=*&order=created_at.desc")
+    suspend fun getNotifications(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String
+    ): Response<List<SupabaseNotification>>
+
+    @PATCH("rest/v1/notifications")
+    suspend fun updateNotificationRead(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Header("Prefer") prefer: String = "return=minimal",
+        @Query("id") idFilter: String, // format: "eq.<uuid>"
+        @Body body: UpdateNotificationReadRequest
+    ): Response<ResponseBody>
+
+    // ----------------------------------------------------
+    // 1:1 SUPPORT CHAT (Feature 2)
+    // ----------------------------------------------------
+    @GET("rest/v1/support_conversations?select=*&limit=1")
+    suspend fun getMySupportConversation(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String
+    ): Response<List<SupabaseSupportConversation>>
+
+    @GET("rest/v1/support_messages?select=*&order=created_at.asc")
+    suspend fun getSupportMessages(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("conversation_id") conversationIdFilter: String // format: "eq.<conversation_id>"
+    ): Response<List<SupabaseSupportMessage>>
+
+    @POST("rest/v1/rpc/send_support_message")
+    suspend fun sendSupportMessage(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: SendSupportMessageRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/mark_support_conversation_read")
+    suspend fun markSupportConversationRead(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> = emptyMap()
+    ): Response<ResponseBody>
+
+    @GET("rest/v1/support_conversations?select=*&order=last_message_at.desc")
+    suspend fun getAllSupportConversations(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String
+    ): Response<List<SupabaseSupportConversation>>
+
+    @POST("rest/v1/rpc/admin_send_support_message")
+    suspend fun adminSendSupportMessage(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: AdminSendSupportMessageRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/admin_mark_support_conversation_read")
+    suspend fun adminMarkSupportConversationRead(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: AdminMarkSupportConversationReadRequest
+    ): Response<ResponseBody>
 }
 
 @JsonClass(generateAdapter = true)
@@ -679,4 +747,70 @@ data class UserRoleItem(
     val user_id: String? = null,
     val role: String? = null
 )
+
+// ----------------------------------------------------
+// IN-APP NOTIFICATIONS MODELS
+// ----------------------------------------------------
+@JsonClass(generateAdapter = true)
+data class SupabaseNotification(
+    val id: String = "",
+    val user_id: String? = null,
+    val type: String? = null,
+    val title: String? = null,
+    val message: String? = null,
+    val report_id: String? = null,
+    val action_type: String? = null,
+    val is_read: Boolean = false,
+    val created_at: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class UpdateNotificationReadRequest(
+    val is_read: Boolean = true
+)
+
+// ----------------------------------------------------
+// 1:1 SUPPORT CHAT MODELS
+// ----------------------------------------------------
+@JsonClass(generateAdapter = true)
+data class SupabaseSupportConversation(
+    val id: String = "",
+    val user_id: String? = null,
+    val status: String? = "open",
+    val last_message_at: String? = null,
+    val created_at: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class SupabaseSupportMessage(
+    val id: String = "",
+    val conversation_id: String? = null,
+    val sender_type: String = "user", // "user" or "admin"
+    val sender_id: String? = null,
+    val body: String = "",
+    val report_id: String? = null,
+    val is_read_by_user: Boolean = false,
+    val is_read_by_admin: Boolean = false,
+    val created_at: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class SendSupportMessageRequest(
+    val p_message: String,
+    val p_report_id: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class AdminSendSupportMessageRequest(
+    val p_user_id: String,
+    val p_message: String,
+    val p_report_id: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class AdminMarkSupportConversationReadRequest(
+    val p_user_id: String
+)
+
+
 

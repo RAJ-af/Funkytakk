@@ -53,7 +53,9 @@ fun HomeScreen(
     viewModel: AuthViewModel,
     onLogoutSuccess: () -> Unit,
     onCreateLanguageRoom: (isPrivate: Boolean) -> Unit = {},
-    onRoomClick: () -> Unit = {}
+    onRoomClick: () -> Unit = {},
+    onOpenNotifications: () -> Unit = {},
+    onOpenSupportChat: (reportId: String?) -> Unit = {}
 ) {
     val authState by viewModel.authState.collectAsState()
     val supabaseProfiles by viewModel.supabaseProfiles.collectAsState()
@@ -61,6 +63,8 @@ fun HomeScreen(
 
     LaunchedEffect(Unit) {
         viewModel.fetchSupabaseProfiles(context)
+        com.example.NotificationsManager.init(context)
+        com.example.SupportChatManager.init(context)
     }
 
     var showCreateRoomBottomSheet by remember { mutableStateOf(false) }
@@ -454,6 +458,7 @@ fun HomeScreen(
                             onOpenEvents = {
                                 showAmusementEventsDialog = true
                             },
+                            onOpenNotifications = onOpenNotifications,
                             onCreateRoom = { showCreateRoomBottomSheet = true },
                             onJoinWithCode = { showJoinCodeDialog = true },
                             onOpenFilter = { showFilterDialog = true },
@@ -499,14 +504,16 @@ fun HomeScreen(
                             conversationsList = conversationsList,
                             onSelectChat = { chat ->
                                 activeChatWindowContact = chat
-                            }
+                            },
+                            onOpenSupportChat = onOpenSupportChat
                         )
                     }
                     "profile" -> {
                         ProfileTabContent(
                             currentUserProfile = currentUserProfile,
                             onLogoutClick = { showLogoutDialog = true },
-                            viewModel = viewModel
+                            viewModel = viewModel,
+                            onOpenSupportChat = onOpenSupportChat
                         )
                     }
                 }

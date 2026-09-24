@@ -32,6 +32,7 @@ fun HomeTabContent(
     selectedSortOption: String,
     hasActiveEvents: Boolean = false,
     onOpenEvents: () -> Unit,
+    onOpenNotifications: () -> Unit = {},
     onCreateRoom: () -> Unit,
     onJoinWithCode: () -> Unit,
     onOpenFilter: () -> Unit,
@@ -46,6 +47,7 @@ fun HomeTabContent(
             HomeHeader(
                 hasActiveEvents = hasActiveEvents,
                 onOpenEvents = onOpenEvents,
+                onOpenNotifications = onOpenNotifications,
                 onCreateRoom = onCreateRoom,
                 onJoinWithCode = onJoinWithCode
             )

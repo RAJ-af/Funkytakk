@@ -1,0 +1,180 @@
+package com.example
+
+import android.content.Context
+import android.util.Log
+import com.example.realtime.RealtimeTableEvent
+import com.example.realtime.VoiceRoomRealtimeManager
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import java.text.SimpleDateFormat
+import java.util.*
+
+object NotificationsManager {
+    private const val TAG = "NotificationsManager"
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    private val _notifications = MutableStateFlow<List<SupabaseNotification>>(emptyList())
+    val notifications: StateFlow<List<SupabaseNotification>> = _notifications.asStateFlow()
+
+    private val _unreadCount = MutableStateFlow(0)
+    val unreadCount: StateFlow<Int> = _unreadCount.asStateFlow()
+
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    private var currentUserId: String? = null
+    private var isListening = false
+
+    fun init(context: Context) {
+        if (!isListening) {
+            isListening = true
+            scope.launch {
+                VoiceRoomRealtimeManager.events.collect { event ->
+                    when (event) {
+                        is RealtimeTableEvent.NotificationChanged -> {
+                            Log.d(TAG, "Notification changed via Realtime: ${event.eventType}")
+                            fetchNotifications(context)
+                        }
+                        is RealtimeTableEvent.Reconnected -> {
+                            fetchNotifications(context)
+                        }
+                        else -> Unit
+                    }
+                }
+            }
+        }
+        fetchNotifications(context)
+    }
+
+    fun fetchNotifications(context: Context) {
+        scope.launch {
+            try {
+                val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                if (token.isNullOrBlank()) {
+                    Log.d(TAG, "fetchNotifications: No active session, skipping")
+                    return@launch
+                }
+
+                val uid = SupabaseSessionManager.getUserId(context)
+                if (uid != null && uid != currentUserId) {
+                    currentUserId = uid
+                    VoiceRoomRealtimeManager.subscribeUserNotifications(uid)
+                }
+
+                _isLoading.value = true
+                val response = SupabaseClient.api.getNotifications(auth = token)
+                if (response.isSuccessful && response.body() != null) {
+                    val list = response.body()!!
+                    _notifications.value = list
+                    _unreadCount.value = list.count { !it.is_read }
+                    Log.d(TAG, "Fetched ${list.size} notifications, unread: ${_unreadCount.value}")
+                } else {
+                    Log.e(TAG, "Failed to fetch notifications: ${response.code()} ${response.message()}")
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching notifications", e)
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    fun markAsRead(context: Context, notificationId: String, onComplete: (() -> Unit)? = null) {
+        if (notificationId.isBlank()) return
+        
+        // Optimistically update local state immediately
+        val currentList = _notifications.value
+        val target = currentList.find { it.id == notificationId }
+        if (target != null && !target.is_read) {
+            val updatedList = currentList.map {
+                if (it.id == notificationId) it.copy(is_read = true) else it
+            }
+            _notifications.value = updatedList
+            _unreadCount.value = updatedList.count { !it.is_read }
+        }
+
+        scope.launch {
+            try {
+                val token = SupabaseSessionManager.getAuthenticatedBearerToken(context) ?: return@launch
+                val response = SupabaseClient.api.updateNotificationRead(
+                    auth = token,
+                    idFilter = "eq.$notificationId",
+                    body = UpdateNotificationReadRequest(is_read = true)
+                )
+                if (response.isSuccessful) {
+                    Log.d(TAG, "Successfully marked notification $notificationId as read")
+                } else {
+                    Log.w(TAG, "Failed to mark notification as read: ${response.code()}")
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Error updating notification read status", e)
+            } finally {
+                withContext(Dispatchers.Main) {
+                    onComplete?.invoke()
+                }
+            }
+        }
+    }
+
+    fun markAllAsRead(context: Context) {
+        val currentList = _notifications.value
+        val unreadItems = currentList.filter { !it.is_read }
+        if (unreadItems.isEmpty()) return
+
+        // Optimistically update all to read
+        val updatedList = currentList.map { it.copy(is_read = true) }
+        _notifications.value = updatedList
+        _unreadCount.value = 0
+
+        scope.launch {
+            unreadItems.forEach { item ->
+                try {
+                    val token = SupabaseSessionManager.getAuthenticatedBearerToken(context) ?: return@forEach
+                    SupabaseClient.api.updateNotificationRead(
+                        auth = token,
+                        idFilter = "eq.${item.id}",
+                        body = UpdateNotificationReadRequest(is_read = true)
+                    )
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    fun formatRelativeTime(isoString: String?): String {
+        if (isoString.isNullOrBlank()) return "Just now"
+        return try {
+            val clean = isoString.replace("Z", "+0000").replace("T", " ")
+            val format = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }
+            val date = format.parse(clean) ?: Date()
+            val now = System.currentTimeMillis()
+            val diffMs = now - date.time
+
+            val seconds = diffMs / 1000
+            val minutes = seconds / 60
+            val hours = minutes / 60
+            val days = hours / 24
+
+            when {
+                seconds < 45 -> "Just now"
+                minutes < 60 -> "${minutes}m ago"
+                hours < 24 -> "${hours}h ago"
+                days == 1L -> "Yesterday"
+                days < 7 -> "${days}d ago"
+                else -> {
+                    val outFormat = SimpleDateFormat("MMM d", Locale.getDefault())
+                    outFormat.format(date)
+                }
+            }
+        } catch (_: Exception) {
+            "Recently"
+        }
+    }
+}

@@ -124,13 +124,24 @@ object SupabaseSessionManager {
         }
 
         Log.d(TAG, "Session updated: hasAccessToken=${realAccessToken != null}, resolvedUuid=$resolvedUuid")
+        try {
+            com.example.realtime.VoiceRoomRealtimeManager.setAuthToken(realAccessToken)
+        } catch (_: Exception) {}
     }
 
     fun getAccessToken(context: Context): String? {
-        if (cachedAccessToken != null) return cachedAccessToken
+        if (cachedAccessToken != null) {
+            try {
+                com.example.realtime.VoiceRoomRealtimeManager.setAuthToken(cachedAccessToken)
+            } catch (_: Exception) {}
+            return cachedAccessToken
+        }
         val token = getPrefs(context).getString(KEY_ACCESS_TOKEN, null)
         if (token == BuildConfig.SUPABASE_ANON_KEY) return null
         cachedAccessToken = token
+        try {
+            com.example.realtime.VoiceRoomRealtimeManager.setAuthToken(token)
+        } catch (_: Exception) {}
         return token
     }
 
