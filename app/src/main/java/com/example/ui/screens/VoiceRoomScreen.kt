@@ -415,7 +415,9 @@ fun VoiceRoomScreen(
         }
     }
 
-    val currentUserId = remember(context) { SupabaseSessionManager.getUserId(context) ?: "" }
+    var currentUserId by remember {
+        mutableStateOf(SupabaseSessionManager.getUserId(context) ?: "")
+    }
     val currentUserProfile = remember(supabaseProfiles, currentUserId) {
         supabaseProfiles.find { it.uid == currentUserId }
     }
@@ -427,7 +429,7 @@ fun VoiceRoomScreen(
     var participantsData by remember { mutableStateOf<List<SupabaseRoomParticipant>>(emptyList()) }
     var roomHostId by remember { mutableStateOf<String?>("") }
     val isSpeaker = remember(participantsData, currentUserId, roomHostId) {
-        (currentUserId.isNotBlank() && currentUserId == roomHostId) ||
+        (currentUserId.isNotBlank() && currentUserId.equals(roomHostId, ignoreCase = true)) ||
         participantsData.any { it.user_id == currentUserId && (it.role == "speaker" || it.role == "host") }
     }
     val scope = rememberCoroutineScope()
@@ -983,6 +985,13 @@ fun VoiceRoomScreen(
 
     LaunchedEffect(showPeopleSheet) {
         if (showPeopleSheet && activeRoomId.isNotBlank()) {
+            val uid = SupabaseSessionManager.ensureActiveSession(context) ?: SupabaseSessionManager.getUserId(context) ?: currentUserId
+            if (uid.isNotBlank()) currentUserId = uid
+            val isHost = (uid.isNotBlank() && roomHostId != null && uid.equals(roomHostId, ignoreCase = true))
+            Log.d("HostSpeakerRequests", "showPeopleSheet opened: isHost=$isHost, uid=$uid, hostId=$roomHostId, roomId=$activeRoomId")
+            if (isHost) {
+                viewModel?.checkPendingSpeakerRequestsForHost(activeRoomId, context)
+            }
             withContext(Dispatchers.IO) {
                 try {
                     val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
@@ -1024,9 +1033,15 @@ fun VoiceRoomScreen(
         isSpeakerRequestPending = (mySpeakerRequestStatus == "pending")
     }
 
-    LaunchedEffect(activeRoomId) {
+    LaunchedEffect(activeRoomId, roomHostId, currentUserId) {
         if (activeRoomId.isNotBlank()) {
-            if (currentUserId == roomHostId) {
+            val uid = SupabaseSessionManager.getUserId(context) ?: currentUserId
+            if (uid.isNotBlank() && currentUserId.isBlank()) {
+                currentUserId = uid
+            }
+            val isHost = (uid.isNotBlank() && roomHostId != null && uid.equals(roomHostId, ignoreCase = true))
+            Log.d("HostSpeakerRequests", "LaunchedEffect room sync: isHost=$isHost, uid=$uid, hostId=$roomHostId, roomId=$activeRoomId")
+            if (isHost) {
                 viewModel?.checkPendingSpeakerRequestsForHost(activeRoomId, context)
             } else {
                 viewModel?.checkMySpeakerRequest(activeRoomId, context)
@@ -1035,11 +1050,14 @@ fun VoiceRoomScreen(
     }
 
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner, activeRoomId) {
+    DisposableEffect(lifecycleOwner, activeRoomId, roomHostId) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && activeRoomId.isNotBlank()) {
+                val uid = SupabaseSessionManager.getUserId(context) ?: currentUserId
+                val isHost = (uid.isNotBlank() && roomHostId != null && uid.equals(roomHostId, ignoreCase = true))
+                Log.d("HostSpeakerRequests", "ON_RESUME event: isHost=$isHost, uid=$uid, hostId=$roomHostId, roomId=$activeRoomId")
                 viewModel?.refreshActiveRoomSpeakers(activeRoomId, context)
-                if (currentUserId == roomHostId) {
+                if (isHost) {
                     viewModel?.checkPendingSpeakerRequestsForHost(activeRoomId, context)
                 } else {
                     viewModel?.checkMySpeakerRequest(activeRoomId, context)

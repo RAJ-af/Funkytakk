@@ -56,6 +56,7 @@ sealed class RealtimeTableEvent {
         val actionType: String,
         val reason: String?
     ) : RealtimeTableEvent()
+    data class Reconnected(val timestamp: Long = System.currentTimeMillis()) : RealtimeTableEvent()
 }
 
 object VoiceRoomRealtimeManager {
@@ -162,6 +163,7 @@ object VoiceRoomRealtimeManager {
                     isConnected = true
                     subscribeToTopics(ws)
                     startHeartbeat(ws)
+                    _events.tryEmit(RealtimeTableEvent.Reconnected())
                 }
 
                 override fun onMessage(ws: WebSocket, text: String) {

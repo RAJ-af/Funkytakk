@@ -126,6 +126,24 @@ class AuthViewModel : ViewModel() {
         viewModelScope.launch {
             VoiceRoomRealtimeManager.events.collect { event ->
                 when (event) {
+                    is RealtimeTableEvent.Reconnected -> {
+                        val currentRoomId = _activeRoomId.value
+                        if (!currentRoomId.isNullOrBlank()) {
+                            val hostId = _activeRoomHostId.value
+                            val appContext = FunkyTalkApplication.appContext
+                            val myUid = appContext?.let { SupabaseSessionManager.getUserId(it) }
+                                ?: (authState.value as? AuthState.Success)?.user?.uid
+                            val isHost = (hostId != null && myUid != null && hostId.equals(myUid, ignoreCase = true))
+
+                            Log.d("HostSpeakerRequests", "[Realtime Reconnect] Reconnected to Realtime. Refreshing room $currentRoomId (isHost=$isHost)")
+                            if (isHost) {
+                                checkPendingSpeakerRequestsForHost(currentRoomId, appContext)
+                            } else {
+                                checkMySpeakerRequest(currentRoomId, appContext)
+                            }
+                            refreshActiveRoomSpeakers(currentRoomId, appContext)
+                        }
+                    }
                     is RealtimeTableEvent.SpeakerRequestChanged -> {
                         val currentRoomId = _activeRoomId.value
                         if (currentRoomId != null && (event.roomId == currentRoomId || event.roomId.isNullOrBlank())) {
@@ -134,14 +152,22 @@ class AuthViewModel : ViewModel() {
                             val myUid = appContext?.let { SupabaseSessionManager.getUserId(it) }
                                 ?: (authState.value as? AuthState.Success)?.user?.uid
 
-                            val isHost = hostId != null && myUid != null && hostId == myUid
+                            val isHost = hostId != null && myUid != null && hostId.equals(myUid, ignoreCase = true)
 
-                            // 1. HOST Handling: Manage pending requests list
+                            Log.d("HostSpeakerRequests", "[Realtime Event] SpeakerRequestChanged: status=${event.status}, reqId=${event.requestId}, user=${event.userId}, isHost=$isHost")
+
+                            // 1. HOST Handling: Immediately query and refresh pending requests list from Supabase
                             if (isHost) {
                                 if (event.status == "pending") {
                                     val user = _supabaseProfiles.value.find { it.uid == event.userId }
-                                    val name = user?.displayName?.ifBlank { null } ?: user?.username?.ifBlank { null } ?: "Listener"
-                                    val avatar = user?.avatar?.ifBlank { null } ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400"
+                                    val snippet = com.example.realtime.VoiceRoomRealtimeManager.getUserSnippet(event.userId ?: "")
+                                    val name = user?.displayName?.ifBlank { null }
+                                        ?: user?.username?.ifBlank { null }
+                                        ?: snippet?.name?.ifBlank { null }
+                                        ?: "Listener"
+                                    val avatar = user?.avatar?.ifBlank { null }
+                                        ?: snippet?.avatar?.ifBlank { null }
+                                        ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400"
                                     val newItem = SpeakerRequestItem(
                                         id = event.requestId ?: "req_${System.currentTimeMillis()}",
                                         roomId = currentRoomId,
@@ -160,6 +186,7 @@ class AuthViewModel : ViewModel() {
                                         refreshActiveRoomSpeakers(currentRoomId, appContext)
                                     }
                                 }
+                                checkPendingSpeakerRequestsForHost(currentRoomId, appContext)
                             }
 
                             // 2. LISTENER Handling: Update requester's local state
@@ -320,55 +347,110 @@ class AuthViewModel : ViewModel() {
 
     fun checkPendingSpeakerRequestsForHost(roomId: String, context: Context? = null) {
         val ctx = context ?: FunkyTalkApplication.appContext
-        val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                if (ctx != null) {
+                    SupabaseSessionManager.ensureActiveSession(ctx)
+                }
+                val myAuthUid = ctx?.let { SupabaseSessionManager.getUserId(it) }
+                    ?: (authState.value as? AuthState.Success)?.user?.uid
+                val hostId = _activeRoomHostId.value
+                val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+                val isHostVerified = (myAuthUid != null && hostId != null && myAuthUid.equals(hostId, ignoreCase = true))
+
+                // Mandatory integration logging for Host speaker requests
+                Log.d("HostSpeakerRequests", "=== [DEBUG] Host Speaker Requests Check ===")
+                Log.d("HostSpeakerRequests", "1. Authenticated Supabase auth.uid(): $myAuthUid")
+                Log.d("HostSpeakerRequests", "2. Current room ID: $roomId, voice_rooms.host_id: $hostId")
+                Log.d("HostSpeakerRequests", "3. Verification (auth.uid == host_id): $isHostVerified")
+
                 val res = SupabaseClient.api.getPendingSpeakerRequests(auth = token, roomIdEq = "eq.$roomId")
+                Log.d("HostSpeakerRequests", "4. Supabase API query status: ${res.code()}, isSuccessful: ${res.isSuccessful}")
+
                 if (res.isSuccessful) {
                     val list = res.body() ?: emptyList()
+                    Log.d("HostSpeakerRequests", "5. Loaded ${list.size} pending speaker requests: $list")
                     val currentProfiles = _supabaseProfiles.value
                     val items = list.map { req ->
-                        val user = currentProfiles.find { it.uid == req.user_id }
-                        val name = user?.displayName?.ifBlank { null } ?: user?.username?.ifBlank { null } ?: "Listener"
-                        val avatar = user?.avatar?.ifBlank { null } ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400"
+                        val snippet = com.example.realtime.VoiceRoomRealtimeManager.getUserSnippet(req.user_id)
+                        val pProfile = currentProfiles.find { it.uid == req.user_id }
+                        val name = pProfile?.displayName?.ifBlank { null }
+                            ?: pProfile?.username?.ifBlank { null }
+                            ?: snippet?.name?.ifBlank { null }
+                            ?: "Listener"
+                        val avatar = pProfile?.avatar?.ifBlank { null }
+                            ?: snippet?.avatar?.ifBlank { null }
+                            ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400"
                         SpeakerRequestItem(
                             id = req.id,
-                            roomId = roomId,
+                            roomId = req.room_id.ifBlank { roomId },
                             userId = req.user_id,
                             requesterName = name,
                             requesterAvatar = avatar
                         )
                     }
-                    _pendingSpeakerRequests.value = items
-                    _pendingSpeakerRequest.value = items.firstOrNull()
+                    withContext(Dispatchers.Main) {
+                        _pendingSpeakerRequests.value = items
+                        _pendingSpeakerRequest.value = items.firstOrNull()
+                    }
+
+                    // Enriches names in background if user profile not yet cached
+                    for (item in items) {
+                        if (item.requesterName == "Listener") {
+                            try {
+                                val uRes = SupabaseClient.api.getUser(auth = token, uidEq = "eq.${item.userId}")
+                                if (uRes.isSuccessful && !uRes.body().isNullOrEmpty()) {
+                                    val fetchedUser = uRes.body()!!.first()
+                                    val fName = fetchedUser.display_name?.ifBlank { null } ?: fetchedUser.username?.ifBlank { null } ?: "Listener"
+                                    val fAvatar = fetchedUser.avatar?.ifBlank { null } ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400"
+                                    com.example.realtime.VoiceRoomRealtimeManager.recordUserSnippet(item.userId, fName, fAvatar, fetchedUser.country_code)
+                                    withContext(Dispatchers.Main) {
+                                        _pendingSpeakerRequests.value = _pendingSpeakerRequests.value.map { cur ->
+                                            if (cur.id == item.id) cur.copy(requesterName = fName, requesterAvatar = fAvatar) else cur
+                                        }
+                                        _pendingSpeakerRequest.value = _pendingSpeakerRequests.value.firstOrNull()
+                                    }
+                                }
+                            } catch (_: Exception) {}
+                        }
+                    }
+                } else {
+                    val err = res.errorBody()?.string() ?: res.message()
+                    Log.e("HostSpeakerRequests", "Failed to query pending speaker requests: ${res.code()} - $err")
                 }
             } catch (e: Exception) {
-                Log.e("AuthViewModel", "Error checking pending speaker requests", e)
+                Log.e("HostSpeakerRequests", "Error in checkPendingSpeakerRequestsForHost", e)
             }
         }
     }
 
     fun checkMySpeakerRequest(roomId: String, context: Context? = null) {
         val ctx = context ?: FunkyTalkApplication.appContext
-        val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
-        val uid = ctx?.let { SupabaseSessionManager.getUserId(it) }
-            ?: (authState.value as? AuthState.Success)?.user?.uid
-            ?: return
-
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                if (ctx != null) {
+                    SupabaseSessionManager.ensureActiveSession(ctx)
+                }
+                val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+                val uid = ctx?.let { SupabaseSessionManager.getUserId(it) }
+                    ?: (authState.value as? AuthState.Success)?.user?.uid
+                    ?: return@launch
+
+                Log.d("HostSpeakerRequests", "checkMySpeakerRequest for user $uid in room $roomId")
                 val res = SupabaseClient.api.getPendingSpeakerRequests(auth = token, roomIdEq = "eq.$roomId")
                 if (res.isSuccessful) {
                     val list = res.body() ?: emptyList()
                     val hasPending = list.any { it.user_id == uid && it.status == "pending" }
-                    if (hasPending) {
-                        _mySpeakerRequestStatus.value = "pending"
-                    } else if (_mySpeakerRequestStatus.value == "pending") {
-                        _mySpeakerRequestStatus.value = null
+                    withContext(Dispatchers.Main) {
+                        if (hasPending) {
+                            _mySpeakerRequestStatus.value = "pending"
+                        } else if (_mySpeakerRequestStatus.value == "pending") {
+                            _mySpeakerRequestStatus.value = null
+                        }
                     }
                 }
             } catch (e: Exception) {
-                Log.e("AuthViewModel", "Error checking my speaker request", e)
+                Log.e("HostSpeakerRequests", "Error checking my speaker request", e)
             }
         }
     }
