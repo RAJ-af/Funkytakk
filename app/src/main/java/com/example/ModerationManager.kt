@@ -331,7 +331,7 @@ object ModerationManager {
                 val roles = response.body() ?: emptyList()
                 val isAdmin = roles.any { item ->
                     val r = item.role?.lowercase()?.trim() ?: ""
-                    r in listOf("admin", "moderator", "superadmin")
+                    r in listOf("admin", "superadmin")
                 }
                 Log.d(TAG, "checkIsAdmin: fetched roles=$roles, isAdmin=$isAdmin")
                 return@withContext isAdmin

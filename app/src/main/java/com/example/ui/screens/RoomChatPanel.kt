@@ -138,31 +138,37 @@ fun RoomChatPanel(
                         }
                         if (msg.userId == currentUserId) {
                             Spacer(modifier = Modifier.width(6.dp))
-                            // Small "+" request-to-speak icon
+                            // Small "+" / pending request-to-speak icon
                             Box(
                                 modifier = Modifier
                                     .size(22.dp)
                                     .clip(CircleShape)
-                                    .background(ChillGoldIcon)
+                                    .background(if (isSpeakerRequestPending) Color(0xFF3F3F46) else ChillGoldIcon)
                                     .clickable(enabled = !isSpeakerRequestSubmitting) {
                                         if (isSpeakerRequestPending) {
                                             Toast.makeText(context, "Your request to speak is pending host approval", Toast.LENGTH_SHORT).show()
                                         } else {
                                             onSpeakerRequestSubmittingChange(true)
                                             val token = SupabaseSessionManager.getBearerToken(context)
+                                            val uid = SupabaseSessionManager.getUserId(context) ?: currentUserId
                                             scope.launch(Dispatchers.IO) {
                                                 try {
                                                     val res = SupabaseClient.api.createSpeakerRequest(
                                                         auth = token,
                                                         body = SpeakerRequestInsert(
                                                             room_id = activeRoomId,
-                                                            user_id = currentUserId
+                                                            user_id = uid,
+                                                            status = "pending"
                                                         )
                                                     )
                                                     withContext(Dispatchers.Main) {
                                                         onSpeakerRequestSubmittingChange(false)
-                                                        onSpeakerRequestPendingChange(true)
-                                                        Toast.makeText(context, "Request to speak sent to host!", Toast.LENGTH_SHORT).show()
+                                                        if (res.isSuccessful || res.code() == 409) {
+                                                            onSpeakerRequestPendingChange(true)
+                                                            Toast.makeText(context, "Request to speak sent to host!", Toast.LENGTH_SHORT).show()
+                                                        } else {
+                                                            Toast.makeText(context, "Could not submit speaker request.", Toast.LENGTH_SHORT).show()
+                                                        }
                                                     }
                                                 } catch (e: Exception) {
                                                     withContext(Dispatchers.Main) {
@@ -175,12 +181,19 @@ fun RoomChatPanel(
                                     },
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Add,
-                                    contentDescription = "Request to Speak",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(14.dp)
-                                )
+                                if (isSpeakerRequestPending) {
+                                    CustomPendingHourglassIcon(
+                                        tint = Color.White,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = "Request to Speak",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
                             }
                         }
                     }

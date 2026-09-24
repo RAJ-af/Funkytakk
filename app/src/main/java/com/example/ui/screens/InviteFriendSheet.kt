@@ -26,14 +26,21 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import coil.compose.AsyncImage
 import com.example.ui.components.CircleFlag
+import com.example.util.RoomShareHelper
 
 @Composable
 fun InviteFriendBottomSheetContent(
     isDarkMode: Boolean,
+    roomName: String = "FunkyTalk Room",
+    roomId: String = "FT5272",
+    inviteLink: String = RoomShareHelper.buildDefaultInviteLink(roomId),
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     val textColor = if (isDarkMode) Color.White else Color.Black
     val bgColors = if (isDarkMode) Color(0xFF1F2937) else Color(0xFFF3F4F6)
 
@@ -80,7 +87,40 @@ fun InviteFriendBottomSheetContent(
                 "More" to Icons.Default.MoreVert
             )
             platforms.forEach { (name, icon) ->
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onDismiss() }) {
+                val testTag = when (name) {
+                    "Copy Link" -> "share_copy_link_button"
+                    "WhatsApp" -> "share_whatsapp_button"
+                    "Facebook" -> "share_facebook_button"
+                    else -> "share_more_button"
+                }
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .testTag(testTag)
+                        .clickable {
+                            when (name) {
+                                "Copy Link" -> {
+                                    RoomShareHelper.copyLinkToClipboard(context, inviteLink)
+                                    onDismiss()
+                                }
+                                "WhatsApp" -> {
+                                    RoomShareHelper.shareToWhatsApp(context, roomName, roomId, inviteLink)
+                                    onDismiss()
+                                }
+                                "Facebook" -> {
+                                    RoomShareHelper.shareToFacebook(context, roomName, roomId, inviteLink)
+                                    onDismiss()
+                                }
+                                "More" -> {
+                                    RoomShareHelper.shareMore(context, roomName, roomId, inviteLink)
+                                    onDismiss()
+                                }
+                                else -> {
+                                    onDismiss()
+                                }
+                            }
+                        }
+                ) {
                     Box(
                         modifier = Modifier
                             .size(52.dp)

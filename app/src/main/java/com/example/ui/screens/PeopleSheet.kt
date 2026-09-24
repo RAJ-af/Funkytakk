@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -31,6 +32,8 @@ fun PeopleBottomSheetContent(
     listenerUserIds: List<String> = emptyList(),
     isCurrentUserHost: Boolean = false,
     currentUserId: String = "",
+    pendingSpeakerRequests: List<com.example.SpeakerRequestItem> = emptyList(),
+    onRespondToSpeakerRequest: (requestId: String, accept: Boolean) -> Unit = { _, _ -> },
     onUserClick: (PrivateChatItem) -> Unit = {},
     onInviteClick: () -> Unit = {},
     onModeratorAction: (targetUserId: String, targetUserName: String, actionType: String) -> Unit = { _, _, _ -> },
@@ -120,6 +123,122 @@ fun PeopleBottomSheetContent(
             }
 
             Spacer(modifier = Modifier.height(16.dp))
+
+            if (isCurrentUserHost && pendingSpeakerRequests.isNotEmpty()) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                ) {
+                    CustomRaisedHandIcon(
+                        tint = if (isDark) currentTheme.themeColor else ChillGoldIcon,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Speaker Requests (${pendingSpeakerRequests.size})",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isDark) Color.White.copy(alpha = 0.85f) else Color(0xFF1E293B)
+                    )
+                }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 20.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    pendingSpeakerRequests.forEach { req ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    if (isDark) Color(0xFF1E293B).copy(alpha = 0.85f) else Color(0xFFFFFBEB),
+                                    RoundedCornerShape(16.dp)
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    color = if (isDark) Color.White.copy(alpha = 0.1f) else Color(0xFFFDE68A),
+                                    shape = RoundedCornerShape(16.dp)
+                                )
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                AsyncImage(
+                                    model = req.requesterAvatar,
+                                    contentDescription = req.requesterName,
+                                    modifier = Modifier
+                                        .size(42.dp)
+                                        .clip(CircleShape),
+                                    contentScale = ContentScale.Crop
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = req.requesterName,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isDark) Color.White else Color(0xFF0F172A),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "Wants to speak",
+                                        fontSize = 11.sp,
+                                        color = if (isDark) Color.White.copy(alpha = 0.5f) else Color(0xFF64748B)
+                                    )
+                                }
+                            }
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                // Decline Button
+                                Box(
+                                    modifier = Modifier
+                                        .background(
+                                            if (isDark) Color.White.copy(alpha = 0.1f) else Color(0xFFF1F5F9),
+                                            RoundedCornerShape(10.dp)
+                                        )
+                                        .clickable { onRespondToSpeakerRequest(req.id, false) }
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "Decline",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (isDark) Color.White.copy(alpha = 0.8f) else Color(0xFF475569)
+                                    )
+                                }
+
+                                // Accept Button
+                                Box(
+                                    modifier = Modifier
+                                        .background(
+                                            if (isDark) currentTheme.themeColor else ChillGoldIcon,
+                                            RoundedCornerShape(10.dp)
+                                        )
+                                        .clickable { onRespondToSpeakerRequest(req.id, true) }
+                                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "Accept",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.Black
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             // Speaking Now Section Title
             Row(

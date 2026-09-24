@@ -1,5 +1,9 @@
 package com.example.ui.screens.home.dialogs
 
+import android.content.Intent
+import android.media.AudioAttributes
+import android.media.MediaPlayer
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -30,12 +34,15 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
+import coil.request.ImageRequest
+import com.example.BuildConfig
 import com.example.MyModerationStatus
 import com.example.ModerationManager
 import com.example.ReportMessageSnapshot
@@ -47,10 +54,217 @@ import com.example.UserProfile
 import com.example.ui.screens.home.models.DarkText
 import com.example.ui.screens.home.models.GraySubtitle
 import com.example.ui.theme.GoldPrimary
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.io.File
+import java.io.FileOutputStream
 import java.util.*
+import java.util.concurrent.TimeUnit
+import kotlin.math.abs
+
+@Stable
+class ReportAudioPlayerState(
+    private val context: android.content.Context,
+    private val scope: CoroutineScope
+) {
+    var mediaPlayer by mutableStateOf<MediaPlayer?>(null)
+    var currentUrl by mutableStateOf<String?>(null)
+    var isPlaying by mutableStateOf(false)
+    var isBuffering by mutableStateOf(false)
+    var currentPositionMs by mutableIntStateOf(0)
+    var durationMs by mutableIntStateOf(0)
+    var playbackError by mutableStateOf<String?>(null)
+
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .build()
+
+    fun togglePlay(url: String) {
+        if (currentUrl == url && mediaPlayer != null) {
+            if (isPlaying) {
+                try {
+                    mediaPlayer?.pause()
+                } catch (_: Exception) {}
+                isPlaying = false
+            } else {
+                try {
+                    mediaPlayer?.start()
+                    isPlaying = true
+                } catch (e: Exception) {
+                    stop()
+                    startStreaming(url)
+                }
+            }
+            return
+        }
+
+        stop()
+        startStreaming(url)
+    }
+
+    private fun startStreaming(url: String) {
+        currentUrl = url
+        isBuffering = true
+        isPlaying = false
+        playbackError = null
+        currentPositionMs = 0
+        durationMs = 0
+
+        scope.launch(Dispatchers.IO) {
+            try {
+                // Verify admin authorization prior to accessing evidence
+                val isAdmin = ModerationManager.checkIsAdmin(context)
+                if (!isAdmin) {
+                    withContext(Dispatchers.Main) {
+                        isBuffering = false
+                        isPlaying = false
+                        playbackError = "Access denied"
+                        Toast.makeText(context, "Access Restricted: Administrator role required to review audio evidence.", Toast.LENGTH_LONG).show()
+                    }
+                    return@launch
+                }
+
+                val cacheDir = context.cacheDir.resolve("mod_audio_cache")
+                if (!cacheDir.exists()) cacheDir.mkdirs()
+                val safeFileName = "clip_" + abs(url.hashCode().toLong()) + ".mp3"
+                val localAudioFile = File(cacheDir, safeFileName)
+
+                // If cached file exists, validate it is not a corrupted/JSON error payload
+                if (localAudioFile.exists()) {
+                    if (localAudioFile.length() < 512L || isErrorPayload(localAudioFile)) {
+                        localAudioFile.delete()
+                    }
+                }
+
+                if (!localAudioFile.exists() || localAudioFile.length() <= 0L) {
+                    val downloadSuccess = com.example.SupabaseMediaResolver.downloadEvidenceFile(context, url, localAudioFile)
+                    if (!downloadSuccess) {
+                        localAudioFile.delete()
+                        withContext(Dispatchers.Main) {
+                            isBuffering = false
+                            isPlaying = false
+                            playbackError = "Audio evidence unavailable"
+                            Toast.makeText(context, "Audio evidence is unavailable or access is restricted.", Toast.LENGTH_SHORT).show()
+                        }
+                        return@launch
+                    }
+                }
+
+                // Final safety check: ensure the downloaded file is a valid audio file and not an HTML/JSON error
+                if (!localAudioFile.exists() || localAudioFile.length() < 512L || isErrorPayload(localAudioFile)) {
+                    localAudioFile.delete()
+                    withContext(Dispatchers.Main) {
+                        isBuffering = false
+                        isPlaying = false
+                        playbackError = "Invalid audio file format"
+                        Toast.makeText(context, "Audio clip format is invalid or unavailable", Toast.LENGTH_SHORT).show()
+                    }
+                    return@launch
+                }
+
+                withContext(Dispatchers.Main) {
+                    try {
+                        val mp = MediaPlayer()
+                        mediaPlayer = mp
+                        mp.setAudioAttributes(
+                            AudioAttributes.Builder()
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                                .setUsage(AudioAttributes.USAGE_MEDIA)
+                                .build()
+                        )
+
+                        mp.setDataSource(localAudioFile.absolutePath)
+
+                        mp.setOnPreparedListener { player ->
+                            isBuffering = false
+                            durationMs = player.duration
+                            player.start()
+                            isPlaying = true
+                        }
+
+                        mp.setOnCompletionListener {
+                            isPlaying = false
+                            currentPositionMs = 0
+                        }
+
+                        mp.setOnErrorListener { _, what, extra ->
+                            isBuffering = false
+                            isPlaying = false
+                            playbackError = "Playback error ($what, $extra)"
+                            try {
+                                localAudioFile.delete()
+                            } catch (_: Exception) {}
+                            true
+                        }
+
+                        mp.prepareAsync()
+                    } catch (e: Exception) {
+                        isBuffering = false
+                        isPlaying = false
+                        playbackError = e.localizedMessage ?: "Player failed"
+                        try {
+                            localAudioFile.delete()
+                        } catch (_: Exception) {}
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    isBuffering = false
+                    isPlaying = false
+                    playbackError = e.localizedMessage ?: "Download failed"
+                }
+            }
+        }
+    }
+
+    private fun isErrorBytes(bytes: ByteArray): Boolean {
+        if (bytes.isEmpty()) return true
+        val sample = String(bytes.take(64).toByteArray(), Charsets.UTF_8).trim()
+        return sample.startsWith("{") || sample.startsWith("<!DOCTYPE") || sample.startsWith("<html") || sample.contains("NoSuchKey") || sample.contains("Bucket not found")
+    }
+
+    private fun isErrorPayload(file: File): Boolean {
+        return try {
+            if (!file.exists() || file.length() < 64) return true
+            val header = ByteArray(64)
+            val read = file.inputStream().use { it.read(header) }
+            if (read <= 0) return true
+            val text = String(header, 0, read, Charsets.UTF_8).trim()
+            text.startsWith("{") || text.startsWith("<!DOCTYPE") || text.startsWith("<html") || text.contains("NoSuchKey") || text.contains("Bucket not found")
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun seekTo(positionMs: Int) {
+        try {
+            mediaPlayer?.seekTo(positionMs)
+            currentPositionMs = positionMs
+        } catch (_: Exception) {}
+    }
+
+    fun stop() {
+        try {
+            mediaPlayer?.stop()
+            mediaPlayer?.reset()
+            mediaPlayer?.release()
+        } catch (_: Exception) {}
+        mediaPlayer = null
+        currentUrl = null
+        isPlaying = false
+        isBuffering = false
+        currentPositionMs = 0
+        durationMs = 0
+        playbackError = null
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -62,6 +276,28 @@ fun ModerationReviewDialog(
     val clipboardManager = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
 
+    val audioPlayer = remember(scope) { ReportAudioPlayerState(context, scope) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            audioPlayer.stop()
+        }
+    }
+
+    LaunchedEffect(audioPlayer.isPlaying) {
+        while (audioPlayer.isPlaying) {
+            audioPlayer.mediaPlayer?.let { mp ->
+                try {
+                    if (mp.isPlaying) {
+                        audioPlayer.currentPositionMs = mp.currentPosition
+                        audioPlayer.durationMs = mp.duration
+                    }
+                } catch (_: Exception) {}
+            }
+            delay(250)
+        }
+    }
+
     var reportsList by remember { mutableStateOf<List<RoomReportItem>>(emptyList()) }
     var activePenaltiesList by remember { mutableStateOf<List<MyModerationStatus>>(emptyList()) }
     var selectedAdminTab by remember { mutableIntStateOf(0) } // 0: Reports, 1: Active Restrictions
@@ -71,7 +307,6 @@ fun ModerationReviewDialog(
     var selectedFilter by remember { mutableStateOf("All") }
     var previewImageUrl by remember { mutableStateOf<String?>(null) }
     var actionDialogReport by remember { mutableStateOf<RoomReportItem?>(null) }
-    var playingAudioUrl by remember { mutableStateOf<String?>(null) }
 
     // Revocation state
     var revokeTargetUserId by remember { mutableStateOf<String?>(null) }
@@ -518,13 +753,7 @@ fun ModerationReviewDialog(
                                 items(filteredReports, key = { it.id ?: UUID.randomUUID().toString() }) { report ->
                                     ModernReportCard(
                                         report = report,
-                                        isPlayingAudio = (playingAudioUrl == report.audio_clip_url && !report.audio_clip_url.isNullOrBlank()),
-                                        onToggleAudio = { url ->
-                                            playingAudioUrl = if (playingAudioUrl == url) null else url
-                                            if (playingAudioUrl != null) {
-                                                Toast.makeText(context, "Playing audio evidence clip...", Toast.LENGTH_SHORT).show()
-                                            }
-                                        },
+                                        audioPlayer = audioPlayer,
                                         onViewScreenshot = { url ->
                                             previewImageUrl = url
                                         },
@@ -743,39 +972,10 @@ fun ModerationReviewDialog(
 
     // Modal: Full Screenshot Preview
     if (previewImageUrl != null) {
-        Dialog(onDismissRequest = { previewImageUrl = null }) {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp)),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF111827))
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Screenshot Evidence", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        IconButton(onClick = { previewImageUrl = null }) {
-                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
-                        }
-                    }
-                    AsyncImage(
-                        model = previewImageUrl,
-                        contentDescription = "Screenshot Zoom",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 420.dp)
-                            .clip(RoundedCornerShape(12.dp)),
-                        contentScale = ContentScale.Fit
-                    )
-                }
-            }
-        }
+        ReportScreenshotPreviewModal(
+            imageUrl = previewImageUrl!!,
+            onDismiss = { previewImageUrl = null }
+        )
     }
 
     // Modal: Take Action Dialog
@@ -1353,16 +1553,18 @@ private fun ModernStatBadge(
 @Composable
 private fun ModernReportCard(
     report: RoomReportItem,
-    isPlayingAudio: Boolean,
-    onToggleAudio: (String) -> Unit,
+    audioPlayer: ReportAudioPlayerState,
     onViewScreenshot: (String) -> Unit,
     onCopyText: (String, String) -> Unit,
     onTakeAction: () -> Unit
 ) {
+    val context = LocalContext.current
     val isSolved = (report.status ?: "").lowercase() in listOf("solved", "resolved", "closed")
     val isUrgent = (report.category ?: "").contains("Abuse", ignoreCase = true) || (report.category ?: "").contains("Harassment", ignoreCase = true)
 
     var isSnapshotsExpanded by remember { mutableStateOf(false) }
+
+    val token = remember { SupabaseSessionManager.getAccessToken(context) ?: BuildConfig.SUPABASE_ANON_KEY }
 
     Card(
         modifier = Modifier
@@ -1506,7 +1708,7 @@ private fun ModernReportCard(
                 }
             }
 
-            // Attached Media: Only shown if non-null!
+            // Attached Media: Screenshot Thumbnail & Audio Clip Player
             val hasScreenshot = !report.screenshot_url.isNullOrBlank()
             val hasAudio = !report.audio_clip_url.isNullOrBlank()
 
@@ -1517,84 +1719,187 @@ private fun ModernReportCard(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     if (hasScreenshot) {
+                        val originalScreenshotUrl = report.screenshot_url!!
+                        val resolvedScreenshotUrl by produceState<String?>(initialValue = null, key1 = originalScreenshotUrl) {
+                            value = com.example.SupabaseMediaResolver.resolveSignedEvidenceUrl(context, originalScreenshotUrl)
+                        }
+                        val effectiveScreenshotUrl = resolvedScreenshotUrl
+                        val bearerToken = remember { SupabaseSessionManager.getAuthenticatedBearerToken(context) }
+
+                        val imageRequest = remember(effectiveScreenshotUrl, bearerToken) {
+                            if (!effectiveScreenshotUrl.isNullOrBlank()) {
+                                ImageRequest.Builder(context)
+                                    .data(effectiveScreenshotUrl)
+                                    .addHeader("apikey", BuildConfig.SUPABASE_ANON_KEY)
+                                    .apply {
+                                        if (!bearerToken.isNullOrBlank()) {
+                                            addHeader("Authorization", bearerToken)
+                                        }
+                                    }
+                                    .crossfade(true)
+                                    .build()
+                            } else null
+                        }
+
                         Box(
                             modifier = Modifier
                                 .weight(1f)
-                                .height(72.dp)
+                                .height(82.dp)
                                 .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFFF3F4F6))
                                 .border(1.dp, Color(0xFFE5E7EB), RoundedCornerShape(12.dp))
-                                .clickable { onViewScreenshot(report.screenshot_url!!) }
+                                .clickable {
+                                    if (effectiveScreenshotUrl != null) {
+                                        onViewScreenshot(effectiveScreenshotUrl)
+                                    } else {
+                                        Toast.makeText(context, "Resolving secure evidence...", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
                         ) {
-                            AsyncImage(
-                                model = report.screenshot_url,
-                                contentDescription = "Screenshot",
+                            SubcomposeAsyncImage(
+                                model = imageRequest,
+                                contentDescription = "Screenshot Preview",
                                 modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
+                                contentScale = ContentScale.Crop,
+                                loading = {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(20.dp),
+                                            strokeWidth = 2.dp,
+                                            color = GoldPrimary
+                                        )
+                                    }
+                                },
+                                error = {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(Color(0xFFFEF2F2)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Icon(Icons.Default.BrokenImage, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(18.dp))
+                                            Text("Preview", fontSize = 10.sp, color = Color(0xFFDC2626), fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
                             )
+
+                            // Overlay badge
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .background(Color.Black.copy(alpha = 0.3f)),
-                                contentAlignment = Alignment.Center
+                                    .background(Color.Black.copy(alpha = 0.25f))
+                                    .padding(6.dp),
+                                contentAlignment = Alignment.BottomStart
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(6.dp))
                                         .background(Color.Black.copy(alpha = 0.65f))
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                        .padding(horizontal = 6.dp, vertical = 3.dp)
                                 ) {
-                                    Icon(Icons.Default.ZoomIn, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Screenshot", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    Icon(Icons.Default.ZoomIn, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text("Screenshot", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
                     }
 
                     if (hasAudio) {
+                        val audioUrl = report.audio_clip_url!!
+                        val isThisActive = (audioPlayer.currentUrl == audioUrl)
+                        val isThisPlaying = isThisActive && audioPlayer.isPlaying
+                        val isThisBuffering = isThisActive && audioPlayer.isBuffering
+
                         Box(
                             modifier = Modifier
                                 .weight(1f)
-                                .height(72.dp)
+                                .height(82.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(if (isPlayingAudio) Color(0xFFFFFBEB) else Color(0xFFF9FAFB))
+                                .background(if (isThisPlaying) Color(0xFFFFFBEB) else Color(0xFFF9FAFB))
                                 .border(
                                     1.dp,
-                                    if (isPlayingAudio) Color(0xFFFCD34D) else Color(0xFFE5E7EB),
+                                    if (isThisPlaying) Color(0xFFFCD34D) else Color(0xFFE5E7EB),
                                     RoundedCornerShape(12.dp)
                                 )
-                                .clickable { onToggleAudio(report.audio_clip_url!!) }
-                                .padding(horizontal = 10.dp),
+                                .clickable { audioPlayer.togglePlay(audioUrl) }
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.Center
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .clip(CircleShape)
-                                        .background(if (isPlayingAudio) Color(0xFFD97706) else Color(0xFF1E293B)),
-                                    contentAlignment = Alignment.Center
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Icon(
-                                        imageVector = if (isPlayingAudio) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                        contentDescription = "Audio Play",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(18.dp)
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isThisPlaying) Color(0xFFD97706) else Color(0xFF1E293B)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (isThisBuffering) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(18.dp),
+                                                color = Color.White,
+                                                strokeWidth = 2.dp
+                                            )
+                                        } else {
+                                            Icon(
+                                                imageVector = if (isThisPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                                contentDescription = if (isThisPlaying) "Pause Audio" else "Play Audio",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.width(8.dp))
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = if (isThisBuffering) "Buffering..." else if (isThisPlaying) "Playing Evidence" else "Audio Evidence",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = DarkText,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        AudioWaveformBar(
+                                            isPlaying = isThisPlaying,
+                                            timeText = if (isThisActive && audioPlayer.durationMs > 0) {
+                                                "${formatDurationMs(audioPlayer.currentPositionMs)} / ${formatDurationMs(audioPlayer.durationMs)}"
+                                            } else {
+                                                "Tap to Play"
+                                            }
+                                        )
+                                    }
                                 }
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Column {
-                                    Text(
-                                        text = if (isPlayingAudio) "Playing..." else "Audio Clip",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = DarkText
+
+                                if (isThisActive && audioPlayer.durationMs > 0) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    LinearProgressIndicator(
+                                        progress = {
+                                            if (audioPlayer.durationMs > 0) {
+                                                (audioPlayer.currentPositionMs.toFloat() / audioPlayer.durationMs.toFloat()).coerceIn(0f, 1f)
+                                            } else 0f
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(3.dp)
+                                            .clip(RoundedCornerShape(2.dp)),
+                                        color = Color(0xFFD97706),
+                                        trackColor = Color(0xFFE5E7EB)
                                     )
-                                    AudioWaveformBar(isPlaying = isPlayingAudio)
                                 }
                             }
                         }
@@ -1713,7 +2018,168 @@ private fun ModernReportCard(
 }
 
 @Composable
-private fun AudioWaveformBar(isPlaying: Boolean) {
+private fun ReportScreenshotPreviewModal(
+    imageUrl: String,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    var reloadKey by remember { mutableIntStateOf(0) }
+
+    val resolvedUrl by produceState<String?>(initialValue = null, key1 = imageUrl, key2 = reloadKey) {
+        value = com.example.SupabaseMediaResolver.resolveSignedEvidenceUrl(context, imageUrl)
+    }
+    val activeUrl = resolvedUrl ?: imageUrl
+    val bearerToken = remember { SupabaseSessionManager.getAuthenticatedBearerToken(context) }
+
+    val imageRequest = remember(activeUrl, bearerToken, reloadKey) {
+        ImageRequest.Builder(context)
+            .data(activeUrl)
+            .addHeader("apikey", BuildConfig.SUPABASE_ANON_KEY)
+            .apply {
+                if (!bearerToken.isNullOrBlank()) {
+                    addHeader("Authorization", bearerToken)
+                }
+            }
+            .crossfade(true)
+            .build()
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .fillMaxHeight(0.85f)
+                .clip(RoundedCornerShape(24.dp)),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Header Bar
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF1E293B)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Image, contentDescription = null, tint = GoldPrimary, modifier = Modifier.size(18.dp))
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text("Screenshot Evidence", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            Text("High-resolution incident preview", color = Color(0xFF94A3B8), fontSize = 11.sp)
+                        }
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = {
+                                try {
+                                    val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(activeUrl))
+                                    context.startActivity(browserIntent)
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Could not open external browser", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        ) {
+                            Icon(Icons.Default.OpenInNew, contentDescription = "Open in browser", tint = Color(0xFF94A3B8))
+                        }
+
+                        IconButton(
+                            onClick = {
+                                clipboardManager.setText(AnnotatedString(activeUrl))
+                                Toast.makeText(context, "Image URL copied to clipboard", Toast.LENGTH_SHORT).show()
+                            }
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy Link", tint = Color(0xFF94A3B8))
+                        }
+
+                        IconButton(onClick = onDismiss) {
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Image Viewer Container
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0xFF020617))
+                        .border(1.dp, Color(0xFF334155), RoundedCornerShape(16.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    key(activeUrl, reloadKey) {
+                        SubcomposeAsyncImage(
+                            model = imageRequest,
+                            contentDescription = "Full Screenshot Zoom",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit,
+                            loading = {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center,
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    CircularProgressIndicator(color = GoldPrimary, modifier = Modifier.size(36.dp), strokeWidth = 3.dp)
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Text("Loading high-res evidence image...", color = Color(0xFF94A3B8), fontSize = 12.sp)
+                                }
+                            },
+                            error = {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center,
+                                    modifier = Modifier.padding(24.dp)
+                                ) {
+                                    Icon(Icons.Default.BrokenImage, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(48.dp))
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Text("Screenshot file unavailable", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("Attachment might not exist on storage or was removed.", color = Color(0xFF94A3B8), fontSize = 11.sp, textAlign = TextAlign.Center)
+                                    Spacer(modifier = Modifier.height(14.dp))
+                                    Button(
+                                        onClick = {
+                                            reloadKey++
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary)
+                                    ) {
+                                        Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Retry Loading", color = Color.Black, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AudioWaveformBar(
+    isPlaying: Boolean,
+    timeText: String = "0:14"
+) {
     val infiniteTransition = rememberInfiniteTransition(label = "audio_bars")
     val h1 by infiniteTransition.animateFloat(
         initialValue = 4f,
@@ -1744,6 +2210,19 @@ private fun AudioWaveformBar(isPlaying: Boolean) {
         Box(modifier = Modifier.width(3.dp).height(h3.dp).clip(RoundedCornerShape(2.dp)).background(if (isPlaying) Color(0xFFD97706) else Color(0xFF9CA3AF)))
         Box(modifier = Modifier.width(3.dp).height(h1.dp).clip(RoundedCornerShape(2.dp)).background(if (isPlaying) Color(0xFFD97706) else Color(0xFF9CA3AF)))
         Spacer(modifier = Modifier.width(4.dp))
-        Text("0:14", fontSize = 10.sp, color = Color(0xFF6B7280))
+        Text(
+            text = timeText,
+            fontSize = 10.sp,
+            color = if (isPlaying) Color(0xFFD97706) else Color(0xFF6B7280),
+            fontWeight = if (isPlaying) FontWeight.Bold else FontWeight.Normal
+        )
     }
+}
+
+private fun formatDurationMs(ms: Int): String {
+    if (ms <= 0) return "0:00"
+    val totalSec = ms / 1000
+    val minutes = totalSec / 60
+    val seconds = totalSec % 60
+    return String.format(Locale.getDefault(), "%d:%02d", minutes, seconds)
 }

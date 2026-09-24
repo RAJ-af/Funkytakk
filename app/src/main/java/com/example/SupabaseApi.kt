@@ -2,6 +2,7 @@ package com.example
 
 import com.squareup.moshi.JsonClass
 import okhttp3.MultipartBody
+import okhttp3.RequestBody
 import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.*
@@ -114,7 +115,8 @@ data class UpdateParticipantMicRequest(
 @JsonClass(generateAdapter = true)
 data class SpeakerRequestInsert(
     val room_id: String,
-    val user_id: String
+    val user_id: String,
+    val status: String = "pending"
 )
 
 @JsonClass(generateAdapter = true)
@@ -550,6 +552,50 @@ interface SupabaseApi {
         @Path("filename") filename: String,
         @Part file: MultipartBody.Part
     ): Response<ResponseBody>
+
+    @POST("storage/v1/object/{bucket}/{filename}")
+    suspend fun uploadStorageRawBytes(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
+        @Header("x-upsert") upsert: String = "true",
+        @Header("Content-Type") contentType: String,
+        @Path("bucket") bucket: String,
+        @Path("filename") filename: String,
+        @Body body: RequestBody
+    ): Response<ResponseBody>
+
+    @POST("storage/v1/object/sign/{bucket}/{filename}")
+    suspend fun createSignedUrl(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Path("bucket") bucket: String,
+        @Path(value = "filename", encoded = true) filename: String,
+        @Body body: CreateSignedUrlRequest = CreateSignedUrlRequest()
+    ): Response<CreateSignedUrlResponse>
+
+    @GET("storage/v1/object/authenticated/{bucket}/{filename}")
+    suspend fun downloadStorageObject(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Path("bucket") bucket: String,
+        @Path(value = "filename", encoded = true) filename: String
+    ): Response<ResponseBody>
+}
+
+@JsonClass(generateAdapter = true)
+data class CreateSignedUrlRequest(
+    val expiresIn: Int = 3600
+)
+
+@JsonClass(generateAdapter = true)
+data class CreateSignedUrlResponse(
+    val signedURL: String? = null,
+    val signedUrl: String? = null,
+    val error: String? = null,
+    val message: String? = null,
+    val statusCode: String? = null
+) {
+    fun getResolvedPath(): String? = signedURL ?: signedUrl
 }
 
 @JsonClass(generateAdapter = true)

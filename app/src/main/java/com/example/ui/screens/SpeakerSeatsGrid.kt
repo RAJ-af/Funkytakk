@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -47,9 +48,34 @@ fun SpeakerSeatsGrid(
     currentUserId: String,
     scope: CoroutineScope,
     onHostClick: () -> Unit,
-    onSpeakerClick: (Int, ChillRoomSpeaker) -> Unit
+    onSpeakerClick: (Int, ChillRoomSpeaker) -> Unit,
+    isSpeakerRequestPending: Boolean = false,
+    isCurrentUserSpeakerOrHost: Boolean = false,
+    onRequestSpeakerSeat: () -> Unit = {}
 ) {
     val context = LocalContext.current
+
+    val handleSlotRequest = {
+        if (onRequestSpeakerSeat != {}) {
+            onRequestSpeakerSeat()
+        } else {
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val token = SupabaseSessionManager.getBearerToken(context)
+                    val uid = SupabaseSessionManager.getUserId(context) ?: currentUserId
+                    SupabaseClient.api.createSpeakerRequest(
+                        auth = token,
+                        body = SpeakerRequestInsert(
+                            room_id = activeRoomId,
+                            user_id = uid,
+                            status = "pending"
+                        )
+                    )
+                } catch (_: Exception) {}
+            }
+            Toast.makeText(context, "Requested to join as speaker!", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -76,7 +102,7 @@ fun SpeakerSeatsGrid(
                 onClick = onHostClick
             )
 
-            // Seat 2: Speaker 1 or + Request
+            // Seat 2: Speaker 1 or Empty / Request
             val sp1 = speakerSeats.getOrNull(0)
             if (sp1 != null) {
                 VoiceSpeakerItem(
@@ -90,58 +116,15 @@ fun SpeakerSeatsGrid(
                     onClick = { onSpeakerClick(0, sp1) }
                 )
             } else {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.width(82.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(74.dp)
-                            .drawBehind {
-                                drawCircle(
-                                    color = currentTheme.accentColor.copy(alpha = 0.45f),
-                                    style = Stroke(
-                                        width = 1.dp.toPx(),
-                                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 12f), 0f)
-                                    )
-                                )
-                            }
-                            .clip(CircleShape)
-                            .clickable {
-                                scope.launch(Dispatchers.IO) {
-                                    try {
-                                        val token = SupabaseSessionManager.getBearerToken(context)
-                                        SupabaseClient.api.createSpeakerRequest(
-                                            auth = token,
-                                            body = SpeakerRequestInsert(
-                                                room_id = activeRoomId,
-                                                user_id = currentUserId
-                                            )
-                                        )
-                                    } catch (_: Exception) {}
-                                }
-                                Toast.makeText(context, "Requested to join as speaker!", Toast.LENGTH_SHORT).show()
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Request slot",
-                            tint = currentTheme.accentColor,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "+ Request",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = currentTheme.secondaryTextColor
-                    )
-                }
+                EmptySpeakerSeatItem(
+                    theme = currentTheme,
+                    isSpeakerRequestPending = isSpeakerRequestPending,
+                    isCurrentUserSpeakerOrHost = isCurrentUserSpeakerOrHost,
+                    onRequestSlot = handleSlotRequest
+                )
             }
 
-            // Seat 3: Speaker 2 or + Request
+            // Seat 3: Speaker 2 or Empty / Request
             val sp2 = speakerSeats.getOrNull(1)
             if (sp2 != null) {
                 VoiceSpeakerItem(
@@ -155,59 +138,16 @@ fun SpeakerSeatsGrid(
                     onClick = { onSpeakerClick(1, sp2) }
                 )
             } else {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.width(82.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(74.dp)
-                            .drawBehind {
-                                drawCircle(
-                                    color = currentTheme.accentColor.copy(alpha = 0.45f),
-                                    style = Stroke(
-                                        width = 1.dp.toPx(),
-                                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 12f), 0f)
-                                    )
-                                )
-                            }
-                            .clip(CircleShape)
-                            .clickable {
-                                scope.launch(Dispatchers.IO) {
-                                    try {
-                                        val token = SupabaseSessionManager.getBearerToken(context)
-                                        SupabaseClient.api.createSpeakerRequest(
-                                            auth = token,
-                                            body = SpeakerRequestInsert(
-                                                room_id = activeRoomId,
-                                                user_id = currentUserId
-                                            )
-                                        )
-                                    } catch (_: Exception) {}
-                                }
-                                Toast.makeText(context, "Requested to join as speaker!", Toast.LENGTH_SHORT).show()
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Request slot",
-                            tint = currentTheme.accentColor,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "+ Request",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = currentTheme.secondaryTextColor
-                    )
-                }
+                EmptySpeakerSeatItem(
+                    theme = currentTheme,
+                    isSpeakerRequestPending = isSpeakerRequestPending,
+                    isCurrentUserSpeakerOrHost = isCurrentUserSpeakerOrHost,
+                    onRequestSlot = handleSlotRequest
+                )
             }
         }
 
-        // Second Row - Seat 4 (Speaker 3), Seat 5 (Speaker 4), Request slot
+        // Second Row - Seat 4 (Speaker 3), Seat 5 (Speaker 4)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly,
@@ -226,55 +166,12 @@ fun SpeakerSeatsGrid(
                     onClick = { onSpeakerClick(2, sp3) }
                 )
             } else {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.width(82.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(74.dp)
-                            .drawBehind {
-                                drawCircle(
-                                    color = currentTheme.accentColor.copy(alpha = 0.45f),
-                                    style = Stroke(
-                                        width = 1.dp.toPx(),
-                                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 12f), 0f)
-                                    )
-                                )
-                            }
-                            .clip(CircleShape)
-                            .clickable {
-                                scope.launch(Dispatchers.IO) {
-                                    try {
-                                        val token = SupabaseSessionManager.getBearerToken(context)
-                                        SupabaseClient.api.createSpeakerRequest(
-                                            auth = token,
-                                            body = SpeakerRequestInsert(
-                                                room_id = activeRoomId,
-                                                user_id = currentUserId
-                                            )
-                                        )
-                                    } catch (_: Exception) {}
-                                }
-                                Toast.makeText(context, "Requested to join as speaker!", Toast.LENGTH_SHORT).show()
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Request slot",
-                            tint = currentTheme.accentColor,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "+ Request",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = currentTheme.secondaryTextColor
-                    )
-                }
+                EmptySpeakerSeatItem(
+                    theme = currentTheme,
+                    isSpeakerRequestPending = isSpeakerRequestPending,
+                    isCurrentUserSpeakerOrHost = isCurrentUserSpeakerOrHost,
+                    onRequestSlot = handleSlotRequest
+                )
             }
 
             val sp4 = speakerSeats.getOrNull(3)
@@ -290,57 +187,105 @@ fun SpeakerSeatsGrid(
                     onClick = { onSpeakerClick(3, sp4) }
                 )
             } else {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.width(82.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(74.dp)
-                            .drawBehind {
-                                drawCircle(
-                                    color = currentTheme.accentColor.copy(alpha = 0.45f),
-                                    style = Stroke(
-                                        width = 1.dp.toPx(),
-                                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 12f), 0f)
-                                    )
-                                )
-                            }
-                            .clip(CircleShape)
-                            .clickable {
-                                scope.launch(Dispatchers.IO) {
-                                    try {
-                                        val token = SupabaseSessionManager.getBearerToken(context)
-                                        SupabaseClient.api.createSpeakerRequest(
-                                            auth = token,
-                                            body = SpeakerRequestInsert(
-                                                room_id = activeRoomId,
-                                                user_id = currentUserId
-                                            )
-                                        )
-                                    } catch (_: Exception) {}
-                                }
-                                Toast.makeText(context, "Requested to join as speaker!", Toast.LENGTH_SHORT).show()
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Request slot",
-                            tint = currentTheme.accentColor,
-                            modifier = Modifier.size(24.dp)
+                EmptySpeakerSeatItem(
+                    theme = currentTheme,
+                    isSpeakerRequestPending = isSpeakerRequestPending,
+                    isCurrentUserSpeakerOrHost = isCurrentUserSpeakerOrHost,
+                    onRequestSlot = handleSlotRequest
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptySpeakerSeatItem(
+    theme: RoomTheme,
+    isSpeakerRequestPending: Boolean,
+    isCurrentUserSpeakerOrHost: Boolean,
+    onRequestSlot: () -> Unit
+) {
+    val context = LocalContext.current
+    val accentColor = theme.accentColor
+    val secondaryText = theme.secondaryTextColor
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.width(82.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(74.dp)
+                .drawBehind {
+                    drawCircle(
+                        color = when {
+                            isSpeakerRequestPending -> ChillGoldIcon.copy(alpha = 0.7f)
+                            isCurrentUserSpeakerOrHost -> secondaryText.copy(alpha = 0.25f)
+                            else -> accentColor.copy(alpha = 0.45f)
+                        },
+                        style = Stroke(
+                            width = 1.dp.toPx(),
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 12f), 0f)
                         )
+                    )
+                }
+                .clip(CircleShape)
+                .clickable {
+                    when {
+                        isCurrentUserSpeakerOrHost -> {
+                            Toast.makeText(context, "You are already a speaker in this room.", Toast.LENGTH_SHORT).show()
+                        }
+                        isSpeakerRequestPending -> {
+                            Toast.makeText(context, "Your request to speak is pending host approval", Toast.LENGTH_SHORT).show()
+                        }
+                        else -> {
+                            onRequestSlot()
+                        }
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "+ Request",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = currentTheme.secondaryTextColor
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            when {
+                isSpeakerRequestPending -> {
+                    CustomPendingHourglassIcon(
+                        tint = ChillGoldIcon,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+                isCurrentUserSpeakerOrHost -> {
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = "Available slot",
+                        tint = secondaryText.copy(alpha = 0.35f),
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                else -> {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Request slot",
+                        tint = accentColor,
+                        modifier = Modifier.size(24.dp)
                     )
                 }
             }
         }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = when {
+                isCurrentUserSpeakerOrHost -> "Available"
+                isSpeakerRequestPending -> "Request Sent"
+                else -> "+ Request"
+            },
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = when {
+                isSpeakerRequestPending -> ChillGoldIcon
+                isCurrentUserSpeakerOrHost -> secondaryText.copy(alpha = 0.6f)
+                else -> secondaryText
+            },
+            maxLines = 1
+        )
     }
 }
 

@@ -95,8 +95,14 @@ class AuthViewModel : ViewModel() {
     private val _activeRoomSpeakers = MutableStateFlow<List<UserProfile>>(emptyList())
     val activeRoomSpeakers: StateFlow<List<UserProfile>> = _activeRoomSpeakers
 
+    private val _pendingSpeakerRequests = MutableStateFlow<List<SpeakerRequestItem>>(emptyList())
+    val pendingSpeakerRequests: StateFlow<List<SpeakerRequestItem>> = _pendingSpeakerRequests
+
     private val _pendingSpeakerRequest = MutableStateFlow<SpeakerRequestItem?>(null)
     val pendingSpeakerRequest: StateFlow<SpeakerRequestItem?> = _pendingSpeakerRequest
+
+    private val _mySpeakerRequestStatus = MutableStateFlow<String?>(null)
+    val mySpeakerRequestStatus: StateFlow<String?> = _mySpeakerRequestStatus
 
     private val _myModerationStatus = MutableStateFlow<MyModerationStatus?>(null)
     val myModerationStatus: StateFlow<MyModerationStatus?> = _myModerationStatus
@@ -122,25 +128,59 @@ class AuthViewModel : ViewModel() {
                 when (event) {
                     is RealtimeTableEvent.SpeakerRequestChanged -> {
                         val currentRoomId = _activeRoomId.value
-                        if (currentRoomId != null && event.roomId == currentRoomId) {
+                        if (currentRoomId != null && (event.roomId == currentRoomId || event.roomId.isNullOrBlank())) {
                             val hostId = _activeRoomHostId.value
-                            val myUid = (authState.value as? AuthState.Success)?.user?.uid
-                            val isHost = hostId != null && myUid == hostId
+                            val appContext = FunkyTalkApplication.appContext
+                            val myUid = appContext?.let { SupabaseSessionManager.getUserId(it) }
+                                ?: (authState.value as? AuthState.Success)?.user?.uid
 
-                            if (isHost && event.status == "pending") {
-                                val user = _supabaseProfiles.value.find { it.uid == event.userId }
-                                val name = user?.displayName ?: user?.username ?: "Listener"
-                                val avatar = user?.avatar ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400"
-                                _pendingSpeakerRequest.value = SpeakerRequestItem(
-                                    id = event.requestId ?: "req_${System.currentTimeMillis()}",
-                                    roomId = currentRoomId,
-                                    userId = event.userId ?: "",
-                                    requesterName = name,
-                                    requesterAvatar = avatar
-                                )
-                            } else if (event.status in listOf("accepted", "declined") || event.eventType == "DELETE") {
-                                if (_pendingSpeakerRequest.value?.id == event.requestId || _pendingSpeakerRequest.value?.userId == event.userId) {
-                                    _pendingSpeakerRequest.value = null
+                            val isHost = hostId != null && myUid != null && hostId == myUid
+
+                            // 1. HOST Handling: Manage pending requests list
+                            if (isHost) {
+                                if (event.status == "pending") {
+                                    val user = _supabaseProfiles.value.find { it.uid == event.userId }
+                                    val name = user?.displayName?.ifBlank { null } ?: user?.username?.ifBlank { null } ?: "Listener"
+                                    val avatar = user?.avatar?.ifBlank { null } ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400"
+                                    val newItem = SpeakerRequestItem(
+                                        id = event.requestId ?: "req_${System.currentTimeMillis()}",
+                                        roomId = currentRoomId,
+                                        userId = event.userId ?: "",
+                                        requesterName = name,
+                                        requesterAvatar = avatar
+                                    )
+                                    val updated = (listOf(newItem) + _pendingSpeakerRequests.value.filter { it.id != newItem.id && it.userId != newItem.userId })
+                                    _pendingSpeakerRequests.value = updated
+                                    _pendingSpeakerRequest.value = updated.firstOrNull()
+                                } else if (event.status in listOf("accepted", "declined") || event.eventType == "DELETE") {
+                                    val updated = _pendingSpeakerRequests.value.filterNot { it.id == event.requestId || (it.userId.isNotBlank() && it.userId == event.userId) }
+                                    _pendingSpeakerRequests.value = updated
+                                    _pendingSpeakerRequest.value = updated.firstOrNull()
+                                    if (event.status == "accepted") {
+                                        refreshActiveRoomSpeakers(currentRoomId, appContext)
+                                    }
+                                }
+                            }
+
+                            // 2. LISTENER Handling: Update requester's local state
+                            if (myUid != null && event.userId == myUid) {
+                                when (event.status) {
+                                    "pending" -> {
+                                        _mySpeakerRequestStatus.value = "pending"
+                                    }
+                                    "accepted" -> {
+                                        _mySpeakerRequestStatus.value = "accepted"
+                                        _isMicEnabled.value = true
+                                        refreshActiveRoomSpeakers(currentRoomId, appContext)
+                                    }
+                                    "declined" -> {
+                                        _mySpeakerRequestStatus.value = "declined"
+                                    }
+                                    else -> {
+                                        if (event.eventType == "DELETE") {
+                                            _mySpeakerRequestStatus.value = null
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -218,9 +258,13 @@ class AuthViewModel : ViewModel() {
     }
 
     fun respondToSpeakerRequest(requestId: String, accept: Boolean, context: Context? = null) {
-        val ctx = context
+        val ctx = context ?: FunkyTalkApplication.appContext
         val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
-        _pendingSpeakerRequest.value = null
+        
+        // Optimistically remove from pending list
+        val remaining = _pendingSpeakerRequests.value.filter { it.id != requestId }
+        _pendingSpeakerRequests.value = remaining
+        _pendingSpeakerRequest.value = remaining.firstOrNull()
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -229,7 +273,11 @@ class AuthViewModel : ViewModel() {
                     body = RespondSpeakerRequestBody(request_id = requestId, accept = accept)
                 )
                 Log.d("AuthViewModel", "respondToSpeakerRequest: $requestId, accept=$accept, code=${res.code()}")
-                _activeRoomId.value?.let { refreshActiveRoomSpeakers(it, context) }
+                val currentRoom = _activeRoomId.value
+                if (currentRoom != null) {
+                    checkPendingSpeakerRequestsForHost(currentRoom, ctx)
+                    refreshActiveRoomSpeakers(currentRoom, ctx)
+                }
             } catch (e: Exception) {
                 Log.e("AuthViewModel", "Error calling respondToSpeakerRequest", e)
             }
@@ -237,7 +285,7 @@ class AuthViewModel : ViewModel() {
     }
 
     fun refreshActiveRoomSpeakers(roomId: String, context: Context? = null) {
-        val ctx = context
+        val ctx = context ?: FunkyTalkApplication.appContext
         val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -256,6 +304,13 @@ class AuthViewModel : ViewModel() {
                         )
                     }
                     _activeRoomSpeakers.value = speakers
+
+                    // If current user is now a speaker, update local state
+                    val myUid = ctx?.let { SupabaseSessionManager.getUserId(it) }
+                    if (myUid != null && speakerUserIds.contains(myUid)) {
+                        _mySpeakerRequestStatus.value = "accepted"
+                        _isMicEnabled.value = true
+                    }
                 }
             } catch (e: Exception) {
                 Log.e("AuthViewModel", "Error refreshing active room speakers", e)
@@ -264,31 +319,123 @@ class AuthViewModel : ViewModel() {
     }
 
     fun checkPendingSpeakerRequestsForHost(roomId: String, context: Context? = null) {
-        val ctx = context
+        val ctx = context ?: FunkyTalkApplication.appContext
         val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val res = SupabaseClient.api.getPendingSpeakerRequests(auth = token, roomIdEq = "eq.$roomId")
                 if (res.isSuccessful) {
                     val list = res.body() ?: emptyList()
-                    val firstPending = list.firstOrNull()
-                    if (firstPending != null) {
-                        val user = _supabaseProfiles.value.find { it.uid == firstPending.user_id }
-                        val name = user?.displayName ?: user?.username ?: "Listener"
-                        val avatar = user?.avatar ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400"
-                        _pendingSpeakerRequest.value = SpeakerRequestItem(
-                            id = firstPending.id,
+                    val currentProfiles = _supabaseProfiles.value
+                    val items = list.map { req ->
+                        val user = currentProfiles.find { it.uid == req.user_id }
+                        val name = user?.displayName?.ifBlank { null } ?: user?.username?.ifBlank { null } ?: "Listener"
+                        val avatar = user?.avatar?.ifBlank { null } ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400"
+                        SpeakerRequestItem(
+                            id = req.id,
                             roomId = roomId,
-                            userId = firstPending.user_id,
+                            userId = req.user_id,
                             requesterName = name,
                             requesterAvatar = avatar
                         )
-                    } else {
-                        _pendingSpeakerRequest.value = null
                     }
+                    _pendingSpeakerRequests.value = items
+                    _pendingSpeakerRequest.value = items.firstOrNull()
                 }
             } catch (e: Exception) {
                 Log.e("AuthViewModel", "Error checking pending speaker requests", e)
+            }
+        }
+    }
+
+    fun checkMySpeakerRequest(roomId: String, context: Context? = null) {
+        val ctx = context ?: FunkyTalkApplication.appContext
+        val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+        val uid = ctx?.let { SupabaseSessionManager.getUserId(it) }
+            ?: (authState.value as? AuthState.Success)?.user?.uid
+            ?: return
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val res = SupabaseClient.api.getPendingSpeakerRequests(auth = token, roomIdEq = "eq.$roomId")
+                if (res.isSuccessful) {
+                    val list = res.body() ?: emptyList()
+                    val hasPending = list.any { it.user_id == uid && it.status == "pending" }
+                    if (hasPending) {
+                        _mySpeakerRequestStatus.value = "pending"
+                    } else if (_mySpeakerRequestStatus.value == "pending") {
+                        _mySpeakerRequestStatus.value = null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("AuthViewModel", "Error checking my speaker request", e)
+            }
+        }
+    }
+
+    fun requestSpeakerSeat(
+        roomId: String,
+        context: Context,
+        onResult: ((Boolean, String?) -> Unit)? = null
+    ) {
+        val uid = SupabaseSessionManager.getUserId(context)
+            ?: (authState.value as? AuthState.Success)?.user?.uid
+
+        if (uid.isNullOrBlank()) {
+            onResult?.invoke(false, "Please sign in to request a speaker seat.")
+            return
+        }
+
+        // Edge case: Already a speaker or host -> do not show/request another seat
+        val hostId = _activeRoomHostId.value
+        val isHost = (hostId != null && hostId == uid)
+        val isAlreadySpeaker = _activeRoomSpeakers.value.any { it.uid == uid }
+        if (isHost || isAlreadySpeaker) {
+            onResult?.invoke(false, "You are already a speaker in this room.")
+            return
+        }
+
+        // Edge case: Existing pending request -> do not create another
+        if (_mySpeakerRequestStatus.value == "pending") {
+            onResult?.invoke(true, "Your request to speak is pending host approval.")
+            return
+        }
+
+        val token = SupabaseSessionManager.getBearerToken(context)
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val res = SupabaseClient.api.createSpeakerRequest(
+                    auth = token,
+                    body = SpeakerRequestInsert(
+                        room_id = roomId,
+                        user_id = uid,
+                        status = "pending"
+                    )
+                )
+                withContext(Dispatchers.Main) {
+                    if (res.isSuccessful) {
+                        _mySpeakerRequestStatus.value = "pending"
+                        onResult?.invoke(true, "Request to join as speaker sent to host!")
+                    } else {
+                        val code = res.code()
+                        if (code == 409) {
+                            // Already exists as pending
+                            _mySpeakerRequestStatus.value = "pending"
+                            onResult?.invoke(true, "Request already pending host approval.")
+                        } else if (code == 404 || code == 410) {
+                            onResult?.invoke(false, "This room is no longer active.")
+                        } else {
+                            // Query backend state in case RLS or constraint treated it as duplicate
+                            checkMySpeakerRequest(roomId, context)
+                            onResult?.invoke(false, "Could not submit speaker request.")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("AuthViewModel", "Error creating speaker request", e)
+                withContext(Dispatchers.Main) {
+                    onResult?.invoke(false, "Error submitting speaker request. Please try again.")
+                }
             }
         }
     }
@@ -316,6 +463,8 @@ class AuthViewModel : ViewModel() {
         refreshActiveRoomSpeakers(roomId, context)
         if (hostId == uid || _activeRoomHostId.value == uid) {
             checkPendingSpeakerRequestsForHost(roomId, context)
+        } else {
+            checkMySpeakerRequest(roomId, context)
         }
 
         val userAvatar = (authState.value as? AuthState.Success)?.user?.avatar
@@ -405,7 +554,9 @@ class AuthViewModel : ViewModel() {
         _activeRoomId.value = null
         _activeRoomTitle.value = null
         _activeRoomHostId.value = null
+        _pendingSpeakerRequests.value = emptyList()
         _pendingSpeakerRequest.value = null
+        _mySpeakerRequestStatus.value = null
         _activeRoomSpeakers.value = emptyList()
 
         if (ctx != null) {
@@ -534,7 +685,8 @@ class AuthViewModel : ViewModel() {
                     val allRoomsResp = SupabaseClient.api.getVoiceRooms(auth = token)
                     if (allRoomsResp.isSuccessful) {
                         val matchingPublicRoom = allRoomsResp.body()?.find {
-                            (it.id == clean || it.join_code.equals(clean, ignoreCase = true)) && it.is_private != true
+                            (it.id == clean || it.join_code.equals(clean, ignoreCase = true) ||
+                             com.example.util.RoomShareHelper.getDisplayRoomCode(it.id, it.join_code).equals(clean, ignoreCase = true)) && it.is_private != true
                         }
                         if (matchingPublicRoom != null) {
                             targetRoomId = matchingPublicRoom.id

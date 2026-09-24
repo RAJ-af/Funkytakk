@@ -6,6 +6,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import com.example.util.RoomShareHelper
 import com.example.UpdateVoiceRoomRequest
 import com.example.SpeakerRequestInsert
 import com.example.SupabaseRoomParticipant
@@ -1014,8 +1015,92 @@ fun VoiceRoomScreen(
     LaunchedEffect(vmMicEnabled) {
         isMicOn = vmMicEnabled
     }
+    val pendingSpeakerRequests by viewModel?.pendingSpeakerRequests?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
+    val mySpeakerRequestStatus by viewModel?.mySpeakerRequestStatus?.collectAsState() ?: remember { mutableStateOf<String?>(null) }
     var isSpeakerRequestPending by remember { mutableStateOf(false) }
     var isSpeakerRequestSubmitting by remember { mutableStateOf(false) }
+
+    LaunchedEffect(mySpeakerRequestStatus) {
+        isSpeakerRequestPending = (mySpeakerRequestStatus == "pending")
+    }
+
+    LaunchedEffect(activeRoomId) {
+        if (activeRoomId.isNotBlank()) {
+            if (currentUserId == roomHostId) {
+                viewModel?.checkPendingSpeakerRequestsForHost(activeRoomId, context)
+            } else {
+                viewModel?.checkMySpeakerRequest(activeRoomId, context)
+            }
+        }
+    }
+
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, activeRoomId) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && activeRoomId.isNotBlank()) {
+                viewModel?.refreshActiveRoomSpeakers(activeRoomId, context)
+                if (currentUserId == roomHostId) {
+                    viewModel?.checkPendingSpeakerRequestsForHost(activeRoomId, context)
+                } else {
+                    viewModel?.checkMySpeakerRequest(activeRoomId, context)
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    val handleRequestSpeakerSeat: () -> Unit = {
+        val myPart = participantsData.find { it.user_id == currentUserId }
+        val isAlreadySpeaker = (currentUserId == roomHostId || myPart?.role == "speaker" || speakerSeats.any { it.userId == currentUserId })
+        if (isAlreadySpeaker) {
+            Toast.makeText(context, "You are already a speaker in this room.", Toast.LENGTH_SHORT).show()
+        } else if (isSpeakerRequestPending || mySpeakerRequestStatus == "pending") {
+            Toast.makeText(context, "Your request to speak is pending host approval", Toast.LENGTH_SHORT).show()
+        } else {
+            isSpeakerRequestSubmitting = true
+            if (viewModel != null) {
+                viewModel.requestSpeakerSeat(activeRoomId, context) { success, message ->
+                    isSpeakerRequestSubmitting = false
+                    if (success) {
+                        isSpeakerRequestPending = true
+                    }
+                    message?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+                }
+            } else {
+                scope.launch(Dispatchers.IO) {
+                    try {
+                        val token = SupabaseSessionManager.getBearerToken(context)
+                        val uid = SupabaseSessionManager.getUserId(context) ?: currentUserId
+                        val res = SupabaseClient.api.createSpeakerRequest(
+                            auth = token,
+                            body = SpeakerRequestInsert(
+                                room_id = activeRoomId,
+                                user_id = uid,
+                                status = "pending"
+                            )
+                        )
+                        withContext(Dispatchers.Main) {
+                            isSpeakerRequestSubmitting = false
+                            if (res.isSuccessful || res.code() == 409) {
+                                isSpeakerRequestPending = true
+                                Toast.makeText(context, "Request to speak sent to host!", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "Could not submit speaker request.", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    } catch (_: Exception) {
+                        withContext(Dispatchers.Main) {
+                            isSpeakerRequestSubmitting = false
+                            Toast.makeText(context, "Error sending request to speak", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            }
+        }
+    }
     var showThreeDotMenu by remember { mutableStateOf(false) }
     var showReportDialog by remember { mutableStateOf(false) }
     var showEditRoomSheet by remember { mutableStateOf(false) }
@@ -1050,46 +1135,78 @@ fun VoiceRoomScreen(
                     inputStream?.close()
                     if (bytes != null && bytes.isNotEmpty()) {
                         val filename = "report_shot_${System.currentTimeMillis()}.jpg"
-                        val reqFile = bytes.toRequestBody("image/*".toMediaTypeOrNull(), 0, bytes.size)
-                        val part = MultipartBody.Part.createFormData("file", filename, reqFile)
+                        val reqBody = bytes.toRequestBody("image/jpeg".toMediaTypeOrNull(), 0, bytes.size)
+                        
+                        // Ensure session is fresh and authenticated
+                        SupabaseSessionManager.ensureActiveSession(context)
                         val bearerAuth = SupabaseSessionManager.getBearerToken(context)
-                        var usedBucket = "reports"
+                        var usedBucket = "avatars"
                         var isUploadSuccess = false
-                        val res = SupabaseClient.api.uploadStorageFile(
+
+                        // 1. Try raw bytes upload to avatars bucket (guaranteed public & accessible)
+                        val rawRes = SupabaseClient.api.uploadStorageRawBytes(
                             auth = bearerAuth,
-                            bucket = usedBucket,
+                            bucket = "avatars",
                             filename = filename,
-                            file = part
+                            contentType = "image/jpeg",
+                            body = reqBody
                         )
-                        if (res.isSuccessful) {
+                        if (rawRes.isSuccessful) {
                             isUploadSuccess = true
+                            usedBucket = "avatars"
                         } else {
-                            val fallbackPart = MultipartBody.Part.createFormData("file", filename, reqFile)
-                            val fallbackRes = SupabaseClient.api.uploadAvatar(
+                            // 2. Try multipart upload to avatars bucket
+                            val multiPart = okhttp3.MultipartBody.Part.createFormData("file", filename, reqBody)
+                            val multiRes = SupabaseClient.api.uploadStorageFile(
                                 auth = bearerAuth,
+                                bucket = "avatars",
                                 filename = filename,
-                                file = fallbackPart
+                                file = multiPart
                             )
-                            if (fallbackRes.isSuccessful) {
+                            if (multiRes.isSuccessful) {
                                 isUploadSuccess = true
                                 usedBucket = "avatars"
+                            } else {
+                                // 3. Try reports bucket with raw bytes
+                                val repRes = SupabaseClient.api.uploadStorageRawBytes(
+                                    auth = bearerAuth,
+                                    bucket = "reports",
+                                    filename = filename,
+                                    contentType = "image/jpeg",
+                                    body = reqBody
+                                )
+                                if (repRes.isSuccessful) {
+                                    isUploadSuccess = true
+                                    usedBucket = "reports"
+                                }
                             }
                         }
+
                         if (isUploadSuccess) {
                             val baseUrl = BuildConfig.SUPABASE_URL.trimEnd('/')
                             val url = if (baseUrl.startsWith("http")) baseUrl else "https://$baseUrl"
-                            reportScreenshotUrl = "$url/storage/v1/object/public/$usedBucket/$filename"
+                            val directUrl = "$url/storage/v1/object/public/$usedBucket/$filename"
+                            // If uploaded to reports (private), resolve to a signed URL immediately
+                            val finalUrl = if (usedBucket == "reports") {
+                                com.example.SupabaseMediaResolver.resolveMediaUrl(directUrl) ?: directUrl
+                            } else {
+                                directUrl
+                            }
+                            reportScreenshotUrl = finalUrl
                             withContext(Dispatchers.Main) {
                                 Toast.makeText(context, "Screenshot attached successfully", Toast.LENGTH_SHORT).show()
                             }
                         } else {
                             withContext(Dispatchers.Main) {
-                                Toast.makeText(context, "Failed to upload screenshot", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Failed to upload screenshot. Please check connection.", Toast.LENGTH_SHORT).show()
                             }
                         }
                     }
                 } catch (e: Exception) {
                     android.util.Log.e("VoiceRoomScreen", "Screenshot upload failed", e)
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "Upload error: ${e.localizedMessage ?: "Unknown error"}", Toast.LENGTH_SHORT).show()
+                    }
                 } finally {
                     isUploadingScreenshot = false
                 }
@@ -1109,46 +1226,78 @@ fun VoiceRoomScreen(
                     inputStream?.close()
                     if (bytes != null && bytes.isNotEmpty()) {
                         val filename = "report_clip_${System.currentTimeMillis()}.mp3"
-                        val reqFile = bytes.toRequestBody("audio/*".toMediaTypeOrNull(), 0, bytes.size)
-                        val part = MultipartBody.Part.createFormData("file", filename, reqFile)
+                        val reqBody = bytes.toRequestBody("audio/mpeg".toMediaTypeOrNull(), 0, bytes.size)
+                        
+                        // Ensure session is fresh and authenticated
+                        SupabaseSessionManager.ensureActiveSession(context)
                         val bearerAuth = SupabaseSessionManager.getBearerToken(context)
-                        var usedBucket = "reports"
+                        var usedBucket = "avatars"
                         var isUploadSuccess = false
-                        val res = SupabaseClient.api.uploadStorageFile(
+
+                        // 1. Try raw bytes upload to avatars bucket (reliable public storage)
+                        val rawRes = SupabaseClient.api.uploadStorageRawBytes(
                             auth = bearerAuth,
-                            bucket = usedBucket,
+                            bucket = "avatars",
                             filename = filename,
-                            file = part
+                            contentType = "audio/mpeg",
+                            body = reqBody
                         )
-                        if (res.isSuccessful) {
+                        if (rawRes.isSuccessful) {
                             isUploadSuccess = true
+                            usedBucket = "avatars"
                         } else {
-                            val fallbackPart = MultipartBody.Part.createFormData("file", filename, reqFile)
-                            val fallbackRes = SupabaseClient.api.uploadAvatar(
+                            // 2. Try multipart upload to avatars
+                            val multiPart = okhttp3.MultipartBody.Part.createFormData("file", filename, reqBody)
+                            val multiRes = SupabaseClient.api.uploadStorageFile(
                                 auth = bearerAuth,
+                                bucket = "avatars",
                                 filename = filename,
-                                file = fallbackPart
+                                file = multiPart
                             )
-                            if (fallbackRes.isSuccessful) {
+                            if (multiRes.isSuccessful) {
                                 isUploadSuccess = true
                                 usedBucket = "avatars"
+                            } else {
+                                // 3. Fallback to reports bucket
+                                val repRes = SupabaseClient.api.uploadStorageRawBytes(
+                                    auth = bearerAuth,
+                                    bucket = "reports",
+                                    filename = filename,
+                                    contentType = "audio/mpeg",
+                                    body = reqBody
+                                )
+                                if (repRes.isSuccessful) {
+                                    isUploadSuccess = true
+                                    usedBucket = "reports"
+                                }
                             }
                         }
+
                         if (isUploadSuccess) {
                             val baseUrl = BuildConfig.SUPABASE_URL.trimEnd('/')
                             val url = if (baseUrl.startsWith("http")) baseUrl else "https://$baseUrl"
-                            reportAudioClipUrl = "$url/storage/v1/object/public/$usedBucket/$filename"
+                            val directUrl = "$url/storage/v1/object/public/$usedBucket/$filename"
+                            // If uploaded to reports (private), resolve to a signed URL immediately
+                            val finalUrl = if (usedBucket == "reports") {
+                                com.example.SupabaseMediaResolver.resolveMediaUrl(directUrl) ?: directUrl
+                            } else {
+                                directUrl
+                            }
+                            reportAudioClipUrl = finalUrl
                             withContext(Dispatchers.Main) {
                                 Toast.makeText(context, "Clip attached successfully", Toast.LENGTH_SHORT).show()
                             }
                         } else {
                             withContext(Dispatchers.Main) {
-                                Toast.makeText(context, "Failed to upload clip", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Failed to upload clip. Please check connection.", Toast.LENGTH_SHORT).show()
                             }
                         }
                     }
                 } catch (e: Exception) {
                     android.util.Log.e("VoiceRoomScreen", "Clip upload failed", e)
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "Upload error: ${e.localizedMessage ?: "Unknown error"}", Toast.LENGTH_SHORT).show()
+                    }
                 } finally {
                     isUploadingClip = false
                 }
@@ -1479,7 +1628,11 @@ fun VoiceRoomScreen(
                     
                     Spacer(modifier = Modifier.width(8.dp))
                     
-                    Column(modifier = Modifier.widthIn(max = 120.dp)) {
+                    val displayShortCode = remember(activeRoomId, joinCodeState) {
+                        RoomShareHelper.getDisplayRoomCode(activeRoomId, joinCodeState)
+                    }
+
+                    Column(modifier = Modifier.widthIn(min = 60.dp, max = 150.dp)) {
                         Text(
                             text = roomTitle,
                             fontSize = 14.sp,
@@ -1490,10 +1643,13 @@ fun VoiceRoomScreen(
                         )
                         Spacer(modifier = Modifier.height(1.dp))
                         Text(
-                            text = "ID:FT5272",
+                            text = "ID: $displayShortCode",
                             fontSize = 11.sp,
                             color = currentTheme.secondaryTextColor,
-                            fontWeight = FontWeight.Medium
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                     
@@ -1515,7 +1671,7 @@ fun VoiceRoomScreen(
                             .background(currentTheme.cardBgColor, CircleShape)
                             .border(1.dp, currentTheme.cardBorderColor, CircleShape)
                             .clickable {
-                                Toast.makeText(context, "Room link copied! Share with your friends.", Toast.LENGTH_SHORT).show()
+                                showInviteFriendSheet = true
                             },
                         contentAlignment = Alignment.Center
                     ) {
@@ -1801,7 +1957,139 @@ fun VoiceRoomScreen(
                 }
             }
 
+            // Host In-Room Pending Requests Banner
+            if (currentUserId == roomHostId && pendingSpeakerRequests.isNotEmpty()) {
+                val firstReq = pendingSpeakerRequests.first()
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isRoomDarkMode) Color(0xFF261E10) else Color(0xFFFFFBEB)
+                    ),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = ChillGoldIcon.copy(alpha = 0.8f)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(contentAlignment = Alignment.BottomEnd) {
+                                AsyncImage(
+                                    model = firstReq.requesterAvatar,
+                                    contentDescription = firstReq.requesterName,
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape),
+                                    contentScale = ContentScale.Crop
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(14.dp)
+                                        .background(ChillGoldIcon, CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CustomRaisedHandIcon(
+                                        tint = Color.Black,
+                                        modifier = Modifier.size(9.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = if (pendingSpeakerRequests.size > 1) {
+                                        "${firstReq.requesterName} +${pendingSpeakerRequests.size - 1} more"
+                                    } else {
+                                        firstReq.requesterName
+                                    },
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isRoomDarkMode) Color.White else Color(0xFF0F172A),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "Requested to speak",
+                                    fontSize = 11.sp,
+                                    color = if (isRoomDarkMode) Color.White.copy(alpha = 0.6f) else Color(0xFF92400E)
+                                )
+                            }
+                        }
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Decline button
+                            Box(
+                                modifier = Modifier
+                                    .background(
+                                        if (isRoomDarkMode) Color.White.copy(alpha = 0.1f) else Color(0xFFF1F5F9),
+                                        RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable {
+                                        viewModel?.respondToSpeakerRequest(firstReq.id, false, context)
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = "Decline",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (isRoomDarkMode) Color.White.copy(alpha = 0.75f) else Color(0xFF475569)
+                                )
+                            }
+
+                            // Accept button
+                            Box(
+                                modifier = Modifier
+                                    .background(
+                                        ChillGoldIcon,
+                                        RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable {
+                                        viewModel?.respondToSpeakerRequest(firstReq.id, true, context)
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = "Accept",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Black
+                                )
+                            }
+
+                            if (pendingSpeakerRequests.size > 1) {
+                                Text(
+                                    text = "View all",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = ChillGoldIcon,
+                                    modifier = Modifier
+                                        .clickable { showPeopleSheet = true }
+                                        .padding(horizontal = 4.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             // 2. SPEAKERS VISUAL SYSTEM
+            val currentParticipant = participantsData.find { it.user_id == currentUserId }
+            val isCurrentUserSpeakerOrHost = (currentUserId == roomHostId || currentParticipant?.role == "speaker" || speakerSeats.any { it.userId == currentUserId })
             SpeakerSeatsGrid(
                 hostSeat = hostSeat,
                 speakerSeats = speakerSeats,
@@ -1818,7 +2106,10 @@ fun VoiceRoomScreen(
                 onSpeakerClick = { index, sp ->
                     oneToOneChatUser = PrivateChatItem("sp${index + 1}", sp.name, sp.imageUrl, sp.flagCode, "", "Now", 0, true, false)
                     showOneToOneChatSheet = true
-                }
+                },
+                isSpeakerRequestPending = isSpeakerRequestPending || mySpeakerRequestStatus == "pending",
+                isCurrentUserSpeakerOrHost = isCurrentUserSpeakerOrHost,
+                onRequestSpeakerSeat = handleRequestSpeakerSeat
             )
 
             Spacer(modifier = Modifier.weight(1f))
@@ -2096,20 +2387,26 @@ fun VoiceRoomScreen(
                     onClick = { showChatSheet = true }
                 )
                 val realPeopleCount = if (participantsData.isNotEmpty()) participantsData.size else allRoomSeats.size.coerceAtLeast(1)
+                val isHost = (currentUserId == roomHostId)
+                val peopleBadge = if (isHost && pendingSpeakerRequests.isNotEmpty()) {
+                    "+${pendingSpeakerRequests.size}"
+                } else {
+                    "$realPeopleCount"
+                }
                 VoiceBottomBarItem(
-                    icon = { CustomPeopleGroupIcon(tint = inactiveIconTint, modifier = Modifier.size(26.dp)) },
+                    icon = { CustomPeopleGroupIcon(tint = if (isHost && pendingSpeakerRequests.isNotEmpty()) ChillGoldIcon else inactiveIconTint, modifier = Modifier.size(26.dp)) },
                     label = "People",
-                    tint = inactiveIconTint,
-                    badgeText = "$realPeopleCount",
+                    tint = if (isHost && pendingSpeakerRequests.isNotEmpty()) ChillGoldIcon else inactiveIconTint,
+                    badgeText = peopleBadge,
                     onClick = { showPeopleSheet = true }
                 )
 
                 val myParticipant = participantsData.find { it.user_id == currentUserId }
-                val isHost = (currentUserId == roomHostId)
                 val myRole = myParticipant?.role ?: if (isHost) "speaker" else "listener"
                 val isListener = !isHost && (myRole == "listener")
 
                 if (isListener) {
+                    val isPending = (isSpeakerRequestPending || mySpeakerRequestStatus == "pending")
                     // Listener-side Request to Speak Action Bubble
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -2121,62 +2418,14 @@ fun VoiceRoomScreen(
                                 .shadow(6.dp, CircleShape)
                                 .clip(CircleShape)
                                 .background(
-                                    if (isSpeakerRequestPending) Color(0xFF3F3F46) else ChillGoldIcon
+                                    if (isPending) Color(0xFF3F3F46) else ChillGoldIcon
                                 )
                                 .clickable(enabled = !isSpeakerRequestSubmitting) {
-                                    if (isSpeakerRequestPending) {
-                                        Toast.makeText(
-                                            context,
-                                            "Your request to speak is pending host approval",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    } else {
-                                        isSpeakerRequestSubmitting = true
-                                        val token = SupabaseSessionManager.getBearerToken(context)
-                                        scope.launch(Dispatchers.IO) {
-                                            try {
-                                                val res = SupabaseClient.api.createSpeakerRequest(
-                                                    auth = token,
-                                                    body = SpeakerRequestInsert(
-                                                        room_id = activeRoomId,
-                                                        user_id = currentUserId
-                                                    )
-                                                )
-                                                withContext(Dispatchers.Main) {
-                                                    isSpeakerRequestSubmitting = false
-                                                    if (res.isSuccessful) {
-                                                        isSpeakerRequestPending = true
-                                                        Toast.makeText(
-                                                            context,
-                                                            "Request to speak sent to host!",
-                                                            Toast.LENGTH_SHORT
-                                                        ).show()
-                                                    } else {
-                                                        isSpeakerRequestPending = true
-                                                        Toast.makeText(
-                                                            context,
-                                                            "Request to speak submitted.",
-                                                            Toast.LENGTH_SHORT
-                                                        ).show()
-                                                    }
-                                                }
-                                            } catch (e: Exception) {
-                                                withContext(Dispatchers.Main) {
-                                                    isSpeakerRequestSubmitting = false
-                                                    isSpeakerRequestPending = true
-                                                    Toast.makeText(
-                                                        context,
-                                                        "Request submitted to host.",
-                                                        Toast.LENGTH_SHORT
-                                                    ).show()
-                                                }
-                                            }
-                                        }
-                                    }
+                                    handleRequestSpeakerSeat()
                                 },
                             contentAlignment = Alignment.Center
                         ) {
-                            if (isSpeakerRequestPending) {
+                            if (isPending) {
                                 CustomPendingHourglassIcon(
                                     tint = Color.White,
                                     modifier = Modifier.size(30.dp)
@@ -2190,10 +2439,10 @@ fun VoiceRoomScreen(
                         }
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = if (isSpeakerRequestPending) "Requested" else "Request to Speak",
+                            text = if (isPending) "Requested" else "Request to Speak",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (isSpeakerRequestPending) Color(0xFFA1A1AA) else ChillGoldIcon
+                            color = if (isPending) Color(0xFFA1A1AA) else ChillGoldIcon
                         )
                     }
                 } else {
@@ -2337,6 +2586,10 @@ fun VoiceRoomScreen(
                 listenerUserIds = listenerUserIds,
                 isCurrentUserHost = (currentUserId == roomHostId && currentUserId.isNotBlank()),
                 currentUserId = currentUserId,
+                pendingSpeakerRequests = pendingSpeakerRequests,
+                onRespondToSpeakerRequest = { reqId, accept ->
+                    viewModel?.respondToSpeakerRequest(reqId, accept, context)
+                },
                 onUserClick = { chatUser ->
                     oneToOneChatUser = chatUser
                     showOneToOneChatSheet = true
@@ -2435,6 +2688,9 @@ fun VoiceRoomScreen(
 
     if (showInviteFriendSheet) {
         val currentTheme = roomThemes[selectedThemeIndex]
+        val displayRoomName = roomTitle.ifBlank { activeRoomTitle.ifBlank { "FunkyTalk Room" } }
+        val displayShortCode = RoomShareHelper.getDisplayRoomCode(activeRoomId, joinCodeState)
+        val displayInviteLink = RoomShareHelper.buildDefaultInviteLink(activeRoomId)
         ModalBottomSheet(
             onDismissRequest = { showInviteFriendSheet = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -2444,6 +2700,9 @@ fun VoiceRoomScreen(
         ) {
             InviteFriendBottomSheetContent(
                 isDarkMode = currentTheme.isDark,
+                roomName = displayRoomName,
+                roomId = displayShortCode,
+                inviteLink = displayInviteLink,
                 onDismiss = { showInviteFriendSheet = false }
             )
         }
