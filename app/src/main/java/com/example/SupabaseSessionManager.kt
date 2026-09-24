@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.util.Base64
 import android.util.Log
 import com.google.firebase.auth.FirebaseAuth
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
@@ -232,6 +233,8 @@ object SupabaseSessionManager {
                 val err = verifyRes.errorBody()?.string() ?: verifyRes.message()
                 Log.e(TAG, "ensureActiveSession: verifyFirebaseToken failed (code ${verifyRes.code()}): $err")
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "ensureActiveSession: Exception refreshing session", e)
         }

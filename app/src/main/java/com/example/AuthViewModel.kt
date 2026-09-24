@@ -98,6 +98,24 @@ class AuthViewModel : ViewModel() {
     private val _pendingSpeakerRequest = MutableStateFlow<SpeakerRequestItem?>(null)
     val pendingSpeakerRequest: StateFlow<SpeakerRequestItem?> = _pendingSpeakerRequest
 
+    private val _myModerationStatus = MutableStateFlow<MyModerationStatus?>(null)
+    val myModerationStatus: StateFlow<MyModerationStatus?> = _myModerationStatus
+
+    fun refreshModerationStatus(context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val status = ModerationManager.fetchMyModerationStatus(context)
+                _myModerationStatus.value = status
+            } catch (e: Exception) {
+                Log.w("AuthViewModel", "Failed to refresh moderation status: ${e.message}")
+            }
+        }
+    }
+
+    fun setModerationStatus(status: MyModerationStatus?) {
+        _myModerationStatus.value = status
+    }
+
     init {
         viewModelScope.launch {
             VoiceRoomRealtimeManager.events.collect { event ->
@@ -131,6 +149,19 @@ class AuthViewModel : ViewModel() {
                         val currentRoomId = _activeRoomId.value
                         if (currentRoomId != null && (event.roomId == currentRoomId || event.roomId == null)) {
                             refreshActiveRoomSpeakers(currentRoomId)
+                        }
+                    }
+                    is RealtimeTableEvent.ModerationActionEnforced -> {
+                        val currentUid = (authState.value as? AuthState.Success)?.user?.uid ?: ""
+                        if (event.targetUserId.isNotBlank() && (event.targetUserId.equals(currentUid, ignoreCase = true) || currentUid.isBlank())) {
+                            Log.d("AuthViewModel", "Received moderation realtime event for me: ${event.actionType}")
+                            // Re-fetch via SupabaseClient to ensure backend source of truth
+                            try {
+                                val context = FunkyTalkApplication.appContext
+                                refreshModerationStatus(context)
+                            } catch (e: Exception) {
+                                Log.w("AuthViewModel", "Could not get appContext for moderation refresh: ${e.message}")
+                            }
                         }
                     }
                     else -> {}

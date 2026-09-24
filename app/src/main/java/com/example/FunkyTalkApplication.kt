@@ -9,6 +9,16 @@ import coil.decode.ImageDecoderDecoder
 import coil.decode.SvgDecoder
 
 class FunkyTalkApplication : Application(), ImageLoaderFactory {
+    companion object {
+        lateinit var appContext: android.content.Context
+            private set
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        appContext = applicationContext
+    }
+
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
             .components {

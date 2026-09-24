@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -35,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import com.example.MyModerationStatus
 import com.example.ModerationManager
 import com.example.ReportMessageSnapshot
 import com.example.ReportSpeakerLogItem
@@ -61,6 +63,8 @@ fun ModerationReviewDialog(
     val scope = rememberCoroutineScope()
 
     var reportsList by remember { mutableStateOf<List<RoomReportItem>>(emptyList()) }
+    var activePenaltiesList by remember { mutableStateOf<List<MyModerationStatus>>(emptyList()) }
+    var selectedAdminTab by remember { mutableIntStateOf(0) } // 0: Reports, 1: Active Restrictions
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var searchQuery by remember { mutableStateOf("") }
@@ -69,7 +73,11 @@ fun ModerationReviewDialog(
     var actionDialogReport by remember { mutableStateOf<RoomReportItem?>(null) }
     var playingAudioUrl by remember { mutableStateOf<String?>(null) }
 
-    fun fetchReports() {
+    // Revocation state
+    var revokeTargetUserId by remember { mutableStateOf<String?>(null) }
+    var showRevokeConfirmDialog by remember { mutableStateOf(false) }
+
+    fun fetchAllData() {
         isLoading = true
         errorMessage = null
         scope.launch(Dispatchers.IO) {
@@ -80,6 +88,7 @@ fun ModerationReviewDialog(
                 if (bearerAuth == null) {
                     withContext(Dispatchers.Main) {
                         reportsList = emptyList()
+                        activePenaltiesList = emptyList()
                         errorMessage = "Authentication error: Active session required to view incident reports."
                         isLoading = false
                     }
@@ -91,6 +100,7 @@ fun ModerationReviewDialog(
                 if (!isAdmin) {
                     withContext(Dispatchers.Main) {
                         reportsList = emptyList()
+                        activePenaltiesList = emptyList()
                         errorMessage = "Access Restricted: Your account has role 'user'. In Supabase dashboard, set your role to 'admin' in public.user_roles to view and manage incident reports."
                         isLoading = false
                     }
@@ -98,6 +108,7 @@ fun ModerationReviewDialog(
                 }
 
                 val response = SupabaseClient.api.getRoomReports(auth = bearerAuth)
+                val penalties = ModerationManager.fetchActiveModerationPenalties(context)
 
                 withContext(Dispatchers.Main) {
                     if (response.isSuccessful) {
@@ -111,11 +122,13 @@ fun ModerationReviewDialog(
                             errorMessage = "Failed to load reports (HTTP ${response.code()})"
                         }
                     }
+                    activePenaltiesList = penalties
                     isLoading = false
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     reportsList = emptyList()
+                    activePenaltiesList = emptyList()
                     errorMessage = "Network error: ${e.localizedMessage ?: "Unable to fetch reports"}"
                     isLoading = false
                 }
@@ -124,7 +137,7 @@ fun ModerationReviewDialog(
     }
 
     LaunchedEffect(Unit) {
-        fetchReports()
+        fetchAllData()
     }
 
     // Filtered reports
@@ -236,7 +249,7 @@ fun ModerationReviewDialog(
 
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 IconButton(
-                                    onClick = { fetchReports() },
+                                    onClick = { fetchAllData() },
                                     modifier = Modifier
                                         .size(38.dp)
                                         .clip(CircleShape)
@@ -269,234 +282,463 @@ fun ModerationReviewDialog(
                         }
                     }
 
+                    // Admin Navigation Tabs
+                    PrimaryTabRow(
+                        selectedTabIndex = selectedAdminTab,
+                        containerColor = Color.White,
+                        contentColor = Color(0xFFD97706),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Tab(
+                            selected = selectedAdminTab == 0,
+                            onClick = { selectedAdminTab = 0 },
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Assessment, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Reports (${reportsList.size})", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                            }
+                        )
+                        Tab(
+                            selected = selectedAdminTab == 1,
+                            onClick = { selectedAdminTab = 1 },
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Block, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Active Penalties (${activePenaltiesList.size})", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                            }
+                        )
+                    }
+
                     HorizontalDivider(color = Color(0xFFE5E7EB), thickness = 1.dp)
 
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .weight(1f),
-                        contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        // Summary Stats Bar
-                        item {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                ModernStatBadge(
-                                    title = "Pending",
-                                    count = pendingCount.toString(),
-                                    icon = Icons.Outlined.PendingActions,
-                                    containerColor = Color(0xFFFFFBEB),
-                                    accentColor = Color(0xFFD97706),
-                                    modifier = Modifier.weight(1f)
-                                )
-                                ModernStatBadge(
-                                    title = "Urgent",
-                                    count = urgentCount.toString(),
-                                    icon = Icons.Outlined.WarningAmber,
-                                    containerColor = Color(0xFFFEF2F2),
-                                    accentColor = Color(0xFFDC2626),
-                                    modifier = Modifier.weight(1f)
-                                )
-                                ModernStatBadge(
-                                    title = "Resolved",
-                                    count = solvedCount.toString(),
-                                    icon = Icons.Outlined.CheckCircle,
-                                    containerColor = Color(0xFFECFDF5),
-                                    accentColor = Color(0xFF059669),
-                                    modifier = Modifier.weight(1f)
-                                )
-                                ModernStatBadge(
-                                    title = "Total",
-                                    count = reportsList.size.toString(),
-                                    icon = Icons.Outlined.Assignment,
-                                    containerColor = Color(0xFFF3F4F6),
-                                    accentColor = Color(0xFF4B5563),
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
-
-                        // Search Input
-                        item {
-                            OutlinedTextField(
-                                value = searchQuery,
-                                onValueChange = { searchQuery = it },
-                                placeholder = { Text("Search by Room, User, or Keyword...", fontSize = 13.sp, color = Color(0xFF9CA3AF)) },
-                                leadingIcon = {
-                                    Icon(Icons.Default.Search, contentDescription = "Search", tint = Color(0xFF9CA3AF), modifier = Modifier.size(20.dp))
-                                },
-                                trailingIcon = {
-                                    if (searchQuery.isNotEmpty()) {
-                                        IconButton(onClick = { searchQuery = "" }) {
-                                            Icon(Icons.Default.Clear, contentDescription = "Clear", tint = Color(0xFF9CA3AF), modifier = Modifier.size(16.dp))
-                                        }
-                                    }
-                                },
-                                singleLine = true,
-                                shape = RoundedCornerShape(14.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedContainerColor = Color.White,
-                                    unfocusedContainerColor = Color.White,
-                                    focusedBorderColor = GoldPrimary,
-                                    unfocusedBorderColor = Color(0xFFE5E7EB)
-                                ),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(52.dp)
-                            )
-                        }
-
-                        // Filter Chips Row
-                        item {
-                            val filters = listOf("All", "Pending", "Urgent", "Solved")
-                            LazyRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                items(filters) { filter ->
-                                    val isSelected = (selectedFilter == filter)
-                                    val chipBg = if (isSelected) Color(0xFF1E293B) else Color.White
-                                    val chipText = if (isSelected) Color.White else Color(0xFF4B5563)
-                                    val chipBorder = if (isSelected) Color(0xFF1E293B) else Color(0xFFE5E7EB)
-
-                                    Surface(
-                                        onClick = { selectedFilter = filter },
-                                        shape = RoundedCornerShape(100.dp),
-                                        color = chipBg,
-                                        border = BorderStroke(1.dp, chipBorder),
-                                        modifier = Modifier.height(34.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier.padding(horizontal = 14.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = filter,
-                                                color = chipText,
-                                                fontSize = 12.sp,
-                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                            )
-                                        }
-                                    }
+                    if (selectedAdminTab == 0) {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .weight(1f),
+                            contentPadding = PaddingValues(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            // Summary Stats Bar
+                            item {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    ModernStatBadge(
+                                        title = "Pending",
+                                        count = pendingCount.toString(),
+                                        icon = Icons.Outlined.PendingActions,
+                                        containerColor = Color(0xFFFFFBEB),
+                                        accentColor = Color(0xFFD97706),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    ModernStatBadge(
+                                        title = "Urgent",
+                                        count = urgentCount.toString(),
+                                        icon = Icons.Outlined.WarningAmber,
+                                        containerColor = Color(0xFFFEF2F2),
+                                        accentColor = Color(0xFFDC2626),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    ModernStatBadge(
+                                        title = "Resolved",
+                                        count = solvedCount.toString(),
+                                        icon = Icons.Outlined.CheckCircle,
+                                        containerColor = Color(0xFFECFDF5),
+                                        accentColor = Color(0xFF059669),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    ModernStatBadge(
+                                        title = "Total",
+                                        count = reportsList.size.toString(),
+                                        icon = Icons.Outlined.Assignment,
+                                        containerColor = Color(0xFFF3F4F6),
+                                        accentColor = Color(0xFF4B5563),
+                                        modifier = Modifier.weight(1f)
+                                    )
                                 }
                             }
-                        }
 
-                        // Error Banner
-                        if (errorMessage != null) {
+                            // Search Input
                             item {
-                                Card(
-                                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF2F2)),
-                                    shape = RoundedCornerShape(16.dp),
-                                    border = BorderStroke(1.dp, Color(0xFFFECACA)),
+                                OutlinedTextField(
+                                    value = searchQuery,
+                                    onValueChange = { searchQuery = it },
+                                    placeholder = { Text("Search by Room, User, or Keyword...", fontSize = 13.sp, color = Color(0xFF9CA3AF)) },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.Search, contentDescription = "Search", tint = Color(0xFF9CA3AF), modifier = Modifier.size(20.dp))
+                                    },
+                                    trailingIcon = {
+                                        if (searchQuery.isNotEmpty()) {
+                                            IconButton(onClick = { searchQuery = "" }) {
+                                                Icon(Icons.Default.Clear, contentDescription = "Clear", tint = Color(0xFF9CA3AF), modifier = Modifier.size(16.dp))
+                                            }
+                                        }
+                                    },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedContainerColor = Color.White,
+                                        unfocusedContainerColor = Color.White,
+                                        focusedBorderColor = GoldPrimary,
+                                        unfocusedBorderColor = Color(0xFFE5E7EB)
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(52.dp)
+                                )
+                            }
+
+                            // Filter Chips Row
+                            item {
+                                val filters = listOf("All", "Pending", "Urgent", "Solved")
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Row(
-                                        modifier = Modifier.padding(14.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = Color(0xFFDC2626), modifier = Modifier.size(22.dp))
-                                        Spacer(modifier = Modifier.width(10.dp))
-                                        Text(
-                                            text = errorMessage!!,
-                                            color = Color(0xFF991B1B),
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
+                                    items(filters) { filter ->
+                                        val isSelected = (selectedFilter == filter)
+                                        val chipBg = if (isSelected) Color(0xFF1E293B) else Color.White
+                                        val chipText = if (isSelected) Color.White else Color(0xFF4B5563)
+                                        val chipBorder = if (isSelected) Color(0xFF1E293B) else Color(0xFFE5E7EB)
+
+                                        Surface(
+                                            onClick = { selectedFilter = filter },
+                                            shape = RoundedCornerShape(100.dp),
+                                            color = chipBg,
+                                            border = BorderStroke(1.dp, chipBorder),
+                                            modifier = Modifier.height(34.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier.padding(horizontal = 14.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = filter,
+                                                    color = chipText,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                                )
+                                            }
+                                        }
                                     }
+                                }
+                            }
+
+                            // Error Banner
+                            if (errorMessage != null) {
+                                item {
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF2F2)),
+                                        shape = RoundedCornerShape(16.dp),
+                                        border = BorderStroke(1.dp, Color(0xFFFECACA)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(14.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = Color(0xFFDC2626), modifier = Modifier.size(22.dp))
+                                            Spacer(modifier = Modifier.width(10.dp))
+                                            Text(
+                                                text = errorMessage!!,
+                                                color = Color(0xFF991B1B),
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Report Cards
+                            if (isLoading) {
+                                item {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(180.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(color = GoldPrimary, modifier = Modifier.size(32.dp))
+                                    }
+                                }
+                            } else if (filteredReports.isEmpty()) {
+                                item {
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 20.dp),
+                                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                                        shape = RoundedCornerShape(20.dp),
+                                        border = BorderStroke(1.dp, Color(0xFFE5E7EB))
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(32.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(60.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(0xFFECFDF5)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.CheckCircle,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFF10B981),
+                                                    modifier = Modifier.size(32.dp)
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.height(14.dp))
+                                            Text(
+                                                text = if (errorMessage != null) "Reports Unavailable" else "All Reports Clear!",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 16.sp,
+                                                color = DarkText
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = if (errorMessage != null) "Administrative access required." else "No pending reports matching the selected filter.",
+                                                fontSize = 13.sp,
+                                                color = GraySubtitle
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                items(filteredReports, key = { it.id ?: UUID.randomUUID().toString() }) { report ->
+                                    ModernReportCard(
+                                        report = report,
+                                        isPlayingAudio = (playingAudioUrl == report.audio_clip_url && !report.audio_clip_url.isNullOrBlank()),
+                                        onToggleAudio = { url ->
+                                            playingAudioUrl = if (playingAudioUrl == url) null else url
+                                            if (playingAudioUrl != null) {
+                                                Toast.makeText(context, "Playing audio evidence clip...", Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                        onViewScreenshot = { url ->
+                                            previewImageUrl = url
+                                        },
+                                        onCopyText = { text, label ->
+                                            clipboardManager.setText(AnnotatedString(text))
+                                            Toast.makeText(context, "$label copied", Toast.LENGTH_SHORT).show()
+                                        },
+                                        onTakeAction = {
+                                            actionDialogReport = report
+                                        }
+                                    )
                                 }
                             }
                         }
-
-                        // Report Cards
-                        if (isLoading) {
+                    } else {
+                        // Active Restrictions Tab
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .weight(1f),
+                            contentPadding = PaddingValues(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
                             item {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(180.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    CircularProgressIndicator(color = GoldPrimary, modifier = Modifier.size(32.dp))
-                                }
+                                Text(
+                                    text = "Active Moderation Restrictions (${activePenaltiesList.size})",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = DarkText
+                                )
+                                Text(
+                                    text = "Manage and revoke active warnings, suspensions, or mutes across all rooms.",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF6B7280)
+                                )
                             }
-                        } else if (filteredReports.isEmpty()) {
-                            item {
-                                Card(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 20.dp),
-                                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                                    shape = RoundedCornerShape(20.dp),
-                                    border = BorderStroke(1.dp, Color(0xFFE5E7EB))
-                                ) {
-                                    Column(
+
+                            if (isLoading) {
+                                item {
+                                    Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(32.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally
+                                            .height(180.dp),
+                                        contentAlignment = Alignment.Center
                                     ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(60.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFFECFDF5)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.CheckCircle,
-                                                contentDescription = null,
-                                                tint = Color(0xFF10B981),
-                                                modifier = Modifier.size(32.dp)
-                                            )
-                                        }
-                                        Spacer(modifier = Modifier.height(14.dp))
-                                        Text(
-                                            text = if (errorMessage != null) "Reports Unavailable" else "All Reports Clear!",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 16.sp,
-                                            color = DarkText
-                                        )
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Text(
-                                            text = if (errorMessage != null) "Administrative access required." else "No pending reports matching the selected filter.",
-                                            fontSize = 13.sp,
-                                            color = GraySubtitle
-                                        )
+                                        CircularProgressIndicator(color = GoldPrimary, modifier = Modifier.size(32.dp))
                                     }
                                 }
-                            }
-                        } else {
-                            items(filteredReports, key = { it.id ?: UUID.randomUUID().toString() }) { report ->
-                                ModernReportCard(
-                                    report = report,
-                                    isPlayingAudio = (playingAudioUrl == report.audio_clip_url && !report.audio_clip_url.isNullOrBlank()),
-                                    onToggleAudio = { url ->
-                                        playingAudioUrl = if (playingAudioUrl == url) null else url
-                                        if (playingAudioUrl != null) {
-                                            Toast.makeText(context, "Playing audio evidence clip...", Toast.LENGTH_SHORT).show()
+                            } else if (activePenaltiesList.isEmpty()) {
+                                item {
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 20.dp),
+                                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                                        shape = RoundedCornerShape(20.dp),
+                                        border = BorderStroke(1.dp, Color(0xFFE5E7EB))
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(32.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(56.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(0xFFF3F4F6)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Shield,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFF10B981),
+                                                    modifier = Modifier.size(28.dp)
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.height(12.dp))
+                                            Text(
+                                                text = "No Active Restrictions",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 15.sp,
+                                                color = DarkText
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = "There are currently no users with active warning, suspend, or mute actions.",
+                                                fontSize = 12.sp,
+                                                color = GraySubtitle
+                                            )
                                         }
-                                    },
-                                    onViewScreenshot = { url ->
-                                        previewImageUrl = url
-                                    },
-                                    onCopyText = { text, label ->
-                                        clipboardManager.setText(AnnotatedString(text))
-                                        Toast.makeText(context, "$label copied", Toast.LENGTH_SHORT).show()
-                                    },
-                                    onTakeAction = {
-                                        actionDialogReport = report
                                     }
-                                )
+                                }
+                            } else {
+                                items(activePenaltiesList, key = { it.user_id ?: UUID.randomUUID().toString() }) { penalty ->
+                                    val actionType = penalty.action_type?.lowercase() ?: "action"
+                                    val badgeColor = when (actionType) {
+                                        "suspend" -> Color(0xFFDC2626)
+                                        "warning" -> Color(0xFFD97706)
+                                        "mute" -> Color(0xFF7C3AED)
+                                        else -> Color(0xFF4B5563)
+                                    }
+                                    val badgeBg = when (actionType) {
+                                        "suspend" -> Color(0xFFFEE2E2)
+                                        "warning" -> Color(0xFFFEF3C7)
+                                        "mute" -> Color(0xFFEDE9FE)
+                                        else -> Color(0xFFF3F4F6)
+                                    }
+
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                                        shape = RoundedCornerShape(16.dp),
+                                        border = BorderStroke(1.dp, Color(0xFFE5E7EB))
+                                    ) {
+                                        Column(modifier = Modifier.padding(14.dp)) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .background(badgeBg)
+                                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                                ) {
+                                                    Text(
+                                                        text = actionType.uppercase(),
+                                                        color = badgeColor,
+                                                        fontWeight = FontWeight.Black,
+                                                        fontSize = 11.sp
+                                                    )
+                                                }
+
+                                                Button(
+                                                    onClick = {
+                                                        revokeTargetUserId = penalty.user_id
+                                                        showRevokeConfirmDialog = true
+                                                    },
+                                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Restore, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text("Revoke Action", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+
+                                            Spacer(modifier = Modifier.height(8.dp))
+
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.clickable {
+                                                    penalty.user_id?.let {
+                                                        clipboardManager.setText(AnnotatedString(it))
+                                                        Toast.makeText(context, "User ID copied", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                            ) {
+                                                Text(
+                                                    text = "User UUID: ${penalty.user_id ?: "Unknown"}",
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = Color(0xFF2563EB),
+                                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = Color(0xFF2563EB), modifier = Modifier.size(12.dp))
+                                            }
+
+                                            if (!penalty.reason.isNullOrBlank()) {
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Text(
+                                                    text = "Reason: ${penalty.reason}",
+                                                    fontSize = 12.sp,
+                                                    color = DarkText
+                                                )
+                                            }
+
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = if (penalty.expires_at != null) "Expires: ${penalty.expires_at}" else "Expires: Indefinite / Manual Revoke",
+                                                fontSize = 11.sp,
+                                                color = Color(0xFF6B7280)
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    // Modal: Revoke Confirmation Dialog
+    if (showRevokeConfirmDialog && revokeTargetUserId != null) {
+        val targetUid = revokeTargetUserId!!
+        RevokeModerationConfirmDialog(
+            targetUserId = targetUid,
+            onDismiss = {
+                showRevokeConfirmDialog = false
+                revokeTargetUserId = null
+            },
+            onRevoked = {
+                showRevokeConfirmDialog = false
+                revokeTargetUserId = null
+                fetchAllData()
+            }
+        )
     }
 
     // Modal: Full Screenshot Preview
@@ -544,9 +786,137 @@ fun ModerationReviewDialog(
             onDismiss = { actionDialogReport = null },
             onActionApplied = {
                 actionDialogReport = null
-                fetchReports()
+                fetchAllData()
             }
         )
+    }
+}
+
+@Composable
+fun RevokeModerationConfirmDialog(
+    targetUserId: String,
+    onDismiss: () -> Unit,
+    onRevoked: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var reasonInput by remember { mutableStateOf("") }
+    var isRevoking by remember { mutableStateOf(false) }
+
+    Dialog(onDismissRequest = { if (!isRevoking) onDismiss() }) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp)),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFECFDF5)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Restore, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(20.dp))
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text("Revoke Moderation Action", fontWeight = FontWeight.Black, fontSize = 16.sp, color = DarkText)
+                        Text("Lift warning, suspension, or mute", fontSize = 12.sp, color = Color(0xFF6B7280))
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF9FAFB)),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text("Target User UUID:", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Color(0xFF6B7280))
+                        Text(
+                            text = targetUserId,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF2563EB),
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text("Revocation Reason:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = DarkText)
+                Spacer(modifier = Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = reasonInput,
+                    onValueChange = { reasonInput = it },
+                    placeholder = { Text("Reason for revoking (e.g., appeal granted, resolved)...", fontSize = 12.sp, color = Color(0xFF9CA3AF)) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = GoldPrimary,
+                        unfocusedBorderColor = Color(0xFFE5E7EB)
+                    ),
+                    modifier = Modifier.fillMaxWidth().height(50.dp)
+                )
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f).height(44.dp)
+                    ) {
+                        Text("Cancel", color = Color(0xFF6B7280), fontWeight = FontWeight.Bold)
+                    }
+
+                    Button(
+                        onClick = {
+                            isRevoking = true
+                            scope.launch {
+                                val result = ModerationManager.revokeModerationAction(
+                                    context = context,
+                                    targetUserId = targetUserId,
+                                    reason = reasonInput.ifBlank { "Revoked by administrator" }
+                                )
+                                isRevoking = false
+                                result.onSuccess { msg ->
+                                    Toast.makeText(context, "✓ $msg", Toast.LENGTH_LONG).show()
+                                    ModerationManager.fetchMyModerationStatus(context)
+                                    onRevoked()
+                                }.onFailure { e ->
+                                    Toast.makeText(context, "Revoke Failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        },
+                        enabled = !isRevoking,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1.3f).height(44.dp)
+                    ) {
+                        if (isRevoking) {
+                            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text("Confirm Revoke", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -565,8 +935,14 @@ private fun AdminModerationActionDialog(
         speakerLog.filter { SupabaseSessionManager.isValidUuid(it.user_id) }
     }
 
-    var selectedTargetUserId by remember(validTargets) {
-        mutableStateOf(validTargets.firstOrNull()?.user_id ?: "")
+    var manualUserIdInput by remember { mutableStateOf("") }
+    var selectedTargetUserId by remember(validTargets, report) {
+        val nonReporter = validTargets.firstOrNull { it.user_id != report.reporter_id }?.user_id
+        mutableStateOf(nonReporter ?: validTargets.firstOrNull()?.user_id ?: "")
+    }
+
+    val effectiveTargetUserId = remember(manualUserIdInput, selectedTargetUserId) {
+        if (manualUserIdInput.isNotBlank()) manualUserIdInput.trim() else selectedTargetUserId.trim()
     }
 
     var actionType by remember { mutableStateOf("suspend") } // "suspend", "warning", "mute"
@@ -662,12 +1038,23 @@ private fun AdminModerationActionDialog(
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Column {
-                                            Text(
-                                                text = item.name.ifBlank { "User" },
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 13.sp,
-                                                color = DarkText
-                                            )
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = item.name.ifBlank { "User" },
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 13.sp,
+                                                    color = DarkText
+                                                )
+                                                if (item.user_id == report.reporter_id) {
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(
+                                                        text = "(Reporter)",
+                                                        color = Color(0xFFDC2626),
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
                                             Text(
                                                 text = "Role: ${item.role} • UUID: ${item.user_id.take(8)}...",
                                                 fontSize = 11.sp,
@@ -689,6 +1076,30 @@ private fun AdminModerationActionDialog(
                             }
                         }
                     }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Manual UUID entry option
+                OutlinedTextField(
+                    value = manualUserIdInput,
+                    onValueChange = { manualUserIdInput = it },
+                    label = { Text("Or Enter Target UUID Directly", fontSize = 11.sp) },
+                    placeholder = { Text("e.g. 550e8400-e29b-41d4-a716-446655440000", fontSize = 11.sp) },
+                    singleLine = true,
+                    textStyle = TextStyle(fontSize = 12.sp),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (effectiveTargetUserId.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Target ID: $effectiveTargetUserId",
+                        fontSize = 11.sp,
+                        color = Color(0xFF2563EB),
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -794,7 +1205,48 @@ private fun AdminModerationActionDialog(
                     modifier = Modifier.fillMaxWidth().height(50.dp)
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Revoke Action button (if active action exists or admin wants to lift restrictions for this offender)
+                OutlinedButton(
+                    onClick = {
+                        if (effectiveTargetUserId.isBlank()) {
+                            Toast.makeText(context, "Please select an offender or enter a target UUID.", Toast.LENGTH_SHORT).show()
+                            return@OutlinedButton
+                        }
+                        if (!SupabaseSessionManager.isValidUuid(effectiveTargetUserId)) {
+                            Toast.makeText(context, "Invalid UUID format: '$effectiveTargetUserId'", Toast.LENGTH_LONG).show()
+                            return@OutlinedButton
+                        }
+                        isSubmitting = true
+                        scope.launch {
+                            val result = ModerationManager.revokeModerationAction(
+                                context = context,
+                                targetUserId = effectiveTargetUserId,
+                                reason = reasonInput.ifBlank { "Revoked by admin from Incident #${report.id?.take(8)}" }
+                            )
+                            isSubmitting = false
+                            result.onSuccess { msg ->
+                                Toast.makeText(context, "✓ $msg", Toast.LENGTH_LONG).show()
+                                ModerationManager.fetchMyModerationStatus(context)
+                                onActionApplied()
+                            }.onFailure { e ->
+                                Toast.makeText(context, "Revocation Failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    },
+                    enabled = !isSubmitting && effectiveTargetUserId.isNotBlank(),
+                    border = BorderStroke(1.dp, Color(0xFF10B981)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF059669)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().height(42.dp)
+                ) {
+                    Icon(Icons.Default.Restore, contentDescription = null, tint = Color(0xFF059669), modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Revoke Action for User", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
 
                 // Submit Buttons
                 Row(
@@ -811,19 +1263,24 @@ private fun AdminModerationActionDialog(
 
                     Button(
                         onClick = {
-                            if (selectedTargetUserId.isBlank()) {
-                                Toast.makeText(context, "Please select an offender from the speaker log.", Toast.LENGTH_SHORT).show()
+                            if (effectiveTargetUserId.isBlank()) {
+                                Toast.makeText(context, "Please select an offender or enter a target UUID.", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            if (!SupabaseSessionManager.isValidUuid(effectiveTargetUserId)) {
+                                Toast.makeText(context, "Invalid UUID format: '$effectiveTargetUserId'", Toast.LENGTH_LONG).show()
                                 return@Button
                             }
                             isSubmitting = true
                             scope.launch {
                                 val result = ModerationManager.applyModerationAction(
                                     context = context,
-                                    reportId = report.id!!,
-                                    targetUserId = selectedTargetUserId,
+                                    reportId = report.id ?: "",
+                                    targetUserId = effectiveTargetUserId,
                                     actionType = actionType,
                                     durationHours = if (actionType == "suspend") durationHours else null,
-                                    reason = reasonInput.ifBlank { report.reason }
+                                    reason = reasonInput.ifBlank { report.reason },
+                                    roomId = report.room_id ?: ""
                                 )
 
                                 isSubmitting = false
@@ -831,11 +1288,11 @@ private fun AdminModerationActionDialog(
                                     Toast.makeText(context, "✓ $msg", Toast.LENGTH_LONG).show()
                                     onActionApplied()
                                 }.onFailure { e ->
-                                    Toast.makeText(context, "Error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context, "Enforcement Failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
                                 }
                             }
                         },
-                        enabled = !isSubmitting && validTargets.isNotEmpty() && selectedTargetUserId.isNotBlank(),
+                        enabled = !isSubmitting && effectiveTargetUserId.isNotBlank(),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.weight(1.3f).height(44.dp)

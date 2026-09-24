@@ -50,6 +50,12 @@ sealed class RealtimeTableEvent {
         val status: String?,
         val requestId: String?
     ) : RealtimeTableEvent()
+    data class ModerationActionEnforced(
+        val roomId: String,
+        val targetUserId: String,
+        val actionType: String,
+        val reason: String?
+    ) : RealtimeTableEvent()
 }
 
 object VoiceRoomRealtimeManager {
@@ -357,6 +363,22 @@ object VoiceRoomRealtimeManager {
                             senderAvatar = senderAvatar
                         )
                     )
+                } else if (broadcastType == "moderation_action") {
+                    val targetRoomId = innerPayload?.optString("room_id")?.ifBlank { roomId } ?: roomId
+                    val targetUid = innerPayload?.optString("target_user_id") ?: ""
+                    val actType = innerPayload?.optString("action_type") ?: ""
+                    val modReason = innerPayload?.optString("reason")
+                    Log.d(TAG, "Received broadcast moderation_action for target '$targetUid': $actType in room '$targetRoomId'")
+                    if (targetUid.isNotBlank()) {
+                        _events.tryEmit(
+                            RealtimeTableEvent.ModerationActionEnforced(
+                                roomId = targetRoomId,
+                                targetUserId = targetUid,
+                                actionType = actType,
+                                reason = modReason
+                            )
+                        )
+                    }
                 }
             } else if (event == "postgres_changes" && payload != null) {
                 val data = payload.optJSONObject("data")
@@ -565,6 +587,43 @@ object VoiceRoomRealtimeManager {
             Log.d(TAG, "Broadcasted room_reported to room:$roomId by $reporterId")
         } catch (e: Exception) {
             Log.w(TAG, "Error broadcasting room_reported to room $roomId: ${e.message}")
+        }
+    }
+
+    fun broadcastModerationAction(
+        roomId: String,
+        targetUserId: String,
+        actionType: String,
+        reason: String? = null
+    ) {
+        if (targetUserId.isBlank()) return
+        val targetRoom = roomId.ifBlank { "global" }
+        val ws = webSocket ?: return
+        try {
+            if (!subscribedRoomChannels.contains(targetRoom)) {
+                subscribeRoomChannel(targetRoom)
+            }
+            val payloadObj = JSONObject().apply {
+                put("room_id", targetRoom)
+                put("target_user_id", targetUserId)
+                put("action_type", actionType)
+                if (!reason.isNullOrBlank()) put("reason", reason)
+                put("timestamp", System.currentTimeMillis())
+            }
+            val broadcastMsg = JSONObject().apply {
+                put("topic", "realtime:room:$targetRoom")
+                put("event", "broadcast")
+                put("payload", JSONObject().apply {
+                    put("type", "broadcast")
+                    put("event", "moderation_action")
+                    put("payload", payloadObj)
+                })
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(broadcastMsg.toString())
+            Log.d(TAG, "Broadcasted moderation_action for $targetUserId ($actionType) in room $targetRoom")
+        } catch (e: Exception) {
+            Log.w(TAG, "Error broadcasting moderation_action to room $targetRoom: ${e.message}")
         }
     }
 

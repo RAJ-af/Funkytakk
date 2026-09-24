@@ -48,6 +48,32 @@ class MainActivity : ComponentActivity() {
                     }
 
                     val authState by authViewModel.authState.collectAsState()
+                    val myModerationStatus by authViewModel.myModerationStatus.collectAsState()
+
+                    // Lifecycle observer: refresh moderation status when app enters foreground / resumes
+                    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+                    DisposableEffect(lifecycleOwner) {
+                        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                                authViewModel.refreshModerationStatus(applicationContext)
+                            }
+                        }
+                        lifecycleOwner.lifecycle.addObserver(observer)
+                        onDispose {
+                            lifecycleOwner.lifecycle.removeObserver(observer)
+                        }
+                    }
+
+                    // Check moderation on startup or auth state change
+                    LaunchedEffect(authState) {
+                        authViewModel.refreshModerationStatus(applicationContext)
+                    }
+
+                    val isSuspended = remember(myModerationStatus) {
+                        myModerationStatus != null &&
+                            myModerationStatus?.action_type?.equals("suspend", ignoreCase = true) == true &&
+                            com.example.ModerationManager.isActionActive(myModerationStatus)
+                    }
 
                     // Temporary registers to compile setup profiles atomically at Step 5
                     var tempUsername by rememberSaveable { mutableStateOf("") }
@@ -114,11 +140,19 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    Box(modifier = Modifier.fillMaxSize()) {
-                        Crossfade(
-                            targetState = currentScreen,
-                        label = "screen_routing"
-                    ) { screen ->
+                    if (isSuspended) {
+                        SuspendedAccountScreen(
+                            moderationStatus = myModerationStatus,
+                            onStatusRefreshed = {
+                                authViewModel.refreshModerationStatus(applicationContext)
+                            }
+                        )
+                    } else {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            Crossfade(
+                                targetState = currentScreen,
+                                label = "screen_routing"
+                            ) { screen ->
                         when (screen) {
                             "welcome" -> WelcomeScreen(
                                 onGetStartedClick = {
@@ -322,6 +356,7 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                     }
+                }
                 }
                 }
             }

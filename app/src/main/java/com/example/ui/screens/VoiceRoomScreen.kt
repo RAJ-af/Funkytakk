@@ -623,6 +623,10 @@ fun VoiceRoomScreen(
                 val modStatus = ModerationManager.fetchMyModerationStatus(context)
                 withContext(Dispatchers.Main) {
                     myModerationStatus = modStatus
+                    if (modStatus?.action_type == "suspend" && ModerationManager.isActionActive(modStatus)) {
+                        isMicOn = false
+                        com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(true)
+                    }
                 }
 
                 // Broadcast presence and ping so everyone in room knows we are here, and replies
@@ -927,6 +931,35 @@ fun VoiceRoomScreen(
                                 }
                             }
                         }
+                    }
+                }
+                is RealtimeTableEvent.ModerationActionEnforced -> {
+                    val mySupabaseUid = currentUserId.ifBlank { SupabaseSessionManager.getUserId(context) ?: "" }
+                    val myFirebaseUid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
+                    val targetUid = event.targetUserId.trim()
+
+                    val isTargetMe = targetUid.isNotBlank() && (
+                        (mySupabaseUid.isNotBlank() && targetUid.equals(mySupabaseUid, ignoreCase = true)) ||
+                        (myFirebaseUid.isNotBlank() && targetUid.equals(myFirebaseUid, ignoreCase = true))
+                    )
+
+                    if (isTargetMe) {
+                        Log.w("VoiceRoomScreen", "Moderation action received via realtime for ME: ${event.actionType}")
+                        val updated = ModerationManager.fetchMyModerationStatus(context)
+                        withContext(Dispatchers.Main) {
+                            myModerationStatus = updated
+                            if (event.actionType == "suspend") {
+                                isMicOn = false
+                                com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(true)
+                                Toast.makeText(context, "Account suspended: ${event.reason ?: "Violation of guidelines"}", Toast.LENGTH_LONG).show()
+                            } else if (event.actionType == "warning") {
+                                Toast.makeText(context, "Community Warning: Messaging disabled for 1 hour.", Toast.LENGTH_LONG).show()
+                            } else if (event.actionType == "mute") {
+                                Toast.makeText(context, "Chat muted by moderation.", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    } else {
+                        Log.d("VoiceRoomScreen", "Ignoring realtime moderation broadcast for target '$targetUid': not for current user ('$mySupabaseUid' / '$myFirebaseUid')")
                     }
                 }
                 else -> {}

@@ -35,10 +35,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight
@@ -63,6 +65,13 @@ fun HomeScreen(
 
     var showCreateRoomBottomSheet by remember { mutableStateOf(false) }
     var showLogoutDialog by remember { mutableStateOf(false) }
+
+    var myModerationStatus by remember { mutableStateOf<com.example.MyModerationStatus?>(null) }
+    val homeScope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        myModerationStatus = com.example.ModerationManager.fetchMyModerationStatus(context)
+    }
 
     // Join Code Dialog States
     var showJoinCodeDialog by remember { mutableStateOf(false) }
@@ -523,8 +532,79 @@ fun HomeScreen(
         CreateRoomBottomSheet(
             onDismiss = { showCreateRoomBottomSheet = false },
             onCreateRoom = { isPrivate ->
-                showCreateRoomBottomSheet = false
-                onCreateLanguageRoom(isPrivate)
+                if (myModerationStatus?.action_type == "suspend" && com.example.ModerationManager.isActionActive(myModerationStatus)) {
+                    Toast.makeText(context, "Cannot create room: Your account is currently suspended.", Toast.LENGTH_LONG).show()
+                } else {
+                    showCreateRoomBottomSheet = false
+                    onCreateLanguageRoom(isPrivate)
+                }
+            }
+        )
+    }
+
+    // Active Suspension Alert on Home Screen
+    if (myModerationStatus?.action_type == "suspend" && com.example.ModerationManager.isActionActive(myModerationStatus)) {
+        AlertDialog(
+            onDismissRequest = { /* Cannot dismiss without resolving */ },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = "Suspended",
+                    tint = Color(0xFFDC2626),
+                    modifier = Modifier.size(36.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Account Suspended",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = Color(0xFFDC2626)
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "Your account has been placed under active suspension by administrators for violating community safety policies.",
+                        fontSize = 13.sp,
+                        color = Color(0xFF374151)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Surface(
+                        color = Color(0xFFFEF2F2),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(
+                                text = "Reason: ${myModerationStatus?.reason ?: "Violation of Community Guidelines"}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF991B1B)
+                            )
+                            if (!myModerationStatus?.expires_at.isNullOrBlank()) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Suspension expires: ${myModerationStatus?.expires_at}",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFFB91C1C)
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        homeScope.launch {
+                            myModerationStatus = com.example.ModerationManager.fetchMyModerationStatus(context)
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                ) {
+                    Text("Refresh Status", color = Color.White)
+                }
             }
         )
     }

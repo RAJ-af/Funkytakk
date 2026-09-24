@@ -472,12 +472,39 @@ interface SupabaseApi {
         @Body body: AdminApplyModerationActionRequest
     ): Response<ResponseBody>
 
+    @POST("rest/v1/rpc/admin_revoke_moderation_action")
+    suspend fun adminRevokeModerationAction(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: AdminRevokeModerationActionRequest
+    ): Response<ResponseBody>
+
+    @DELETE("rest/v1/user_moderation_status")
+    suspend fun deleteUserModerationStatus(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("user_id") userIdEq: String
+    ): Response<ResponseBody>
+
     @POST("rest/v1/rpc/get_my_moderation_status")
     suspend fun getMyModerationStatus(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String,
         @Body body: Map<String, String> = emptyMap()
     ): Response<ResponseBody>
+
+    @GET("rest/v1/user_moderation_status?select=*")
+    suspend fun getUserModerationStatus(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("user_id") userIdEq: String
+    ): Response<ResponseBody>
+
+    @GET("rest/v1/user_moderation_status?select=*&order=started_at.desc")
+    suspend fun getAllActiveModerationStatuses(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String
+    ): Response<List<MyModerationStatus>>
 
     @POST("rest/v1/room_reports")
     suspend fun createRoomReport(
@@ -535,7 +562,14 @@ data class AdminApplyModerationActionRequest(
 )
 
 @JsonClass(generateAdapter = true)
+data class AdminRevokeModerationActionRequest(
+    val p_target_user_id: String,
+    val p_reason: String? = null
+)
+
+@JsonClass(generateAdapter = true)
 data class MyModerationStatus(
+    val user_id: String? = null,
     val action_type: String? = null,
     val started_at: String? = null,
     val expires_at: String? = null,
