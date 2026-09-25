@@ -66,6 +66,13 @@ sealed class RealtimeTableEvent {
         val record: JSONObject?,
         val conversationId: String? = null
     ) : RealtimeTableEvent()
+    data class DmMessageReceived(
+        val eventType: String,
+        val record: JSONObject?,
+        val recipientId: String?,
+        val senderId: String?,
+        val conversationId: String?
+    ) : RealtimeTableEvent()
     data class Reconnected(val timestamp: Long = System.currentTimeMillis()) : RealtimeTableEvent()
 }
 
@@ -361,6 +368,28 @@ object VoiceRoomRealtimeManager {
         }
         ws.send(joinSupportMessages.toString())
 
+        // Subscribe to dm_messages table changes
+        val joinDmMessages = JSONObject().apply {
+            put("topic", "realtime:public:dm_messages")
+            put("event", "phx_join")
+            put("payload", JSONObject().apply {
+                if (!token.isNullOrBlank()) {
+                    put("access_token", token)
+                }
+                put("config", JSONObject().apply {
+                    put("postgres_changes", org.json.JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("event", "*")
+                            put("schema", "public")
+                            put("table", "dm_messages")
+                        })
+                    })
+                })
+            })
+            put("ref", refCounter.getAndIncrement().toString())
+        }
+        ws.send(joinDmMessages.toString())
+
         // Resubscribe to any active room broadcast channels
         subscribedRoomChannels.forEach { roomId ->
             sendJoinRoomChannel(ws, roomId)
@@ -572,10 +601,56 @@ object VoiceRoomRealtimeManager {
                             conversationId = conversationId
                         )
                     )
+                } else if (table == "dm_messages" || topic.contains("dm_messages")) {
+                    val recipientId = record?.optString("recipient_id")
+                    val senderId = record?.optString("sender_id")
+                    val convId = record?.optString("conversation_id")
+                    Log.d(TAG, "[Realtime] Received dm_messages event ($eventType) for recipient $recipientId from $senderId")
+                    _events.tryEmit(
+                        RealtimeTableEvent.DmMessageReceived(
+                            eventType = eventType,
+                            record = record,
+                            recipientId = recipientId,
+                            senderId = senderId,
+                            conversationId = convId
+                        )
+                    )
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error handling message", e)
+        }
+    }
+
+    fun subscribeDmInbox(recipientId: String) {
+        if (recipientId.isBlank()) return
+        val ws = webSocket ?: return
+        try {
+            val token = currentAuthToken
+            val joinMsg = JSONObject().apply {
+                put("topic", "realtime:public:dm_messages:recipient_id=eq.$recipientId")
+                put("event", "phx_join")
+                put("payload", JSONObject().apply {
+                    if (!token.isNullOrBlank()) {
+                        put("access_token", token)
+                    }
+                    put("config", JSONObject().apply {
+                        put("postgres_changes", org.json.JSONArray().apply {
+                            put(JSONObject().apply {
+                                put("event", "INSERT")
+                                put("schema", "public")
+                                put("table", "dm_messages")
+                                put("filter", "recipient_id=eq.$recipientId")
+                            })
+                        })
+                    })
+                })
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(joinMsg.toString())
+            Log.d(TAG, "Subscribed to postgres_changes dm_messages for recipient:$recipientId")
+        } catch (e: Exception) {
+            Log.w(TAG, "Error sending join for dm_messages recipient channel $recipientId: ${e.message}")
         }
     }
 

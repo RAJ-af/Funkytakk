@@ -34,11 +34,18 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Shield
 import com.example.SupportChatManager
+import com.example.crypto.VaultSecurityManager
+import com.example.crypto.VaultStatus
+import com.example.repository.EncryptedChatRepository
 import com.example.ui.components.CircleFlag
 import com.example.ui.components.FunkyHeartIcon
 import com.example.ui.components.FunkyMoreIcon
 import com.example.ui.components.FunkySearchIcon
+import com.example.ui.screens.chat.VaultManagementDialogs
 import com.example.ui.screens.home.models.DirectChat
 import com.example.ui.theme.GoldAccent
 
@@ -52,22 +59,41 @@ fun ChatsTabContent(
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf("All") } // "All", "Unread", "Language", "Groups"
     var showOptionsMenu by remember { mutableStateOf(false) }
+    var showVaultDialog by remember { mutableStateOf(false) }
 
     val supportPreview by SupportChatManager.latestMessagePreview.collectAsState()
     val supportTime by SupportChatManager.latestMessageTime.collectAsState()
     val supportUnreadCount by SupportChatManager.unreadCount.collectAsState()
 
+    val vaultStatus by VaultSecurityManager.vaultStatus.collectAsState()
+    val dbConversations by EncryptedChatRepository.conversations.collectAsState()
+
     LaunchedEffect(Unit) {
         SupportChatManager.init(context)
+        EncryptedChatRepository.init(context)
     }
 
-    // Dynamic list that can be updated (e.g., mark all as read)
-    var localConversations by remember(conversationsList) {
-        mutableStateOf(conversationsList)
+    // Merge real encrypted conversations with fallback contacts
+    val mergedConversations = remember(conversationsList, dbConversations) {
+        val dbMapped = dbConversations.map { conv ->
+            DirectChat(
+                id = conv.otherUserId,
+                name = conv.otherUserName,
+                avatar = conv.otherUserAvatar.orEmpty().ifBlank { "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200" },
+                lastMsg = conv.lastMessageText.ifBlank { "🔒 Encrypted conversation" },
+                time = formatTimeAgo(conv.lastMessageTime),
+                unreadCount = conv.unreadCount,
+                onlineStatus = "online",
+                isNativeLanguage = conv.otherUserFlag ?: "English"
+            )
+        }
+        val existingIds = dbMapped.map { it.id }.toSet()
+        val rest = conversationsList.filterNot { it.id in existingIds }
+        dbMapped + rest
     }
 
-    val filteredList = remember(localConversations, searchQuery, selectedFilter) {
-        localConversations.filter { chat ->
+    val filteredList = remember(mergedConversations, searchQuery, selectedFilter) {
+        mergedConversations.filter { chat ->
             val matchesSearch = searchQuery.isBlank() ||
                     chat.name.contains(searchQuery, ignoreCase = true) ||
                     chat.lastMsg.contains(searchQuery, ignoreCase = true) ||
@@ -156,7 +182,6 @@ fun ChatsTabContent(
                         DropdownMenuItem(
                             text = { Text("Mark all as read", color = Color.Black, fontSize = 14.sp) },
                             onClick = {
-                                localConversations = localConversations.map { it.copy(unreadCount = 0) }
                                 showOptionsMenu = false
                                 Toast.makeText(context, "All conversations marked as read", Toast.LENGTH_SHORT).show()
                             }
@@ -292,6 +317,155 @@ fun ChatsTabContent(
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                             color = if (isSelected) Color.Black else Color(0xFF1F2937)
                         )
+                    }
+                }
+            }
+        }
+
+        // 4.5. ENCRYPTED CHAT VAULT STATUS BANNER
+        item {
+            Spacer(modifier = Modifier.height(14.dp))
+            when (vaultStatus) {
+                VaultStatus.NOT_CONFIGURED -> {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable { showVaultDialog = true },
+                        color = Color(0xFFFFFBEB),
+                        border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .background(Color(0xFFFEF3C7), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = "Lock",
+                                    tint = Color(0xFFD97706),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Setup E2EE Chat Vault",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF92400E)
+                                )
+                                Text(
+                                    text = "Protect 1:1 messages with Tink HPKE & local SQLCipher",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFFB45309)
+                                )
+                            }
+                            Button(
+                                onClick = { showVaultDialog = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706)),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Text("Setup", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+                        }
+                    }
+                }
+                VaultStatus.LOCKED -> {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable { showVaultDialog = true },
+                        color = Color(0xFFEFF6FF),
+                        border = BorderStroke(1.dp, Color(0xFFBFDBFE)),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .background(Color(0xFFDBEAFE), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = "Locked",
+                                    tint = Color(0xFF2563EB),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Chat Vault Locked",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF1E40AF)
+                                )
+                                Text(
+                                    text = "Unlock with password or biometric to read messages",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF3B82F6)
+                                )
+                            }
+                            Button(
+                                onClick = { showVaultDialog = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Text("Unlock", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+                        }
+                    }
+                }
+                VaultStatus.UNLOCKED -> {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp),
+                        color = Color(0xFFF0FDF4),
+                        border = BorderStroke(1.dp, Color(0xFFDCFCE7)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Shield,
+                                contentDescription = "Active",
+                                tint = Color(0xFF16A34A),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "End-to-End Encrypted · Zero plaintext on server",
+                                fontSize = 11.sp,
+                                color = Color(0xFF15803D),
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
                 }
             }
@@ -487,7 +661,13 @@ fun ChatsTabContent(
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 5.dp)
                     .clip(RoundedCornerShape(22.dp))
-                    .clickable { onSelectChat(chat) },
+                    .clickable {
+                        if (vaultStatus != VaultStatus.UNLOCKED) {
+                            showVaultDialog = true
+                        } else {
+                            onSelectChat(chat)
+                        }
+                    },
                 shape = RoundedCornerShape(22.dp),
                 color = Color.White,
                 border = BorderStroke(1.dp, Color(0xFFF0F0EE)),
@@ -535,12 +715,37 @@ fun ChatsTabContent(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = chat.name,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp,
-                                color = Color.Black
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = chat.name,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp,
+                                    color = Color.Black
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(Color(0xFFDCFCE7))
+                                        .padding(horizontal = 5.dp, vertical = 1.dp)
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.Lock,
+                                            contentDescription = "E2EE",
+                                            tint = Color(0xFF15803D),
+                                            modifier = Modifier.size(9.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(2.dp))
+                                        Text(
+                                            text = "E2EE",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF15803D)
+                                        )
+                                    }
+                                }
+                            }
 
                             Text(
                                 text = chat.time,
@@ -611,6 +816,21 @@ fun ChatsTabContent(
                 }
             }
         }
+    }
+
+    if (showVaultDialog) {
+        VaultManagementDialogs(onDismissRequest = { showVaultDialog = false })
+    }
+}
+
+private fun formatTimeAgo(epochMillis: Long): String {
+    if (epochMillis <= 0L) return "Just now"
+    val diff = System.currentTimeMillis() - epochMillis
+    return when {
+        diff < 60_000L -> "Just now"
+        diff < 3600_000L -> "${diff / 60_000L}m ago"
+        diff < 86400_000L -> "${diff / 3600_000L}h ago"
+        else -> java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault()).format(java.util.Date(epochMillis))
     }
 }
 

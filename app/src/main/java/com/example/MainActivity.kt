@@ -3,10 +3,10 @@ package com.example
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.fragment.app.FragmentActivity
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
@@ -19,7 +19,7 @@ import com.example.ui.screens.*
 import com.example.ui.components.FloatingBubbleOverlay
 import com.example.ui.theme.MyApplicationTheme
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     private val authViewModel: AuthViewModel by viewModels()
     private var pendingDeepLinkUri by mutableStateOf<Uri?>(null)
     private var pendingNavigateTo by mutableStateOf<String?>(null)
@@ -118,6 +118,10 @@ class MainActivity : ComponentActivity() {
                                     else -> "onboarding_hobbies"
                                 }
                             }
+
+                            // Initialize E2EE identity keys and encrypted repository
+                            com.example.crypto.E2EEManager.ensureIdentityKeyInitialized(applicationContext)
+                            com.example.repository.EncryptedChatRepository.init(applicationContext)
                         }
                     }
 
@@ -313,12 +317,20 @@ class MainActivity : ComponentActivity() {
                                             "onboarding_complete" to true
                                         ),
                                         onSuccess = {
-                                            currentScreen = "home"
+                                            currentScreen = "onboarding_chat_vault"
                                         }
                                     )
                                 },
                                 onBack = {
                                     currentScreen = "onboarding_learning_language"
+                                }
+                            )
+                            "onboarding_chat_vault" -> OnboardingChatVaultScreen(
+                                onComplete = {
+                                    currentScreen = "home"
+                                },
+                                onBack = {
+                                    currentScreen = "onboarding_hobbies"
                                 }
                             )
                             "home" -> HomeScreen(

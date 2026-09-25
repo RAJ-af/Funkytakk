@@ -648,6 +648,53 @@ interface SupabaseApi {
         @Header("Authorization") auth: String,
         @Body body: AdminMarkSupportConversationReadRequest
     ): Response<ResponseBody>
+
+    // ----------------------------------------------------
+    // E2EE 1:1 USER CHAT (PART 1 & 2)
+    // ----------------------------------------------------
+    @GET("rest/v1/user_public_keys")
+    suspend fun getUserPublicKey(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("user_id") userIdFilter: String
+    ): Response<List<UserPublicKeyItem>>
+
+    @POST("rest/v1/user_public_keys")
+    suspend fun upsertUserPublicKey(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Header("Prefer") prefer: String = "resolution=merge-duplicates",
+        @Body body: UpsertUserPublicKeyRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/get_or_create_dm_conversation")
+    suspend fun getOrCreateDmConversation(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: GetOrCreateDmConversationRequest
+    ): Response<ResponseBody>
+
+    @GET("rest/v1/dm_messages?select=*&order=created_at.asc")
+    suspend fun getPendingDmMessages(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("recipient_id") recipientIdFilter: String
+    ): Response<List<SupabaseDmMessage>>
+
+    @POST("rest/v1/dm_messages")
+    suspend fun sendDmMessage(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Header("Prefer") prefer: String = "return=minimal",
+        @Body body: SendDmMessageRequest
+    ): Response<ResponseBody>
+
+    @DELETE("rest/v1/dm_messages")
+    suspend fun deleteDmMessage(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("id") idFilter: String
+    ): Response<ResponseBody>
 }
 
 @JsonClass(generateAdapter = true)
@@ -811,6 +858,54 @@ data class AdminSendSupportMessageRequest(
 data class AdminMarkSupportConversationReadRequest(
     val p_user_id: String
 )
+
+// ----------------------------------------------------
+// E2EE 1:1 USER CHAT MODELS
+// ----------------------------------------------------
+@JsonClass(generateAdapter = true)
+data class UserPublicKeyItem(
+    val user_id: String? = null,
+    val identity_public_key: String? = null,
+    val key_version: Int = 1,
+    val updated_at: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class UpsertUserPublicKeyRequest(
+    val user_id: String,
+    val identity_public_key: String,
+    val key_version: Int = 1,
+    val updated_at: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class GetOrCreateDmConversationRequest(
+    val p_other_user_id: String
+)
+
+@JsonClass(generateAdapter = true)
+data class SendDmMessageRequest(
+    val conversation_id: String,
+    val sender_id: String,
+    val recipient_id: String,
+    val ciphertext: String,
+    val nonce: String = "",
+    val key_version: Int = 1
+)
+
+@JsonClass(generateAdapter = true)
+data class SupabaseDmMessage(
+    val id: String = "",
+    val conversation_id: String = "",
+    val sender_id: String = "",
+    val recipient_id: String = "",
+    val ciphertext: String = "",
+    val nonce: String = "",
+    val key_version: Int = 1,
+    val created_at: String? = null,
+    val delivered_at: String? = null
+)
+
 
 
 

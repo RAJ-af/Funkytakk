@@ -49,6 +49,7 @@ fun DirectChatDialog(
             .background(Color(0xFFFAFAEE))
     ) {
         DirectChatScreen(
+            partnerUserId = contact.id,
             partnerName = if (contact.name.isNotBlank()) contact.name else "Yuki Tanaka",
             partnerAvatarUrl = if (contact.avatar.isNotBlank()) contact.avatar else "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200",
             partnerCountry = countryName,
