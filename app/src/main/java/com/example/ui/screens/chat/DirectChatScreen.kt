@@ -5,6 +5,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -29,6 +30,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.crypto.VaultSecurityManager
 import com.example.crypto.VaultStatus
 import com.example.repository.EncryptedChatRepository
@@ -138,113 +141,17 @@ fun DirectChatScreen(
         Scaffold(
             containerColor = Color(0xFFFAFAEE),
             topBar = {
-                Column {
-                    ChatHeader(
-                        partnerName = partnerName,
-                        partnerAvatarUrl = partnerAvatarUrl,
-                        partnerCountry = partnerCountry,
-                        partnerCountryCode = partnerCountryCode,
-                        isOnline = true,
-                        onBackClick = onBack,
-                        onMenuClick = {
-                            Toast.makeText(context, "End-to-End Encrypted Chat with $partnerName", Toast.LENGTH_SHORT).show()
-                        }
-                    )
-
-                    // E2EE Status Banner (Adaptive based on recipient public key readiness)
-                    if (recipientKeyReady == false) {
-                        Surface(
-                            color = Color(0xFFFFFBEB),
-                            border = BorderStroke(1.dp, Color(0xFFFDE68A)),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    coroutineScope.launch {
-                                        isCheckingKey = true
-                                        recipientKeyReady = EncryptedChatRepository.checkRecipientKeyStatus(context, partnerUserId)
-                                        isCheckingKey = false
-                                        if (recipientKeyReady == true) {
-                                            Toast.makeText(context, "$partnerName is now ready for secure chat!", Toast.LENGTH_SHORT).show()
-                                        } else {
-                                            showNotReadyDialog = true
-                                        }
-                                    }
-                                }
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 7.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    modifier = Modifier.weight(1f),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Warning,
-                                        contentDescription = "Warning",
-                                        tint = Color(0xFFD97706),
-                                        modifier = Modifier.size(15.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "$partnerName abhi secure chat ke liye ready nahi hai",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = Color(0xFF92400E)
-                                    )
-                                }
-
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = "Check",
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFFB45309)
-                                    )
-                                    Spacer(modifier = Modifier.width(3.dp))
-                                    Icon(
-                                        imageVector = Icons.Default.Refresh,
-                                        contentDescription = "Refresh",
-                                        tint = Color(0xFFB45309),
-                                        modifier = Modifier.size(13.dp)
-                                    )
-                                }
-                            }
-                        }
-                    } else {
-                        // Standard Active E2EE Badge
-                        Surface(
-                            color = Color(0xFFF0FDF4),
-                            border = BorderStroke(1.dp, Color(0xFFDCFCE7)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Lock,
-                                    contentDescription = "E2EE",
-                                    tint = Color(0xFF16A34A),
-                                    modifier = Modifier.size(13.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "End-to-end encrypted · Google Tink (HPKE) · Device vault",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = Color(0xFF15803D)
-                                )
-                            }
-                        }
+                ChatHeader(
+                    partnerName = partnerName,
+                    partnerAvatarUrl = partnerAvatarUrl,
+                    partnerCountry = partnerCountry,
+                    partnerCountryCode = partnerCountryCode,
+                    isOnline = true,
+                    onBackClick = onBack,
+                    onMenuClick = {
+                        Toast.makeText(context, "End-to-End Encrypted Chat with $partnerName", Toast.LENGTH_SHORT).show()
                     }
-                }
+                )
             },
             bottomBar = {
                 Column(modifier = Modifier.background(Color(0xFFFAFAEE))) {
@@ -334,47 +241,6 @@ fun DirectChatScreen(
                     .padding(paddingValues),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp)
             ) {
-                // E2EE Notice Pill
-                item {
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = Color(0xFFFEF9C3),
-                        border = BorderStroke(1.dp, Color(0xFFFEF08A)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 8.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.Security,
-                                    contentDescription = null,
-                                    tint = Color(0xFF854D0E),
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "End-to-End Encrypted",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF854D0E)
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Messages are encrypted on your device with Google Tink HPKE and only decrypted by the recipient. The server acts as an ephemeral mailbox and deletes messages immediately upon delivery.",
-                                fontSize = 10.sp,
-                                color = Color(0xFFA16207),
-                                textAlign = TextAlign.Center,
-                                lineHeight = 14.sp
-                            )
-                        }
-                    }
-                }
-
                 // Date separator
                 item {
                     DateSeparatorPill(dateText = "Today")
@@ -385,19 +251,19 @@ fun DirectChatScreen(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 32.dp),
+                                .padding(vertical = 40.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = if (recipientKeyReady == false) {
-                                    "$partnerName abhi secure chat ke liye ready nahi hai.\nJaise hi wo app kholega, aap unhe encrypted messages bhej sakenge."
+                                    "$partnerName hasn't enabled secure chat yet.\nYou can message them once they open FunkyTalk."
                                 } else {
-                                    "No messages yet.\nSend an encrypted message to start chatting with $partnerName!"
+                                    "No messages yet.\nSend a message to start chatting with $partnerName!"
                                 },
-                                fontSize = 13.sp,
+                                fontSize = 14.sp,
                                 color = Color(0xFF9CA3AF),
                                 textAlign = TextAlign.Center,
-                                lineHeight = 18.sp
+                                lineHeight = 20.sp
                             )
                         }
                     }
@@ -463,80 +329,130 @@ fun DirectChatScreen(
 
         // Graceful Edge Case Dialog when recipient hasn't opened app / initialized keys
         if (showNotReadyDialog) {
-            AlertDialog(
+            Dialog(
                 onDismissRequest = { showNotReadyDialog = false },
-                icon = {
-                    Box(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .background(Color(0xFFFEF3C7), RoundedCornerShape(24.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Warning,
-                            contentDescription = "Not Ready",
-                            tint = Color(0xFFD97706),
-                            modifier = Modifier.size(26.dp)
-                        )
-                    }
-                },
-                title = {
-                    Text(
-                        text = "User Not Ready for Secure Chat",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp,
-                        color = Color(0xFF1F2937),
-                        textAlign = TextAlign.Center
-                    )
-                },
-                text = {
+                properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = true)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(28.dp),
+                    color = Color.White,
+                    shadowElevation = 16.dp,
+                    border = BorderStroke(1.dp, Color(0xFFF3F4F6)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 12.dp)
+                ) {
                     Column(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
+                        // Icon in amber/gold soft container
+                        Box(
+                            modifier = Modifier
+                                .size(60.dp)
+                                .background(Color(0xFFFEF3C7), RoundedCornerShape(30.dp))
+                                .border(1.5.dp, Color(0xFFFDE68A), RoundedCornerShape(30.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Security,
+                                contentDescription = "Security Notice",
+                                tint = Color(0xFFD97706),
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
                         Text(
-                            text = "Ye user abhi secure chat ke liye ready nahi hai.",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            color = Color(0xFF92400E),
+                            text = "Secure Chat Unavailable",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 20.sp,
+                            color = Color(0xFF111827),
+                            textAlign = TextAlign.Center,
+                            letterSpacing = (-0.3).sp
+                        )
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Text(
+                            text = "This user is not ready for secure chat yet.",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp,
+                            color = Color(0xFFB45309),
                             textAlign = TextAlign.Center
                         )
+
                         Spacer(modifier = Modifier.height(10.dp))
+
                         Text(
-                            text = "$partnerName ne abhi tak FunkyTalk app open nahi kiya hai (isliye unki public encryption keys generate nahi hui hain).\n\nJaise hi $partnerName ek baar app open karega, secure keys automatically set ho jayengi aur aap chatting kar sakenge.\n\nAapka likha hua message draft me save rakha gaya hai.",
-                            fontSize = 12.sp,
+                            text = "$partnerName has not opened FunkyTalk yet, so their end-to-end encryption keys have not been registered.\n\nAs soon as $partnerName launches the app, secure chat will be ready automatically.\n\nYour message draft has been saved.",
+                            fontSize = 13.sp,
                             color = Color(0xFF4B5563),
                             textAlign = TextAlign.Center,
-                            lineHeight = 17.sp
+                            lineHeight = 18.sp
                         )
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = { showNotReadyDialog = false },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706)),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Text("Samajh gaya", color = Color.White, fontWeight = FontWeight.Bold)
-                    }
-                },
-                dismissButton = {
-                    OutlinedButton(
-                        onClick = {
-                            showNotReadyDialog = false
-                            coroutineScope.launch {
-                                recipientKeyReady = EncryptedChatRepository.checkRecipientKeyStatus(context, partnerUserId)
-                                if (recipientKeyReady == true) {
-                                    Toast.makeText(context, "$partnerName is now ready!", Toast.LENGTH_SHORT).show()
+
+                        Spacer(modifier = Modifier.height(24.dp))
+
+                        Button(
+                            onClick = { showNotReadyDialog = false },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF111827)),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                        ) {
+                            Text(
+                                text = "Got it",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        OutlinedButton(
+                            onClick = {
+                                showNotReadyDialog = false
+                                coroutineScope.launch {
+                                    isCheckingKey = true
+                                    val ready = EncryptedChatRepository.checkRecipientKeyStatus(context, partnerUserId)
+                                    recipientKeyReady = ready
+                                    isCheckingKey = false
+                                    if (ready == true) {
+                                        Toast.makeText(context, "$partnerName is now ready for secure chat!", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, "$partnerName is still not ready.", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
-                            }
-                        },
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Text("Check Again", color = Color(0xFF4B5563))
+                            },
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Check Again",
+                                tint = Color(0xFF4B5563),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Check Again",
+                                color = Color(0xFF4B5563),
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 14.sp
+                            )
+                        }
                     }
                 }
-            )
+            }
         }
     }
 }

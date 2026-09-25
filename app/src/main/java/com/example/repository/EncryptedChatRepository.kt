@@ -20,7 +20,7 @@ import org.json.JSONObject
 import java.util.UUID
 
 class RecipientNotReadyException(val recipientName: String) : Exception(
-    "$recipientName abhi secure chat ke liye ready nahi hai. Is user ne abhi tak app open nahi kiya hai ya encryption keys set nahi kiye hain."
+    "$recipientName is not ready for secure chat yet. This user has not opened the app or registered encryption keys."
 )
 
 object EncryptedChatRepository {

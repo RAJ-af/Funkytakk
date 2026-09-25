@@ -439,34 +439,7 @@ fun ChatsTabContent(
                     }
                 }
                 VaultStatus.UNLOCKED -> {
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp),
-                        color = Color(0xFFF0FDF4),
-                        border = BorderStroke(1.dp, Color(0xFFDCFCE7)),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Shield,
-                                contentDescription = "Active",
-                                tint = Color(0xFF16A34A),
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "End-to-End Encrypted · Zero plaintext on server",
-                                fontSize = 11.sp,
-                                color = Color(0xFF15803D),
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
+                    // Chat vault is active and unlocked; keep conversation UI clean and spacious
                 }
             }
         }
