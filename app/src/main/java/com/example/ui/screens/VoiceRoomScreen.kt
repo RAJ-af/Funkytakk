@@ -382,8 +382,14 @@ fun VoiceRoomScreen(
         emptyList()
     }
 
-    val activeRoomId = viewModel?.activeRoomId?.collectAsState()?.value ?: "FT5272"
-    val activeRoomTitle = viewModel?.activeRoomTitle?.collectAsState()?.value ?: "Hindi Voice Circle"
+    val activeRoomId = viewModel?.activeRoomId?.collectAsState()?.value ?: ""
+    val activeRoomTitle = viewModel?.activeRoomTitle?.collectAsState()?.value ?: "Voice Circle"
+
+    LaunchedEffect(activeRoomId) {
+        if (activeRoomId.isBlank()) {
+            onBack()
+        }
+    }
 
     // Room Config States (edited by user)
     var roomTitle by remember { mutableStateOf("Let's chat and play games") }
@@ -432,6 +438,16 @@ fun VoiceRoomScreen(
     }
     var participantsData by remember { mutableStateOf<List<SupabaseRoomParticipant>>(emptyList()) }
     var roomHostId by remember { mutableStateOf<String?>("") }
+
+    val pendingSpeakerRequests by viewModel?.pendingSpeakerRequests?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
+    val mySpeakerRequestStatus by viewModel?.mySpeakerRequestStatus?.collectAsState() ?: remember { mutableStateOf<String?>(null) }
+    var isSpeakerRequestPending by remember { mutableStateOf(false) }
+    var isSpeakerRequestSubmitting by remember { mutableStateOf(false) }
+
+    LaunchedEffect(mySpeakerRequestStatus) {
+        isSpeakerRequestPending = (mySpeakerRequestStatus == "pending")
+    }
+
     val isSpeaker = remember(participantsData, currentUserId, roomHostId) {
         (currentUserId.isNotBlank() && currentUserId.equals(roomHostId, ignoreCase = true)) ||
         participantsData.any { it.user_id == currentUserId && (it.role == "speaker" || it.role == "host") }
@@ -619,16 +635,26 @@ fun VoiceRoomScreen(
                 val roomRes = SupabaseClient.api.getVoiceRoomById(idEq = "eq.$activeRoomId")
                 if (roomRes.isSuccessful) {
                     val roomObj = roomRes.body()?.firstOrNull()
-                    if (roomObj != null) {
-                        roomHostId = roomObj.host_id ?: ""
-                        viewModel?.setActiveRoomHostId(roomHostId)
-                        roomTitle = roomObj.title ?: "Voice Circle"
-                        roomDescription = roomObj.description ?: ""
-                        roomLanguage = roomObj.language ?: ""
-                        roomCountryCode = roomObj.language_code.orEmpty().ifBlank { roomObj.country_code.orEmpty() }.ifBlank { LanguageData.getFlagCodeForLanguage(roomLanguage) }
-                        isPrivateRoomState = roomObj.is_private ?: false
-                        joinCodeState = roomObj.join_code ?: ""
+                    if (roomObj == null || roomObj.is_live == false || roomObj.status == "ended") {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, "This room has ended.", Toast.LENGTH_SHORT).show()
+                            if (com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
+                                com.example.service.VoiceRoomOverlayManager.stopService(context)
+                            }
+                            com.example.service.VoiceRoomOverlayManager.clear()
+                            viewModel?.leaveRoom(context)
+                            onBack()
+                        }
+                        return@withContext
                     }
+                    roomHostId = roomObj.host_id ?: ""
+                    viewModel?.setActiveRoomHostId(roomHostId)
+                    roomTitle = roomObj.title ?: "Voice Circle"
+                    roomDescription = roomObj.description ?: ""
+                    roomLanguage = roomObj.language ?: ""
+                    roomCountryCode = roomObj.language_code.orEmpty().ifBlank { roomObj.country_code.orEmpty() }.ifBlank { LanguageData.getFlagCodeForLanguage(roomLanguage) }
+                    isPrivateRoomState = roomObj.is_private ?: false
+                    joinCodeState = roomObj.join_code ?: ""
                 }
                 val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
                 val dbList = if (partsRes.isSuccessful) partsRes.body() ?: emptyList() else emptyList()
@@ -794,7 +820,7 @@ fun VoiceRoomScreen(
                                     participantsData = participantsData.filter { it.user_id != targetUid }
                                 }
                             }
-                        } else if (action in listOf("joined", "sync_presence", "update", "insert")) {
+                        } else if (action in listOf("joined", "sync_presence", "update", "insert", "speaker_promoted")) {
                             if (targetUid.isNotBlank()) {
                                 val effectiveRole = if (targetUid == roomHostId) "host" else targetRole
                                 withContext(Dispatchers.Main) {
@@ -815,6 +841,10 @@ fun VoiceRoomScreen(
                                         )
                                     }
                                     if (targetUid == currentUserId) {
+                                        if (effectiveRole == "speaker") {
+                                            isSpeakerRequestPending = false
+                                            viewModel?.setMicEnabled(targetMic, context)
+                                        }
                                         if (isMicOn != targetMic) {
                                             isMicOn = targetMic
                                             com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(!targetMic)
@@ -1002,6 +1032,78 @@ fun VoiceRoomScreen(
                         Log.d("VoiceRoomScreen", "Ignoring realtime moderation broadcast for target '$targetUid': not for current user ('$mySupabaseUid' / '$myFirebaseUid')")
                     }
                 }
+                is RealtimeTableEvent.RoomLifecycleEvent -> {
+                    if (event.roomId == activeRoomId) {
+                        if (event.action == "room_ended") {
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(context, "This room has ended.", Toast.LENGTH_SHORT).show()
+                                if (com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
+                                    com.example.service.VoiceRoomOverlayManager.stopService(context)
+                                }
+                                com.example.service.VoiceRoomOverlayManager.clear()
+                                onBack()
+                            }
+                        }
+                    }
+                }
+                is RealtimeTableEvent.VoiceRoomChanged -> {
+                    val record = event.record
+                    val rId = record?.optString("id")
+                    if (rId == activeRoomId || rId.isNullOrBlank()) {
+                        val isLive = record?.optBoolean("is_live", true) ?: true
+                        val status = record?.optString("status") ?: "active"
+                        if (!isLive || status == "ended" || event.eventType.equals("DELETE", ignoreCase = true)) {
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(context, "This room has ended.", Toast.LENGTH_SHORT).show()
+                                if (com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
+                                    com.example.service.VoiceRoomOverlayManager.stopService(context)
+                                }
+                                com.example.service.VoiceRoomOverlayManager.clear()
+                                onBack()
+                            }
+                        }
+                    }
+                }
+                is RealtimeTableEvent.SpeakerRequestChanged -> {
+                    if (event.roomId == activeRoomId || event.roomId.isNullOrBlank()) {
+                        val targetUid = event.userId ?: ""
+                        val reqStatus = event.status ?: event.eventType
+                        val isHost = (currentUserId.isNotBlank() && roomHostId != null && currentUserId.equals(roomHostId, ignoreCase = true))
+
+                        if (isHost) {
+                            viewModel?.checkPendingSpeakerRequestsForHost(activeRoomId, context)
+                        }
+
+                        if (targetUid.isNotBlank() && targetUid == currentUserId) {
+                            if (reqStatus == "accepted") {
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(context, "Your request to speak was accepted!", Toast.LENGTH_SHORT).show()
+                                    isSpeakerRequestPending = false
+                                    isMicOn = true
+                                    com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(false)
+                                    viewModel?.setMicEnabled(true, context)
+                                }
+                                scope.launch(Dispatchers.IO) {
+                                    try {
+                                        val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
+                                        if (partsRes.isSuccessful) {
+                                            val list = partsRes.body() ?: emptyList()
+                                            withContext(Dispatchers.Main) {
+                                                participantsData = list
+                                            }
+                                        }
+                                    } catch (_: Exception) {}
+                                }
+                            } else if (reqStatus == "declined") {
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(context, "Your request to speak was declined.", Toast.LENGTH_SHORT).show()
+                                    isSpeakerRequestPending = false
+                                }
+                                viewModel?.checkMySpeakerRequest(activeRoomId, context)
+                            }
+                        }
+                    }
+                }
                 else -> {}
             }
         }
@@ -1109,14 +1211,6 @@ fun VoiceRoomScreen(
     val vmMicEnabled by viewModel?.isMicEnabled?.collectAsState() ?: remember { mutableStateOf(true) }
     LaunchedEffect(vmMicEnabled) {
         isMicOn = vmMicEnabled
-    }
-    val pendingSpeakerRequests by viewModel?.pendingSpeakerRequests?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
-    val mySpeakerRequestStatus by viewModel?.mySpeakerRequestStatus?.collectAsState() ?: remember { mutableStateOf<String?>(null) }
-    var isSpeakerRequestPending by remember { mutableStateOf(false) }
-    var isSpeakerRequestSubmitting by remember { mutableStateOf(false) }
-
-    LaunchedEffect(mySpeakerRequestStatus) {
-        isSpeakerRequestPending = (mySpeakerRequestStatus == "pending")
     }
 
     LaunchedEffect(activeRoomId, roomHostId, currentUserId) {

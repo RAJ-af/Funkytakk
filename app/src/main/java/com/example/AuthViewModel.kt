@@ -218,7 +218,40 @@ class AuthViewModel : ViewModel() {
                     is RealtimeTableEvent.ParticipantChanged -> {
                         val currentRoomId = _activeRoomId.value
                         if (currentRoomId != null && (event.roomId == currentRoomId || event.roomId == null)) {
-                            refreshActiveRoomSpeakers(currentRoomId)
+                            val appContext = FunkyTalkApplication.appContext
+                            val myUid = appContext?.let { SupabaseSessionManager.getUserId(it) }
+                                ?: (authState.value as? AuthState.Success)?.user?.uid
+                            val role = event.role ?: event.record?.optString("role")
+                            val mic = event.isMicEnabled ?: event.record?.optBoolean("is_mic_enabled", false)
+                            if (myUid != null && event.userId == myUid && role == "speaker") {
+                                _mySpeakerRequestStatus.value = "accepted"
+                                _isMicEnabled.value = mic ?: true
+                            }
+                            refreshActiveRoomSpeakers(currentRoomId, appContext)
+                        }
+                    }
+                    is RealtimeTableEvent.VoiceRoomChanged -> {
+                        val currentRoomId = _activeRoomId.value
+                        val record = event.record
+                        val changedRoomId = record?.optString("id")
+                        val isLive = record?.optBoolean("is_live", true) ?: true
+                        val status = record?.optString("status") ?: "active"
+                        if (currentRoomId != null && (changedRoomId == currentRoomId || changedRoomId.isNullOrBlank())) {
+                            if (!isLive || status == "ended" || event.eventType.equals("DELETE", ignoreCase = true)) {
+                                Log.d("AuthViewModel", "Active room $currentRoomId changed to ended/deleted in voice_rooms table")
+                                _activeRoomId.value = null
+                                _activeRoomTitle.value = null
+                                _activeRoomHostId.value = null
+                                _pendingSpeakerRequests.value = emptyList()
+                                _pendingSpeakerRequest.value = null
+                                _mySpeakerRequestStatus.value = null
+                                _activeRoomSpeakers.value = emptyList()
+                                val ctx = FunkyTalkApplication.appContext
+                                if (ctx != null) {
+                                    com.example.service.VoiceRoomOverlayManager.stopService(ctx)
+                                }
+                                com.example.service.VoiceRoomOverlayManager.clear()
+                            }
                         }
                     }
                     is RealtimeTableEvent.ModerationActionEnforced -> {
@@ -984,6 +1017,58 @@ class AuthViewModel : ViewModel() {
             }
         }
         onComplete?.invoke()
+    }
+
+    /**
+     * Verifies against Supabase that the room is still live and active before navigating in.
+     * If the room has ended, clears active room state, stops the floating overlay service, and triggers onRoomEnded.
+     */
+    fun verifyAndNavigateToRoom(
+        context: Context,
+        onRoomActive: (String) -> Unit,
+        onRoomEnded: () -> Unit
+    ) {
+        val roomId = _activeRoomId.value ?: com.example.service.VoiceRoomOverlayManager.roomId.value
+        if (roomId.isNullOrBlank()) {
+            com.example.service.VoiceRoomOverlayManager.stopService(context)
+            com.example.service.VoiceRoomOverlayManager.clear()
+            onRoomEnded()
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val token = SupabaseSessionManager.getBearerToken(context)
+                val resp = SupabaseClient.api.getVoiceRoomById(auth = token, idEq = "eq.$roomId")
+                val room = if (resp.isSuccessful) resp.body()?.firstOrNull() else null
+                val isActive = room != null && (room.is_live == true) && (room.status != "ended")
+
+                withContext(Dispatchers.Main) {
+                    if (isActive) {
+                        _activeRoomId.value = room?.id ?: roomId
+                        if (!room?.title.isNullOrBlank()) _activeRoomTitle.value = room?.title
+                        if (!room?.host_id.isNullOrBlank()) _activeRoomHostId.value = room?.host_id
+                        onRoomActive(room?.id ?: roomId)
+                    } else {
+                        _activeRoomId.value = null
+                        _activeRoomTitle.value = null
+                        _activeRoomHostId.value = null
+                        _pendingSpeakerRequests.value = emptyList()
+                        _pendingSpeakerRequest.value = null
+                        _mySpeakerRequestStatus.value = null
+                        _activeRoomSpeakers.value = emptyList()
+                        com.example.service.VoiceRoomOverlayManager.stopService(context)
+                        com.example.service.VoiceRoomOverlayManager.clear()
+                        onRoomEnded()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("AuthViewModel", "Error verifying room status for room $roomId", e)
+                withContext(Dispatchers.Main) {
+                    onRoomActive(roomId)
+                }
+            }
+        }
     }
 
     fun processDeepLinkUri(uri: Uri?, context: Context, onNavigateToRoom: (() -> Unit)? = null) {

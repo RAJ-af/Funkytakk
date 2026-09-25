@@ -19,6 +19,7 @@ import com.example.SupabaseClient
 import com.example.SupabaseEvent
 import com.example.UserProfile
 import com.example.realtime.VoiceRoomRealtimeManager
+import com.example.realtime.RealtimeTableEvent
 import com.example.util.CustomTabsHelper
 import com.example.ui.screens.home.components.HomeBottomBar
 import com.example.ui.screens.home.dialogs.*
@@ -156,9 +157,11 @@ fun HomeScreen(
 
         suspend fun refreshRoomsAndFriends() {
             try {
-                // 1. Fetch voice rooms from Supabase
+                // 1. Fetch voice rooms from Supabase (only active, live rooms)
                 val roomsRes = SupabaseClient.api.getVoiceRooms()
-                val supaRooms = roomsRes.body() ?: emptyList()
+                val supaRooms = (roomsRes.body() ?: emptyList()).filter {
+                    (it.is_live == true) && (it.status != "ended")
+                }
 
                 // 2. Fetch active events from Supabase events table (ordered by event_time asc)
                 try {
@@ -269,6 +272,8 @@ fun HomeScreen(
                         )
                     }
                     roomsList = mapped
+                } else {
+                    roomsList = emptyList()
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -289,7 +294,18 @@ fun HomeScreen(
 
         // Real-time updates from Supabase postgres_changes, live participants, and room broadcasts
         launch {
-            VoiceRoomRealtimeManager.events.collect {
+            VoiceRoomRealtimeManager.events.collect { event ->
+                if (event is RealtimeTableEvent.VoiceRoomChanged) {
+                    val record = event.record
+                    val rId = record?.optString("id")
+                    val isLive = record?.optBoolean("is_live", true) ?: true
+                    val status = record?.optString("status") ?: "active"
+                    if (!rId.isNullOrBlank() && (!isLive || status == "ended" || event.eventType.equals("DELETE", ignoreCase = true))) {
+                        roomsList = roomsList.filterNot { it.id == rId }
+                    }
+                } else if (event is RealtimeTableEvent.RoomLifecycleEvent && event.action == "room_ended") {
+                    roomsList = roomsList.filterNot { it.id == event.roomId }
+                }
                 refreshRoomsAndFriends()
             }
         }

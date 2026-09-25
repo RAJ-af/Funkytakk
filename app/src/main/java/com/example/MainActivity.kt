@@ -42,8 +42,20 @@ class MainActivity : FragmentActivity() {
 
                     LaunchedEffect(pendingNavigateTo) {
                         pendingNavigateTo?.let { target ->
-                            currentScreen = target
                             pendingNavigateTo = null
+                            if (target == "voice_room") {
+                                authViewModel.verifyAndNavigateToRoom(
+                                    context = applicationContext,
+                                    onRoomActive = {
+                                        currentScreen = "voice_room"
+                                    },
+                                    onRoomEnded = {
+                                        android.widget.Toast.makeText(applicationContext, "This room has ended.", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                )
+                            } else {
+                                currentScreen = target
+                            }
                         }
                     }
 
@@ -394,7 +406,15 @@ class MainActivity : FragmentActivity() {
                         FloatingBubbleOverlay(
                             viewModel = authViewModel,
                             onNavigateToRoom = {
-                                currentScreen = "voice_room"
+                                authViewModel.verifyAndNavigateToRoom(
+                                    context = applicationContext,
+                                    onRoomActive = {
+                                        currentScreen = "voice_room"
+                                    },
+                                    onRoomEnded = {
+                                        android.widget.Toast.makeText(applicationContext, "This room has ended.", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                )
                             }
                         )
                     }

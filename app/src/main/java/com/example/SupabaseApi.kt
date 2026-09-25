@@ -340,7 +340,7 @@ interface SupabaseApi {
         @Body profile: SupabaseProfile
     ): Response<Unit>
 
-    @GET("rest/v1/voice_rooms?select=*&order=created_at.desc")
+    @GET("rest/v1/voice_rooms?select=*&is_live=eq.true&status=neq.ended&order=created_at.desc")
     suspend fun getVoiceRooms(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
