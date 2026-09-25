@@ -324,6 +324,7 @@ fun VoiceSpeakerItem(
                         .fillMaxSize()
                         .clip(CircleShape)
                         .background(Color.LightGray)
+                        .alpha(if (speaker.isHostAway) 0.75f else 1f)
                 )
             }
 
@@ -341,6 +342,24 @@ fun VoiceSpeakerItem(
                         color = Color.Black,
                         fontSize = 8.sp,
                         fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            // Host Away subtle indicator badge
+            if (speaker.isHost && speaker.isHostAway) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 4.dp, y = (-4).dp)
+                        .background(Color(0xFFF59E0B), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "AWAY",
+                        color = Color.Black,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.ExtraBold
                     )
                 }
             }
@@ -389,8 +408,18 @@ fun VoiceSpeakerItem(
             )
             Spacer(modifier = Modifier.width(4.dp))
             CustomMicIcon(
-                tint = if (speaker.isMuted) Color.LightGray else micIconTint,
+                tint = if (speaker.isMuted || speaker.isHostAway) Color.LightGray else micIconTint,
                 modifier = Modifier.size(12.dp)
+            )
+        }
+
+        if (speaker.isHost && speaker.isHostAway) {
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "Host Away",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFFF59E0B)
             )
         }
     }

@@ -13,6 +13,7 @@ data class ChatMessage(
     val isMe: Boolean,
     val type: ChatMessageType = ChatMessageType.TEXT,
     val imageUrl: String? = null,
+    val imageUrls: List<String> = emptyList(),
     val audioDuration: String = "0:12",
     val audioDurationSecs: Int = 12,
     val reactions: List<String> = emptyList(),
@@ -21,7 +22,17 @@ data class ChatMessage(
     val replyToText: String? = null,
     val replyToSender: String? = null,
     val showAvatar: Boolean = true
-)
+) {
+    /**
+     * Resolves all available images for this message, combining single imageUrl and imageUrls list.
+     */
+    fun getAllImages(): List<String> {
+        val list = mutableListOf<String>()
+        if (!imageUrl.isNullOrBlank()) list.add(imageUrl)
+        list.addAll(imageUrls.filter { it.isNotBlank() })
+        return list.distinct()
+    }
+}
 
 object ChatSampleData {
     fun getInitialMessages(): List<ChatMessage> {

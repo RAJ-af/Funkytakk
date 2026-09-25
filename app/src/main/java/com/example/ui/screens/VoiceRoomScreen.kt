@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.Manifest
 import android.content.pm.PackageManager
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -91,6 +92,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.lazy.items
@@ -310,7 +312,8 @@ data class ChillRoomSpeaker(
     val isCenter: Boolean = false,
     val gradientColors: List<Color>,
     val isHost: Boolean = false,
-    val userId: String = ""
+    val userId: String = "",
+    val isHostAway: Boolean = false
 )
 
 data class ChillRoomMessage(
@@ -392,6 +395,7 @@ fun VoiceRoomScreen(
     var joinCodeState by remember { mutableStateOf("") }
 
     var myModerationStatus by remember { mutableStateOf<MyModerationStatus?>(null) }
+    var showHostLeaveDialog by remember { mutableStateOf(false) }
 
     val hasOverlayPermission = remember(context) {
         com.example.service.OverlayPermissionHelper.canDrawOverlays(context)
@@ -432,6 +436,21 @@ fun VoiceRoomScreen(
         (currentUserId.isNotBlank() && currentUserId.equals(roomHostId, ignoreCase = true)) ||
         participantsData.any { it.user_id == currentUserId && (it.role == "speaker" || it.role == "host") }
     }
+
+    val isCurrentUserHost = remember(currentUserId, roomHostId) {
+        currentUserId.isNotBlank() && !roomHostId.isNullOrBlank() && currentUserId.equals(roomHostId, ignoreCase = true)
+    }
+
+    BackHandler {
+        if (isCurrentUserHost) {
+            showHostLeaveDialog = true
+        } else {
+            if (com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
+                com.example.service.VoiceRoomOverlayManager.startServiceIfPermitted(context)
+            }
+            onBack()
+        }
+    }
     val scope = rememberCoroutineScope()
     var isMicOn by remember { mutableStateOf(true) }
     val messages = remember { mutableStateListOf<ChillRoomMessage>() }
@@ -454,21 +473,39 @@ fun VoiceRoomScreen(
     val activeReactions = remember { mutableStateListOf<FloatingEmojiId>() }
     val speakerReactions = remember { mutableStateMapOf<String, List<FloatingEmojiId>>() }
 
-    val allRoomSeats = remember(participantsData, supabaseProfiles, roomHostId) {
+    val isHostPresent = remember(participantsData, roomHostId) {
+        participantsData.any { it.user_id == roomHostId && (it.role == "host" || it.role == "speaker") }
+    }
+
+    val hostSeat = remember(participantsData, supabaseProfiles, roomHostId, isHostPresent, currentUserProfile, currentUserId) {
+        val hostProfile = supabaseProfiles.find { it.uid == roomHostId }
+        val snippet = com.example.realtime.VoiceRoomRealtimeManager.getUserSnippet(roomHostId ?: "")
+        val name = hostProfile?.displayName?.ifBlank { null }
+            ?: hostProfile?.username?.ifBlank { null }
+            ?: snippet?.name?.ifBlank { null }
+            ?: if (currentUserId == roomHostId) (currentUserProfile?.displayName ?: "Host") else "Host"
+        val avatar = hostProfile?.avatar?.ifBlank { null }
+            ?: snippet?.avatar?.ifBlank { null }
+            ?: if (currentUserId == roomHostId) currentUserProfile?.avatar else "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400"
+        val flagCode = hostProfile?.countryCode ?: snippet?.countryCode ?: "in"
+        val pHost = participantsData.find { it.user_id == roomHostId }
+
+        ChillRoomSpeaker(
+            name = name,
+            imageUrl = avatar ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400",
+            flagCode = flagCode,
+            isMuted = pHost?.let { !it.is_mic_enabled } ?: true,
+            isCenter = true,
+            gradientColors = listOf(Color(0xFFFFB800), Color(0xFFF59E0B), Color(0xFFFFB800)),
+            isHost = true,
+            userId = hostProfile?.uid ?: (roomHostId ?: ""),
+            isHostAway = !isHostPresent
+        )
+    }
+
+    val allRoomSeats = remember(hostSeat, participantsData, supabaseProfiles, roomHostId) {
         if (participantsData.isEmpty()) {
-            val hostProfile = supabaseProfiles.find { it.uid == roomHostId }
-            listOf(
-                ChillRoomSpeaker(
-                    name = hostProfile?.displayName ?: hostProfile?.username ?: "Host",
-                    imageUrl = hostProfile?.avatar ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400",
-                    flagCode = hostProfile?.countryCode ?: "in",
-                    isMuted = false,
-                    isCenter = true,
-                    gradientColors = listOf(Color(0xFFFFB800), Color(0xFFF59E0B), Color(0xFFFFB800)),
-                    isHost = true,
-                    userId = hostProfile?.uid ?: (roomHostId ?: "")
-                )
-            )
+            listOf(hostSeat)
         } else {
             participantsData.map { p ->
                 val pProfile = supabaseProfiles.find { it.uid == p.user_id }
@@ -484,14 +521,11 @@ fun VoiceRoomScreen(
                     isCenter = isHost,
                     gradientColors = if (isHost) listOf(Color(0xFFFFB800), Color(0xFFF59E0B), Color(0xFFFFB800)) else listOf(Color(0xFF8B5CF6), Color(0xFFEC4899)),
                     isHost = isHost,
-                    userId = p.user_id
+                    userId = p.user_id,
+                    isHostAway = if (isHost) !isHostPresent else false
                 )
             }
         }
-    }
-
-    val hostSeat = remember(allRoomSeats, roomHostId) {
-        allRoomSeats.find { it.isHost } ?: allRoomSeats.first()
     }
 
     val speakerSeats = remember(participantsData, supabaseProfiles, roomHostId, hostSeat) {
@@ -1013,6 +1047,44 @@ fun VoiceRoomScreen(
         while (isActive && activeRoomId.isNotBlank()) {
             delay(4000)
             try {
+                // 1. Fetch room status & enforce server-authoritative 3-minute grace period
+                val roomsRes = SupabaseClient.api.getVoiceRoomById(idEq = "eq.$activeRoomId")
+                if (roomsRes.isSuccessful) {
+                    val roomObj = roomsRes.body()?.firstOrNull()
+                    if (roomObj != null) {
+                        if (roomObj.is_live == false || roomObj.status == "ended") {
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(context, "This voice room has ended.", Toast.LENGTH_SHORT).show()
+                                onBack()
+                            }
+                            break
+                        } else {
+                            val hostLeftStr = roomObj.host_left_at
+                            if (!hostLeftStr.isNullOrBlank()) {
+                                val leftEpoch = try {
+                                    java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).apply {
+                                        timeZone = java.util.TimeZone.getTimeZone("UTC")
+                                    }.parse(hostLeftStr)?.time ?: 0L
+                                } catch (_: Exception) { 0L }
+
+                                if (leftEpoch > 0L && (System.currentTimeMillis() - leftEpoch) > 3 * 60 * 1000L) {
+                                    // 3-minute grace period expired without host return
+                                    val token = SupabaseSessionManager.getBearerToken(context)
+                                    try {
+                                        SupabaseClient.api.checkAndCleanupEndedRooms(auth = token)
+                                    } catch (_: Exception) {}
+                                    withContext(Dispatchers.Main) {
+                                        Toast.makeText(context, "Voice room ended (host was away for more than 3 minutes).", Toast.LENGTH_LONG).show()
+                                        onBack()
+                                    }
+                                    break
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 2. Fetch room participants
                 val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
                 if (partsRes.isSuccessful) {
                     val list = partsRes.body() ?: emptyList()
@@ -1662,10 +1734,14 @@ fun VoiceRoomScreen(
                         modifier = Modifier
                             .size(24.dp)
                             .clickable {
-                                if (com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
-                                    com.example.service.VoiceRoomOverlayManager.startServiceIfPermitted(context)
+                                if (isCurrentUserHost) {
+                                    showHostLeaveDialog = true
+                                } else {
+                                    if (com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
+                                        com.example.service.VoiceRoomOverlayManager.startServiceIfPermitted(context)
+                                    }
+                                    onBack()
                                 }
-                                onBack()
                             }
                     )
                     
@@ -1834,7 +1910,7 @@ fun VoiceRoomScreen(
                                             fontWeight = FontWeight.Bold
                                         )
                                         Text(
-                                            text = "Exit current circle",
+                                            text = if (isCurrentUserHost) "Leave or end circle" else "Exit current circle",
                                             color = Color(0xFFF87171).copy(alpha = 0.85f),
                                             fontSize = 11.sp
                                         )
@@ -1842,8 +1918,12 @@ fun VoiceRoomScreen(
                                 },
                                 onClick = {
                                     showThreeDotMenu = false
-                                    viewModel?.leaveRoom(context)
-                                    onBack()
+                                    if (isCurrentUserHost) {
+                                        showHostLeaveDialog = true
+                                    } else {
+                                        viewModel?.leaveRoom(context)
+                                        onBack()
+                                    }
                                 },
                                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                             )
@@ -2966,6 +3046,149 @@ fun VoiceRoomScreen(
             },
             shape = RoundedCornerShape(20.dp),
             containerColor = Color.White
+        )
+    }
+
+    // 1b) Host Leave Room vs End Room Confirmation Dialog
+    if (showHostLeaveDialog) {
+        AlertDialog(
+            onDismissRequest = { showHostLeaveDialog = false },
+            icon = {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFFEF3C7)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("👑", fontSize = 24.sp)
+                }
+            },
+            title = {
+                Text(
+                    text = "Leave Room?",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = if (isRoomDarkMode) Color.White else Color(0xFF0F172A),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "As the Host, you can leave temporarily or end the session completely for everyone.",
+                        fontSize = 13.sp,
+                        color = if (isRoomDarkMode) Color.White.copy(alpha = 0.7f) else Color(0xFF475569),
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Surface(
+                        color = if (isRoomDarkMode) Color(0xFF1E293B) else Color(0xFFF8FAFC),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(verticalAlignment = Alignment.Top) {
+                                Text("•", fontWeight = FontWeight.Bold, color = Color(0xFFF59E0B), fontSize = 16.sp)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Column {
+                                    Text(
+                                        text = "Leave Only",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        color = Color(0xFFF59E0B)
+                                    )
+                                    Text(
+                                        text = "Keeps room active with floating chat head. You have a 3-minute grace period to return.",
+                                        fontSize = 11.sp,
+                                        color = if (isRoomDarkMode) Color.White.copy(alpha = 0.8f) else Color(0xFF475569)
+                                    )
+                                }
+                            }
+                            Row(verticalAlignment = Alignment.Top) {
+                                Text("•", fontWeight = FontWeight.Bold, color = Color(0xFFEF4444), fontSize = 16.sp)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Column {
+                                    Text(
+                                        text = "End Room",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        color = Color(0xFFEF4444)
+                                    )
+                                    Text(
+                                        text = "Closes the room for all participants immediately and clears all seats.",
+                                        fontSize = 11.sp,
+                                        color = if (isRoomDarkMode) Color.White.copy(alpha = 0.8f) else Color(0xFF475569)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            showHostLeaveDialog = false
+                            viewModel?.hostLeaveRoomOnly(context) {
+                                if (com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
+                                    com.example.service.VoiceRoomOverlayManager.startServiceIfPermitted(context)
+                                }
+                                onBack()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFF59E0B),
+                            contentColor = Color.Black
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().height(44.dp)
+                    ) {
+                        Text("Leave Only", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+
+                    Button(
+                        onClick = {
+                            showHostLeaveDialog = false
+                            viewModel?.endActiveVoiceRoom(context) {
+                                onBack()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFDC2626),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().height(44.dp)
+                    ) {
+                        Text("End Room", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+
+                    TextButton(
+                        onClick = { showHostLeaveDialog = false },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Cancel", 
+                            color = if (isRoomDarkMode) Color.White.copy(alpha = 0.7f) else Color(0xFF64748B),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            },
+            dismissButton = null,
+            shape = RoundedCornerShape(20.dp),
+            containerColor = if (isRoomDarkMode) Color(0xFF0F172A) else Color.White
         )
     }
 

@@ -88,7 +88,9 @@ data class SupabaseVoiceRoom(
     val last_2h_growth_rate: Double? = 0.0,
     val last_activity_at: String? = null,
     val is_private: Boolean? = false,
-    val join_code: String? = null
+    val join_code: String? = null,
+    val host_left_at: String? = null,
+    val ended_at: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -104,7 +106,11 @@ data class UpdateVoiceRoomRequest(
     val join_code: String? = null,
     val speaking_count: Int? = null,
     val listening_count: Int? = null,
-    val participants: Int? = null
+    val participants: Int? = null,
+    val is_live: Boolean? = null,
+    val status: String? = null,
+    val host_left_at: String? = null,
+    val ended_at: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -424,6 +430,57 @@ interface SupabaseApi {
         @Header("Authorization") auth: String,
         @Query("room_id") roomIdEq: String
     ): Response<List<SupabaseSpeakerRequest>>
+
+    @DELETE("rest/v1/speaker_requests")
+    suspend fun deletePendingSpeakerRequest(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("room_id") roomIdEq: String,
+        @Query("user_id") userIdEq: String,
+        @Query("status") statusEq: String = "eq.pending"
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/leave_voice_room")
+    suspend fun leaveVoiceRoom(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> // {"p_room_id": roomId}
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/host_rejoin_voice_room")
+    suspend fun hostRejoinVoiceRoom(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> // {"p_room_id": roomId}
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/end_voice_room")
+    suspend fun endVoiceRoom(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> // {"p_room_id": roomId}
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/request_speaker_seat")
+    suspend fun requestSpeakerSeat(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> // {"p_room_id": roomId}
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/cancel_speaker_request")
+    suspend fun cancelSpeakerRequest(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> // {"p_room_id": roomId}
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/check_and_cleanup_ended_rooms")
+    suspend fun checkAndCleanupEndedRooms(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> = emptyMap()
+    ): Response<ResponseBody>
 
     @POST("rest/v1/rpc/respond_to_speaker_request")
     suspend fun respondToSpeakerRequest(

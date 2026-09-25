@@ -2,6 +2,7 @@ package com.example.ui.screens.chat.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
@@ -15,9 +16,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.example.ui.components.FluentEmojiRenderedText
 import com.example.ui.screens.chat.model.ChatMessage
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -27,7 +31,7 @@ fun IncomingMessageBubble(
     partnerAvatarUrl: String,
     isHighlighted: Boolean = false,
     onLongClick: () -> Unit,
-    onReactionClick: () -> Unit = {},
+    onReactionClick: () -> Unit = onLongClick,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -68,11 +72,50 @@ fun IncomingMessageBubble(
                         )
                 ) {
                     Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                        Text(
-                            text = if (message.isTranslated && message.translation != null) message.translation else message.text,
-                            fontSize = 14.5.sp,
-                            color = Color(0xFF111827),
-                            lineHeight = 20.sp
+                        // Reply banner if replying to a message
+                        if (!message.replyToText.isNullOrBlank()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 6.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFFE5E7EB))
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(3.dp)
+                                        .height(26.dp)
+                                        .background(Color(0xFF9CA3AF), RoundedCornerShape(2.dp))
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Column {
+                                    Text(
+                                        text = message.replyToSender ?: "Replied message",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF374151)
+                                    )
+                                    Text(
+                                        text = message.replyToText,
+                                        fontSize = 12.sp,
+                                        color = Color(0xFF6B7280),
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+
+                        val displayText = if (message.isTranslated && message.translation != null) message.translation else message.text
+
+                        FluentEmojiRenderedText(
+                            text = displayText,
+                            style = TextStyle(
+                                fontSize = 14.5.sp,
+                                lineHeight = 20.sp,
+                                fontWeight = FontWeight.Normal
+                            ),
+                            color = Color(0xFF111827)
                         )
                     }
                 }

@@ -234,6 +234,27 @@ class AuthViewModel : ViewModel() {
                             }
                         }
                     }
+                    is RealtimeTableEvent.RoomLifecycleEvent -> {
+                        val currentRoomId = _activeRoomId.value
+                        if (currentRoomId != null && event.roomId == currentRoomId) {
+                            Log.d("AuthViewModel", "RoomLifecycleEvent received for active room $currentRoomId: action=${event.action}")
+                            if (event.action == "room_ended") {
+                                Log.d("AuthViewModel", "Room $currentRoomId was ended by host.")
+                                _activeRoomId.value = null
+                                _activeRoomTitle.value = null
+                                _activeRoomHostId.value = null
+                                _pendingSpeakerRequests.value = emptyList()
+                                _pendingSpeakerRequest.value = null
+                                _mySpeakerRequestStatus.value = null
+                                _activeRoomSpeakers.value = emptyList()
+                                val ctx = FunkyTalkApplication.appContext
+                                if (ctx != null) {
+                                    com.example.service.VoiceRoomOverlayManager.stopService(ctx)
+                                }
+                                com.example.service.VoiceRoomOverlayManager.clear()
+                            }
+                        }
+                    }
                     else -> {}
                 }
             }
@@ -524,36 +545,62 @@ class AuthViewModel : ViewModel() {
         val token = SupabaseSessionManager.getBearerToken(context)
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val res = SupabaseClient.api.createSpeakerRequest(
-                    auth = token,
-                    body = SpeakerRequestInsert(
-                        room_id = roomId,
-                        user_id = uid,
-                        status = "pending"
-                    )
-                )
                 var reqId = "req_${System.currentTimeMillis()}"
-                if (res.isSuccessful) {
-                    try {
-                        val rawBody = res.body()?.string()
+                var isSuccess = false
+
+                // 1. Try atomic request_speaker_seat RPC first (which resets any stale records)
+                try {
+                    val rpcRes = SupabaseClient.api.requestSpeakerSeat(
+                        auth = token,
+                        body = mapOf("p_room_id" to roomId)
+                    )
+                    if (rpcRes.isSuccessful) {
+                        isSuccess = true
+                        val rawBody = rpcRes.body()?.string()
                         if (!rawBody.isNullOrBlank()) {
-                            if (rawBody.trim().startsWith("[")) {
-                                val arr = org.json.JSONArray(rawBody)
-                                if (arr.length() > 0) {
-                                    val obj = arr.getJSONObject(0)
+                            try {
+                                val obj = org.json.JSONObject(rawBody)
+                                val idFromObj = obj.optString("request_id")
+                                if (!idFromObj.isNullOrBlank()) reqId = idFromObj
+                            } catch (_: Exception) {}
+                        }
+                    }
+                } catch (_: Exception) {}
+
+                // 2. Fallback to direct table insert if RPC was not handled
+                if (!isSuccess) {
+                    val res = SupabaseClient.api.createSpeakerRequest(
+                        auth = token,
+                        body = SpeakerRequestInsert(
+                            room_id = roomId,
+                            user_id = uid,
+                            status = "pending"
+                        )
+                    )
+                    if (res.isSuccessful) {
+                        isSuccess = true
+                        try {
+                            val rawBody = res.body()?.string()
+                            if (!rawBody.isNullOrBlank()) {
+                                if (rawBody.trim().startsWith("[")) {
+                                    val arr = org.json.JSONArray(rawBody)
+                                    if (arr.length() > 0) {
+                                        val obj = arr.getJSONObject(0)
+                                        val idFromObj = obj.optString("id")
+                                        if (!idFromObj.isNullOrBlank()) reqId = idFromObj
+                                    }
+                                } else if (rawBody.trim().startsWith("{")) {
+                                    val obj = org.json.JSONObject(rawBody)
                                     val idFromObj = obj.optString("id")
                                     if (!idFromObj.isNullOrBlank()) reqId = idFromObj
                                 }
-                            } else if (rawBody.trim().startsWith("{")) {
-                                val obj = org.json.JSONObject(rawBody)
-                                val idFromObj = obj.optString("id")
-                                if (!idFromObj.isNullOrBlank()) reqId = idFromObj
                             }
-                        }
-                    } catch (_: Exception) {}
+                        } catch (_: Exception) {}
+                    }
                 }
+
                 withContext(Dispatchers.Main) {
-                    if (res.isSuccessful) {
+                    if (isSuccess) {
                         _mySpeakerRequestStatus.value = "pending"
 
                         // Broadcast speaker request live to room & host
@@ -569,29 +616,9 @@ class AuthViewModel : ViewModel() {
 
                         onResult?.invoke(true, "Request to join as speaker sent to host!")
                     } else {
-                        val code = res.code()
-                        if (code == 409) {
-                            // Already exists as pending
-                            _mySpeakerRequestStatus.value = "pending"
-
-                            com.example.realtime.VoiceRoomRealtimeManager.broadcastSpeakerRequest(
-                                roomId = roomId,
-                                requestId = "req_${System.currentTimeMillis()}",
-                                userId = uid,
-                                action = "requested",
-                                status = "pending",
-                                userName = myName,
-                                userAvatar = myAvatar
-                            )
-
-                            onResult?.invoke(true, "Request already pending host approval.")
-                        } else if (code == 404 || code == 410) {
-                            onResult?.invoke(false, "This room is no longer active.")
-                        } else {
-                            // Query backend state in case RLS or constraint treated it as duplicate
-                            checkMySpeakerRequest(roomId, context)
-                            onResult?.invoke(false, "Could not submit speaker request.")
-                        }
+                        // Query backend state in case constraint treated it as duplicate
+                        checkMySpeakerRequest(roomId, context)
+                        onResult?.invoke(false, "Could not submit speaker request. Please try again.")
                     }
                 }
             } catch (e: Exception) {
@@ -642,6 +669,31 @@ class AuthViewModel : ViewModel() {
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                // If Host rejoins, cancel the 3-minute grace period and restore host
+                if (hostId == uid || _activeRoomHostId.value == uid) {
+                    try {
+                        SupabaseClient.api.hostRejoinVoiceRoom(
+                            auth = token,
+                            body = mapOf("p_room_id" to roomId)
+                        )
+                    } catch (_: Exception) {}
+
+                    try {
+                        SupabaseClient.api.updateVoiceRoom(
+                            auth = token,
+                            idEq = "eq.$roomId",
+                            updates = UpdateVoiceRoomRequest(host_left_at = null)
+                        )
+                    } catch (_: Exception) {}
+
+                    try {
+                        VoiceRoomRealtimeManager.broadcastRoomLifecycle(
+                            roomId = roomId,
+                            action = "host_returned"
+                        )
+                    } catch (_: Exception) {}
+                }
+
                 SupabaseClient.api.joinRoomParticipant(
                     auth = token,
                     participant = SupabaseRoomParticipant(
@@ -709,7 +761,7 @@ class AuthViewModel : ViewModel() {
 
     fun leaveRoom(context: Context? = null) {
         val roomId = _activeRoomId.value
-        val ctx = context
+        val ctx = context ?: FunkyTalkApplication.appContext
         val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
         val uid = ctx?.let { SupabaseSessionManager.getUserId(it) }
             ?: (authState.value as? AuthState.Success)?.user?.uid
@@ -733,6 +785,18 @@ class AuthViewModel : ViewModel() {
             val username = userObj?.displayName?.ifBlank { null } ?: userObj?.username?.ifBlank { null } ?: "Someone"
 
             viewModelScope.launch(Dispatchers.IO) {
+                // 1. Broadcast cancellation of any pending speaker request for this user
+                try {
+                    VoiceRoomRealtimeManager.broadcastSpeakerRequest(
+                        roomId = roomId,
+                        requestId = "cancelled_$uid",
+                        userId = uid,
+                        action = "cancelled",
+                        status = "cancelled"
+                    )
+                } catch (_: Exception) {}
+
+                // 2. Broadcast participant left
                 try {
                     VoiceRoomRealtimeManager.broadcastParticipantUpdate(
                         roomId = roomId,
@@ -754,18 +818,172 @@ class AuthViewModel : ViewModel() {
                     )
                 } catch (_: Exception) {}
 
+                // 3. Clean up pending speaker requests for this user in this room on Supabase
                 try {
-                    SupabaseClient.api.leaveRoomParticipant(
+                    SupabaseClient.api.deletePendingSpeakerRequest(
                         auth = token,
                         roomIdEq = "eq.$roomId",
                         userIdEq = "eq.$uid"
                     )
-                    Log.d("AuthViewModel", "User $uid left room $roomId in Supabase room_participants")
-                } catch (e: Exception) {
-                    Log.e("AuthViewModel", "Error leaving room $roomId in Supabase", e)
+                } catch (_: Exception) {}
+
+                // 4. Remove participant / execute leave_voice_room RPC
+                try {
+                    SupabaseClient.api.leaveVoiceRoom(
+                        auth = token,
+                        body = mapOf("p_room_id" to roomId)
+                    )
+                } catch (_: Exception) {
+                    try {
+                        SupabaseClient.api.leaveRoomParticipant(
+                            auth = token,
+                            roomIdEq = "eq.$roomId",
+                            userIdEq = "eq.$uid"
+                        )
+                    } catch (e: Exception) {
+                        Log.e("AuthViewModel", "Error leaving room $roomId in Supabase", e)
+                    }
                 }
             }
         }
+    }
+
+    /**
+     * Host chooses "Leave Only": leaves current room screen but does NOT end the room.
+     * Room remains open for others, floating bubble can run in background, and 3-minute grace period starts.
+     */
+    fun hostLeaveRoomOnly(context: Context? = null, onComplete: (() -> Unit)? = null) {
+        val roomId = _activeRoomId.value
+        val ctx = context ?: FunkyTalkApplication.appContext
+        val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+        val uid = ctx?.let { SupabaseSessionManager.getUserId(it) }
+            ?: (authState.value as? AuthState.Success)?.user?.uid
+
+        _activeRoomId.value = null
+        _activeRoomTitle.value = null
+        _activeRoomHostId.value = null
+        _pendingSpeakerRequests.value = emptyList()
+        _pendingSpeakerRequest.value = null
+        _mySpeakerRequestStatus.value = null
+        _activeRoomSpeakers.value = emptyList()
+
+        if (roomId != null && uid != null) {
+            VoiceRoomRealtimeManager.removeLiveParticipant(roomId, uid)
+            val nowIso = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }.format(java.util.Date())
+
+            viewModelScope.launch(Dispatchers.IO) {
+                // Broadcast host away event
+                try {
+                    VoiceRoomRealtimeManager.broadcastRoomLifecycle(
+                        roomId = roomId,
+                        action = "host_away",
+                        hostLeftAt = nowIso
+                    )
+                } catch (_: Exception) {}
+
+                try {
+                    VoiceRoomRealtimeManager.broadcastParticipantUpdate(
+                        roomId = roomId,
+                        userId = uid,
+                        action = "host_away",
+                        role = "host",
+                        isMicEnabled = false
+                    )
+                } catch (_: Exception) {}
+
+                // Set host_left_at in database to start server-authoritative 3-minute grace period
+                try {
+                    SupabaseClient.api.leaveVoiceRoom(
+                        auth = token,
+                        body = mapOf("p_room_id" to roomId)
+                    )
+                } catch (_: Exception) {}
+
+                try {
+                    SupabaseClient.api.updateVoiceRoom(
+                        auth = token,
+                        idEq = "eq.$roomId",
+                        updates = UpdateVoiceRoomRequest(host_left_at = nowIso)
+                    )
+                } catch (_: Exception) {}
+            }
+        }
+        onComplete?.invoke()
+    }
+
+    /**
+     * Host chooses "End Room": explicitly closes room, ends active sessions, and notifies everyone.
+     */
+    fun endActiveVoiceRoom(context: Context? = null, onComplete: (() -> Unit)? = null) {
+        val roomId = _activeRoomId.value
+        val ctx = context ?: FunkyTalkApplication.appContext
+        val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+        val uid = ctx?.let { SupabaseSessionManager.getUserId(it) }
+            ?: (authState.value as? AuthState.Success)?.user?.uid
+
+        _activeRoomId.value = null
+        _activeRoomTitle.value = null
+        _activeRoomHostId.value = null
+        _pendingSpeakerRequests.value = emptyList()
+        _pendingSpeakerRequest.value = null
+        _mySpeakerRequestStatus.value = null
+        _activeRoomSpeakers.value = emptyList()
+
+        if (ctx != null) {
+            com.example.service.VoiceRoomOverlayManager.stopService(ctx)
+        }
+        com.example.service.VoiceRoomOverlayManager.clear()
+
+        if (roomId != null) {
+            val nowIso = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply {
+                timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }.format(java.util.Date())
+
+            viewModelScope.launch(Dispatchers.IO) {
+                // Broadcast room_ended to realtime immediately so all participants exit
+                try {
+                    VoiceRoomRealtimeManager.broadcastRoomLifecycle(
+                        roomId = roomId,
+                        action = "room_ended"
+                    )
+                } catch (_: Exception) {}
+
+                try {
+                    VoiceRoomRealtimeManager.broadcastRoomMessage(
+                        roomId = roomId,
+                        message = "The host has ended this voice room.",
+                        userId = uid ?: "",
+                        senderName = "System",
+                        senderAvatar = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200",
+                        messageId = "sys_ended_${System.currentTimeMillis()}"
+                    )
+                } catch (_: Exception) {}
+
+                // Call end_voice_room RPC
+                try {
+                    SupabaseClient.api.endVoiceRoom(
+                        auth = token,
+                        body = mapOf("p_room_id" to roomId)
+                    )
+                } catch (_: Exception) {}
+
+                // Explicit fallback update
+                try {
+                    SupabaseClient.api.updateVoiceRoom(
+                        auth = token,
+                        idEq = "eq.$roomId",
+                        updates = UpdateVoiceRoomRequest(
+                            is_live = false,
+                            status = "ended",
+                            ended_at = nowIso
+                        )
+                    )
+                } catch (_: Exception) {}
+            }
+        }
+        onComplete?.invoke()
     }
 
     fun processDeepLinkUri(uri: Uri?, context: Context, onNavigateToRoom: (() -> Unit)? = null) {

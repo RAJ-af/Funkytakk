@@ -56,6 +56,11 @@ sealed class RealtimeTableEvent {
         val actionType: String,
         val reason: String?
     ) : RealtimeTableEvent()
+    data class RoomLifecycleEvent(
+        val roomId: String,
+        val action: String, // "room_ended", "host_away", "host_returned"
+        val hostLeftAt: String? = null
+    ) : RealtimeTableEvent()
     data class NotificationChanged(
         val eventType: String,
         val record: JSONObject?,
@@ -526,6 +531,20 @@ object VoiceRoomRealtimeManager {
                                 targetUserId = targetUid,
                                 actionType = actType,
                                 reason = modReason
+                            )
+                        )
+                    }
+                } else if (broadcastType == "room_lifecycle" || broadcastType == "room_ended") {
+                    val targetRoomId = innerPayload?.optString("room_id")?.ifBlank { roomId } ?: roomId
+                    val action = innerPayload?.optString("action") ?: broadcastType
+                    val hostLeftAt = innerPayload?.optString("host_left_at")
+                    Log.d(TAG, "Received broadcast room_lifecycle: action=$action for room $targetRoomId")
+                    if (targetRoomId.isNotBlank()) {
+                        _events.tryEmit(
+                            RealtimeTableEvent.RoomLifecycleEvent(
+                                roomId = targetRoomId,
+                                action = action,
+                                hostLeftAt = hostLeftAt
                             )
                         )
                     }
@@ -1069,6 +1088,56 @@ object VoiceRoomRealtimeManager {
             Log.d(TAG, "Broadcasted speaker_request ($action / $status) to room:$roomId for user $userId (reqId=$requestId)")
         } catch (e: Exception) {
             Log.e(TAG, "Error broadcasting speaker_request to room $roomId", e)
+        }
+    }
+
+    fun broadcastRoomLifecycle(
+        roomId: String,
+        action: String, // "room_ended", "host_away", "host_returned"
+        hostLeftAt: String? = null
+    ) {
+        if (roomId.isBlank()) return
+        val ws = webSocket ?: return
+        try {
+            if (!subscribedRoomChannels.contains(roomId)) {
+                subscribeRoomChannel(roomId)
+            }
+            val payloadObj = JSONObject().apply {
+                put("room_id", roomId)
+                put("action", action)
+                if (!hostLeftAt.isNullOrBlank()) put("host_left_at", hostLeftAt)
+                put("timestamp", System.currentTimeMillis())
+            }
+
+            // Broadcast to room channel: realtime:room:$roomId
+            val broadcastMsg = JSONObject().apply {
+                put("topic", "realtime:room:$roomId")
+                put("event", "broadcast")
+                put("payload", JSONObject().apply {
+                    put("type", "broadcast")
+                    put("event", "room_lifecycle")
+                    put("payload", payloadObj)
+                })
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(broadcastMsg.toString())
+
+            // Also broadcast to public:voice_rooms channel
+            val publicBroadcastMsg = JSONObject().apply {
+                put("topic", "realtime:public:voice_rooms")
+                put("event", "broadcast")
+                put("payload", JSONObject().apply {
+                    put("type", "broadcast")
+                    put("event", "room_lifecycle")
+                    put("payload", payloadObj)
+                })
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(publicBroadcastMsg.toString())
+
+            Log.d(TAG, "Broadcasted room_lifecycle ($action) to room:$roomId")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error broadcasting room_lifecycle to room $roomId", e)
         }
     }
 
