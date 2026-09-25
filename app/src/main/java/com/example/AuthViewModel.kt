@@ -2031,7 +2031,7 @@ class AuthViewModel : ViewModel() {
                         user.getIdToken(true).addOnSuccessListener { tokenResult ->
                             val firebaseIdToken = tokenResult.token
                             if (!firebaseIdToken.isNullOrEmpty()) {
-                                viewModelScope.launch {
+                                viewModelScope.launch(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
                                     var supaAccessToken: String? = null
                                     var sUserId: String = user.uid
                                     try {
@@ -2039,9 +2039,7 @@ class AuthViewModel : ViewModel() {
                                             firebase_token = firebaseIdToken,
                                             firebaseIdToken = firebaseIdToken
                                         )
-                                        val verifyRes = withContext(Dispatchers.IO) {
-                                            SupabaseClient.api.verifyFirebaseToken(request = verifyReq)
-                                        }
+                                        val verifyRes = SupabaseClient.api.verifyFirebaseToken(request = verifyReq)
                                         if (verifyRes.isSuccessful && verifyRes.body() != null) {
                                             val body = verifyRes.body()!!
                                             supaAccessToken = body.access_token
@@ -2056,6 +2054,7 @@ class AuthViewModel : ViewModel() {
                                             }
                                         }
                                     } catch (e: Exception) {
+                                        if (e is kotlinx.coroutines.CancellationException) throw e
                                         Log.e("AuthViewModel", "Google Supabase session exchange error: ${e.message}")
                                     }
 
