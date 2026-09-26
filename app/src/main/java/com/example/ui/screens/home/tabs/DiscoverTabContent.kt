@@ -57,7 +57,7 @@ data class DiscoverPartner(
 fun DiscoverTabContent(
     supabaseProfiles: List<UserProfile> = emptyList(),
     onCreateRoom: () -> Unit = {},
-    onStartDirectChat: (name: String, avatarUrl: String, flagCode: String) -> Unit = { _, _, _ -> }
+    onStartDirectChat: (userId: String, name: String, avatarUrl: String, flagCode: String) -> Unit = { _, _, _, _ -> }
 ) {
     val context = LocalContext.current
 
@@ -650,7 +650,7 @@ fun DiscoverTabContent(
                         }
                         val greeting = waveCustomMessage.ifBlank { "Waved hello!" }
                         Toast.makeText(context, "Wave sent to ${targetUser.name}!", Toast.LENGTH_SHORT).show()
-                        onStartDirectChat(targetUser.name, targetUser.avatarUrl, targetUser.countryCode)
+                        onStartDirectChat(targetUser.id, targetUser.name, targetUser.avatarUrl, targetUser.countryCode)
                         waveDialogUser = null
                         waveCustomMessage = ""
                     },
@@ -795,7 +795,7 @@ fun DiscoverTabContent(
                     Button(
                         onClick = {
                             profileSheetUser = null
-                            onStartDirectChat(user.name, user.avatarUrl, user.countryCode)
+                            onStartDirectChat(user.id, user.name, user.avatarUrl, user.countryCode)
                         },
                         modifier = Modifier
                             .weight(1f)

@@ -490,9 +490,9 @@ fun HomeScreen(
                         DiscoverTabContent(
                             supabaseProfiles = supabaseProfiles,
                             onCreateRoom = { showCreateRoomBottomSheet = true },
-                            onStartDirectChat = { name, avatarUrl, flagCode ->
+                            onStartDirectChat = { userId, name, avatarUrl, flagCode ->
                                 activeChatWindowContact = DirectChat(
-                                    id = name.hashCode().toString(),
+                                    id = userId.ifBlank { name.hashCode().toString() },
                                     name = name,
                                     avatar = avatarUrl,
                                     lastMsg = "Hey! Let's connect 👋",

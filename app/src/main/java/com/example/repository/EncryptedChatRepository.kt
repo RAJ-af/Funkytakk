@@ -300,9 +300,11 @@ object EncryptedChatRepository {
     ): Result<LocalDmMessage> = withContext(Dispatchers.IO) {
         try {
             val db = database ?: return@withContext Result.failure(IllegalStateException("Chat vault is locked"))
-            val myUserId = SupabaseSessionManager.getUserId(context)
+            val myUserId = SupabaseSessionManager.ensureActiveSession(context)
+                ?: SupabaseSessionManager.getUserId(context)
                 ?: return@withContext Result.failure(IllegalStateException("User not authenticated"))
-            val token = SupabaseSessionManager.getBearerToken(context)
+            val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                ?: SupabaseSessionManager.getBearerToken(context)
 
             // 1. Fetch recipient's public key from Supabase user_public_keys
             val displayName = recipientName.ifBlank { "Ye user" }
@@ -312,13 +314,15 @@ object EncryptedChatRepository {
                 )
             }
 
+            val resolvedUserId = resolveRecipientAuthUserId(context, recipientUserId) ?: recipientUserId
+
             val keyResp = SupabaseClient.api.getUserPublicKey(
                 apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
                 auth = token,
-                userIdFilter = "eq.$recipientUserId"
+                userIdFilter = "eq.$resolvedUserId"
             )
             if (!keyResp.isSuccessful || keyResp.body().isNullOrEmpty()) {
-                Log.w(TAG, "Recipient $recipientUserId has no entry in user_public_keys (user hasn't opened app yet).")
+                Log.w(TAG, "Recipient $recipientUserId (resolved: $resolvedUserId) has no entry in user_public_keys (user hasn't opened app yet).")
                 return@withContext Result.failure(
                     RecipientNotReadyException(displayName)
                 )
@@ -326,7 +330,7 @@ object EncryptedChatRepository {
             val keyItem = keyResp.body()!!.first()
             val recipientPublicKey = keyItem.identity_public_key
             if (recipientPublicKey.isNullOrBlank()) {
-                Log.w(TAG, "Recipient $recipientUserId public key is blank in user_public_keys.")
+                Log.w(TAG, "Recipient $recipientUserId (resolved: $resolvedUserId) public key is blank in user_public_keys.")
                 return@withContext Result.failure(
                     RecipientNotReadyException(displayName)
                 )
@@ -336,7 +340,7 @@ object EncryptedChatRepository {
             val rpcResp = SupabaseClient.api.getOrCreateDmConversation(
                 apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
                 auth = token,
-                body = GetOrCreateDmConversationRequest(p_other_user_id = recipientUserId)
+                body = GetOrCreateDmConversationRequest(p_other_user_id = resolvedUserId)
             )
             if (!rpcResp.isSuccessful) {
                 return@withContext Result.failure(
@@ -357,7 +361,7 @@ object EncryptedChatRepository {
                 body = SendDmMessageRequest(
                     conversation_id = conversationId,
                     sender_id = myUserId,
-                    recipient_id = recipientUserId,
+                    recipient_id = resolvedUserId,
                     ciphertext = ciphertext,
                     nonce = "",
                     key_version = keyItem.key_version
@@ -429,6 +433,78 @@ object EncryptedChatRepository {
         }
     }
 
+    /**
+     * Resolves a recipient user ID or username/display name to their exact Supabase auth_user_id UUID.
+     */
+    suspend fun resolveRecipientAuthUserId(context: Context, inputIdOrName: String): String? = withContext(Dispatchers.IO) {
+        if (inputIdOrName.isBlank() || inputIdOrName.startsWith("partner_mock") || inputIdOrName.startsWith("c_")) {
+            return@withContext null
+        }
+
+        // 1. Ensure active session and token
+        SupabaseSessionManager.ensureActiveSession(context)
+        val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+            ?: SupabaseSessionManager.getBearerToken(context)
+
+        // 2. If it's already a valid UUID, check if user_public_keys has a row directly
+        if (SupabaseSessionManager.isValidUuid(inputIdOrName)) {
+            try {
+                val keyResp = SupabaseClient.api.getUserPublicKey(
+                    apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
+                    auth = token,
+                    userIdFilter = "eq.$inputIdOrName"
+                )
+                if (keyResp.isSuccessful && !keyResp.body().isNullOrEmpty()) {
+                    Log.d(TAG, "resolveRecipientAuthUserId: $inputIdOrName is valid UUID with user_public_keys row")
+                    return@withContext inputIdOrName
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Direct check of user_public_keys for $inputIdOrName failed: ${e.message}")
+            }
+        }
+
+        // 3. Look up profile by auth_user_id or profile_name / username / email
+        try {
+            val profileRes = SupabaseClient.api.getProfile(
+                apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
+                auth = token,
+                authUserIdEq = "eq.$inputIdOrName"
+            )
+            if (profileRes.isSuccessful && !profileRes.body().isNullOrEmpty()) {
+                val p = profileRes.body()!!.first()
+                if (!p.auth_user_id.isNullOrBlank()) {
+                    Log.d(TAG, "resolveRecipientAuthUserId: matched $inputIdOrName to auth_user_id=${p.auth_user_id} via getProfile auth_user_id")
+                    return@withContext p.auth_user_id
+                }
+            }
+        } catch (_: Exception) {}
+
+        try {
+            val allProfilesRes = SupabaseClient.api.getAllProfiles(
+                apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
+                auth = token
+            )
+            if (allProfilesRes.isSuccessful && !allProfilesRes.body().isNullOrEmpty()) {
+                val match = allProfilesRes.body()!!.find { p ->
+                    p.auth_user_id?.equals(inputIdOrName, ignoreCase = true) == true ||
+                    p.profile_name?.equals(inputIdOrName, ignoreCase = true) == true ||
+                    p.username?.equals(inputIdOrName, ignoreCase = true) == true ||
+                    p.email?.equals(inputIdOrName, ignoreCase = true) == true
+                }
+                if (match?.auth_user_id != null) {
+                    Log.d(TAG, "resolveRecipientAuthUserId: matched $inputIdOrName to auth_user_id=${match.auth_user_id} via getAllProfiles match")
+                    return@withContext match.auth_user_id
+                }
+            }
+        } catch (_: Exception) {}
+
+        if (SupabaseSessionManager.isValidUuid(inputIdOrName)) {
+            return@withContext inputIdOrName
+        }
+
+        return@withContext null
+    }
+
     suspend fun getOrCreateLocalConversation(
         context: Context,
         otherUserId: String,
@@ -436,17 +512,21 @@ object EncryptedChatRepository {
         otherUserAvatar: String? = null
     ): LocalDmConversation = withContext(Dispatchers.IO) {
         val db = database ?: throw IllegalStateException("Chat vault is locked")
-        val existing = db.conversationDao().getConversationByOtherUser(otherUserId)
+        val resolvedUserId = resolveRecipientAuthUserId(context, otherUserId) ?: otherUserId
+
+        val existing = db.conversationDao().getConversationByOtherUser(resolvedUserId)
         if (existing != null) return@withContext existing
 
         // Establish conversation via RPC if online
         var convId = UUID.randomUUID().toString()
         try {
-            val token = SupabaseSessionManager.getBearerToken(context)
+            SupabaseSessionManager.ensureActiveSession(context)
+            val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                ?: SupabaseSessionManager.getBearerToken(context)
             val rpcResp = SupabaseClient.api.getOrCreateDmConversation(
                 apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
                 auth = token,
-                body = GetOrCreateDmConversationRequest(p_other_user_id = otherUserId)
+                body = GetOrCreateDmConversationRequest(p_other_user_id = resolvedUserId)
             )
             if (rpcResp.isSuccessful) {
                 val raw = rpcResp.body()?.string()?.trim() ?: ""
@@ -461,7 +541,7 @@ object EncryptedChatRepository {
 
         val newConv = LocalDmConversation(
             id = convId,
-            otherUserId = otherUserId,
+            otherUserId = resolvedUserId,
             otherUserName = otherUserName,
             otherUserAvatar = otherUserAvatar,
             lastMessageText = "",
@@ -475,12 +555,25 @@ object EncryptedChatRepository {
     suspend fun checkRecipientKeyStatus(context: Context, recipientUserId: String): Boolean = withContext(Dispatchers.IO) {
         if (recipientUserId.isBlank() || recipientUserId.startsWith("partner_mock")) return@withContext false
         try {
-            val token = SupabaseSessionManager.getBearerToken(context)
+            // 1. Ensure authenticated session
+            SupabaseSessionManager.ensureActiveSession(context)
+            val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                ?: SupabaseSessionManager.getBearerToken(context)
+
+            // 2. Resolve to exact Supabase auth_user_id UUID
+            val resolvedUserId = resolveRecipientAuthUserId(context, recipientUserId) ?: recipientUserId
+
+            Log.d(TAG, "checkRecipientKeyStatus: input=$recipientUserId -> resolved=$resolvedUserId")
+            Log.d(TAG, "checkRecipientKeyStatus request: GET rest/v1/user_public_keys?user_id=eq.$resolvedUserId with token present=${!token.isBlank()}")
+
             val resp = SupabaseClient.api.getUserPublicKey(
                 apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
                 auth = token,
-                userIdFilter = "eq.$recipientUserId"
+                userIdFilter = "eq.$resolvedUserId"
             )
+
+            Log.d(TAG, "checkRecipientKeyStatus response: code=${resp.code()}, body=${resp.body()}")
+
             if (resp.isSuccessful && !resp.body().isNullOrEmpty()) {
                 val key = resp.body()!!.first().identity_public_key
                 !key.isNullOrBlank()
@@ -488,6 +581,7 @@ object EncryptedChatRepository {
                 false
             }
         } catch (e: Exception) {
+            Log.e(TAG, "Error checking recipient key status", e)
             false
         }
     }

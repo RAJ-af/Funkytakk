@@ -246,10 +246,7 @@ class AuthViewModel : ViewModel() {
                                 _pendingSpeakerRequest.value = null
                                 _mySpeakerRequestStatus.value = null
                                 _activeRoomSpeakers.value = emptyList()
-                                val ctx = FunkyTalkApplication.appContext
-                                if (ctx != null) {
-                                    com.example.service.VoiceRoomOverlayManager.stopService(ctx)
-                                }
+                                com.example.service.VoiceRoomOverlayManager.stopService(FunkyTalkApplication.appContext)
                                 com.example.service.VoiceRoomOverlayManager.clear()
                             }
                         }
@@ -280,10 +277,7 @@ class AuthViewModel : ViewModel() {
                                 _pendingSpeakerRequest.value = null
                                 _mySpeakerRequestStatus.value = null
                                 _activeRoomSpeakers.value = emptyList()
-                                val ctx = FunkyTalkApplication.appContext
-                                if (ctx != null) {
-                                    com.example.service.VoiceRoomOverlayManager.stopService(ctx)
-                                }
+                                com.example.service.VoiceRoomOverlayManager.stopService(FunkyTalkApplication.appContext)
                                 com.example.service.VoiceRoomOverlayManager.clear()
                             }
                         }
