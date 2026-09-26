@@ -86,41 +86,131 @@ fun DirectChatScreen(
     var showAttachmentSheet by remember { mutableStateOf(false) }
     var previewImageUrl by remember { mutableStateOf<String?>(null) }
 
-    // Multiple Image Photo Picker (zero-permission, compliant with Android & Play policies)
+    // Voice Note States & Audio Player
+    var isRecordingVoice by remember { mutableStateOf(false) }
+    var recordingSeconds by remember { mutableStateOf(0) }
+    var playingAudioMsgId by remember { mutableStateOf<String?>(null) }
+    var activeMediaPlayer by remember { mutableStateOf<android.media.MediaPlayer?>(null) }
+
+    val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            val started = com.example.util.VoiceRecorderManager.startRecording(context)
+            if (started) {
+                isRecordingVoice = true
+                recordingSeconds = 0
+            } else {
+                Toast.makeText(context, "Could not start voice recorder", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            Toast.makeText(context, "Microphone permission required for voice notes", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    LaunchedEffect(isRecordingVoice) {
+        if (isRecordingVoice) {
+            while (isRecordingVoice) {
+                kotlinx.coroutines.delay(1000L)
+                recordingSeconds++
+            }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            try {
+                com.example.util.VoiceRecorderManager.cancelRecording()
+                activeMediaPlayer?.stop()
+                activeMediaPlayer?.release()
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun togglePlayAudio(msg: ChatMessage) {
+        if (playingAudioMsgId == msg.id) {
+            try {
+                activeMediaPlayer?.stop()
+                activeMediaPlayer?.release()
+            } catch (_: Exception) {}
+            activeMediaPlayer = null
+            playingAudioMsgId = null
+        } else {
+            try {
+                activeMediaPlayer?.stop()
+                activeMediaPlayer?.release()
+            } catch (_: Exception) {}
+
+            val path = msg.text.removePrefix("file://").trim()
+            val file = java.io.File(path)
+            if (file.exists() && file.length() > 0) {
+                try {
+                    val player = android.media.MediaPlayer().apply {
+                        setDataSource(file.absolutePath)
+                        prepare()
+                        start()
+                    }
+                    activeMediaPlayer = player
+                    playingAudioMsgId = msg.id
+
+                    player.setOnCompletionListener {
+                        try { player.release() } catch (_: Exception) {}
+                        activeMediaPlayer = null
+                        playingAudioMsgId = null
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Cannot play audio: ${e.message}", Toast.LENGTH_SHORT).show()
+                    playingAudioMsgId = null
+                }
+            } else {
+                Toast.makeText(context, "Voice note file unavailable locally", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    // Multiple Image Photo Picker (2-layer E2EE encrypted media upload)
     val multiplePhotoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 6)
     ) { uris: List<Uri> ->
         if (uris.isNotEmpty()) {
             coroutineScope.launch {
                 isSending = true
-                val urlStrings = uris.map { it.toString() }
-                val encodedText = if (urlStrings.size == 1) {
-                    "[img]${urlStrings.first()}"
-                } else {
-                    "[imgs]${urlStrings.joinToString(",")}"
-                }
-
-                val sendResult = EncryptedChatRepository.sendMessage(
-                    context = context,
-                    recipientUserId = partnerUserId.ifBlank { "partner_mock_id" },
-                    recipientName = partnerName,
-                    recipientAvatar = partnerAvatarUrl,
-                    text = encodedText,
-                    replyToText = replyingToMessage?.text,
-                    replyToSender = replyingToMessage?.let { if (it.isMe) "You" else partnerName }
-                )
-                isSending = false
-                sendResult.onSuccess {
-                    replyingToMessage = null
-                    recipientKeyReady = true
-                    Toast.makeText(context, "${uris.size} image(s) sent securely", Toast.LENGTH_SHORT).show()
-                }.onFailure { ex ->
-                    if (ex is RecipientNotReadyException) {
-                        recipientKeyReady = false
-                        showNotReadyDialog = true
-                    } else {
-                        Toast.makeText(context, ex.message ?: "Failed to encrypt and send image", Toast.LENGTH_LONG).show()
+                var sendSuccessCount = 0
+                for (uri in uris) {
+                    try {
+                        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        if (bytes != null && bytes.isNotEmpty()) {
+                            val sendResult = EncryptedChatRepository.sendMediaMessage(
+                                context = context,
+                                recipientUserId = partnerUserId.ifBlank { "partner_mock_id" },
+                                recipientName = partnerName,
+                                recipientAvatar = partnerAvatarUrl,
+                                rawBytes = bytes,
+                                messageType = "image",
+                                mimeType = "image/jpeg",
+                                replyToText = replyingToMessage?.text,
+                                replyToSender = replyingToMessage?.let { if (it.isMe) "You" else partnerName }
+                            )
+                            sendResult.onSuccess {
+                                sendSuccessCount++
+                                recipientKeyReady = true
+                            }.onFailure { ex ->
+                                if (ex is RecipientNotReadyException) {
+                                    recipientKeyReady = false
+                                    showNotReadyDialog = true
+                                } else {
+                                    Toast.makeText(context, ex.message ?: "Failed to encrypt and send image", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "Error reading image: ${e.message}", Toast.LENGTH_SHORT).show()
                     }
+                }
+                isSending = false
+                if (sendSuccessCount > 0) {
+                    replyingToMessage = null
+                    Toast.makeText(context, "$sendSuccessCount image(s) encrypted and sent securely", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -159,16 +249,35 @@ fun DirectChatScreen(
 
     val timeFormatter = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
 
-    // Map local DB messages to UI ChatMessage with support for Single & Stacked Images
+    // Map local DB messages to UI ChatMessage with support for Single/Stacked Images and Voice Notes
     val uiMessages = remember(localDbMessages) {
         localDbMessages.map { dbMsg ->
             val rawText = dbMsg.text
             val isImgStack = rawText.startsWith("[imgs]")
             val isSingleImg = rawText.startsWith("[img]")
+            val isVoice = rawText.startsWith("[voice]") || rawText.startsWith("[audio]")
             val isWebImg = (rawText.startsWith("http://") || rawText.startsWith("https://")) &&
                     (rawText.contains(".jpg") || rawText.contains(".png") || rawText.contains(".jpeg") || rawText.contains("unsplash"))
 
             when {
+                isVoice -> {
+                    val parts = rawText.removePrefix("[voice]").removePrefix("[audio]").split("|")
+                    val audioPath = parts.getOrNull(0)?.trim() ?: ""
+                    val durationSecs = parts.getOrNull(1)?.toIntOrNull() ?: 12
+                    val formattedDuration = String.format("%d:%02d", durationSecs / 60, durationSecs % 60)
+                    ChatMessage(
+                        id = dbMsg.id,
+                        text = audioPath,
+                        time = timeFormatter.format(Date(dbMsg.timestamp)),
+                        isMe = dbMsg.isOutgoing,
+                        type = ChatMessageType.AUDIO,
+                        audioDuration = formattedDuration,
+                        audioDurationSecs = durationSecs,
+                        replyToText = dbMsg.replyToText,
+                        replyToSender = dbMsg.replyToSender,
+                        showAvatar = !dbMsg.isOutgoing
+                    )
+                }
                 isImgStack -> {
                     val urls = rawText.removePrefix("[imgs]").split(",").map { it.trim() }.filter { it.isNotBlank() }
                     ChatMessage(
@@ -342,11 +451,114 @@ fun DirectChatScreen(
                             showEmojiPicker = !showEmojiPicker
                         },
                         onMicClick = {
-                            Toast.makeText(context, "Encrypted voice messaging", Toast.LENGTH_SHORT).show()
+                            if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                val started = com.example.util.VoiceRecorderManager.startRecording(context)
+                                if (started) {
+                                    isRecordingVoice = true
+                                    recordingSeconds = 0
+                                } else {
+                                    Toast.makeText(context, "Could not start voice recorder", Toast.LENGTH_SHORT).show()
+                                }
+                            } else {
+                                recordAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                            }
                         },
                         replyingToMessage = replyingToMessage,
                         onCancelReply = { replyingToMessage = null }
                     )
+
+                    // Active Voice Recording Bar
+                    if (isRecordingVoice) {
+                        Surface(
+                            color = Color(0xFFFEF3C7),
+                            border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+                            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+                            shadowElevation = 8.dp,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .navigationBarsPadding()
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .clip(CircleShape)
+                                            .background(Color.Red)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Recording voice note: ${String.format("%d:%02d", recordingSeconds / 60, recordingSeconds % 60)}",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp,
+                                        color = Color(0xFF92400E)
+                                    )
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            com.example.util.VoiceRecorderManager.cancelRecording()
+                                            isRecordingVoice = false
+                                            recordingSeconds = 0
+                                        },
+                                        shape = RoundedCornerShape(12.dp),
+                                        border = BorderStroke(1.dp, Color(0xFFD97706)),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                    ) {
+                                        Text("Cancel", color = Color(0xFF92400E), fontSize = 13.sp)
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Button(
+                                        onClick = {
+                                            val recRes = com.example.util.VoiceRecorderManager.stopRecording()
+                                            isRecordingVoice = false
+                                            recordingSeconds = 0
+                                            if (recRes != null && recRes.bytes.isNotEmpty()) {
+                                                coroutineScope.launch {
+                                                    isSending = true
+                                                    val sendResult = EncryptedChatRepository.sendMediaMessage(
+                                                        context = context,
+                                                        recipientUserId = partnerUserId.ifBlank { "partner_mock_id" },
+                                                        recipientName = partnerName,
+                                                        recipientAvatar = partnerAvatarUrl,
+                                                        rawBytes = recRes.bytes,
+                                                        messageType = "voice",
+                                                        mimeType = "audio/aac",
+                                                        durationSeconds = recRes.durationSeconds,
+                                                        replyToText = replyingToMessage?.text,
+                                                        replyToSender = replyingToMessage?.let { if (it.isMe) "You" else partnerName }
+                                                    )
+                                                    isSending = false
+                                                    sendResult.onSuccess {
+                                                        replyingToMessage = null
+                                                        recipientKeyReady = true
+                                                        Toast.makeText(context, "Voice note sent securely 🎙️", Toast.LENGTH_SHORT).show()
+                                                    }.onFailure { ex ->
+                                                        if (ex is RecipientNotReadyException) {
+                                                            recipientKeyReady = false
+                                                            showNotReadyDialog = true
+                                                        } else {
+                                                            Toast.makeText(context, ex.message ?: "Failed to encrypt and send voice note", Toast.LENGTH_LONG).show()
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706)),
+                                        shape = RoundedCornerShape(12.dp),
+                                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                                    ) {
+                                        Text("Send Voice", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         ) { paddingValues ->
@@ -374,7 +586,7 @@ fun DirectChatScreen(
                                 text = if (recipientKeyReady == false) {
                                     "$partnerName hasn't enabled secure chat yet.\nYou can message them once they open FunkyTalk."
                                 } else {
-                                    "No messages yet.\nSend a message or photos to start chatting with $partnerName!"
+                                    "No messages yet.\nSend a message, voice note, or photos to start chatting with $partnerName!"
                                 },
                                 fontSize = 14.sp,
                                 color = Color(0xFF9CA3AF),
@@ -385,9 +597,18 @@ fun DirectChatScreen(
                     }
                 }
 
-                // Dynamic message bubbles (Text & Single/Stacked Images)
+                // Dynamic message bubbles (Text, Voice Notes, & Single/Stacked Images)
                 items(uiMessages, key = { it.id }) { msg ->
-                    if (msg.type == ChatMessageType.IMAGE || msg.getAllImages().isNotEmpty()) {
+                    if (msg.type == ChatMessageType.AUDIO) {
+                        VoiceMessageBubble(
+                            message = msg,
+                            partnerAvatarUrl = partnerAvatarUrl,
+                            isPlaying = playingAudioMsgId == msg.id,
+                            isHighlighted = selectedMessageForMenu?.id == msg.id,
+                            onPlayPauseClick = { togglePlayAudio(msg) },
+                            onLongClick = { selectedMessageForMenu = msg }
+                        )
+                    } else if (msg.type == ChatMessageType.IMAGE || msg.getAllImages().isNotEmpty()) {
                         ImageMessageBubble(
                             message = msg,
                             partnerAvatarUrl = partnerAvatarUrl,

@@ -752,6 +752,30 @@ interface SupabaseApi {
         @Header("Authorization") auth: String,
         @Query("id") idFilter: String
     ): Response<ResponseBody>
+
+    @POST("storage/v1/object/dm-media/{path}")
+    suspend fun uploadDmMedia(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Header("x-upsert") upsert: String = "true",
+        @Header("Content-Type") contentType: String = "application/octet-stream",
+        @Path(value = "path", encoded = true) path: String,
+        @Body body: RequestBody
+    ): Response<ResponseBody>
+
+    @GET("storage/v1/object/dm-media/{path}")
+    suspend fun downloadDmMedia(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Path(value = "path", encoded = true) path: String
+    ): Response<ResponseBody>
+
+    @DELETE("storage/v1/object/dm-media/{path}")
+    suspend fun deleteDmMedia(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Path(value = "path", encoded = true) path: String
+    ): Response<ResponseBody>
 }
 
 @JsonClass(generateAdapter = true)
@@ -942,12 +966,15 @@ data class GetOrCreateDmConversationRequest(
 
 @JsonClass(generateAdapter = true)
 data class SendDmMessageRequest(
+    val id: String? = null,
     val conversation_id: String,
     val sender_id: String,
     val recipient_id: String,
     val ciphertext: String,
     val nonce: String = "",
-    val key_version: Int = 1
+    val key_version: Int = 1,
+    val message_type: String = "text",
+    val storage_path: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -959,6 +986,8 @@ data class SupabaseDmMessage(
     val ciphertext: String = "",
     val nonce: String = "",
     val key_version: Int = 1,
+    val message_type: String? = "text",
+    val storage_path: String? = null,
     val created_at: String? = null,
     val delivered_at: String? = null
 )
