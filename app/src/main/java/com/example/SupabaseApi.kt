@@ -763,6 +763,13 @@ interface SupabaseApi {
         @Body body: RequestBody
     ): Response<ResponseBody>
 
+    @GET("storage/v1/object/authenticated/dm-media/{path}")
+    suspend fun downloadDmMediaAuthenticated(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Path(value = "path", encoded = true) path: String
+    ): Response<ResponseBody>
+
     @GET("storage/v1/object/dm-media/{path}")
     suspend fun downloadDmMedia(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
