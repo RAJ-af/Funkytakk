@@ -117,6 +117,7 @@ dependencies {
   implementation(libs.androidx.navigation.compose)
   implementation(libs.firebase.auth)
   implementation(libs.firebase.firestore)
+  implementation(libs.firebase.storage)
   implementation(libs.play.services.auth)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)

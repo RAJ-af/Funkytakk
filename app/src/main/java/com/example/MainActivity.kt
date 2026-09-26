@@ -274,7 +274,7 @@ class MainActivity : FragmentActivity() {
                                     tempCountryCode = countryCode
                                     authViewModel.patchProfileStep(
                                         context = applicationContext,
-                                        updates = mapOf("country" to countryName),
+                                        updates = mapOf("country" to countryName, "country_code" to countryCode),
                                         onSuccess = {
                                             currentScreen = "onboarding_native_language"
                                         }

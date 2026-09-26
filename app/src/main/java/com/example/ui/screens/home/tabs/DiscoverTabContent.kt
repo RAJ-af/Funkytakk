@@ -30,12 +30,30 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.UserProfile
+import com.example.SupabaseClient
+import com.example.SupabaseSessionManager
+import com.example.DiscoverableProfile
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import android.util.Log
 import com.example.ui.components.AvatarWithCircularFlag
 import com.example.ui.components.CircleFlag
 import com.example.ui.components.FunkyMicIcon
 import com.example.ui.components.FunkySearchIcon
 import com.example.ui.components.FunkySlidersIcon
 import com.example.ui.components.FunkyWaveHandIcon
+import com.example.ui.components.SoftWavingHandIcon
+import com.example.ui.components.SoftSwapIcon
+import com.example.ui.components.SoftCheckmarkBadge
+import com.example.ui.components.SoftStarIcon
+import com.example.ui.components.SoftGamepadIcon
+import com.example.ui.components.SoftGlobeIcon
+import com.example.ui.components.SoftChevronDownIcon
+import com.example.ui.components.SoftThreeDotsIcon
+import com.example.ui.components.SoftCloseIcon
+import com.example.ui.components.DiscoverSquareAvatarWithFlag
+import com.example.ui.components.UserAvatarImage
+import com.example.ui.screens.LanguageData
 
 data class DiscoverPartner(
     val id: String,
@@ -49,8 +67,112 @@ data class DiscoverPartner(
     val bio: String,
     val interests: List<String>,
     val vibe: String = "Chill",
-    val isWaved: Boolean = false
+    val isWaved: Boolean = false,
+    val nativeLangFull: String = "",
+    val learningLangFull: String = ""
 )
+
+fun formatLanguageToCode(langStr: String): String {
+    if (langStr.isBlank()) return "EN"
+    // e.g. "CHINESE (NATIVE / FLUENT)" -> "CHINESE"
+    val nameOnly = langStr.substringBefore("(").trim()
+    // Find in LanguageData
+    val matched = LanguageData.allLanguages.find {
+        it.name.equals(nameOnly, ignoreCase = true) ||
+        it.nativeName.equals(nameOnly, ignoreCase = true) ||
+        it.code.equals(nameOnly, ignoreCase = true)
+    }
+    if (matched != null) {
+        return matched.code.uppercase()
+    }
+    // Fallbacks for common variations
+    return when (nameOnly.uppercase()) {
+        "CHINESE" -> "ZH"
+        "JAPANESE" -> "JA"
+        "KOREAN" -> "KO"
+        "ENGLISH" -> "EN"
+        "SPANISH" -> "ES"
+        "FRENCH" -> "FR"
+        "GERMAN" -> "DE"
+        "HINDI" -> "HI"
+        "ARABIC" -> "AR"
+        "PORTUGUESE" -> "PT"
+        "BENGALI" -> "BN"
+        "RUSSIAN" -> "RU"
+        "TURKISH" -> "TR"
+        "VIETNAMESE" -> "VI"
+        "THAI" -> "TH"
+        "ITALIAN" -> "IT"
+        "DUTCH" -> "NL"
+        "POLISH" -> "PL"
+        "INDONESIAN" -> "ID"
+        "FILIPINO" -> "TL"
+        "TAGALOG" -> "TL"
+        "PUNJABI" -> "PA"
+        "TAMIL" -> "TA"
+        "TELUGU" -> "TE"
+        "URDU" -> "UR"
+        "SWEDISH" -> "SV"
+        "MALAY" -> "MS"
+        "SWAHILI" -> "SW"
+        "UKRAINIAN" -> "UK"
+        "GREEK" -> "EL"
+        "HEBREW" -> "HE"
+        "IRISH" -> "GA"
+        "LATIN" -> "LA"
+        "PERSIAN" -> "FA"
+        "FARSI" -> "FA"
+        "SANSKRIT" -> "SA"
+        else -> nameOnly.take(2).uppercase()
+    }
+}
+
+fun formatLanguagesToCodes(langsList: List<String>?): String {
+    if (langsList.isNullOrEmpty()) return ""
+    return langsList.map { formatLanguageToCode(it) }.distinct().joinToString(" ")
+}
+
+fun resolveCountryCode(countryName: String?, dbCountryCode: String?): String {
+    if (!dbCountryCode.isNullOrBlank()) return dbCountryCode.trim().lowercase()
+    if (countryName.isNullOrBlank()) return "us"
+    return when (countryName.trim().lowercase()) {
+        "india" -> "in"
+        "korea", "south korea", "republic of korea" -> "kr"
+        "japan" -> "jp"
+        "malaysia" -> "my"
+        "albania" -> "al"
+        "united arab emirates", "uae" -> "ae"
+        "united states", "usa", "us" -> "us"
+        "united kingdom", "uk", "great britain" -> "gb"
+        "canada" -> "ca"
+        "australia" -> "au"
+        "germany" -> "de"
+        "france" -> "fr"
+        "spain" -> "es"
+        "italy" -> "it"
+        "china" -> "cn"
+        "brazil" -> "br"
+        "russia" -> "ru"
+        "saudi arabia" -> "sa"
+        "indonesia" -> "id"
+        "turkey" -> "tr"
+        "vietnam" -> "vn"
+        "thailand" -> "th"
+        "philippines" -> "ph"
+        "bangladesh" -> "bd"
+        "pakistan" -> "pk"
+        "netherlands" -> "nl"
+        "poland" -> "pl"
+        "ukraine" -> "ua"
+        "sweden" -> "se"
+        "switzerland" -> "ch"
+        "egypt" -> "eg"
+        "mexico" -> "mx"
+        "colombia" -> "co"
+        "argentina" -> "ar"
+        else -> "us"
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,146 +182,6 @@ fun DiscoverTabContent(
     onStartDirectChat: (userId: String, name: String, avatarUrl: String, flagCode: String) -> Unit = { _, _, _, _ -> }
 ) {
     val context = LocalContext.current
-
-    // Curated initial global partners directly inspired by the design
-    val defaultPartners = remember {
-        listOf(
-            DiscoverPartner(
-                id = "p1",
-                name = "Yohan",
-                age = 20,
-                isOnline = true,
-                avatarUrl = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400",
-                countryCode = "id",
-                nativeLang = "EN",
-                learningLang = "KO",
-                bio = "I love anime, music and meeting new friends!",
-                interests = listOf("Anime", "Music", "Languages", "Gaming"),
-                vibe = "Same Vibe"
-            ),
-            DiscoverPartner(
-                id = "p2",
-                name = "piaa",
-                age = 19,
-                isOnline = true,
-                avatarUrl = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400",
-                countryCode = "id",
-                nativeLang = "ID",
-                learningLang = "EN",
-                bio = "Hello everyone, I am piaa, nice to meet you all!",
-                interests = listOf("K-Drama", "Food", "Travel", "Photography"),
-                vibe = "Same Vibe"
-            ),
-            DiscoverPartner(
-                id = "p3",
-                name = "允真",
-                age = 21,
-                isOnline = false,
-                avatarUrl = "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400",
-                countryCode = "cn",
-                nativeLang = "CN",
-                learningLang = "EN",
-                bio = "奇怪的人不要靠近我 :)",
-                interests = listOf("Music", "Games", "Photography", "Art"),
-                vibe = "Interests"
-            ),
-            DiscoverPartner(
-                id = "p4",
-                name = "Bunny",
-                age = 18,
-                isOnline = true,
-                avatarUrl = "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=400",
-                countryCode = "eg",
-                nativeLang = "EN",
-                learningLang = "KO",
-                bio = "I don't care about losing anyone. Um, this reflects my personality, but...",
-                interests = listOf("Art", "Movies", "Cats", "Design"),
-                vibe = "Same Vibe"
-            ),
-            DiscoverPartner(
-                id = "p5",
-                name = "Ju Ju",
-                age = 19,
-                isOnline = true,
-                avatarUrl = "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400",
-                countryCode = "bd",
-                nativeLang = "EN",
-                learningLang = "KO",
-                bio = "Silent moon, always positive and kind...",
-                interests = listOf("Books", "Nature", "Self Care", "Poetry"),
-                vibe = "Same Vibe"
-            ),
-            DiscoverPartner(
-                id = "p6",
-                name = "Alyan Khan",
-                age = 22,
-                isOnline = false,
-                avatarUrl = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400",
-                countryCode = "pk",
-                nativeLang = "EN",
-                learningLang = "KO",
-                bio = "Hello everyone, I am Alyan Khan, nice to meet you all",
-                interests = listOf("Sports", "Tech", "Travel", "Coding"),
-                vibe = "Interests"
-            ),
-            DiscoverPartner(
-                id = "p7",
-                name = "Kenji",
-                age = 23,
-                isOnline = true,
-                avatarUrl = "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400",
-                countryCode = "jp",
-                nativeLang = "JA",
-                learningLang = "EN",
-                bio = "Tokyo native learning English! Let's talk about anime, ramen, and culture.",
-                interests = listOf("Anime", "Cooking", "Music", "Manga"),
-                vibe = "Same Vibe"
-            ),
-            DiscoverPartner(
-                id = "p8",
-                name = "Elena",
-                age = 21,
-                isOnline = true,
-                avatarUrl = "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400",
-                countryCode = "es",
-                nativeLang = "ES",
-                learningLang = "EN",
-                bio = "Hola! Looking for friendly language exchange partners to practice speaking English.",
-                interests = listOf("Travel", "Photography", "Fitness", "Art"),
-                vibe = "Same Vibe"
-            )
-        )
-    }
-
-    // Dynamic state of partners with wave tracking
-    var partnersList by remember { mutableStateOf(defaultPartners) }
-
-    // Merge Supabase profiles if available
-    LaunchedEffect(supabaseProfiles) {
-        if (supabaseProfiles.isNotEmpty()) {
-            val fromSupabase = supabaseProfiles.mapNotNull { p ->
-                val name = p.displayName ?: p.username
-                if (!name.isNullOrBlank()) {
-                    DiscoverPartner(
-                        id = p.uid,
-                        name = name,
-                        age = p.age ?: 21,
-                        isOnline = true,
-                        avatarUrl = p.avatar ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400",
-                        countryCode = p.countryCode ?: "in",
-                        nativeLang = p.nativeLanguage?.take(2)?.uppercase() ?: "EN",
-                        learningLang = p.learningLanguage?.take(2)?.uppercase() ?: "KO",
-                        bio = if (!p.country.isNullOrBlank()) "From ${p.country}! Let's connect & practice languages 🌟" else "Excited to meet new friends and exchange languages!",
-                        interests = p.hobbies?.ifEmpty { listOf("Languages", "Culture", "Music") } ?: listOf("Languages", "Culture", "Music"),
-                        vibe = "Same Vibe"
-                    )
-                } else null
-            }
-            val existingIds = defaultPartners.map { it.id }.toSet()
-            val newOnes = fromSupabase.filterNot { it.id in existingIds }
-            partnersList = defaultPartners + newOnes
-        }
-    }
 
     // Interactive States
     var isSearchActive by remember { mutableStateOf(false) }
@@ -211,10 +193,96 @@ fun DiscoverTabContent(
     var showFilterSettingsSheet by remember { mutableStateOf(false) }
     var selectedInterestTag by remember { mutableStateOf<String?>(null) }
 
+    // Dynamic state of partners with wave tracking
+    var partnersList by remember { mutableStateOf<List<DiscoverPartner>>(emptyList()) }
+    var isDatabaseLoading by remember { mutableStateOf(false) }
+    var databaseError by remember { mutableStateOf<String?>(null) }
+    var refreshTrigger by remember { mutableStateOf(0) }
+
+    // Fetch discoverable profiles dynamically from Supabase
+    LaunchedEffect(activeCategoryFilter, selectedLanguageFilter, selectedInterestTag, refreshTrigger) {
+        isDatabaseLoading = true
+        databaseError = null
+        try {
+            val currentUserId = SupabaseSessionManager.getUserId(context).orEmpty()
+            val token = SupabaseSessionManager.getBearerToken(context)
+            val options = mutableMapOf<String, String>()
+            
+            // Sort by: is_online desc, last_seen desc
+            options["order"] = "is_online.desc,last_seen.desc"
+            options["limit"] = "50" // Paginate / don't fetch whole table
+            
+            // Exclude current user
+            if (currentUserId.isNotBlank()) {
+                options["auth_user_id"] = "neq.$currentUserId"
+            }
+            
+            if (activeCategoryFilter == "Online") {
+                options["is_online"] = "eq.true"
+            }
+            
+            if (selectedInterestTag != null) {
+                options["hobbies"] = "cs.{\"$selectedInterestTag\"}"
+            }
+            
+            if (selectedLanguageFilter != "All") {
+                val langUpper = selectedLanguageFilter.uppercase()
+                options["or"] = "(native_languages.cs.{\"$langUpper\"},learning_languages.cs.{\"$langUpper\"})"
+            }
+
+            val response = withContext(Dispatchers.IO) {
+                SupabaseClient.api.getDiscoverableProfiles(
+                    apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
+                    auth = token,
+                    options = options
+                )
+            }
+
+            if (response.isSuccessful) {
+                val profiles = response.body().orEmpty()
+                partnersList = profiles.map { p ->
+                    val rawNativeList = p.native_languages.orEmpty()
+                    val rawLearningList = p.learning_languages.orEmpty()
+                    DiscoverPartner(
+                        id = p.auth_user_id,
+                        name = p.profile_name ?: p.username ?: "Anonymous",
+                        age = p.age ?: 21,
+                        isOnline = p.is_online ?: false,
+                        avatarUrl = p.avatar_url ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500",
+                        countryCode = resolveCountryCode(p.country, p.country_code),
+                        nativeLang = formatLanguagesToCodes(rawNativeList),
+                        learningLang = formatLanguagesToCodes(rawLearningList),
+                        bio = p.bio ?: "Excited to practice languages and make new friends!",
+                        interests = p.hobbies ?: emptyList(),
+                        vibe = if (p.is_online == true) "Same Vibe" else "Chill",
+                        isWaved = false,
+                        nativeLangFull = rawNativeList.joinToString(", "),
+                        learningLangFull = rawLearningList.joinToString(", ")
+                    )
+                }
+            } else {
+                val errBody = response.errorBody()?.string()
+                Log.e("DiscoverTab", "Failed to fetch discoverable profiles: $errBody")
+                databaseError = "Failed to load profiles: ${response.message()}"
+            }
+        } catch (e: Exception) {
+            Log.e("DiscoverTab", "Error loading discoverable profiles", e)
+            databaseError = e.localizedMessage ?: "Unknown error occurred"
+        } finally {
+            isDatabaseLoading = false
+        }
+    }
+
     // User Interaction Modals
     var waveDialogUser by remember { mutableStateOf<DiscoverPartner?>(null) }
     var waveCustomMessage by remember { mutableStateOf("") }
     var profileSheetUser by remember { mutableStateOf<DiscoverPartner?>(null) }
+    var showFullProfileScreenWithFeed by remember { mutableStateOf<DiscoverPartner?>(null) }
+
+    val languageSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val interestsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val filterSettingsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val profileSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     // Filter logic
     val filteredPartners = remember(partnersList, searchQuery, activeCategoryFilter, selectedLanguageFilter, selectedInterestTag) {
@@ -225,6 +293,8 @@ fun DiscoverTabContent(
                 partner.bio.contains(searchQuery, ignoreCase = true) ||
                 partner.nativeLang.contains(searchQuery, ignoreCase = true) ||
                 partner.learningLang.contains(searchQuery, ignoreCase = true) ||
+                partner.nativeLangFull.contains(searchQuery, ignoreCase = true) ||
+                partner.learningLangFull.contains(searchQuery, ignoreCase = true) ||
                 partner.interests.any { it.contains(searchQuery, ignoreCase = true) }
             }
 
@@ -272,17 +342,10 @@ fun DiscoverTabContent(
                             color = Color(0xFF1E1E1E)
                         )
                         Text(
-                            text = "Talk",
+                            text = "Talk.",
                             fontSize = 25.sp,
                             fontWeight = FontWeight.Black,
                             color = Color(0xFFF59E0B)
-                        )
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text(
-                            text = "✦",
-                            fontSize = 14.sp,
-                            color = Color(0xFFF59E0B),
-                            modifier = Modifier.padding(bottom = 6.dp)
                         )
                     }
                     Text(
@@ -413,11 +476,9 @@ fun DiscoverTabContent(
                 DiscoverFilterChip(
                     text = "Same Vibe",
                     leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Default.StarBorder,
-                            contentDescription = null,
-                            tint = if (activeCategoryFilter == "Same Vibe") Color.Black else Color(0xFF64748B),
-                            modifier = Modifier.size(16.dp)
+                        SoftStarIcon(
+                            color = if (activeCategoryFilter == "Same Vibe") Color.Black else Color(0xFF64748B),
+                            size = 15.dp
                         )
                     },
                     isSelected = activeCategoryFilter == "Same Vibe",
@@ -430,11 +491,9 @@ fun DiscoverTabContent(
                 DiscoverFilterChip(
                     text = selectedInterestTag ?: "Interests",
                     leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Default.SportsEsports,
-                            contentDescription = null,
-                            tint = if (activeCategoryFilter == "Interests" || selectedInterestTag != null) Color.Black else Color(0xFF64748B),
-                            modifier = Modifier.size(16.dp)
+                        SoftGamepadIcon(
+                            color = if (activeCategoryFilter == "Interests" || selectedInterestTag != null) Color.Black else Color(0xFF64748B),
+                            size = 15.dp
                         )
                     },
                     isSelected = activeCategoryFilter == "Interests" || selectedInterestTag != null,
@@ -447,19 +506,15 @@ fun DiscoverTabContent(
                 DiscoverFilterChip(
                     text = if (selectedLanguageFilter != "All") "Language: $selectedLanguageFilter" else "Language",
                     leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Default.Language,
-                            contentDescription = null,
-                            tint = if (selectedLanguageFilter != "All") Color.Black else Color(0xFF64748B),
-                            modifier = Modifier.size(16.dp)
+                        SoftGlobeIcon(
+                            color = if (selectedLanguageFilter != "All") Color.Black else Color(0xFF64748B),
+                            size = 15.dp
                         )
                     },
                     trailingIcon = {
-                        Icon(
-                            imageVector = Icons.Default.KeyboardArrowDown,
-                            contentDescription = null,
-                            tint = if (selectedLanguageFilter != "All") Color.Black else Color(0xFF64748B),
-                            modifier = Modifier.size(16.dp)
+                        SoftChevronDownIcon(
+                            color = if (selectedLanguageFilter != "All") Color.Black else Color(0xFF64748B),
+                            size = 14.dp
                         )
                     },
                     isSelected = selectedLanguageFilter != "All",
@@ -498,8 +553,44 @@ fun DiscoverTabContent(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 contentPadding = PaddingValues(top = 6.dp, bottom = 28.dp)
             ) {
-                // Empty state
-                if (filteredPartners.isEmpty()) {
+                if (isDatabaseLoading) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 80.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                color = Color(0xFFFFD43B)
+                            )
+                        }
+                    }
+                } else if (databaseError != null) {
+                    item {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 60.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "Failed to load partners: $databaseError",
+                                color = Color.Red,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Button(
+                                onClick = { refreshTrigger++ },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD43B)),
+                                shape = RoundedCornerShape(18.dp)
+                            ) {
+                                Text("Retry Connection", color = Color.Black, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                } else if (filteredPartners.isEmpty()) {
                     item {
                         Column(
                             modifier = Modifier
@@ -551,7 +642,7 @@ fun DiscoverTabContent(
                     items(filteredPartners, key = { it.id }) { partner ->
                         DiscoverUserCard(
                             partner = partner,
-                            onCardClick = { profileSheetUser = partner },
+                            onCardClick = { showFullProfileScreenWithFeed = partner },
                             onWaveClick = {
                                 if (!partner.isWaved) {
                                     waveDialogUser = partner
@@ -574,9 +665,9 @@ fun DiscoverTabContent(
             shape = RoundedCornerShape(24.dp),
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    FunkyWaveHandIcon(
+                    SoftWavingHandIcon(
                         color = Color(0xFFD97706),
-                        modifier = Modifier.size(22.dp)
+                        size = 22.dp
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
@@ -658,7 +749,7 @@ fun DiscoverTabContent(
                     shape = RoundedCornerShape(16.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        FunkyWaveHandIcon(color = Color.Black, modifier = Modifier.size(15.dp))
+                        SoftWavingHandIcon(color = Color.Black, size = 15.dp)
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Send Wave", color = Color.Black, fontWeight = FontWeight.Bold)
                     }
@@ -676,6 +767,7 @@ fun DiscoverTabContent(
     profileSheetUser?.let { user ->
         ModalBottomSheet(
             onDismissRequest = { profileSheetUser = null },
+            sheetState = profileSheetState,
             containerColor = Color.White,
             shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
         ) {
@@ -731,10 +823,10 @@ fun DiscoverTabContent(
                         .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
                     Text("Native: ", fontSize = 12.sp, color = Color(0xFF64748B))
-                    Text(user.nativeLang, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                    Text(user.nativeLangFull.ifBlank { user.nativeLang }, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
                     Text("  ⇄  ", fontSize = 12.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.Bold)
                     Text("Learning: ", fontSize = 12.sp, color = Color(0xFF64748B))
-                    Text(user.learningLang, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFD97706))
+                    Text(user.learningLangFull.ifBlank { user.learningLang }, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFD97706))
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -786,7 +878,7 @@ fun DiscoverTabContent(
                         shape = RoundedCornerShape(16.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            FunkyWaveHandIcon(color = Color.Black, modifier = Modifier.size(16.dp))
+                            SoftWavingHandIcon(color = Color.Black, size = 16.dp)
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Say Hi", color = Color.Black, fontWeight = FontWeight.Bold)
                         }
@@ -816,12 +908,39 @@ fun DiscoverTabContent(
         }
     }
 
+    // Full Screen Profile Feed View
+    showFullProfileScreenWithFeed?.let { partner ->
+        com.example.ui.screens.UserProfileFeedScreen(
+            userId = partner.id,
+            username = partner.name.lowercase().replace(" ", ""),
+            profileName = partner.name,
+            avatarUrl = partner.avatarUrl,
+            countryCode = partner.countryCode,
+            bio = partner.bio,
+            onBack = { showFullProfileScreenWithFeed = null },
+            onStartChat = {
+                showFullProfileScreenWithFeed = null
+                onStartDirectChat(partner.id, partner.name, partner.avatarUrl, partner.countryCode)
+            }
+        )
+    }
+
     // Modal: Language Filter Sheet
     if (showLanguageSheet) {
         ModalBottomSheet(
             onDismissRequest = { showLanguageSheet = false },
+            sheetState = languageSheetState,
             containerColor = Color.White,
-            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+            shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+            dragHandle = {
+                Box(
+                    modifier = Modifier
+                        .padding(top = 10.dp, bottom = 4.dp)
+                        .size(width = 38.dp, height = 4.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFCBD5E1))
+                )
+            }
         ) {
             Column(
                 modifier = Modifier
@@ -829,65 +948,167 @@ fun DiscoverTabContent(
                     .padding(horizontal = 24.dp, vertical = 12.dp)
                     .navigationBarsPadding()
             ) {
+                // Header with Close Button
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "Filter by ",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFF0F172A)
+                        )
+                        Text(
+                            text = "Language Exchange",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFFF59E0B)
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFF1F5F9))
+                            .clickable { showLanguageSheet = false },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        SoftCloseIcon(size = 14.dp, color = Color(0xFF64748B))
+                    }
+                }
+
                 Text(
-                    text = "Filter by Language Exchange",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0F172A)
+                    text = "Find people to practice the languages you want.",
+                    fontSize = 12.sp,
+                    color = Color(0xFF64748B),
+                    modifier = Modifier.padding(top = 2.dp)
                 )
+
                 Spacer(modifier = Modifier.height(14.dp))
 
-                val availableLangs = listOf(
-                    "All" to ("All Languages" to null),
-                    "EN" to ("English (EN)" to "us"),
-                    "KO" to ("Korean (KO)" to "kr"),
-                    "JA" to ("Japanese (JA)" to "jp"),
-                    "CN" to ("Chinese (CN)" to "cn"),
-                    "ID" to ("Indonesian (ID)" to "id"),
-                    "ES" to ("Spanish (ES)" to "es"),
-                    "FR" to ("French (FR)" to "fr"),
-                    "HI" to ("Hindi (HI)" to "in")
+                // Search Input
+                var langSearchQuery by remember { mutableStateOf("") }
+                OutlinedTextField(
+                    value = langSearchQuery,
+                    onValueChange = { langSearchQuery = it },
+                    placeholder = { Text("Search languages...", fontSize = 13.sp, color = Color(0xFF94A3B8)) },
+                    leadingIcon = { FunkySearchIcon(color = Color(0xFF94A3B8), modifier = Modifier.size(16.dp)) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(20.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = Color(0xFFFAFAFA),
+                        unfocusedContainerColor = Color(0xFFFAFAFA),
+                        focusedBorderColor = Color(0xFFFFD43B),
+                        unfocusedBorderColor = Color(0xFFE2E8F0)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
                 )
 
-                availableLangs.forEach { (code, data) ->
-                    val (label, countryCode) = data
-                    val isSelected = selectedLanguageFilter == code
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(if (isSelected) Color(0xFFFFFBEB) else Color(0xFFF8FAFC))
-                            .border(1.dp, if (isSelected) Color(0xFFF59E0B) else Color(0xFFE2E8F0), RoundedCornerShape(14.dp))
-                            .clickable {
-                                selectedLanguageFilter = code
-                                showLanguageSheet = false
+                Spacer(modifier = Modifier.height(14.dp))
+
+                val availableLangs = remember {
+                    listOf("All" to ("All Languages" to null)) +
+                    LanguageData.allLanguages.map { lang ->
+                        lang.code.uppercase() to ("${lang.name} (${lang.code.uppercase()})" to lang.flagCode)
+                    }
+                }
+
+                val filteredLangs = availableLangs.filter { (code, data) ->
+                    langSearchQuery.isBlank() || data.first.contains(langSearchQuery, ignoreCase = true) || code.contains(langSearchQuery, ignoreCase = true)
+                }
+
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.heightIn(max = 340.dp)
+                ) {
+                    items(filteredLangs) { (code, data) ->
+                        val (label, countryCode) = data
+                        val isSelected = selectedLanguageFilter == code
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(
+                                    if (isSelected) Color(0xFFFFFBEB) else Color(0xFFF8FAFC)
+                                )
+                                .border(
+                                    width = if (isSelected) 1.5.dp else 1.dp,
+                                    color = if (isSelected) Color(0xFFF59E0B) else Color(0xFFE2E8F0),
+                                    shape = RoundedCornerShape(18.dp)
+                                )
+                                .clickable {
+                                    selectedLanguageFilter = code
+                                }
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (countryCode != null) {
+                                    CircleFlag(countryCode = countryCode, modifier = Modifier.size(22.dp).clip(CircleShape))
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                } else {
+                                    SoftGlobeIcon(size = 20.dp, color = if (isSelected) Color(0xFFF59E0B) else Color(0xFF64748B))
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                }
+                                Text(
+                                    text = label,
+                                    fontSize = 14.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                    color = Color(0xFF0F172A)
+                                )
                             }
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (countryCode != null) {
-                                CircleFlag(countryCode = countryCode, modifier = Modifier.size(20.dp))
-                                Spacer(modifier = Modifier.width(10.dp))
+
+                            if (isSelected) {
+                                SoftCheckmarkBadge(size = 20.dp, badgeColor = Color(0xFFF59E0B), checkColor = Color.White)
                             } else {
-                                Icon(Icons.Default.Language, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(20.dp))
-                                Spacer(modifier = Modifier.width(10.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .clip(CircleShape)
+                                        .border(1.5.dp, Color(0xFFCBD5E1), CircleShape)
+                                )
                             }
-                            Text(
-                                text = label,
-                                fontSize = 14.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) Color(0xFF92400E) else Color(0xFF1E293B)
-                            )
-                        }
-                        if (isSelected) {
-                            Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFFF59E0B), modifier = Modifier.size(18.dp))
                         }
                     }
                 }
+
                 Spacer(modifier = Modifier.height(16.dp))
+
+                // Yellow Bottom Apply Button with Dark Count Badge
+                Button(
+                    onClick = { showLanguageSheet = false },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD43B)),
+                    shape = RoundedCornerShape(100.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Spacer(modifier = Modifier.width(28.dp))
+                        Text("Apply", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF0F172A)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("1", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
             }
         }
     }
@@ -896,8 +1117,18 @@ fun DiscoverTabContent(
     if (showInterestsSheet) {
         ModalBottomSheet(
             onDismissRequest = { showInterestsSheet = false },
+            sheetState = interestsSheetState,
             containerColor = Color.White,
-            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+            shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+            dragHandle = {
+                Box(
+                    modifier = Modifier
+                        .padding(top = 10.dp, bottom = 4.dp)
+                        .size(width = 38.dp, height = 4.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFCBD5E1))
+                )
+            }
         ) {
             Column(
                 modifier = Modifier
@@ -905,69 +1136,175 @@ fun DiscoverTabContent(
                     .padding(horizontal = 24.dp, vertical = 12.dp)
                     .navigationBarsPadding()
             ) {
+                // Header with Close Button
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "Filter by ",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFF0F172A)
+                        )
+                        Text(
+                            text = "Interests & Hobbies",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFFF59E0B)
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFF1F5F9))
+                            .clickable { showInterestsSheet = false },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        SoftCloseIcon(size = 14.dp, color = Color(0xFF64748B))
+                    }
+                }
+
                 Text(
-                    text = "Filter by Interests & Hobbies",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0F172A)
+                    text = "Find people who share your interests.",
+                    fontSize = 12.sp,
+                    color = Color(0xFF64748B),
+                    modifier = Modifier.padding(top = 2.dp)
                 )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Search Input
+                var interestSearchQuery by remember { mutableStateOf("") }
+                OutlinedTextField(
+                    value = interestSearchQuery,
+                    onValueChange = { interestSearchQuery = it },
+                    placeholder = { Text("Search interests...", fontSize = 13.sp, color = Color(0xFF94A3B8)) },
+                    leadingIcon = { FunkySearchIcon(color = Color(0xFF94A3B8), modifier = Modifier.size(16.dp)) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(20.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = Color(0xFFFAFAFA),
+                        unfocusedContainerColor = Color(0xFFFAFAFA),
+                        focusedBorderColor = Color(0xFFFFD43B),
+                        unfocusedBorderColor = Color(0xFFE2E8F0)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                )
+
                 Spacer(modifier = Modifier.height(14.dp))
 
                 val interestsList = listOf(
                     "Anime", "Music", "K-Drama", "Food", "Travel", "Gaming",
                     "Photography", "Art", "Movies", "Cats", "Books", "Sports", "Tech", "Coding"
-                )
+                ).filter { interestSearchQuery.isBlank() || it.contains(interestSearchQuery, ignoreCase = true) }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    FilterChip(
-                        selected = selectedInterestTag == null,
-                        onClick = {
-                            selectedInterestTag = null
-                            activeCategoryFilter = "All"
-                            showInterestsSheet = false
-                        },
-                        label = { Text("All Interests") }
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Grid/Wrap of interest chips
+                // Grid of 3 columns of interest chips
                 androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
                     columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(3),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.height(240.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.height(260.dp)
                 ) {
+                    // Item 0: All Interests
+                    item {
+                        val isAllSelected = selectedInterestTag == null
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(if (isAllSelected) Color(0xFFFFF0B3) else Color(0xFFF8FAFC))
+                                .border(
+                                    width = if (isAllSelected) 1.5.dp else 1.dp,
+                                    color = if (isAllSelected) Color(0xFFF59E0B) else Color(0xFFE2E8F0),
+                                    shape = RoundedCornerShape(18.dp)
+                                )
+                                .clickable {
+                                    selectedInterestTag = null
+                                    activeCategoryFilter = "All"
+                                }
+                                .padding(vertical = 12.dp, horizontal = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "All Interests",
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isAllSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                    color = if (isAllSelected) Color(0xFF0F172A) else Color(0xFF475569)
+                                )
+                                if (isAllSelected) {
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    SoftCheckmarkBadge(size = 14.dp, badgeColor = Color(0xFFF59E0B), checkColor = Color.White)
+                                }
+                            }
+                        }
+                    }
+
                     items(interestsList.size) { idx ->
                         val item = interestsList[idx]
                         val isSelected = selectedInterestTag == item
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(if (isSelected) Color(0xFFFFE380) else Color(0xFFF1F5F9))
-                                .border(1.dp, if (isSelected) Color(0xFFEAB308) else Color.Transparent, RoundedCornerShape(14.dp))
-                            .clickable {
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(if (isSelected) Color(0xFFFFF0B3) else Color(0xFFF8FAFC))
+                                .border(
+                                    width = if (isSelected) 1.5.dp else 1.dp,
+                                    color = if (isSelected) Color(0xFFF59E0B) else Color(0xFFE2E8F0),
+                                    shape = RoundedCornerShape(18.dp)
+                                )
+                                .clickable {
                                     selectedInterestTag = item
                                     activeCategoryFilter = "Interests"
-                                    showInterestsSheet = false
                                 }
-                                .padding(vertical = 10.dp, horizontal = 12.dp),
+                                .padding(vertical = 12.dp, horizontal = 10.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = item,
                                 fontSize = 12.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) Color.Black else Color(0xFF334155)
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                color = if (isSelected) Color(0xFF0F172A) else Color(0xFF475569)
                             )
                         }
                     }
                 }
+
                 Spacer(modifier = Modifier.height(16.dp))
+
+                // Yellow Bottom Apply Button with Dark Count Badge
+                Button(
+                    onClick = { showInterestsSheet = false },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD43B)),
+                    shape = RoundedCornerShape(100.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Spacer(modifier = Modifier.width(28.dp))
+                        Text("Apply", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF0F172A)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("1", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
             }
         }
     }
@@ -976,8 +1313,18 @@ fun DiscoverTabContent(
     if (showFilterSettingsSheet) {
         ModalBottomSheet(
             onDismissRequest = { showFilterSettingsSheet = false },
+            sheetState = filterSettingsSheetState,
             containerColor = Color.White,
-            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+            shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+            dragHandle = {
+                Box(
+                    modifier = Modifier
+                        .padding(top = 10.dp, bottom = 4.dp)
+                        .size(width = 38.dp, height = 4.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFCBD5E1))
+                )
+            }
         ) {
             Column(
                 modifier = Modifier
@@ -992,8 +1339,8 @@ fun DiscoverTabContent(
                 ) {
                     Text(
                         text = "Discovery Preferences",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Black,
                         color = Color(0xFF0F172A)
                     )
                     TextButton(onClick = {
@@ -1002,55 +1349,59 @@ fun DiscoverTabContent(
                         selectedInterestTag = null
                         showFilterSettingsSheet = false
                     }) {
-                        Text("Reset", color = Color(0xFFD97706), fontWeight = FontWeight.Bold)
+                        Text("Reset", color = Color(0xFFD97706), fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-                Text("Show Only Active", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF334155))
+                Text("Show Only Active", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(18.dp))
                         .background(Color(0xFFF8FAFC))
+                        .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(18.dp))
                         .clickable {
                             activeCategoryFilter = if (activeCategoryFilter == "Online") "All" else "Online"
                         }
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
-                                .size(8.dp)
+                                .size(10.dp)
                                 .background(Color(0xFF22C55E), CircleShape)
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Only Online Users", fontSize = 13.sp, color = Color(0xFF1E293B))
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text("Only Online Users", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1E293B))
                     }
                     Switch(
                         checked = activeCategoryFilter == "Online",
                         onCheckedChange = {
                             activeCategoryFilter = if (it) "Online" else "All"
                         },
-                        colors = SwitchDefaults.colors(checkedThumbColor = Color(0xFFD97706), checkedTrackColor = Color(0xFFFFE380))
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.Black,
+                            checkedTrackColor = Color(0xFFFFC529)
+                        )
                     )
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(24.dp))
 
                 Button(
                     onClick = { showFilterSettingsSheet = false },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD43B)),
-                    shape = RoundedCornerShape(14.dp)
+                        .height(52.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFC529)),
+                    shape = RoundedCornerShape(100.dp)
                 ) {
-                    Text("Apply Preferences", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text("Apply Preferences", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -1110,190 +1461,208 @@ fun DiscoverUserCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
         border = BorderStroke(1.dp, Color(0xFFF1F5F9))
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Avatar with overlapping Country Flag
-            AvatarWithCircularFlag(
-                avatarUrl = partner.avatarUrl,
-                countryCode = partner.countryCode,
-                avatarSize = 62.dp,
-                flagSize = 22.dp
-            )
-
-            Spacer(modifier = Modifier.width(14.dp))
-
-            // Info Column
-            Column(
-                modifier = Modifier.weight(1f)
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // Name, Age & Online Dot
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = partner.name,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1E293B),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "${partner.age}",
-                        fontSize = 13.sp,
-                        color = Color(0xFF64748B),
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    // Online Dot
-                    Box(
-                        modifier = Modifier
-                            .size(7.dp)
-                            .background(
-                                if (partner.isOnline) Color(0xFF22C55E) else Color(0xFFCBD5E1),
-                                CircleShape
-                            )
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(2.dp))
-
-                // Language Exchange Pair: e.g. EN ⇄ KO
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = partner.nativeLang,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFF334155)
-                    )
-                    Text(
-                        text = " ⇄ ",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF94A3B8)
-                    )
-                    Text(
-                        text = partner.learningLang,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFFD97706)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(3.dp))
-
-                // Bio
-                Text(
-                    text = partner.bio,
-                    fontSize = 12.sp,
-                    color = Color(0xFF475569),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    lineHeight = 16.sp
+                // Large Rounded-Square Avatar with Flag & Online Dot
+                DiscoverSquareAvatarWithFlag(
+                    avatarUrl = partner.avatarUrl,
+                    countryCode = partner.countryCode,
+                    isOnline = partner.isOnline,
+                    avatarSize = 82.dp,
+                    flagSize = 24.dp
                 )
 
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.width(14.dp))
 
-                // Interest Pills
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                // Info Column
+                Column(
+                    modifier = Modifier.weight(1f)
                 ) {
-                    val displayTags = partner.interests.take(3)
-                    val remaining = partner.interests.size - displayTags.size
-
-                    displayTags.forEachIndexed { i, tag ->
-                        val bg = when (i % 3) {
-                            0 -> Color(0xFFFDF2F8) // Pink
-                            1 -> Color(0xFFF3E8FF) // Lavender
-                            else -> Color(0xFFE0F2FE) // Sky
-                        }
-                        val textCol = when (i % 3) {
-                            0 -> Color(0xFFBE185D)
-                            1 -> Color(0xFF7E22CE)
-                            else -> Color(0xFF0369A1)
-                        }
-
+                    // Name, Age & Online/Offline Pill Badge
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = partner.name,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF0F172A),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "${partner.age}",
+                            fontSize = 13.sp,
+                            color = Color(0xFF64748B),
+                            fontWeight = FontWeight.Medium
+                        )
+                        // Online / Offline Status Badge with dot inside and increased roundness
                         Box(
                             modifier = Modifier
-                                .background(bg, RoundedCornerShape(8.dp))
-                                .padding(horizontal = 7.dp, vertical = 2.dp)
+                                .clip(CircleShape)
+                                .background(if (partner.isOnline) Color(0xFFE6F4EA) else Color(0xFFF1F5F9))
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
                         ) {
-                            Text(
-                                text = tag,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = textCol
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(7.dp)
+                                        .clip(CircleShape)
+                                        .background(if (partner.isOnline) Color(0xFF22C55E) else Color(0xFF94A3B8))
+                                )
+                                Text(
+                                    text = if (partner.isOnline) "Online" else "Offline",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = if (partner.isOnline) Color(0xFF137333) else Color(0xFF64748B)
+                                )
+                            }
                         }
                     }
 
-                    if (remaining > 0) {
-                        Box(
-                            modifier = Modifier
-                                .background(Color(0xFFF1F5F9), RoundedCornerShape(8.dp))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = "+$remaining",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color(0xFF64748B)
-                            )
+                    Spacer(modifier = Modifier.height(2.dp))
+
+                    // Language Exchange: e.g., hi en mr → zh ko jp
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = partner.nativeLang.lowercase(),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF475569) // slate gray
+                        )
+                        Text(
+                            text = "→",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF94A3B8) // light gray
+                        )
+                        Text(
+                            text = partner.learningLang.lowercase(),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFFD97706) // FunkyTalk warm yellow/amber
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(3.dp))
+
+                    // Bio
+                    Text(
+                        text = partner.bio,
+                        fontSize = 12.sp,
+                        color = Color(0xFF475569),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        lineHeight = 16.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Interest Pills
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val displayTags = partner.interests.take(3)
+                        val remaining = partner.interests.size - displayTags.size
+
+                        displayTags.forEachIndexed { i, tag ->
+                            val bg = when (i % 3) {
+                                0 -> Color(0xFFFDF2F8) // Pink
+                                1 -> Color(0xFFF3E8FF) // Lavender
+                                else -> Color(0xFFE0F2FE) // Sky
+                            }
+                            val textCol = when (i % 3) {
+                                0 -> Color(0xFFBE185D)
+                                1 -> Color(0xFF7E22CE)
+                                else -> Color(0xFF0369A1)
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .background(bg, RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 7.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = tag,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = textCol
+                                )
+                            }
+                        }
+
+                        if (remaining > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .background(Color(0xFFF1F5F9), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "+$remaining",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color(0xFF64748B)
+                                )
+                            }
                         }
                     }
                 }
-            }
 
-            Spacer(modifier = Modifier.width(10.dp))
+                Spacer(modifier = Modifier.width(8.dp))
 
-            // Action: "Hi" Button with vector icon (no 3 dots)
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(
-                        if (partner.isWaved) Color(0xFFDCFCE7) else Color(0xFFFFD43B)
-                    )
-                    .clickable { onWaveClick() }
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
+                // Action: "Hi" Button on the RIGHT
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(
+                            if (partner.isWaved) Color(0xFFDCFCE7) else Color(0xFFFFD43B)
+                        )
+                        .clickable { onWaveClick() }
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
                 ) {
-                    if (partner.isWaved) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = "Sent",
-                            tint = Color(0xFF15803D),
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Sent",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF15803D)
-                        )
-                    } else {
-                        FunkyWaveHandIcon(
-                            color = Color(0xFF1E293B),
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Spacer(modifier = Modifier.width(5.dp))
-                        Text(
-                            text = "Hi",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF1E293B)
-                        )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        if (partner.isWaved) {
+                            SoftCheckmarkBadge(
+                                size = 15.dp,
+                                badgeColor = Color(0xFF15803D),
+                                checkColor = Color.White
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Sent",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF15803D)
+                            )
+                        } else {
+                            SoftWavingHandIcon(
+                                color = Color(0xFF1E293B),
+                                size = 15.dp
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = "Hi",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF1E293B)
+                            )
+                        }
                     }
                 }
             }

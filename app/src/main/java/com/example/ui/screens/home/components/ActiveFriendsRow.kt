@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.example.ui.components.UserAvatarImage
 import com.example.ui.components.CircleFlag
 import com.example.ui.screens.home.models.FollowedFriend
 import com.example.ui.screens.home.models.GoldDark
@@ -115,8 +116,8 @@ fun ActiveFriendsRow(
                             contentAlignment = Alignment.Center
                         ) {
                             Box(modifier = Modifier.fillMaxSize()) {
-                                AsyncImage(
-                                    model = friend.avatarUrl,
+                                UserAvatarImage(
+                                    avatarUrl = friend.avatarUrl,
                                     contentDescription = friend.name,
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier

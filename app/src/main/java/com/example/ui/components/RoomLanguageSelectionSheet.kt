@@ -66,8 +66,11 @@ fun RoomLanguageSelectionSheet(
     val inputBg = if (isDark) Color(0xFF1E293B) else Color(0xFFF9FAFB)
     val dividerColor = if (isDark) Color.White.copy(alpha = 0.08f) else Color(0xFFF3F4F6)
 
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        sheetState = sheetState,
         containerColor = sheetBg,
         tonalElevation = 4.dp,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),

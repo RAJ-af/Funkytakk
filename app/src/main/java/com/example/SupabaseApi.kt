@@ -230,6 +230,62 @@ data class SupabaseProfile(
     val onboarding_complete: Boolean? = null
 )
 
+@JsonClass(generateAdapter = true)
+data class DiscoverableProfile(
+    val auth_user_id: String,
+    val username: String? = null,
+    val profile_name: String? = null,
+    val avatar_url: String? = null,
+    val age: Int? = null,
+    val gender: String? = null,
+    val native_languages: List<String>? = null,
+    val learning_languages: List<String>? = null,
+    val country: String? = null,
+    val country_code: String? = null,
+    val hobbies: List<String>? = null,
+    val bio: String? = null,
+    val is_online: Boolean? = null,
+    val last_seen: String? = null,
+    val created_at: String? = null,
+    val is_verified: Boolean? = false
+)
+
+@JsonClass(generateAdapter = true)
+data class SupabaseMoment(
+    val id: String,
+    val user_id: String? = null,
+    val content: String? = null,
+    val image_urls: List<String>? = null,
+    val likes_count: Int? = 0,
+    val comments_count: Int? = 0,
+    val created_at: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class SupabaseFollower(
+    val id: String? = null,
+    val follower_id: String,
+    val following_id: String,
+    val created_at: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class SupabaseMomentLike(
+    val id: String? = null,
+    val moment_id: String,
+    val user_id: String,
+    val created_at: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class SupabaseMomentComment(
+    val id: String? = null,
+    val moment_id: String,
+    val user_id: String,
+    val content: String,
+    val created_at: String? = null
+)
+
 interface SupabaseApi {
 
     @POST("functions/v1/verify-firebase-token")
@@ -323,6 +379,130 @@ interface SupabaseApi {
         @Header("Authorization") auth: String,
         @Query("auth_user_id") authUserIdEq: String // e.g. "eq.<uuid>"
     ): Response<List<SupabaseProfile>>
+
+    @GET("rest/v1/discoverable_profiles?select=*")
+    suspend fun getDiscoverableProfiles(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @QueryMap options: Map<String, String>
+    ): Response<List<DiscoverableProfile>>
+
+    @GET("rest/v1/moments?select=id,user_id,content,image_urls,likes_count,comments_count,created_at")
+    suspend fun getMomentsByUserId(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("user_id") userIdEq: String, // e.g. "eq.<uuid>"
+        @Query("order") order: String = "created_at.desc"
+    ): Response<List<SupabaseMoment>>
+
+    @GET("rest/v1/moments?select=id")
+    suspend fun countMomentsByUserId(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Header("Prefer") prefer: String = "count=exact",
+        @Query("user_id") userIdEq: String // e.g. "eq.<uuid>"
+    ): Response<List<Map<String, Any>>>
+
+    @GET("rest/v1/followers?select=*")
+    suspend fun getFollowers(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("follower_id") followerIdEq: String? = null,
+        @Query("following_id") followingIdEq: String? = null
+    ): Response<List<SupabaseFollower>>
+
+    @GET("rest/v1/followers?select=id")
+    suspend fun countFollowers(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Header("Prefer") prefer: String = "count=exact",
+        @Query("following_id") followingIdEq: String // e.g. "eq.<profileId>"
+    ): Response<List<Map<String, Any>>>
+
+    @GET("rest/v1/followers?select=id")
+    suspend fun countFollowing(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Header("Prefer") prefer: String = "count=exact",
+        @Query("follower_id") followerIdEq: String // e.g. "eq.<profileId>"
+    ): Response<List<Map<String, Any>>>
+
+    @POST("rest/v1/followers")
+    suspend fun followUser(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Header("Prefer") prefer: String = "return=representation",
+        @Body follower: SupabaseFollower
+    ): Response<List<SupabaseFollower>>
+
+    @GET("rest/v1/moments?select=id,user_id,content,image_urls,likes_count,comments_count,created_at&order=created_at.desc")
+    suspend fun getAllMoments(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String
+    ): Response<List<SupabaseMoment>>
+
+    @POST("rest/v1/moments")
+    suspend fun createMoment(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Header("Prefer") prefer: String = "return=representation",
+        @Body moment: Map<String, @JvmSuppressWildcards Any?>
+    ): Response<List<SupabaseMoment>>
+
+    @GET("rest/v1/moment_likes?select=*")
+    suspend fun getMomentLikes(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("moment_id") momentIdEq: String,
+        @Query("user_id") userIdEq: String
+    ): Response<List<SupabaseMomentLike>>
+
+    @POST("rest/v1/moment_likes")
+    suspend fun likeMoment(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Header("Prefer") prefer: String = "return=representation",
+        @Body like: SupabaseMomentLike
+    ): Response<List<SupabaseMomentLike>>
+
+    @DELETE("rest/v1/moment_likes")
+    suspend fun unlikeMoment(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("moment_id") momentIdEq: String,
+        @Query("user_id") userIdEq: String
+    ): Response<Unit>
+
+    @GET("rest/v1/moment_comments?select=*&order=created_at.asc")
+    suspend fun getMomentComments(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("moment_id") momentIdEq: String
+    ): Response<List<SupabaseMomentComment>>
+
+    @POST("rest/v1/moment_comments")
+    suspend fun postMomentComment(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Header("Prefer") prefer: String = "return=representation",
+        @Body comment: SupabaseMomentComment
+    ): Response<List<SupabaseMomentComment>>
+
+    @DELETE("rest/v1/moment_comments")
+    suspend fun deleteMomentComment(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("id") idEq: String,
+        @Query("user_id") userIdEq: String
+    ): Response<Unit>
+
+    @DELETE("rest/v1/followers")
+    suspend fun unfollowUser(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("follower_id") followerIdEq: String, // e.g. "eq.<self>"
+        @Query("following_id") followingIdEq: String // e.g. "eq.<profileId>"
+    ): Response<Unit>
 
     @PATCH("rest/v1/profiles")
     suspend fun patchProfile(
@@ -775,6 +955,13 @@ interface SupabaseApi {
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String,
         @Path(value = "path", encoded = true) path: String
+    ): Response<ResponseBody>
+
+    @GET
+    suspend fun downloadFromUrl(
+        @Url url: String,
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String? = null
     ): Response<ResponseBody>
 
     @DELETE("storage/v1/object/dm-media/{path}")

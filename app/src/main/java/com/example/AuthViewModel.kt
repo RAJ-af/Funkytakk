@@ -2235,6 +2235,9 @@ class AuthViewModel : ViewModel() {
                 if (updates.containsKey("country")) {
                     editor.putString("profile_country_${supaUid}", updates["country"] as? String ?: "")
                 }
+                if (updates.containsKey("country_code")) {
+                    editor.putString("profile_countryCode_${supaUid}", updates["country_code"] as? String ?: "")
+                }
                 if (updates.containsKey("native_languages")) {
                     val list = updates["native_languages"] as? List<*> ?: emptyList<Any>()
                     editor.putString("profile_nativeLanguage_${supaUid}", list.joinToString(", "))
@@ -2263,6 +2266,7 @@ class AuthViewModel : ViewModel() {
                         age = if (updates.containsKey("age")) (updates["age"] as? Number)?.toInt() else u.age,
                         gender = if (updates.containsKey("gender")) updates["gender"] as? String else u.gender,
                         country = if (updates.containsKey("country")) updates["country"] as? String else u.country,
+                        countryCode = if (updates.containsKey("country_code")) updates["country_code"] as? String else u.countryCode,
                         nativeLanguage = if (updates.containsKey("native_languages")) (updates["native_languages"] as? List<*>)?.joinToString(", ") else u.nativeLanguage,
                         learningLanguage = if (updates.containsKey("learning_languages")) (updates["learning_languages"] as? List<*>)?.joinToString(", ") else u.learningLanguage,
                         hobbies = if (updates.containsKey("hobbies")) (updates["hobbies"] as? List<String>) ?: u.hobbies else u.hobbies,
@@ -2409,6 +2413,7 @@ class AuthViewModel : ViewModel() {
                             "avatar_url" to finalAvatar,
                             "gender" to gender,
                             "country" to country,
+                            "country_code" to countryCode,
                             "native_languages" to nativeList,
                             "learning_languages" to learningList,
                             "hobbies" to hobbies,
@@ -2534,6 +2539,7 @@ class AuthViewModel : ViewModel() {
                             putString("profile_nativeLanguage_${userId}", nativeStr ?: "")
                             putString("profile_learningLanguage_${userId}", learningStr ?: "")
                             putString("profile_country_${userId}", supaProfile.country ?: "")
+                            putString("profile_countryCode_${userId}", supaProfile.country_code ?: "")
                             putString("profile_hobbies_${userId}", hobbiesList.joinToString("||"))
                             putBoolean("profile_onboarding_complete_${userId}", supaComplete)
                             apply()
@@ -2549,6 +2555,7 @@ class AuthViewModel : ViewModel() {
                             nativeLanguage = nativeStr ?: mergedProfile.nativeLanguage,
                             learningLanguage = learningStr ?: mergedProfile.learningLanguage,
                             country = supaProfile.country ?: mergedProfile.country,
+                            countryCode = supaProfile.country_code ?: mergedProfile.countryCode,
                             hobbies = if (hobbiesList.isNotEmpty()) hobbiesList else mergedProfile.hobbies,
                             onboardingComplete = supaComplete
                         )

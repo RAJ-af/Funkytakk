@@ -304,6 +304,8 @@ fun CreateLanguageRoomScreen(
     var showBannerOverlay by remember { mutableStateOf(false) }
     var showVipPaywallSheet by remember { mutableStateOf(false) }
     var vipPlanSelected by remember { mutableStateOf("yearly") } // "monthly" or "yearly"
+    val bannerSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val vipSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     
     // Sync current user verified status
     val userProfile = (viewModel.authState.collectAsState().value as? AuthState.Success)?.user
@@ -1152,6 +1154,7 @@ fun CreateLanguageRoomScreen(
             if (showBannerOverlay) {
                 ModalBottomSheet(
                     onDismissRequest = { showBannerOverlay = false },
+                    sheetState = bannerSheetState,
                     containerColor = Color.White,
                     tonalElevation = 6.dp
                 ) {
@@ -1486,6 +1489,7 @@ fun CreateLanguageRoomScreen(
             if (showVipPaywallSheet) {
                 ModalBottomSheet(
                     onDismissRequest = { showVipPaywallSheet = false },
+                    sheetState = vipSheetState,
                     containerColor = Color.White,
                     tonalElevation = 6.dp
                 ) {

@@ -8,6 +8,9 @@ interface DmConversationDao {
     @Query("SELECT * FROM dm_conversations ORDER BY lastMessageTime DESC")
     fun getAllConversations(): Flow<List<LocalDmConversation>>
 
+    @Query("SELECT * FROM dm_conversations ORDER BY lastMessageTime DESC")
+    suspend fun getAllConversationsList(): List<LocalDmConversation>
+
     @Query("SELECT * FROM dm_conversations WHERE id = :id LIMIT 1")
     suspend fun getConversation(id: String): LocalDmConversation?
 
@@ -22,6 +25,9 @@ interface DmConversationDao {
 
     @Query("UPDATE dm_conversations SET lastMessageText = :text, lastMessageTime = :time, unreadCount = unreadCount + :unreadDelta WHERE id = :conversationId")
     suspend fun updateLastMessage(conversationId: String, text: String, time: Long, unreadDelta: Int)
+
+    @Query("UPDATE dm_conversations SET lastMessageText = :text, lastMessageTime = :time, unreadCount = unreadCount + :unreadDelta, otherUserName = COALESCE(:name, otherUserName), otherUserAvatar = COALESCE(:avatar, otherUserAvatar), otherUserFlag = COALESCE(:flag, otherUserFlag) WHERE id = :conversationId")
+    suspend fun updateLastMessageAndProfile(conversationId: String, text: String, time: Long, unreadDelta: Int, name: String?, avatar: String?, flag: String?)
 
     @Query("DELETE FROM dm_conversations WHERE id = :conversationId")
     suspend fun deleteConversation(conversationId: String)
@@ -43,6 +49,9 @@ interface DmMessageDao {
 
     @Query("DELETE FROM dm_messages WHERE id = :id")
     suspend fun deleteMessage(id: String)
+
+    @Query("SELECT EXISTS(SELECT 1 FROM dm_messages WHERE id = :id)")
+    suspend fun messageExists(id: String): Boolean
 
     @Query("DELETE FROM dm_messages WHERE conversationId = :conversationId")
     suspend fun clearConversationMessages(conversationId: String)

@@ -199,7 +199,7 @@ fun HomeScreen(
                             id = pId,
                             name = p.displayName ?: p.username ?: "Learner",
                             avatarUrl = p.avatar ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
-                            flagCode = p.countryCode ?: "us",
+                            flagCode = p.countryCode?.ifBlank { null } ?: "in",
                             isSpeaking = isSpeaking,
                             statusText = statusText,
                             currentRoomId = activePart?.room_id ?: ""
@@ -355,29 +355,8 @@ fun HomeScreen(
         )
     }
 
-    // DM Contacts inbox data
-    val conversationsList = remember {
-        listOf(
-            DirectChat("c_1", "Sarah Jenkins", "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200", "Hey! Are you free to practice English now?", "9:41 AM", 2, "online", "English"),
-            DirectChat("c_2", "Park Min-jun", "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200", "Let's join a room together tonight!", "Yesterday", 0, "online", "Korean"),
-            DirectChat("c_3", "Yuki Tanaka", "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200", "Your Japanese is improving so fast!", "Sunday", 0, "offline", "Japanese"),
-            DirectChat("c_4", "Chen Wei", "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200", "Thanks for helping me with English yesterday!", "May 10", 0, "idle", "Chinese"),
-            DirectChat("c_5", "Lucía Morales", "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200", "¡Fue una gran conversación!", "May 8", 0, "offline", "Spanish"),
-            DirectChat("c_6", "Thomas Müller", "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=200", "Want to practice tomorrow?", "May 6", 0, "online", "German")
-        )
-    }
-
-    // Ensure initial message queues exist
-    LaunchedEffect(Unit) {
-        conversationsList.forEach { chat ->
-            if (!chatMessagesStorage.containsKey(chat.id)) {
-                chatMessagesStorage[chat.id] = listOf(
-                    "Hello! Glad we connected here." to false,
-                    chat.lastMsg to false
-                )
-            }
-        }
-    }
+    // Real conversations list - user-initiated contacts from Discover or Empty
+    val dynamicInitiatedChats = remember { mutableStateListOf<DirectChat>() }
 
     // Dialogs
     if (showLogoutDialog) {
@@ -491,16 +470,44 @@ fun HomeScreen(
                             supabaseProfiles = supabaseProfiles,
                             onCreateRoom = { showCreateRoomBottomSheet = true },
                             onStartDirectChat = { userId, name, avatarUrl, flagCode ->
-                                activeChatWindowContact = DirectChat(
+                                val newChat = DirectChat(
                                     id = userId.ifBlank { name.hashCode().toString() },
                                     name = name,
                                     avatar = avatarUrl,
-                                    lastMsg = "Hey! Let's connect 👋",
+                                    lastMsg = "🔒 Secure chat started",
                                     time = "Just now",
                                     unreadCount = 0,
                                     onlineStatus = "online",
                                     isNativeLanguage = flagCode
                                 )
+                                if (dynamicInitiatedChats.none { it.id == newChat.id }) {
+                                    dynamicInitiatedChats.add(0, newChat)
+                                }
+                                activeChatWindowContact = newChat
+
+                                // Wave send "Hi" using existing E2EE chat system
+                                if (userId.isNotBlank() && !userId.startsWith("partner_mock")) {
+                                    homeScope.launch {
+                                        try {
+                                            com.example.repository.EncryptedChatRepository.init(context)
+                                            val ready = com.example.repository.EncryptedChatRepository.checkRecipientKeyStatus(context, userId)
+                                            if (ready) {
+                                                com.example.repository.EncryptedChatRepository.sendMessage(
+                                                    context = context,
+                                                    recipientUserId = userId,
+                                                    recipientName = name,
+                                                    recipientAvatar = avatarUrl,
+                                                    text = "Hi"
+                                                )
+                                                android.util.Log.d("HomeScreen", "Successfully waved hello (E2EE sent) to $name")
+                                            } else {
+                                                android.util.Log.d("HomeScreen", "E2EE keys missing for $name, Secure Chat Unavailable flow active.")
+                                            }
+                                        } catch (e: Exception) {
+                                            android.util.Log.e("HomeScreen", "Error waving to $name: ${e.message}", e)
+                                        }
+                                    }
+                                }
                             }
                         )
                     }
@@ -517,11 +524,12 @@ fun HomeScreen(
                     }
                     "chats" -> {
                         ChatsTabContent(
-                            conversationsList = conversationsList,
+                            conversationsList = dynamicInitiatedChats,
                             onSelectChat = { chat ->
                                 activeChatWindowContact = chat
                             },
-                            onOpenSupportChat = onOpenSupportChat
+                            onOpenSupportChat = onOpenSupportChat,
+                            onNavigateToDiscover = { activeTab = "rooms" }
                         )
                     }
                     "profile" -> {

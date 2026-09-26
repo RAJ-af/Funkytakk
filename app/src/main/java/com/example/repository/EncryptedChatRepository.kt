@@ -3,6 +3,7 @@ package com.example.repository
 import android.content.Context
 import android.util.Base64
 import android.util.Log
+import com.example.CreateSignedUrlRequest
 import com.example.GetOrCreateDmConversationRequest
 import com.example.SendDmMessageRequest
 import com.example.SupabaseClient
@@ -26,7 +27,7 @@ import java.io.File
 import java.util.UUID
 
 class RecipientNotReadyException(val recipientName: String) : Exception(
-    "$recipientName is not ready for secure chat yet. This user has not opened the app or registered encryption keys."
+    "$recipientName abhi secure chat ke liye ready nahi hai. This user has not opened the app or registered encryption keys yet."
 )
 
 object EncryptedChatRepository {
@@ -41,6 +42,8 @@ object EncryptedChatRepository {
 
     private val _totalUnreadCount = MutableStateFlow(0)
     val totalUnreadCount: StateFlow<Int> = _totalUnreadCount.asStateFlow()
+
+    private val processedMessageIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
     private var conversationCollectJob: Job? = null
     private var realtimeListenerJob: Job? = null
@@ -179,11 +182,11 @@ object EncryptedChatRepository {
                         createdAtIso = msg.created_at
                     )
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to decrypt and process message ${msg.id}", e)
+                    Log.w(TAG, "Failed to decrypt and process message ${msg.id}: ${e.message}")
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error in fetchAndProcessPendingInbox", e)
+            Log.w(TAG, "Error in fetchAndProcessPendingInbox: ${e.message}")
         }
     }
 
@@ -215,7 +218,7 @@ object EncryptedChatRepository {
                 createdAtIso = createdAt
             )
         } catch (e: Exception) {
-            Log.e(TAG, "Error processing incoming message record", e)
+            Log.w(TAG, "Error processing incoming message record: ${e.message}")
         }
     }
 
@@ -232,13 +235,30 @@ object EncryptedChatRepository {
         createdAtIso: String? = null
     ) {
         if (msgId.isBlank() || ciphertext.isBlank()) return
+
+        // Deduplication: prevent processing duplicate messages
+        if (processedMessageIds.contains(msgId)) {
+            Log.d(TAG, "Message $msgId already processed in session; skipping duplicate")
+            deleteMessageFromServer(context, token, msgId)
+            return
+        }
+
+        val db = database
+        if (db != null && db.messageDao().messageExists(msgId)) {
+            Log.d(TAG, "Message $msgId already exists in local DB; skipping duplicate")
+            processedMessageIds.add(msgId)
+            deleteMessageFromServer(context, token, msgId)
+            return
+        }
+        processedMessageIds.add(msgId)
+
         val timestamp = parseTimestampToEpoch(createdAtIso)
 
         // 1. Decrypt using Tink HybridDecrypt
         val decryptedText = try {
             E2EEManager.decryptMessage(context, ciphertext)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to decrypt DM message $msgId", e)
+            Log.w(TAG, "Failed to decrypt DM message $msgId: ${e.message}")
             return
         }
 
@@ -280,11 +300,145 @@ object EncryptedChatRepository {
                     plaintext = decryptedText,
                     timestamp = timestamp
                 )
-                deleteMessageFromServer(token, msgId)
+                deleteMessageFromServer(context, token, msgId)
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to save decrypted text message $msgId locally", e)
+                Log.w(TAG, "Failed to save decrypted text message $msgId locally: ${e.message}")
             }
         }
+    }
+
+    private fun cleanStoragePath(path: String): String {
+        var clean = path.trim()
+        while (clean.startsWith("/") || clean.startsWith("dm-media/")) {
+            clean = clean.removePrefix("/").removePrefix("dm-media/")
+        }
+        return clean
+    }
+
+    private fun isJsonErrorBytes(bytes: ByteArray): Boolean {
+        if (bytes.isEmpty()) return true
+        val checkLen = minOf(bytes.size, 256)
+        val snippet = String(bytes, 0, checkLen).trim()
+        return snippet.startsWith("{\"error\"") ||
+               snippet.startsWith("{\"statusCode\"") ||
+               snippet.startsWith("{\"message\"") ||
+               snippet.startsWith("<!DOCTYPE") ||
+               snippet.startsWith("<html")
+    }
+
+    private suspend fun downloadDmMediaBlob(
+        context: Context,
+        authToken: String,
+        rawPath: String,
+        cleanPath: String,
+        convId: String,
+        msgId: String
+    ): ByteArray? {
+        val candidates = linkedSetOf<String>()
+        val stripped = cleanPath.trim().removePrefix("/").removePrefix("dm-media/").removePrefix("/")
+        if (stripped.isNotBlank()) {
+            candidates.add(stripped)
+            candidates.add("dm-media/$stripped")
+        }
+        val rawTrimmed = rawPath.trim().removePrefix("/")
+        if (rawTrimmed.isNotBlank()) {
+            candidates.add(rawTrimmed)
+            candidates.add(rawTrimmed.removePrefix("dm-media/").removePrefix("/"))
+        }
+        if (convId.isNotBlank() && msgId.isNotBlank()) {
+            candidates.add("$convId/$msgId")
+            candidates.add("dm-media/$convId/$msgId")
+        }
+
+        val tokens = linkedSetOf<String>()
+        if (authToken.isNotBlank()) tokens.add(authToken)
+        val sessionBearer = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+        if (!sessionBearer.isNullOrBlank()) tokens.add(sessionBearer)
+        val accessTok = SupabaseSessionManager.getAccessToken(context)
+        if (!accessTok.isNullOrBlank()) tokens.add("Bearer $accessTok")
+        tokens.add("Bearer ${com.example.BuildConfig.SUPABASE_ANON_KEY}")
+
+        for (path in candidates) {
+            for (authHeader in tokens) {
+                // Strategy 1: Direct authenticated storage download
+                try {
+                    val resp = SupabaseClient.api.downloadDmMediaAuthenticated(
+                        apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
+                        auth = authHeader,
+                        path = path
+                    )
+                    if (resp.isSuccessful && resp.body() != null) {
+                        val bytes = resp.body()!!.bytes()
+                        if (bytes.isNotEmpty() && !isJsonErrorBytes(bytes)) {
+                            Log.d(TAG, "Direct authenticated download succeeded for $path (${bytes.size} bytes)")
+                            return bytes
+                        }
+                    }
+                } catch (_: Exception) {}
+
+                // Strategy 2: Direct standard storage download
+                try {
+                    val resp = SupabaseClient.api.downloadDmMedia(
+                        apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
+                        auth = authHeader,
+                        path = path
+                    )
+                    if (resp.isSuccessful && resp.body() != null) {
+                        val bytes = resp.body()!!.bytes()
+                        if (bytes.isNotEmpty() && !isJsonErrorBytes(bytes)) {
+                            Log.d(TAG, "Standard object download succeeded for $path (${bytes.size} bytes)")
+                            return bytes
+                        }
+                    }
+                } catch (_: Exception) {}
+
+                // Strategy 3: Supabase Storage Signed URL
+                try {
+                    val filename = path.removePrefix("dm-media/").removePrefix("/")
+                    val signResp = SupabaseClient.api.createSignedUrl(
+                        apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
+                        auth = authHeader,
+                        bucket = "dm-media",
+                        filename = filename,
+                        body = CreateSignedUrlRequest(expiresIn = 3600)
+                    )
+                    if (signResp.isSuccessful && signResp.body() != null) {
+                        val body = signResp.body()!!
+                        val signedPath = body.getResolvedPath()
+                        if (!signedPath.isNullOrBlank()) {
+                            val baseUrl = com.example.BuildConfig.SUPABASE_URL.trimEnd('/')
+                            val prefix = if (baseUrl.startsWith("http")) baseUrl else "https://$baseUrl"
+                            val formattedPath = if (signedPath.startsWith("/")) signedPath else "/$signedPath"
+                            val fullSignedUrl = if (formattedPath.startsWith("/storage/v1")) {
+                                "$prefix$formattedPath"
+                            } else {
+                                "$prefix/storage/v1$formattedPath"
+                            }
+
+                            for (signedAuth in listOf(authHeader, null)) {
+                                try {
+                                    val signedDownloadResp = SupabaseClient.api.downloadFromUrl(
+                                        url = fullSignedUrl,
+                                        apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
+                                        auth = signedAuth
+                                    )
+                                    if (signedDownloadResp.isSuccessful && signedDownloadResp.body() != null) {
+                                        val bytes = signedDownloadResp.body()!!.bytes()
+                                        if (bytes.isNotEmpty() && !isJsonErrorBytes(bytes)) {
+                                            Log.d(TAG, "Signed URL download succeeded for $path (${bytes.size} bytes)")
+                                            return bytes
+                                        }
+                                    }
+                                } catch (_: Exception) {}
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+
+        Log.w(TAG, "Media blob unavailable at path $cleanPath after trying all download strategies; falling back to placeholder")
+        return null
     }
 
     private suspend fun processIncomingMediaDescriptor(
@@ -299,14 +453,10 @@ object EncryptedChatRepository {
         storagePath: String,
         timestamp: Long
     ) {
-        var relativePath = storagePath.removePrefix("dm-media/").removePrefix("/")
-        if (relativePath.isBlank() && convId.isNotBlank()) {
-            relativePath = "$convId/$msgId"
-        }
+        val rawPath = descriptorJson.optString("storage_path").ifBlank { storagePath }
+        val cleanPath = cleanStoragePath(rawPath).ifBlank { "$convId/$msgId" }
 
         try {
-            val descriptorStoragePath = descriptorJson.optString("storage_path").ifBlank { storagePath }
-            val finalPath = descriptorStoragePath.removePrefix("dm-media/").removePrefix("/").ifBlank { relativePath }
             val keyBase64 = descriptorJson.optString("media_key")
             val nonceBase64 = descriptorJson.optString("media_nonce")
             val mimeType = descriptorJson.optString("mime_type", if (messageType == "image") "image/jpeg" else "audio/aac")
@@ -321,31 +471,23 @@ object EncryptedChatRepository {
 
             // Ensure active session & authenticated token
             SupabaseSessionManager.ensureActiveSession(context)
-            val authToken = SupabaseSessionManager.getAuthenticatedBearerToken(context) ?: token
+            val authToken = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                ?: (SupabaseSessionManager.getAccessToken(context)?.let { "Bearer $it" })
+                ?: token
 
-            // Download encrypted blob from Supabase Storage bucket dm-media
-            var downloadResp = SupabaseClient.api.downloadDmMediaAuthenticated(
-                apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
-                auth = authToken,
-                path = finalPath
+            val encryptedBlobBytes = downloadDmMediaBlob(
+                context = context,
+                authToken = authToken,
+                rawPath = rawPath,
+                cleanPath = cleanPath,
+                convId = convId,
+                msgId = msgId
             )
-
-            if (!downloadResp.isSuccessful || downloadResp.body() == null) {
-                Log.w(TAG, "downloadDmMediaAuthenticated failed with code ${downloadResp.code()}, trying downloadDmMedia standard endpoint...")
-                downloadResp = SupabaseClient.api.downloadDmMedia(
-                    apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
-                    auth = authToken,
-                    path = finalPath
-                )
-            }
-
-            if (!downloadResp.isSuccessful || downloadResp.body() == null) {
-                Log.e(TAG, "Failed to download encrypted media blob at path $finalPath: code=${downloadResp.code()}")
-                saveLocalPlaceholderAndCleanup(context, authToken, msgId, convId, senderId, recipientId, finalPath, timestamp)
+            if (encryptedBlobBytes == null) {
+                Log.w(TAG, "Media blob unavailable at path $cleanPath; rendering placeholder in message bubble")
+                saveLocalPlaceholderAndCleanup(context, authToken, msgId, convId, senderId, recipientId, cleanPath, timestamp)
                 return
             }
-
-            val encryptedBlobBytes = downloadResp.body()!!.bytes()
 
             // Decrypt raw bytes with AES-256-GCM using media_key + media_nonce
             val rawBytes = E2EEMediaManager.decryptMediaPayload(encryptedBlobBytes, keyBytes, nonceBytes)
@@ -369,14 +511,14 @@ object EncryptedChatRepository {
             )
 
             // Purge server copy: delete dm_messages row AND Storage object
-            deleteMessageFromServer(token, msgId)
-            deleteStorageObjectFromServer(context, token, finalPath)
+            deleteMessageFromServer(context, authToken, msgId)
+            deleteStorageObjectFromServer(context, authToken, cleanPath)
 
             Log.d(TAG, "Successfully processed and purged 2-layer encrypted media message $msgId")
 
         } catch (e: Exception) {
-            Log.e(TAG, "Error processing encrypted media message $msgId: ${e.message}", e)
-            saveLocalPlaceholderAndCleanup(context, token, msgId, convId, senderId, recipientId, relativePath, timestamp)
+            Log.w(TAG, "Error processing encrypted media message $msgId: ${e.message}", e)
+            saveLocalPlaceholderAndCleanup(context, token, msgId, convId, senderId, recipientId, cleanPath, timestamp)
         }
     }
 
@@ -399,25 +541,35 @@ object EncryptedChatRepository {
             plaintext = "⚠️ Media content unavailable",
             timestamp = timestamp
         )
-        // Note: Do NOT delete the dm_messages row on failure so the message remains on server for retry.
+        // Clean up from server so the client does not loop indefinitely and server copy is purged
+        deleteMessageFromServer(context, token, msgId)
+        deleteStorageObjectFromServer(context, token, storagePath)
     }
 
     private suspend fun deleteStorageObjectFromServer(context: Context, token: String, path: String) {
         if (path.isBlank()) return
         try {
-            val authToken = SupabaseSessionManager.getAuthenticatedBearerToken(context) ?: token
+            val cleanPath = cleanStoragePath(path)
+            if (cleanPath.isBlank()) return
+            val authToken = if (token.isNotBlank() && !token.contains(com.example.BuildConfig.SUPABASE_ANON_KEY)) {
+                token
+            } else {
+                SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                    ?: (SupabaseSessionManager.getAccessToken(context)?.let { "Bearer $it" })
+                    ?: token
+            }
             val resp = SupabaseClient.api.deleteDmMedia(
                 apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
                 auth = authToken,
-                path = path
+                path = cleanPath
             )
             if (resp.isSuccessful) {
-                Log.d(TAG, "Deleted storage object $path from dm-media bucket")
+                Log.d(TAG, "Deleted storage object $cleanPath from dm-media bucket")
             } else {
-                Log.w(TAG, "Failed to delete storage object $path: code=${resp.code()}")
+                Log.w(TAG, "Failed to delete storage object $cleanPath: code=${resp.code()}")
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Error deleting storage object $path", e)
+            Log.w(TAG, "Error deleting storage object $path: ${e.message}")
         }
     }
 
@@ -488,11 +640,18 @@ object EncryptedChatRepository {
         }
     }
 
-    private suspend fun deleteMessageFromServer(token: String, messageId: String) {
+    private suspend fun deleteMessageFromServer(context: Context, token: String, messageId: String) {
         try {
+            val authToken = if (token.isNotBlank() && !token.contains(com.example.BuildConfig.SUPABASE_ANON_KEY)) {
+                token
+            } else {
+                SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                    ?: (SupabaseSessionManager.getAccessToken(context)?.let { "Bearer $it" })
+                    ?: token
+            }
             val resp = SupabaseClient.api.deleteDmMessage(
                 apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
-                auth = token,
+                auth = authToken,
                 idFilter = "eq.$messageId"
             )
             if (resp.isSuccessful) {
@@ -501,7 +660,7 @@ object EncryptedChatRepository {
                 Log.w(TAG, "Failed to delete message $messageId: code=${resp.code()}")
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Error deleting message $messageId from server", e)
+            Log.w(TAG, "Error deleting message $messageId from server: ${e.message}")
         }
     }
 
@@ -523,6 +682,7 @@ object EncryptedChatRepository {
                 ?: SupabaseSessionManager.getUserId(context)
                 ?: return@withContext Result.failure(IllegalStateException("User not authenticated"))
             val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                ?: (SupabaseSessionManager.getAccessToken(context)?.let { "Bearer $it" })
                 ?: SupabaseSessionManager.getBearerToken(context)
 
             // 1. Fetch recipient's public key from Supabase user_public_keys
@@ -660,6 +820,7 @@ object EncryptedChatRepository {
                 ?: SupabaseSessionManager.getUserId(context)
                 ?: return@withContext Result.failure(IllegalStateException("User not authenticated"))
             val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                ?: (SupabaseSessionManager.getAccessToken(context)?.let { "Bearer $it" })
                 ?: SupabaseSessionManager.getBearerToken(context)
 
             val displayName = recipientName.ifBlank { "User" }

@@ -12,15 +12,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -32,6 +30,7 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.example.crypto.E2EEManager
 import com.example.crypto.VaultSecurityManager
+import com.example.ui.components.*
 import kotlinx.coroutines.launch
 
 @Composable
@@ -73,10 +72,9 @@ fun OnboardingChatVaultScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = Color(0xFF1F2937)
+                        SoftBackIcon(
+                            size = 22.dp,
+                            color = Color(0xFF1F2937)
                         )
                     }
                     Spacer(modifier = Modifier.width(8.dp))
@@ -98,18 +96,17 @@ fun OnboardingChatVaultScreen(
                 .padding(horizontal = 24.dp, vertical = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Icon
-            Box(
-                modifier = Modifier
-                    .size(72.dp)
-                    .background(Color(0xFFFEF3C7), CircleShape),
-                contentAlignment = Alignment.Center
+            // Soft Badge with Custom Soft Lock Icon
+            SoftIconBadge(
+                badgeSize = 72.dp,
+                backgroundColor = Color(0xFFFEF3C7),
+                borderColor = Color(0xFFFDE68A)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Lock,
-                    contentDescription = "Vault",
-                    tint = Color(0xFFD97706),
-                    modifier = Modifier.size(36.dp)
+                SoftLockIcon(
+                    size = 36.dp,
+                    isUnlocked = false,
+                    gradientColors = listOf(Color(0xFFFBBF24), Color(0xFFD97706)),
+                    shackleColor = Color(0xFF92400E)
                 )
             }
 
@@ -144,11 +141,9 @@ fun OnboardingChatVaultScreen(
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Warning,
-                            contentDescription = "Notice",
-                            tint = Color(0xFFD97706),
-                            modifier = Modifier.size(20.dp)
+                        SoftWarningIcon(
+                            size = 20.dp,
+                            color = Color(0xFFD97706)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
@@ -181,12 +176,26 @@ fun OnboardingChatVaultScreen(
                 visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {
                     IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                        Icon(
-                            imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                            contentDescription = "Toggle password visibility"
+                        SoftEyeIcon(
+                            visible = passwordVisible,
+                            size = 20.dp,
+                            tint = if (passwordVisible) Color(0xFFB45309) else Color(0xFF9CA3AF)
                         )
                     }
                 },
+                textStyle = TextStyle(
+                    color = Color(0xFF111827),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Normal
+                ),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color(0xFF111827),
+                    unfocusedTextColor = Color(0xFF111827),
+                    focusedBorderColor = Color(0xFFFFC529),
+                    focusedLabelColor = Color(0xFFB45309),
+                    cursorColor = Color(0xFF111827),
+                    unfocusedBorderColor = Color(0xFFE5E7EB)
+                ),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp)
@@ -203,6 +212,28 @@ fun OnboardingChatVaultScreen(
                 label = { Text("Confirm Vault Password") },
                 singleLine = true,
                 visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                        SoftEyeIcon(
+                            visible = passwordVisible,
+                            size = 20.dp,
+                            tint = if (passwordVisible) Color(0xFFB45309) else Color(0xFF9CA3AF)
+                        )
+                    }
+                },
+                textStyle = TextStyle(
+                    color = Color(0xFF111827),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Normal
+                ),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color(0xFF111827),
+                    unfocusedTextColor = Color(0xFF111827),
+                    focusedBorderColor = Color(0xFFFFC529),
+                    focusedLabelColor = Color(0xFFB45309),
+                    cursorColor = Color(0xFF111827),
+                    unfocusedBorderColor = Color(0xFFE5E7EB)
+                ),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp)

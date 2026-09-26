@@ -1550,7 +1550,7 @@ fun VoiceRoomScreen(
     var selectedThemeIndex by remember { mutableStateOf(0) } // Default: "Golden Glow" at index 0
     var isRoomDarkMode by remember { mutableStateOf(false) }
     var selectedDarkBgIndex by remember { mutableStateOf(0) }
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     
     val privateChats = remember {
         listOf(

@@ -85,6 +85,7 @@ fun DirectChatScreen(
     var showEmojiPicker by remember { mutableStateOf(false) }
     var showAttachmentSheet by remember { mutableStateOf(false) }
     var previewImageUrl by remember { mutableStateOf<String?>(null) }
+    val attachmentSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     // Voice Note States & Audio Player
     var isRecordingVoice by remember { mutableStateOf(false) }
@@ -654,6 +655,7 @@ fun DirectChatScreen(
         if (showAttachmentSheet) {
             ModalBottomSheet(
                 onDismissRequest = { showAttachmentSheet = false },
+                sheetState = attachmentSheetState,
                 containerColor = Color.White,
                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
             ) {

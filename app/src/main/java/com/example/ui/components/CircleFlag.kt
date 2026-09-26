@@ -4,15 +4,19 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.ImageLoader
 import coil.compose.AsyncImage
@@ -71,6 +75,48 @@ fun getFlagOrDeviconUrl(code: String): String {
     }
 }
 
+fun countryNameToCode(country: String): String {
+    val clean = country.trim().lowercase()
+    if (clean.length == 2) return clean
+    return when (clean) {
+        "india" -> "in"
+        "korea", "south korea", "republic of korea", "south_korea" -> "kr"
+        "japan" -> "jp"
+        "malaysia" -> "my"
+        "albania" -> "al"
+        "united arab emirates", "uae" -> "ae"
+        "united states", "usa", "us", "united states of america" -> "us"
+        "united kingdom", "uk", "great britain" -> "gb"
+        "canada" -> "ca"
+        "australia" -> "au"
+        "germany" -> "de"
+        "france" -> "fr"
+        "spain" -> "es"
+        "italy" -> "it"
+        "china" -> "cn"
+        "brazil" -> "br"
+        "russia" -> "ru"
+        "saudi arabia" -> "sa"
+        "indonesia" -> "id"
+        "turkey" -> "tr"
+        "vietnam" -> "vn"
+        "thailand" -> "th"
+        "philippines" -> "ph"
+        "bangladesh" -> "bd"
+        "pakistan" -> "pk"
+        "netherlands" -> "nl"
+        "poland" -> "pl"
+        "ukraine" -> "ua"
+        "sweden" -> "se"
+        "switzerland" -> "ch"
+        "egypt" -> "eg"
+        "mexico" -> "mx"
+        "colombia" -> "co"
+        "argentina" -> "ar"
+        else -> "us"
+    }
+}
+
 @Composable
 fun CircleFlag(
     countryCode: String,
@@ -84,11 +130,12 @@ fun CircleFlag(
         }
         .build()
 
-    val cleanCode = if (countryCode.any { it.code >= 0x1F1E6 }) {
+    val rawCode = if (countryCode.any { it.code >= 0x1F1E6 }) {
         flagEmojiToCountryCode(countryCode)
     } else {
-        countryCode.lowercase().trim()
+        countryNameToCode(countryCode)
     }
+    val cleanCode = if (rawCode.isBlank()) "in" else rawCode
 
     val isProg = isProgrammingCode(cleanCode)
 
@@ -137,9 +184,10 @@ fun AvatarWithCircularFlag(
         modifier = modifier.size(avatarSize),
         contentAlignment = Alignment.BottomEnd
     ) {
+        val avatarModel = resolveAvatarModel(avatarUrl)
         AsyncImage(
             model = ImageRequest.Builder(LocalContext.current)
-                .data(avatarUrl)
+                .data(avatarModel)
                 .crossfade(true)
                 .build(),
             contentDescription = "Avatar",
@@ -149,11 +197,51 @@ fun AvatarWithCircularFlag(
                 .border(1.5.dp, Color.White, CircleShape)
         )
         CircleFlag(
-            countryCode = countryCode.trim(),
+            countryCode = countryCode.trim().ifBlank { "in" },
             modifier = Modifier
                 .size(flagSize)
                 .clip(CircleShape)
                 .border(1.5.dp, Color.White, CircleShape)
+        )
+    }
+}
+
+@Composable
+fun DiscoverSquareAvatarWithFlag(
+    avatarUrl: String,
+    countryCode: String,
+    isOnline: Boolean,
+    modifier: Modifier = Modifier,
+    avatarSize: Dp = 80.dp,
+    flagSize: Dp = 26.dp
+) {
+    Box(
+        modifier = modifier.size(avatarSize),
+        contentAlignment = Alignment.Center
+    ) {
+        val avatarModel = resolveAvatarModel(avatarUrl)
+        AsyncImage(
+            model = ImageRequest.Builder(LocalContext.current)
+                .data(avatarModel)
+                .crossfade(true)
+                .build(),
+            contentDescription = "Avatar",
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(20.dp))
+                .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(20.dp))
+        )
+
+        // Bottom-Right Circular Country Flag
+        CircleFlag(
+            countryCode = countryCode.trim().ifBlank { "in" },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .offset(x = 4.dp, y = 4.dp)
+                .size(flagSize)
+                .clip(CircleShape)
+                .border(2.dp, Color.White, CircleShape)
         )
     }
 }

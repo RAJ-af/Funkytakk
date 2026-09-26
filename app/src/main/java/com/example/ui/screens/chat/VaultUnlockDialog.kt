@@ -12,8 +12,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,6 +21,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -36,6 +35,7 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.example.crypto.VaultSecurityManager
 import com.example.crypto.VaultStatus
+import com.example.ui.components.*
 import kotlinx.coroutines.launch
 
 @Composable
@@ -57,6 +57,9 @@ fun VaultManagementDialogs(
     }
 }
 
+/**
+ * Modern good-looking Setup Password dialog using custom soft icons only.
+ */
 @Composable
 fun VaultSetupDialog(
     onDismiss: () -> Unit
@@ -68,6 +71,7 @@ fun VaultSetupDialog(
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
+    var confirmPasswordVisible by remember { mutableStateOf(false) }
     var enableBiometrics by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
@@ -82,10 +86,10 @@ fun VaultSetupDialog(
         properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = false)
     ) {
         Surface(
-            shape = RoundedCornerShape(28.dp),
+            shape = RoundedCornerShape(32.dp),
             color = Color.White,
-            shadowElevation = 16.dp,
-            border = BorderStroke(1.dp, Color(0xFFF3F4F6)),
+            shadowElevation = 20.dp,
+            border = BorderStroke(1.dp, Color(0xFFF1F5F9)),
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 12.dp)
@@ -93,34 +97,27 @@ fun VaultSetupDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(24.dp),
+                    .padding(26.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Header Icon with soft warm gradient circle
-                Box(
-                    modifier = Modifier
-                        .size(64.dp)
-                        .clip(CircleShape)
-                        .background(
-                            Brush.linearGradient(
-                                colors = listOf(Color(0xFFFEF3C7), Color(0xFFFDE68A))
-                            )
-                        )
-                        .border(1.5.dp, Color(0xFFFBBF24).copy(alpha = 0.5f), CircleShape),
-                    contentAlignment = Alignment.Center
+                // Header Soft Badge with Custom Soft Lock Icon
+                SoftIconBadge(
+                    badgeSize = 64.dp,
+                    backgroundColor = Color(0xFFFFFBEB),
+                    borderColor = Color(0xFFFDE68A)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Lock,
-                        contentDescription = "Vault Security",
-                        tint = Color(0xFFB45309),
-                        modifier = Modifier.size(30.dp)
+                    SoftLockIcon(
+                        size = 32.dp,
+                        isUnlocked = false,
+                        gradientColors = listOf(Color(0xFFFBBF24), Color(0xFFD97706)),
+                        shackleColor = Color(0xFF92400E)
                     )
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = "Secure Chat Vault",
+                    text = "Set Up Chat Lock",
                     fontSize = 22.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = Color(0xFF111827),
@@ -131,35 +128,34 @@ fun VaultSetupDialog(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Text(
-                    text = "Set a master password to encrypt your 1:1 chats with Google Tink HPKE and SQLCipher.",
+                    text = "Create a password to lock and encrypt your private conversations with end-to-end security.",
                     fontSize = 13.sp,
                     color = Color(0xFF6B7280),
                     textAlign = TextAlign.Center,
                     lineHeight = 18.sp
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(18.dp))
 
-                // Sleek, minimal notice badge
+                // Sleek, minimal notice badge using Custom Soft Shield Icon
                 Surface(
                     shape = RoundedCornerShape(14.dp),
                     color = Color(0xFFFFFBEB),
-                    border = BorderStroke(1.dp, Color(0xFFFDE68A).copy(alpha = 0.8f)),
+                    border = BorderStroke(1.dp, Color(0xFFFDE68A)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Security,
-                            contentDescription = "Protection",
-                            tint = Color(0xFFD97706),
-                            modifier = Modifier.size(18.dp)
+                        SoftShieldIcon(
+                            size = 18.dp,
+                            gradientColors = listOf(Color(0xFFF59E0B), Color(0xFFD97706)),
+                            showCheck = true
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = "Stored only on this device. Messages cannot be restored if the app is reinstalled.",
+                            text = "Stored securely on this device. Never uploaded to servers.",
                             fontSize = 11.sp,
                             color = Color(0xFF92400E),
                             lineHeight = 15.sp
@@ -167,7 +163,7 @@ fun VaultSetupDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(18.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
                 // Password Input
                 OutlinedTextField(
@@ -176,26 +172,38 @@ fun VaultSetupDialog(
                         password = it
                         errorMessage = null
                     },
-                    label = { Text("Master Password (min 4 chars)") },
+                    label = { Text("Chat Password (min 4 chars)") },
                     singleLine = true,
                     visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                     trailingIcon = {
-                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                            Icon(
-                                imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                contentDescription = "Toggle password visibility",
-                                tint = Color(0xFF9CA3AF)
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clickable { passwordVisible = !passwordVisible },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            SoftEyeIcon(
+                                visible = passwordVisible,
+                                size = 20.dp,
+                                tint = if (passwordVisible) Color(0xFFB45309) else Color(0xFF9CA3AF)
                             )
                         }
                     },
+                    textStyle = TextStyle(
+                        color = Color(0xFF111827),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Normal
+                    ),
                     colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color(0xFF111827),
+                        unfocusedTextColor = Color(0xFF111827),
                         focusedBorderColor = Color(0xFFFFC529),
                         focusedLabelColor = Color(0xFFB45309),
                         cursorColor = Color(0xFF111827),
                         unfocusedBorderColor = Color(0xFFE5E7EB)
                     ),
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp)
+                    shape = RoundedCornerShape(16.dp)
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -207,23 +215,44 @@ fun VaultSetupDialog(
                         confirmPassword = it
                         errorMessage = null
                     },
-                    label = { Text("Confirm Master Password") },
+                    label = { Text("Confirm Chat Password") },
                     singleLine = true,
-                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    visualTransformation = if (confirmPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clickable { confirmPasswordVisible = !confirmPasswordVisible },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            SoftEyeIcon(
+                                visible = confirmPasswordVisible,
+                                size = 20.dp,
+                                tint = if (confirmPasswordVisible) Color(0xFFB45309) else Color(0xFF9CA3AF)
+                            )
+                        }
+                    },
+                    textStyle = TextStyle(
+                        color = Color(0xFF111827),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Normal
+                    ),
                     colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color(0xFF111827),
+                        unfocusedTextColor = Color(0xFF111827),
                         focusedBorderColor = Color(0xFFFFC529),
                         focusedLabelColor = Color(0xFFB45309),
                         cursorColor = Color(0xFF111827),
                         unfocusedBorderColor = Color(0xFFE5E7EB)
                     ),
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp)
+                    shape = RoundedCornerShape(16.dp)
                 )
 
                 if (canAuthenticateBiometric) {
                     Spacer(modifier = Modifier.height(12.dp))
                     Surface(
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(14.dp),
                         color = Color(0xFFF9FAFB),
                         border = BorderStroke(1.dp, Color(0xFFF3F4F6)),
                         modifier = Modifier
@@ -231,41 +260,55 @@ fun VaultSetupDialog(
                             .clickable { enableBiometrics = !enableBiometrics }
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            SoftFingerprintIcon(
+                                size = 22.dp,
+                                color = if (enableBiometrics) Color(0xFF2563EB) else Color(0xFF9CA3AF)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = "Enable Biometric unlock",
+                                fontSize = 13.sp,
+                                color = Color(0xFF374151),
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.weight(1f)
+                            )
                             Switch(
                                 checked = enableBiometrics,
                                 onCheckedChange = { enableBiometrics = it },
                                 colors = SwitchDefaults.colors(
                                     checkedThumbColor = Color.White,
                                     checkedTrackColor = Color(0xFF111827)
-                                ),
-                                modifier = Modifier.size(36.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = "Enable Biometric unlock (Fingerprint / Face)",
-                                fontSize = 12.sp,
-                                color = Color(0xFF374151),
-                                fontWeight = FontWeight.Medium
+                                )
                             )
                         }
                     }
                 }
 
                 errorMessage?.let { err ->
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text(
-                        text = err,
-                        fontSize = 12.sp,
-                        color = Color(0xFFDC2626),
-                        textAlign = TextAlign.Center,
-                        fontWeight = FontWeight.Medium
-                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFFFEF2F2), RoundedCornerShape(10.dp))
+                            .border(1.dp, Color(0xFFFEE2E2), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        SoftWarningIcon(size = 18.dp, color = Color(0xFFDC2626))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = err,
+                            fontSize = 12.sp,
+                            color = Color(0xFFDC2626),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(22.dp))
 
                 // Submit Button
                 Button(
@@ -281,32 +324,32 @@ fun VaultSetupDialog(
                         isLoading = true
                         scope.launch {
                             val setupResult = VaultSecurityManager.setupVaultWithPassword(context, password)
-                            setupResult.onSuccess { vaultKey ->
+                            setupResult.onSuccess {
                                 if (enableBiometrics && canAuthenticateBiometric && activity != null) {
                                     val cryptoResult = VaultSecurityManager.createBiometricEncryptCryptoObject()
                                     cryptoResult.onSuccess { cryptoObject ->
-                                        promptBiometricSetup(activity, cryptoObject) { success ->
+                                        promptBiometricSetup(activity, cryptoObject) {
                                             isLoading = false
-                                            Toast.makeText(context, "Secure chat vault created successfully!", Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(context, "Chat lock active! Chats unlocked.", Toast.LENGTH_SHORT).show()
                                         }
                                     }.onFailure {
                                         isLoading = false
-                                        Toast.makeText(context, "Secure chat vault created with password.", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "Chat lock active! Chats unlocked.", Toast.LENGTH_SHORT).show()
                                     }
                                 } else {
                                     isLoading = false
-                                    Toast.makeText(context, "Secure chat vault created successfully!", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Chat lock active! Chats unlocked.", Toast.LENGTH_SHORT).show()
                                 }
                             }.onFailure { ex ->
                                 isLoading = false
-                                errorMessage = ex.message ?: "Failed to initialize vault"
+                                errorMessage = ex.message ?: "Failed to set up chat password"
                             }
                         }
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(50.dp),
-                    shape = RoundedCornerShape(16.dp),
+                        .height(52.dp),
+                    shape = RoundedCornerShape(50.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF111827)),
                     enabled = !isLoading
                 ) {
@@ -314,7 +357,7 @@ fun VaultSetupDialog(
                         CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
                     } else {
                         Text(
-                            text = "Create Secure Vault",
+                            text = "Set Password & Unlock",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
@@ -326,6 +369,9 @@ fun VaultSetupDialog(
     }
 }
 
+/**
+ * Modern good-looking Unlock Password dialog using custom soft icons only.
+ */
 @Composable
 fun VaultUnlockDialog(
     onDismiss: () -> Unit
@@ -357,10 +403,10 @@ fun VaultUnlockDialog(
         properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = false)
     ) {
         Surface(
-            shape = RoundedCornerShape(28.dp),
+            shape = RoundedCornerShape(32.dp),
             color = Color.White,
-            shadowElevation = 16.dp,
-            border = BorderStroke(1.dp, Color(0xFFF3F4F6)),
+            shadowElevation = 20.dp,
+            border = BorderStroke(1.dp, Color(0xFFF1F5F9)),
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 12.dp)
@@ -368,34 +414,27 @@ fun VaultUnlockDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(24.dp),
+                    .padding(26.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Header Icon with soft blue/indigo gradient circle
-                Box(
-                    modifier = Modifier
-                        .size(64.dp)
-                        .clip(CircleShape)
-                        .background(
-                            Brush.linearGradient(
-                                colors = listOf(Color(0xFFEFF6FF), Color(0xFFDBEAFE))
-                            )
-                        )
-                        .border(1.5.dp, Color(0xFF93C5FD).copy(alpha = 0.5f), CircleShape),
-                    contentAlignment = Alignment.Center
+                // Header Soft Badge with Custom Soft Lock Icon
+                SoftIconBadge(
+                    badgeSize = 64.dp,
+                    backgroundColor = Color(0xFFEEF2FF),
+                    borderColor = Color(0xFFC7D2FE)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Lock,
-                        contentDescription = "Unlock Vault",
-                        tint = Color(0xFF2563EB),
-                        modifier = Modifier.size(30.dp)
+                    SoftLockIcon(
+                        size = 32.dp,
+                        isUnlocked = false,
+                        gradientColors = listOf(Color(0xFF6366F1), Color(0xFF4338CA)),
+                        shackleColor = Color(0xFFCBD5E1)
                     )
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = "Unlock Chat Vault",
+                    text = "Enter Chat Password",
                     fontSize = 22.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = Color(0xFF111827),
@@ -406,7 +445,7 @@ fun VaultUnlockDialog(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Text(
-                    text = "Enter your vault password or authenticate to access your encrypted conversations.",
+                    text = "Please enter your password to unlock your conversations.",
                     fontSize = 13.sp,
                     color = Color(0xFF6B7280),
                     textAlign = TextAlign.Center,
@@ -421,21 +460,33 @@ fun VaultUnlockDialog(
                         password = it
                         errorMessage = null
                     },
-                    label = { Text("Vault Password") },
+                    label = { Text("Chat Password") },
                     singleLine = true,
                     visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                     trailingIcon = {
-                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                            Icon(
-                                imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                contentDescription = "Toggle password visibility",
-                                tint = Color(0xFF9CA3AF)
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clickable { passwordVisible = !passwordVisible },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            SoftEyeIcon(
+                                visible = passwordVisible,
+                                size = 20.dp,
+                                tint = if (passwordVisible) Color(0xFF4F46E5) else Color(0xFF9CA3AF)
                             )
                         }
                     },
+                    textStyle = TextStyle(
+                        color = Color(0xFF111827),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Normal
+                    ),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color(0xFF2563EB),
-                        focusedLabelColor = Color(0xFF1D4ED8),
+                        focusedTextColor = Color(0xFF111827),
+                        unfocusedTextColor = Color(0xFF111827),
+                        focusedBorderColor = Color(0xFF4F46E5),
+                        focusedLabelColor = Color(0xFF4338CA),
                         cursorColor = Color(0xFF111827),
                         unfocusedBorderColor = Color(0xFFE5E7EB)
                     ),
@@ -447,24 +498,34 @@ fun VaultUnlockDialog(
                                 val res = VaultSecurityManager.unlockWithPassword(context, password)
                                 isLoading = false
                                 res.onFailure { ex ->
-                                    errorMessage = ex.message ?: "Incorrect password"
+                                    errorMessage = ex.message ?: "Incorrect password. Please try again."
                                 }
                             }
                         }
                     }),
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp)
+                    shape = RoundedCornerShape(16.dp)
                 )
 
                 errorMessage?.let { err ->
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text(
-                        text = err,
-                        fontSize = 12.sp,
-                        color = Color(0xFFDC2626),
-                        textAlign = TextAlign.Center,
-                        fontWeight = FontWeight.Medium
-                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFFFEF2F2), RoundedCornerShape(10.dp))
+                            .border(1.dp, Color(0xFFFEE2E2), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        SoftWarningIcon(size = 18.dp, color = Color(0xFFDC2626))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = err,
+                            fontSize = 12.sp,
+                            color = Color(0xFFDC2626),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(20.dp))
@@ -473,7 +534,7 @@ fun VaultUnlockDialog(
                 Button(
                     onClick = {
                         if (password.isBlank()) {
-                            errorMessage = "Please enter your vault password."
+                            errorMessage = "Please enter your chat password."
                             return@Button
                         }
                         isLoading = true
@@ -481,14 +542,14 @@ fun VaultUnlockDialog(
                             val res = VaultSecurityManager.unlockWithPassword(context, password)
                             isLoading = false
                             res.onFailure { ex ->
-                                errorMessage = ex.message ?: "Incorrect password"
+                                errorMessage = ex.message ?: "Incorrect password. Please try again."
                             }
                         }
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(50.dp),
-                    shape = RoundedCornerShape(16.dp),
+                        .height(52.dp),
+                    shape = RoundedCornerShape(50.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF111827)),
                     enabled = !isLoading
                 ) {
@@ -496,7 +557,7 @@ fun VaultUnlockDialog(
                         CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
                     } else {
                         Text(
-                            text = "Unlock",
+                            text = "Unlock Chats",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
@@ -504,9 +565,9 @@ fun VaultUnlockDialog(
                     }
                 }
 
-                // Biometrics Unlock option
+                // Biometrics Unlock option with Custom Soft Fingerprint Icon
                 if (hasBiometric && activity != null) {
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                     OutlinedButton(
                         onClick = {
                             val cryptoObjResult = VaultSecurityManager.createBiometricDecryptCryptoObject(context)
@@ -523,16 +584,11 @@ fun VaultUnlockDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(50.dp),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(50.dp),
                         border = BorderStroke(1.dp, Color(0xFFE5E7EB))
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Fingerprint,
-                            contentDescription = "Biometrics",
-                            tint = Color(0xFF374151),
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        SoftFingerprintIcon(size = 20.dp, color = Color(0xFF374151))
+                        Spacer(modifier = Modifier.width(10.dp))
                         Text(
                             text = "Unlock with Biometrics",
                             color = Color(0xFF374151),
@@ -542,7 +598,7 @@ fun VaultUnlockDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 // Reset Vault Option
                 TextButton(onClick = { showResetConfirmation = true }) {
@@ -563,9 +619,9 @@ fun VaultUnlockDialog(
             properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = false)
         ) {
             Surface(
-                shape = RoundedCornerShape(24.dp),
+                shape = RoundedCornerShape(28.dp),
                 color = Color.White,
-                shadowElevation = 16.dp,
+                shadowElevation = 20.dp,
                 border = BorderStroke(1.dp, Color(0xFFFEE2E2)),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -574,28 +630,21 @@ fun VaultUnlockDialog(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(24.dp),
+                        .padding(26.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFFEE2E2)),
-                        contentAlignment = Alignment.Center
+                    SoftIconBadge(
+                        badgeSize = 56.dp,
+                        backgroundColor = Color(0xFFFEE2E2),
+                        borderColor = Color(0xFFFECACA)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Warning,
-                            contentDescription = "Reset Warning",
-                            tint = Color(0xFFDC2626),
-                            modifier = Modifier.size(28.dp)
-                        )
+                        SoftWarningIcon(size = 28.dp, color = Color(0xFFDC2626))
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Text(
-                        text = "Reset Encrypted Vault?",
+                        text = "Reset Chat Vault?",
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF111827),
@@ -605,7 +654,7 @@ fun VaultUnlockDialog(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     Text(
-                        text = "Resetting the vault permanently wipes the local encryption keys and erases all 1:1 chat history on this device.\n\nMessages cannot be recovered from the server.",
+                        text = "Resetting the vault permanently wipes the local encryption keys and erases all chat history on this device.\n\nMessages cannot be recovered from the server.",
                         fontSize = 13.sp,
                         color = Color(0xFF4B5563),
                         textAlign = TextAlign.Center,
@@ -621,10 +670,10 @@ fun VaultUnlockDialog(
                             Toast.makeText(context, "Vault reset. Please set up a new password.", Toast.LENGTH_LONG).show()
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
-                        shape = RoundedCornerShape(14.dp),
+                        shape = RoundedCornerShape(50.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(48.dp)
+                            .height(50.dp)
                     ) {
                         Text(
                             text = "Reset & Erase History",
@@ -663,7 +712,7 @@ private fun promptBiometricSetup(
     val executor = ContextCompat.getMainExecutor(activity)
     val promptInfo = BiometricPrompt.PromptInfo.Builder()
         .setTitle("Enable Biometric Unlock")
-        .setSubtitle("Confirm your fingerprint or face to protect your E2EE chat vault")
+        .setSubtitle("Confirm your fingerprint or face to protect your encrypted chats")
         .setNegativeButtonText("Skip for now")
         .build()
 
