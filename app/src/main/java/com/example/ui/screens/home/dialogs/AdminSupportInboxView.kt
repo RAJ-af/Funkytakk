@@ -188,7 +188,7 @@ fun AdminSupportInboxView(
                     contentPadding = PaddingValues(vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    items(messages, key = { it.id }) { msg ->
+                    items(messages.distinctBy { it.id }, key = { it.id }) { msg ->
                         AdminThreadMessageBubble(
                             message = msg,
                             targetName = targetName,
@@ -386,7 +386,7 @@ fun AdminSupportInboxView(
                     }
                 }
             } else {
-                items(filteredList, key = { it.id }) { conv ->
+                items(filteredList.distinctBy { it.id }, key = { it.id }) { conv ->
                     val uid = conv.user_id ?: ""
                     val p = supabaseProfiles.find { it.uid == uid }
                     val snippet = VoiceRoomRealtimeManager.getUserSnippet(uid)

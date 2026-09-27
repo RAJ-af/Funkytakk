@@ -38,6 +38,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.SupabaseSupportMessage
 import com.example.SupportChatManager
+import com.example.ui.components.*
+import com.example.ui.screens.chat.components.*
 import com.example.ui.theme.GoldAccent
 import kotlinx.coroutines.launch
 
@@ -119,10 +121,9 @@ fun SupportChatScreen(
                         onClick = onBack,
                         modifier = Modifier.testTag("support_chat_back_button")
                     ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = Color.Black
+                        SoftBackIcon(
+                            color = Color.Black,
+                            size = 20.dp
                         )
                     }
 
@@ -155,11 +156,9 @@ fun SupportChatScreen(
                                 .border(1.5.dp, Color.White, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = "Official",
-                                tint = Color.White,
-                                modifier = Modifier.size(12.dp)
+                            SoftCheckIcon(
+                                color = Color.White,
+                                size = 9.dp
                             )
                         }
                     }
@@ -209,6 +208,7 @@ fun SupportChatScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .imePadding()
                         .navigationBarsPadding()
                         .padding(horizontal = 16.dp, vertical = 10.dp)
                 ) {
@@ -225,11 +225,9 @@ fun SupportChatScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.Info,
-                                    contentDescription = null,
-                                    tint = Color(0xFF92400E),
-                                    modifier = Modifier.size(14.dp)
+                                SoftShieldIcon(
+                                    size = 14.dp,
+                                    color = Color(0xFF92400E)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
@@ -327,11 +325,10 @@ fun SupportChatScreen(
                                     strokeWidth = 2.dp
                                 )
                             } else {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.Send,
-                                    contentDescription = "Send",
+                                AppSvgIcon(
+                                    icon = ChatIconAsset.Send,
                                     tint = if (inputText.isNotBlank()) Color.Black else Color(0xFF9CA3AF),
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
@@ -358,7 +355,7 @@ fun SupportChatScreen(
                     OfficialWelcomeCard()
                 }
 
-                items(messages, key = { it.id }) { msg ->
+                items(messages.distinctBy { it.id }, key = { it.id }) { msg ->
                     SupportMessageBubble(
                         message = msg,
                         isHighlighted = !activeReportId.isNullOrBlank() && msg.report_id == activeReportId
@@ -388,11 +385,9 @@ private fun OfficialWelcomeCard() {
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.SupportAgent,
-                    contentDescription = null,
-                    tint = Color(0xFFB45309),
-                    modifier = Modifier.size(24.dp)
+                SoftHeadsetIcon(
+                    size = 22.dp,
+                    color = Color(0xFFB45309)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
@@ -464,11 +459,9 @@ private fun SupportMessageBubble(
                         color = Color(0xFF4B5563)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = "Official",
-                        tint = Color(0xFF3B82F6),
-                        modifier = Modifier.size(11.dp)
+                    SoftCheckIcon(
+                        color = Color(0xFF3B82F6),
+                        size = 10.dp
                     )
                 }
             }

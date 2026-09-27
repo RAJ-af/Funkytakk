@@ -39,15 +39,16 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import com.example.ChatPreferencesManager
 import com.example.crypto.VaultSecurityManager
 import com.example.crypto.VaultStatus
 import com.example.repository.EncryptedChatRepository
 import com.example.repository.RecipientNotReadyException
-import com.example.ui.components.FluentEmojiAssets
-import com.example.ui.components.FluentEmojiPickerTray
+import com.example.ui.components.*
 import com.example.ui.screens.chat.components.*
 import com.example.ui.screens.chat.model.ChatMessage
 import com.example.ui.screens.chat.model.ChatMessageType
+import com.example.ui.screens.home.dialogs.BlockedUsersBottomSheet
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -72,6 +73,17 @@ fun DirectChatScreen(
     val vaultStatus by VaultSecurityManager.vaultStatus.collectAsState()
     var conversationId by remember { mutableStateOf("") }
     var isSending by remember { mutableStateOf(false) }
+
+    // Chat Preferences & Blocking State
+    val mutedChats by ChatPreferencesManager.mutedChats.collectAsState()
+    val blockedUsers by ChatPreferencesManager.blockedUsers.collectAsState()
+    val isBlocked = blockedUsers.contains(partnerUserId)
+    val isMuted = mutedChats.contains(conversationId.ifBlank { partnerUserId })
+
+    var showOptionsMenu by remember { mutableStateOf(false) }
+    var showBlockConfirmDialog by remember { mutableStateOf(false) }
+    var showClearConfirmDialog by remember { mutableStateOf(false) }
+    var showBlockedUsersSheet by remember { mutableStateOf(false) }
 
     // Edge case check state: does recipient have public encryption key?
     var recipientKeyReady by remember { mutableStateOf<Boolean?>(null) }
@@ -360,113 +372,338 @@ fun DirectChatScreen(
         Scaffold(
             containerColor = Color(0xFFFAFAEE),
             topBar = {
-                ChatHeader(
-                    partnerName = partnerName,
-                    partnerAvatarUrl = partnerAvatarUrl,
-                    partnerCountry = partnerCountry,
-                    partnerCountryCode = partnerCountryCode,
-                    isOnline = true,
-                    onBackClick = onBack,
-                    onMenuClick = {
-                        Toast.makeText(context, "End-to-End Encrypted Chat with $partnerName", Toast.LENGTH_SHORT).show()
-                    }
-                )
-            },
-            bottomBar = {
-                Column(modifier = Modifier.background(Color(0xFFFAFAEE))) {
-                    // AI Quick Action Buttons Row
-                    AIActionsRow(
-                        onTranslateClick = {
-                            val lastReceived = uiMessages.findLast { !it.isMe && it.type == ChatMessageType.TEXT }
-                            if (lastReceived != null) {
-                                Toast.makeText(context, "Original text shown", Toast.LENGTH_SHORT).show()
-                            } else {
-                                Toast.makeText(context, "No received message to translate", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        onImproveTextClick = {
-                            if (inputText.isNotBlank()) {
-                                inputText = "Thank you so much! I'm genuinely trying my best every day."
-                                Toast.makeText(context, "Polished your sentence!", Toast.LENGTH_SHORT).show()
-                            } else {
-                                inputText = "I would love to practice speaking together soon!"
-                                Toast.makeText(context, "Practice suggestion added!", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        onExampleReplyClick = {
-                            inputText = "That sounds wonderful! When are you free for a conversation?"
-                            Toast.makeText(context, "Example reply ready!", Toast.LENGTH_SHORT).show()
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    ChatHeader(
+                        partnerName = partnerName,
+                        partnerAvatarUrl = partnerAvatarUrl,
+                        partnerCountry = partnerCountry,
+                        partnerCountryCode = partnerCountryCode,
+                        isOnline = true,
+                        onBackClick = onBack,
+                        onMenuClick = {
+                            showOptionsMenu = true
                         }
                     )
 
-                    // 3D Fluent Emoji Picker Tray (shows when smiley icon is tapped)
-                    FluentEmojiPickerTray(
-                        visible = showEmojiPicker,
-                        onEmojiSelected = { unicode, _ ->
-                            inputText += unicode
-                        }
-                    )
-
-                    // Message Composer
-                    MessageComposer(
-                        messageText = inputText,
-                        onMessageChange = { inputText = it },
-                        onSendMessage = {
-                            if (inputText.isNotBlank() && !isSending) {
-                                val textToSend = inputText.trim()
-                                val replyText = replyingToMessage?.text
-                                val replySender = replyingToMessage?.let { if (it.isMe) "You" else partnerName }
-                                isSending = true
-
-                                coroutineScope.launch {
-                                    val sendResult = EncryptedChatRepository.sendMessage(
-                                        context = context,
-                                        recipientUserId = partnerUserId.ifBlank { "partner_mock_id" },
-                                        recipientName = partnerName,
-                                        recipientAvatar = partnerAvatarUrl,
-                                        text = textToSend,
-                                        replyToText = replyText,
-                                        replyToSender = replySender
-                                    )
-                                    isSending = false
-                                    sendResult.onSuccess {
-                                        inputText = ""
-                                        replyingToMessage = null
-                                        recipientKeyReady = true
-                                        showEmojiPicker = false
-                                    }.onFailure { ex ->
-                                        if (ex is RecipientNotReadyException) {
-                                            recipientKeyReady = false
-                                            showNotReadyDialog = true
+                    DropdownMenu(
+                        expanded = showOptionsMenu,
+                        onDismissRequest = { showOptionsMenu = false },
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 48.dp, end = 16.dp)
+                            .width(230.dp)
+                            .background(Color.White)
+                    ) {
+                        // 1. Mute / Unmute
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isMuted) Color(0xFFD1FAE5) else Color(0xFFF3F4F6)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (isMuted) {
+                                            SoftVolumeIcon(size = 15.dp, color = Color(0xFF10B981))
                                         } else {
-                                            Toast.makeText(context, ex.message ?: "Failed to encrypt and send message", Toast.LENGTH_LONG).show()
+                                            SoftMuteIcon(size = 15.dp, color = Color(0xFF4B5563))
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text(
+                                        text = if (isMuted) "Unmute notifications" else "Mute notifications",
+                                        color = Color.Black,
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            },
+                            onClick = {
+                                showOptionsMenu = false
+                                val targetId = conversationId.ifBlank { partnerUserId }
+                                val mutedNow = ChatPreferencesManager.toggleMuteChat(context, targetId)
+                                Toast.makeText(
+                                    context,
+                                    if (mutedNow) "Notifications muted" else "Notifications unmuted",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        )
+
+                        // 2. Clear Chat History
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFFF3F4F6)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        SoftBroomIcon(size = 15.dp, color = Color(0xFF4B5563))
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text(
+                                        text = "Clear chat history",
+                                        color = Color.Black,
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            },
+                            onClick = {
+                                showOptionsMenu = false
+                                showClearConfirmDialog = true
+                            }
+                        )
+
+                        // 3. Block / Unblock User
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isBlocked) Color(0xFFD1FAE5) else Color(0xFFFEE2E2)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (isBlocked) {
+                                            SoftShieldIcon(size = 15.dp, color = Color(0xFF059669))
+                                        } else {
+                                            SoftBlockIcon(size = 15.dp, color = Color(0xFFDC2626))
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text(
+                                        text = if (isBlocked) "Unblock $partnerName" else "Block $partnerName",
+                                        color = if (isBlocked) Color(0xFF059669) else Color(0xFFDC2626),
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            },
+                            onClick = {
+                                showOptionsMenu = false
+                                if (isBlocked) {
+                                    ChatPreferencesManager.unblockUser(context, partnerUserId)
+                                    Toast.makeText(context, "$partnerName unblocked successfully", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    showBlockConfirmDialog = true
+                                }
+                            }
+                        )
+
+                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
+
+                        // 4. Blocked Users List
+                        DropdownMenuItem(
+                            text = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFFFEE2E2)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        SoftShieldIcon(size = 15.dp, color = Color(0xFFDC2626))
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text(
+                                        text = "Blocked Users",
+                                        color = Color.Black,
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    if (blockedUsers.isNotEmpty()) {
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(Color(0xFFDC2626))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = "${blockedUsers.size}",
+                                                color = Color.White,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
                                         }
                                     }
                                 }
+                            },
+                            onClick = {
+                                showOptionsMenu = false
+                                showBlockedUsersSheet = true
                             }
-                        },
-                        onAddClick = {
-                            showAttachmentSheet = true
-                        },
-                        onSmileyClick = {
-                            showEmojiPicker = !showEmojiPicker
-                        },
-                        onMicClick = {
-                            if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                                val started = com.example.util.VoiceRecorderManager.startRecording(context)
-                                if (started) {
-                                    isRecordingVoice = true
-                                    recordingSeconds = 0
-                                } else {
-                                    Toast.makeText(context, "Could not start voice recorder", Toast.LENGTH_SHORT).show()
+                        )
+                    }
+                }
+            },
+            bottomBar = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFFFAFAEE))
+                        .navigationBarsPadding()
+                        .imePadding()
+                ) {
+                    if (isBlocked) {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            shape = RoundedCornerShape(18.dp),
+                            color = Color(0xFFFEF2F2),
+                            border = BorderStroke(1.dp, Color(0xFFFCA5A5))
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    SoftBlockIcon(size = 22.dp, color = Color(0xFFDC2626))
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = "User Blocked",
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF991B1B)
+                                        )
+                                        Text(
+                                            text = "You have blocked $partnerName. Unblock to send messages.",
+                                            fontSize = 11.5.sp,
+                                            color = Color(0xFFB91C1C)
+                                        )
+                                    }
                                 }
-                            } else {
-                                recordAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Button(
+                                    onClick = {
+                                        ChatPreferencesManager.unblockUser(context, partnerUserId)
+                                        Toast.makeText(context, "$partnerName unblocked", Toast.LENGTH_SHORT).show()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(0xFFDC2626),
+                                        contentColor = Color.White
+                                    ),
+                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Text(text = "Unblock", fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                                }
                             }
-                        },
-                        replyingToMessage = replyingToMessage,
-                        onCancelReply = { replyingToMessage = null }
-                    )
+                        }
+                    } else {
+                        // AI Quick Action Buttons Row
+                        AIActionsRow(
+                            onTranslateClick = {
+                                val lastReceived = uiMessages.findLast { !it.isMe && it.type == ChatMessageType.TEXT }
+                                if (lastReceived != null) {
+                                    Toast.makeText(context, "Original text shown", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "No received message to translate", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            onImproveTextClick = {
+                                if (inputText.isNotBlank()) {
+                                    inputText = "Thank you so much! I'm genuinely trying my best every day."
+                                    Toast.makeText(context, "Polished your sentence!", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    inputText = "I would love to practice speaking together soon!"
+                                    Toast.makeText(context, "Practice suggestion added!", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            onExampleReplyClick = {
+                                inputText = "That sounds wonderful! When are you free for a conversation?"
+                                Toast.makeText(context, "Example reply ready!", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+
+                        // 3D Fluent Emoji Picker Tray (shows when smiley icon is tapped)
+                        FluentEmojiPickerTray(
+                            visible = showEmojiPicker,
+                            onEmojiSelected = { unicode, _ ->
+                                inputText += unicode
+                            }
+                        )
+
+                        // Message Composer
+                        MessageComposer(
+                            messageText = inputText,
+                            onMessageChange = { inputText = it },
+                            onSendMessage = {
+                                if (inputText.isNotBlank() && !isSending) {
+                                    val textToSend = inputText.trim()
+                                    val replyText = replyingToMessage?.text
+                                    val replySender = replyingToMessage?.let { if (it.isMe) "You" else partnerName }
+                                    isSending = true
+
+                                    coroutineScope.launch {
+                                        val sendResult = EncryptedChatRepository.sendMessage(
+                                            context = context,
+                                            recipientUserId = partnerUserId.ifBlank { "partner_mock_id" },
+                                            recipientName = partnerName,
+                                            recipientAvatar = partnerAvatarUrl,
+                                            text = textToSend,
+                                            replyToText = replyText,
+                                            replyToSender = replySender
+                                        )
+                                        isSending = false
+                                        sendResult.onSuccess {
+                                            inputText = ""
+                                            replyingToMessage = null
+                                            recipientKeyReady = true
+                                            showEmojiPicker = false
+                                        }.onFailure { ex ->
+                                            if (ex is RecipientNotReadyException) {
+                                                recipientKeyReady = false
+                                                showNotReadyDialog = true
+                                            } else {
+                                                Toast.makeText(context, ex.message ?: "Failed to encrypt and send message", Toast.LENGTH_LONG).show()
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            onAddClick = {
+                                showAttachmentSheet = true
+                            },
+                            onSmileyClick = {
+                                showEmojiPicker = !showEmojiPicker
+                            },
+                            onMicClick = {
+                                if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                    val started = com.example.util.VoiceRecorderManager.startRecording(context)
+                                    if (started) {
+                                        isRecordingVoice = true
+                                        recordingSeconds = 0
+                                    } else {
+                                        Toast.makeText(context, "Could not start voice recorder", Toast.LENGTH_SHORT).show()
+                                    }
+                                } else {
+                                    recordAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                                }
+                            },
+                            replyingToMessage = replyingToMessage,
+                            onCancelReply = { replyingToMessage = null }
+                        )
+                    }
 
                     // Active Voice Recording Bar
                     if (isRecordingVoice) {
@@ -575,6 +812,69 @@ fun DirectChatScreen(
                     DateSeparatorPill(dateText = "Today")
                 }
 
+                // Blocked Warning Banner
+                if (isBlocked) {
+                    item {
+                        Surface(
+                            color = Color(0xFFFEF2F2),
+                            border = BorderStroke(1.dp, Color(0xFFFECACA)),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFFFEE2E2)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        SoftBlockIcon(size = 16.dp, color = Color(0xFFDC2626))
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = "You blocked $partnerName",
+                                            color = Color(0xFF991B1B),
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = "Messages and calls are restricted",
+                                            color = Color(0xFFB91C1C),
+                                            fontSize = 11.5.sp
+                                        )
+                                    }
+                                }
+                                Button(
+                                    onClick = {
+                                        ChatPreferencesManager.unblockUser(context, partnerUserId)
+                                        Toast.makeText(context, "$partnerName unblocked successfully", Toast.LENGTH_SHORT).show()
+                                    },
+                                    shape = RoundedCornerShape(50.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(32.dp)
+                                ) {
+                                    Text("Unblock", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 if (uiMessages.isEmpty()) {
                     item {
                         Box(
@@ -599,7 +899,7 @@ fun DirectChatScreen(
                 }
 
                 // Dynamic message bubbles (Text, Voice Notes, & Single/Stacked Images)
-                items(uiMessages, key = { it.id }) { msg ->
+                items(uiMessages.distinctBy { it.id }, key = { it.id }) { msg ->
                     if (msg.type == ChatMessageType.AUDIO) {
                         VoiceMessageBubble(
                             message = msg,
@@ -617,8 +917,16 @@ fun DirectChatScreen(
                             onImageClick = { url ->
                                 previewImageUrl = url
                             },
-                            onDownloadClick = {
-                                Toast.makeText(context, "Image saved to gallery", Toast.LENGTH_SHORT).show()
+                            onDownloadClick = { imgUrl ->
+                                coroutineScope.launch {
+                                    Toast.makeText(context, "Saving image...", Toast.LENGTH_SHORT).show()
+                                    val res = com.example.util.ImageSaveUtils.saveImageToGallery(context, imgUrl)
+                                    res.onSuccess { msgStr ->
+                                        Toast.makeText(context, "✅ $msgStr", Toast.LENGTH_SHORT).show()
+                                    }.onFailure { ex ->
+                                        Toast.makeText(context, "Failed to save: ${ex.message}", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
                             },
                             onReactionClick = { selectedMessageForMenu = msg },
                             onLongClick = { selectedMessageForMenu = msg }
@@ -703,11 +1011,9 @@ fun DirectChatScreen(
                                     .background(Color(0xFFFEF3C7)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.PhotoLibrary,
-                                    contentDescription = "Photos",
-                                    tint = Color(0xFFD97706),
-                                    modifier = Modifier.size(24.dp)
+                                SoftImageIcon(
+                                    size = 24.dp,
+                                    color = Color(0xFFD97706)
                                 )
                             }
                             Spacer(modifier = Modifier.width(14.dp))
@@ -782,11 +1088,9 @@ fun DirectChatScreen(
                                     .background(Color(0xFFE0E7FF)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Image,
-                                    contentDescription = "Travel Album",
-                                    tint = Color(0xFF4F46E5),
-                                    modifier = Modifier.size(24.dp)
+                                SoftImageIcon(
+                                    size = 24.dp,
+                                    color = Color(0xFF4F46E5)
                                 )
                             }
                             Spacer(modifier = Modifier.width(14.dp))
@@ -878,11 +1182,9 @@ fun DirectChatScreen(
                                 .border(1.5.dp, Color(0xFFFDE68A), RoundedCornerShape(30.dp)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Security,
-                                contentDescription = "Security Notice",
-                                tint = Color(0xFFD97706),
-                                modifier = Modifier.size(28.dp)
+                            SoftShieldIcon(
+                                size = 28.dp,
+                                color = Color(0xFFD97706)
                             )
                         }
 
@@ -958,11 +1260,9 @@ fun DirectChatScreen(
                                 .fillMaxWidth()
                                 .height(48.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = "Check Again",
-                                tint = Color(0xFF4B5563),
-                                modifier = Modifier.size(16.dp)
+                            SoftSwapIcon(
+                                size = 16.dp,
+                                color = Color(0xFF4B5563)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
@@ -975,6 +1275,291 @@ fun DirectChatScreen(
                     }
                 }
             }
+        }
+
+        // Custom Luxury Block Confirmation Dialog
+        if (showBlockConfirmDialog) {
+            Dialog(
+                onDismissRequest = { showBlockConfirmDialog = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.55f))
+                        .clickable { showBlockConfirmDialog = false },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Surface(
+                        modifier = Modifier
+                            .padding(horizontal = 24.dp)
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(32.dp))
+                            .clickable(enabled = false) {},
+                        shape = RoundedCornerShape(32.dp),
+                        color = Color.White,
+                        shadowElevation = 24.dp,
+                        border = BorderStroke(1.dp, Color(0xFFFEE2E2))
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            // Double ring circular avatar with crimson ban badge
+                            Box(
+                                modifier = Modifier.size(76.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                UserAvatarImage(
+                                    avatarUrl = partnerAvatarUrl,
+                                    contentDescription = partnerName,
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                    modifier = Modifier
+                                        .size(72.dp)
+                                        .clip(CircleShape)
+                                        .border(2.5.dp, Color(0xFFFECDD3), CircleShape)
+                                )
+
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .size(26.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFFE11D48))
+                                        .border(2.dp, Color.White, CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    SoftBlockIcon(size = 14.dp, color = Color.White)
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            Text(
+                                text = "Block $partnerName?",
+                                fontSize = 21.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF111827),
+                                textAlign = TextAlign.Center
+                            )
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(18.dp),
+                                color = Color(0xFFFFF1F2),
+                                border = BorderStroke(1.dp, Color(0xFFFFE4E6))
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        SoftBlockIcon(size = 15.dp, color = Color(0xFFE11D48))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "Cannot send messages or voice notes",
+                                            fontSize = 12.5.sp,
+                                            color = Color(0xFF9F1239),
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        SoftMuteIcon(size = 15.dp, color = Color(0xFFE11D48))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "Cannot call you or see your online status",
+                                            fontSize = 12.5.sp,
+                                            color = Color(0xFF9F1239),
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        SoftShieldIcon(size = 15.dp, color = Color(0xFFE11D48))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "Hidden from your conversations list",
+                                            fontSize = 12.5.sp,
+                                            color = Color(0xFF9F1239),
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Text(
+                                text = "💡 You can unblock this user anytime from 3-dots Menu > Blocked Users.",
+                                fontSize = 12.sp,
+                                color = Color(0xFF6B7280),
+                                textAlign = TextAlign.Center,
+                                lineHeight = 16.sp
+                            )
+
+                            Spacer(modifier = Modifier.height(20.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = { showBlockConfirmDialog = false },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp),
+                                    shape = RoundedCornerShape(16.dp),
+                                    border = BorderStroke(1.dp, Color(0xFFE5E7EB))
+                                ) {
+                                    Text(
+                                        text = "Cancel",
+                                        color = Color(0xFF374151),
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    )
+                                }
+
+                                Button(
+                                    onClick = {
+                                        showBlockConfirmDialog = false
+                                        ChatPreferencesManager.blockUser(context, partnerUserId)
+                                        ChatPreferencesManager.markChatDeleted(context, partnerUserId)
+                                        Toast.makeText(
+                                            context,
+                                            "$partnerName blocked. You can unblock anytime from 3-dots Menu > Blocked Users.",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp),
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48))
+                                ) {
+                                    Text(
+                                        text = "Block User",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 14.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Custom Clear Chat Confirmation Dialog
+        if (showClearConfirmDialog) {
+            Dialog(
+                onDismissRequest = { showClearConfirmDialog = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.5f))
+                        .clickable { showClearConfirmDialog = false },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Surface(
+                        modifier = Modifier
+                            .padding(horizontal = 28.dp)
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(28.dp))
+                            .clickable(enabled = false) {},
+                        shape = RoundedCornerShape(28.dp),
+                        color = Color.White,
+                        shadowElevation = 16.dp
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFFEE2E2)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                SoftBroomIcon(size = 28.dp, color = Color(0xFFDC2626))
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            Text(
+                                text = "Clear Chat History?",
+                                fontSize = 19.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF111827)
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Text(
+                                text = "This will permanently delete all messages in this conversation from your device.",
+                                fontSize = 13.5.sp,
+                                color = Color(0xFF6B7280),
+                                textAlign = TextAlign.Center,
+                                lineHeight = 19.sp
+                            )
+
+                            Spacer(modifier = Modifier.height(24.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = { showClearConfirmDialog = false },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp),
+                                    shape = RoundedCornerShape(16.dp),
+                                    border = BorderStroke(1.dp, Color(0xFFE5E7EB))
+                                ) {
+                                    Text("Cancel", color = Color(0xFF374151), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                }
+
+                                Button(
+                                    onClick = {
+                                        showClearConfirmDialog = false
+                                        if (conversationId.isNotBlank()) {
+                                            coroutineScope.launch {
+                                                EncryptedChatRepository.clearConversationMessages(conversationId)
+                                                Toast.makeText(context, "Chat history cleared", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp),
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                                ) {
+                                    Text("Clear", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Blocked Users Bottom Sheet
+        if (showBlockedUsersSheet) {
+            BlockedUsersBottomSheet(
+                onDismiss = { showBlockedUsersSheet = false }
+            )
         }
     }
 }

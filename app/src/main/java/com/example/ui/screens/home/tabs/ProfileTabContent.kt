@@ -51,8 +51,10 @@ import com.example.ui.components.LanguageItem
 import com.example.ui.components.LanguageResolver
 import com.example.ui.components.MultiLanguageExchangeCard
 import com.example.ui.components.PresetAvatarList
+import com.example.ui.components.SoftBlockIcon
 import com.example.ui.components.resolveAvatarModel
 import com.example.ui.screens.*
+import com.example.ui.screens.home.dialogs.BlockedUsersBottomSheet
 import com.example.ui.screens.home.dialogs.ModerationReviewDialog
 import com.example.ui.screens.home.models.DarkText
 import com.example.ui.screens.profile.EditProfileScreen
@@ -78,8 +80,13 @@ fun ProfileTabContent(
 
     var showEditProfileDialog by remember { mutableStateOf(false) }
     var showModerationDialog by remember { mutableStateOf(false) }
+    var showBlockedUsersSheet by remember { mutableStateOf(false) }
     var showOptionsMenuSheet by remember { mutableStateOf(false) }
     var isAdmin by remember { mutableStateOf(false) }
+
+    var activeFollowerUserId by remember { mutableStateOf<String?>(null) }
+    var activeFollowersMode by remember { mutableStateOf(true) } // true = followers, false = following
+    var activeClickedProfile by remember { mutableStateOf<com.example.DiscoverableProfile?>(null) }
 
     val userId = currentUserProfile.uid
     var currentProfileName by remember(currentUserProfile.displayName) { mutableStateOf(currentUserProfile.displayName?.ifBlank { "pikaa" } ?: "pikaa") }
@@ -498,14 +505,30 @@ fun ProfileTabContent(
                                 .height(28.dp)
                                 .background(Color(0xFFE2E8F0))
                         )
-                        StatItemExact(count = followersCount.toString(), label = "Followers", modifier = Modifier.weight(1f))
+                        StatItemExact(
+                            count = followersCount.toString(),
+                            label = "Followers",
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                activeFollowerUserId = userId
+                                activeFollowersMode = true
+                            }
+                        )
                         Box(
                             modifier = Modifier
                                 .width(1.dp)
                                 .height(28.dp)
                                 .background(Color(0xFFE2E8F0))
                         )
-                        StatItemExact(count = followingCount.toString(), label = "Following", modifier = Modifier.weight(1f))
+                        StatItemExact(
+                            count = followingCount.toString(),
+                            label = "Following",
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                activeFollowerUserId = userId
+                                activeFollowersMode = false
+                            }
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -1072,7 +1095,27 @@ fun ProfileTabContent(
                     }
                 }
 
-                // 4. Logout
+                // 4. Blocked Users
+                Surface(
+                    onClick = {
+                        showOptionsMenuSheet = false
+                        showBlockedUsersSheet = true
+                    },
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0xFFF1F5F9),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        SoftBlockIcon(size = 18.dp, color = Color(0xFF475569))
+                        Text("Blocked Users", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+                    }
+                }
+
+                // 5. Logout
                 Surface(
                     onClick = {
                         showOptionsMenuSheet = false
@@ -1095,6 +1138,13 @@ fun ProfileTabContent(
         }
     }
 
+    // Blocked Users Bottom Sheet
+    if (showBlockedUsersSheet) {
+        BlockedUsersBottomSheet(
+            onDismiss = { showBlockedUsersSheet = false }
+        )
+    }
+
     // Edit Profile Dialog Fullscreen Redesign
     if (showEditProfileDialog) {
         EditProfileScreen(
@@ -1110,6 +1160,33 @@ fun ProfileTabContent(
             onDismiss = { showModerationDialog = false },
             currentUserProfile = currentUserProfile,
             supabaseProfiles = supabaseProfiles
+        )
+    }
+
+    if (activeFollowerUserId != null) {
+        com.example.ui.screens.profile.FollowersListBottomSheet(
+            userId = activeFollowerUserId!!,
+            showFollowers = activeFollowersMode,
+            onDismiss = { activeFollowerUserId = null },
+            onUserClick = { user ->
+                activeClickedProfile = user
+            }
+        )
+    }
+
+    if (activeClickedProfile != null) {
+        val user = activeClickedProfile!!
+        com.example.ui.screens.UserProfileFeedScreen(
+            userId = user.auth_user_id,
+            username = user.username ?: "anonymous",
+            profileName = user.profile_name ?: user.username ?: "Anonymous",
+            avatarUrl = user.avatar_url ?: "",
+            countryCode = user.country_code ?: "us",
+            bio = user.bio ?: "",
+            onBack = { activeClickedProfile = null },
+            onStartChat = {
+                activeClickedProfile = null
+            }
         )
     }
 }

@@ -13,6 +13,10 @@ import java.util.*
 
 object SupportChatManager {
     private const val TAG = "SupportChatManager"
+    private const val PREFS_NAME = "funkytalk_support_prefs"
+    private const val KEY_READ_IDS = "read_admin_msg_ids"
+    private const val KEY_LAST_READ_TIME = "last_read_timestamp"
+
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private val _conversation = MutableStateFlow<SupabaseSupportConversation?>(null)
@@ -38,6 +42,33 @@ object SupportChatManager {
 
     private var subscribedConversationId: String? = null
     private var isListening = false
+
+    private fun getReadMessageIds(context: Context): Set<String> {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getStringSet(KEY_READ_IDS, emptySet()) ?: emptySet()
+    }
+
+    private fun saveReadMessageIds(context: Context, ids: Set<String>, timestamp: Long) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val existing = prefs.getStringSet(KEY_READ_IDS, emptySet()) ?: emptySet()
+        prefs.edit()
+            .putStringSet(KEY_READ_IDS, existing + ids)
+            .putLong(KEY_LAST_READ_TIME, timestamp)
+            .apply()
+    }
+
+    private fun parseIsoToMillis(isoString: String?): Long {
+        if (isoString.isNullOrBlank()) return 0L
+        return try {
+            val clean = isoString.replace("Z", "+0000").replace("T", " ")
+            val format = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }
+            format.parse(clean)?.time ?: 0L
+        } catch (_: Exception) {
+            0L
+        }
+    }
 
     fun init(context: Context) {
         if (!isListening) {
@@ -89,15 +120,33 @@ object SupportChatManager {
                             conversationIdFilter = "eq.$convId"
                         )
                         if (msgRes.isSuccessful && msgRes.body() != null) {
-                            val msgList = msgRes.body()!!
-                            _messages.value = msgList
+                            val rawList = msgRes.body()!!
 
-                            // Calculate unread admin messages
-                            val unreadAdmin = msgList.count { it.sender_type == "admin" && !it.is_read_by_user }
+                            // Deduplicate raw messages by ID and by signature (sender + body + time)
+                            val distinctList = rawList
+                                .distinctBy { it.id }
+                                .distinctBy { "${it.sender_type}|${it.body.trim()}|${it.created_at}" }
+
+                            val locallyReadIds = getReadMessageIds(context)
+                            val lastReadTime = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                                .getLong(KEY_LAST_READ_TIME, 0L)
+
+                            val processedList = distinctList.map { msg ->
+                                val msgTimestamp = parseIsoToMillis(msg.created_at)
+                                if (msg.id in locallyReadIds || (lastReadTime > 0 && msgTimestamp > 0 && msgTimestamp <= lastReadTime)) {
+                                    msg.copy(is_read_by_user = true)
+                                } else {
+                                    msg
+                                }
+                            }
+                            _messages.value = processedList
+
+                            // Calculate unread admin messages strictly
+                            val unreadAdmin = processedList.count { it.sender_type == "admin" && !it.is_read_by_user }
                             _unreadCount.value = unreadAdmin
 
                             // Update latest preview
-                            val lastMsg = msgList.lastOrNull()
+                            val lastMsg = processedList.lastOrNull()
                             if (lastMsg != null) {
                                 _latestMessagePreview.value = if (lastMsg.sender_type == "admin") {
                                     lastMsg.body
@@ -157,7 +206,8 @@ object SupportChatManager {
                         timeZone = TimeZone.getTimeZone("UTC")
                     }.format(Date())
                 )
-                _messages.value = _messages.value + optimisticMsg
+                val current = _messages.value
+                _messages.value = (current + optimisticMsg).distinctBy { it.id }
                 _latestMessagePreview.value = "You: $trimmed"
                 _latestMessageTime.value = "Just now"
 
@@ -195,15 +245,15 @@ object SupportChatManager {
     }
 
     fun markSupportConversationRead(context: Context) {
-        // Optimistically mark all admin messages as read by user locally
+        // Mark all current admin messages as read in local storage and memory
         val currentMsgs = _messages.value
-        val hasUnread = currentMsgs.any { it.sender_type == "admin" && !it.is_read_by_user }
-        if (hasUnread) {
-            _messages.value = currentMsgs.map {
-                if (it.sender_type == "admin") it.copy(is_read_by_user = true) else it
-            }
-            _unreadCount.value = 0
+        val adminIds = currentMsgs.filter { it.sender_type == "admin" }.map { it.id }.toSet()
+        saveReadMessageIds(context, adminIds, System.currentTimeMillis())
+
+        _messages.value = currentMsgs.map {
+            if (it.sender_type == "admin") it.copy(is_read_by_user = true) else it
         }
+        _unreadCount.value = 0
 
         scope.launch {
             try {

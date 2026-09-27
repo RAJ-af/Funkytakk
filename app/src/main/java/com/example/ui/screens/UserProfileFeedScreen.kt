@@ -152,6 +152,10 @@ fun UserProfileFeedScreen(
     var waveCustomMessage by remember { mutableStateOf("") }
     var isSendingHi by remember { mutableStateOf(false) }
 
+    var activeFollowerUserId by remember { mutableStateOf<String?>(null) }
+    var activeFollowersMode by remember { mutableStateOf(true) } // true = followers, false = following
+    var activeClickedProfile by remember { mutableStateOf<com.example.DiscoverableProfile?>(null) }
+
     // -------------------------------------------------------------------------
     // 1. FETCH REAL SUPABASE DATA ON LAUNCH
     // -------------------------------------------------------------------------
@@ -715,14 +719,30 @@ fun UserProfileFeedScreen(
                                 .height(28.dp)
                                 .background(Color(0xFFE2E8F0))
                         )
-                        StatItemExact(count = formatStatsCount(followersCount), label = "Followers", modifier = Modifier.weight(1f))
+                        StatItemExact(
+                            count = formatStatsCount(followersCount),
+                            label = "Followers",
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                activeFollowerUserId = userId
+                                activeFollowersMode = true
+                            }
+                        )
                         Box(
                             modifier = Modifier
                                 .width(1.dp)
                                 .height(28.dp)
                                 .background(Color(0xFFE2E8F0))
                         )
-                        StatItemExact(count = formatStatsCount(followingCount), label = "Following", modifier = Modifier.weight(1f))
+                        StatItemExact(
+                            count = formatStatsCount(followingCount),
+                            label = "Following",
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                activeFollowerUserId = userId
+                                activeFollowersMode = false
+                            }
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -1357,6 +1377,33 @@ fun UserProfileFeedScreen(
                 }
             )
         }
+
+        if (activeFollowerUserId != null) {
+            com.example.ui.screens.profile.FollowersListBottomSheet(
+                userId = activeFollowerUserId!!,
+                showFollowers = activeFollowersMode,
+                onDismiss = { activeFollowerUserId = null },
+                onUserClick = { user ->
+                    activeClickedProfile = user
+                }
+            )
+        }
+
+        if (activeClickedProfile != null) {
+            val user = activeClickedProfile!!
+            com.example.ui.screens.UserProfileFeedScreen(
+                userId = user.auth_user_id,
+                username = user.username ?: "anonymous",
+                profileName = user.profile_name ?: user.username ?: "Anonymous",
+                avatarUrl = user.avatar_url ?: "",
+                countryCode = user.country_code ?: "us",
+                bio = user.bio ?: "",
+                onBack = { activeClickedProfile = null },
+                onStartChat = {
+                    activeClickedProfile = null
+                }
+            )
+        }
     }
 }
 
@@ -1487,10 +1534,12 @@ fun ProfileCardContainer(
 fun StatItemExact(
     count: String,
     label: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
 ) {
     Column(
-        modifier = modifier,
+        modifier = modifier
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(

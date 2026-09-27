@@ -19,10 +19,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -33,6 +35,7 @@ import com.example.SupabaseMomentComment
 import com.example.SupabaseSessionManager
 import com.example.CloudinaryUploadResponse
 import com.example.ui.components.*
+import com.example.ui.screens.chat.components.ChatImagePreviewDialog
 import com.example.ui.screens.home.models.MomentPost
 import com.example.ui.screens.post.DetailedPost
 import com.example.ui.screens.post.PostComment
@@ -176,6 +179,7 @@ fun MomentsTabContent(
     }
 
     val displayList = if (liveMoments.isNotEmpty()) liveMoments else momentsPosts
+    var previewImageUrl by remember { mutableStateOf<String?>(null) }
 
     Box(modifier = Modifier.fillMaxSize().background(Color(0xFFFAFAEE))) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -384,24 +388,99 @@ fun MomentsTabContent(
                                     SoftThreeDotsIcon(size = 18.dp, color = Color(0xFF94A3B8))
                                 }
 
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text(post.content, color = Color(0xFF1E293B), fontSize = 14.sp, lineHeight = 20.sp)
+                                val gradientThemes = remember {
+                                    listOf(
+                                        listOf(Color(0xFF6366F1), Color(0xFFA855F7), Color(0xFFEC4899)),
+                                        listOf(Color(0xFFF97316), Color(0xFFEF4444), Color(0xFFF59E0B)),
+                                        listOf(Color(0xFF10B981), Color(0xFF06B6D4), Color(0xFF3B82F6)),
+                                        listOf(Color(0xFF0F172A), Color(0xFF1E1B4B), Color(0xFF4C1D95)),
+                                        listOf(Color(0xFFF43F5E), Color(0xFFFB7185), Color(0xFFFDA4AF)),
+                                        listOf(Color(0xFF18181B), Color(0xFF27272A), Color(0xFF3F3F46))
+                                    )
+                                }
 
-                                if (post.imageUrl != null) {
+                                val isGradient = post.content.startsWith("[gradient:")
+                                val isVideoPost = post.content.startsWith("[video]") || (post.imageUrl != null && (post.imageUrl.contains(".mp4") || post.imageUrl.contains("video")))
+
+                                val gradientIdx = if (isGradient) {
+                                    post.content.substringAfter("[gradient:").substringBefore("]").toIntOrNull() ?: 0
+                                } else 0
+
+                                val cleanText = post.content
+                                    .replace(Regex("^\\[gradient:\\d+\\]\\s*"), "")
+                                    .replace(Regex("^\\[video\\]\\s*"), "")
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                if (isGradient) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(min = 160.dp)
+                                            .clip(RoundedCornerShape(18.dp))
+                                            .background(Brush.linearGradient(gradientThemes[gradientIdx.coerceIn(0, 5)]))
+                                            .padding(20.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = cleanText,
+                                            color = Color.White,
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            textAlign = TextAlign.Center,
+                                            lineHeight = 24.sp
+                                        )
+                                    }
+                                } else if (cleanText.isNotBlank()) {
+                                    Text(cleanText, color = Color(0xFF1E293B), fontSize = 14.sp, lineHeight = 20.sp)
+                                }
+
+                                if (post.imageUrl != null && !isGradient) {
                                     Spacer(modifier = Modifier.height(12.dp))
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .height(220.dp)
-                                            .clip(RoundedCornerShape(14.dp))
+                                            .clip(RoundedCornerShape(16.dp))
                                             .background(Color(0xFFE2E8F0))
+                                            .clickable { previewImageUrl = post.imageUrl }
                                     ) {
                                         AsyncImage(
                                             model = post.imageUrl,
-                                            contentDescription = null,
+                                            contentDescription = "Post media",
                                             contentScale = ContentScale.Crop,
                                             modifier = Modifier.fillMaxSize()
                                         )
+
+                                        if (isVideoPost) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .align(Alignment.Center)
+                                                    .size(48.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color.Black.copy(alpha = 0.5f)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                SoftPlayIcon(size = 22.dp)
+                                            }
+
+                                            Surface(
+                                                color = Color.Black.copy(alpha = 0.65f),
+                                                shape = RoundedCornerShape(10.dp),
+                                                modifier = Modifier
+                                                    .align(Alignment.BottomEnd)
+                                                     .padding(10.dp)
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    SoftVideoIcon(size = 12.dp, color = Color.White)
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text("Video", fontSize = 10.5.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+                                        }
                                     }
                                 }
 
@@ -525,6 +604,14 @@ fun MomentsTabContent(
                     showCreateDialog = false
                     fetchMoments()
                 }
+            )
+        }
+
+        // Fullscreen Image Preview Dialog
+        if (previewImageUrl != null) {
+            ChatImagePreviewDialog(
+                imageUrl = previewImageUrl,
+                onDismiss = { previewImageUrl = null }
             )
         }
 

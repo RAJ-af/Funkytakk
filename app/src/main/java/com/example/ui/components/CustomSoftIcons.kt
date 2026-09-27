@@ -232,7 +232,8 @@ fun SoftKeyIcon(
 fun SoftShieldIcon(
     modifier: Modifier = Modifier,
     size: Dp = 28.dp,
-    gradientColors: List<Color> = listOf(Color(0xFF3B82F6), Color(0xFF1D4ED8)),
+    color: Color? = null,
+    gradientColors: List<Color> = if (color != null) listOf(color, color) else listOf(Color(0xFF3B82F6), Color(0xFF1D4ED8)),
     showCheck: Boolean = true
 ) {
     Canvas(modifier = modifier.size(size)) {
@@ -1354,5 +1355,406 @@ fun SoftTextIcon(modifier: Modifier = Modifier, size: Dp = 24.dp, color: Color =
         drawLine(color, Offset(w * 0.35f, h * 0.8f), Offset(w * 0.65f, h * 0.8f), sw, cap = StrokeCap.Round)
     }
 }
+
+@Composable
+fun SoftPinIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    color: Color = Color(0xFFD97706)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.11f
+
+        // Pin head
+        val headPath = Path().apply {
+            moveTo(w * 0.35f, h * 0.15f)
+            lineTo(w * 0.65f, h * 0.15f)
+            lineTo(w * 0.58f, h * 0.35f)
+            lineTo(w * 0.72f, h * 0.55f)
+            lineTo(w * 0.28f, h * 0.55f)
+            lineTo(w * 0.42f, h * 0.35f)
+            close()
+        }
+        drawPath(headPath, color = color)
+
+        // Pin needle
+        drawLine(
+            color = color,
+            start = Offset(w * 0.5f, h * 0.55f),
+            end = Offset(w * 0.5f, h * 0.88f),
+            strokeWidth = sw,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+@Composable
+fun SoftMuteIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    color: Color = Color(0xFF9CA3AF)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.1f
+
+        // Speaker cone
+        val speakerPath = Path().apply {
+            moveTo(w * 0.18f, h * 0.38f)
+            lineTo(w * 0.32f, h * 0.38f)
+            lineTo(w * 0.52f, h * 0.22f)
+            lineTo(w * 0.52f, h * 0.78f)
+            lineTo(w * 0.32f, h * 0.62f)
+            lineTo(w * 0.18f, h * 0.62f)
+            close()
+        }
+        drawPath(speakerPath, color = color)
+
+        // Slash line
+        drawLine(
+            color = color,
+            start = Offset(w * 0.62f, h * 0.32f),
+            end = Offset(w * 0.88f, h * 0.68f),
+            strokeWidth = sw,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = color,
+            start = Offset(w * 0.88f, h * 0.32f),
+            end = Offset(w * 0.62f, h * 0.68f),
+            strokeWidth = sw,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+@Composable
+fun SoftVolumeIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    color: Color = Color(0xFF10B981)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.1f
+
+        // Speaker cone
+        val speakerPath = Path().apply {
+            moveTo(w * 0.18f, h * 0.38f)
+            lineTo(w * 0.32f, h * 0.38f)
+            lineTo(w * 0.52f, h * 0.22f)
+            lineTo(w * 0.52f, h * 0.78f)
+            lineTo(w * 0.32f, h * 0.62f)
+            lineTo(w * 0.18f, h * 0.62f)
+            close()
+        }
+        drawPath(speakerPath, color = color)
+
+        // Sound waves
+        drawArc(
+            color = color,
+            startAngle = -45f,
+            sweepAngle = 90f,
+            useCenter = false,
+            topLeft = Offset(w * 0.42f, h * 0.30f),
+            size = Size(w * 0.36f, h * 0.40f),
+            style = Stroke(sw, cap = StrokeCap.Round)
+        )
+        drawArc(
+            color = color,
+            startAngle = -45f,
+            sweepAngle = 90f,
+            useCenter = false,
+            topLeft = Offset(w * 0.52f, h * 0.20f),
+            size = Size(w * 0.42f, h * 0.60f),
+            style = Stroke(sw, cap = StrokeCap.Round)
+        )
+    }
+}
+
+@Composable
+fun SoftMailIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    color: Color = Color(0xFF3B82F6)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.1f
+
+        // Envelope body
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(w * 0.12f, h * 0.24f),
+            size = Size(w * 0.76f, h * 0.52f),
+            cornerRadius = CornerRadius(w * 0.12f, w * 0.12f),
+            style = Stroke(sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+
+        // Envelope fold
+        val foldPath = Path().apply {
+            moveTo(w * 0.16f, h * 0.30f)
+            lineTo(w * 0.50f, h * 0.54f)
+            lineTo(w * 0.84f, h * 0.30f)
+        }
+        drawPath(foldPath, color = color, style = Stroke(sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+@Composable
+fun SoftTrashIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    color: Color = Color(0xFFDC2626)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.1f
+
+        // Lid top handle
+        drawArc(
+            color = color,
+            startAngle = 180f,
+            sweepAngle = 180f,
+            useCenter = false,
+            topLeft = Offset(w * 0.38f, h * 0.12f),
+            size = Size(w * 0.24f, h * 0.18f),
+            style = Stroke(sw, cap = StrokeCap.Round)
+        )
+
+        // Lid line
+        drawLine(
+            color = color,
+            start = Offset(w * 0.16f, h * 0.26f),
+            end = Offset(w * 0.84f, h * 0.26f),
+            strokeWidth = sw,
+            cap = StrokeCap.Round
+        )
+
+        // Can body
+        val canPath = Path().apply {
+            moveTo(w * 0.24f, h * 0.28f)
+            lineTo(w * 0.28f, h * 0.82f)
+            quadraticTo(w * 0.29f, h * 0.88f, w * 0.36f, h * 0.88f)
+            lineTo(w * 0.64f, h * 0.88f)
+            quadraticTo(w * 0.71f, h * 0.88f, w * 0.72f, h * 0.82f)
+            lineTo(w * 0.76f, h * 0.28f)
+        }
+        drawPath(canPath, color = color, style = Stroke(sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+
+        // Inner vertical rib lines
+        drawLine(color, Offset(w * 0.42f, h * 0.40f), Offset(w * 0.42f, h * 0.76f), sw * 0.8f, StrokeCap.Round)
+        drawLine(color, Offset(w * 0.58f, h * 0.40f), Offset(w * 0.58f, h * 0.76f), sw * 0.8f, StrokeCap.Round)
+    }
+}
+
+@Composable
+fun SoftBlockIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    color: Color = Color(0xFFDC2626)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.11f
+
+        // Outer circle
+        drawCircle(
+            color = color,
+            radius = w * 0.38f,
+            center = Offset(w * 0.5f, h * 0.5f),
+            style = Stroke(sw)
+        )
+
+        // Diagonal slash
+        val offset = w * 0.26f
+        drawLine(
+            color = color,
+            start = Offset(w * 0.5f - offset, h * 0.5f - offset),
+            end = Offset(w * 0.5f + offset, h * 0.5f + offset),
+            strokeWidth = sw,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+@Composable
+fun SoftGroupIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    color: Color = Color(0xFFD97706)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.09f
+
+        // Center person
+        drawCircle(color, radius = w * 0.16f, center = Offset(w * 0.50f, h * 0.32f), style = Stroke(sw))
+        val centerBody = Path().apply {
+            moveTo(w * 0.26f, h * 0.84f)
+            quadraticTo(w * 0.26f, h * 0.58f, w * 0.50f, h * 0.58f)
+            quadraticTo(w * 0.74f, h * 0.58f, w * 0.74f, h * 0.84f)
+        }
+        drawPath(centerBody, color = color, style = Stroke(sw, cap = StrokeCap.Round))
+
+        // Side person (left)
+        drawCircle(color.copy(alpha = 0.7f), radius = w * 0.12f, center = Offset(w * 0.24f, h * 0.36f), style = Stroke(sw * 0.9f))
+        val leftBody = Path().apply {
+            moveTo(w * 0.10f, h * 0.82f)
+            quadraticTo(w * 0.10f, h * 0.62f, w * 0.26f, h * 0.62f)
+        }
+        drawPath(leftBody, color = color.copy(alpha = 0.7f), style = Stroke(sw * 0.9f, cap = StrokeCap.Round))
+
+        // Side person (right)
+        drawCircle(color.copy(alpha = 0.7f), radius = w * 0.12f, center = Offset(w * 0.76f, h * 0.36f), style = Stroke(sw * 0.9f))
+        val rightBody = Path().apply {
+            moveTo(w * 0.74f, h * 0.62f)
+            quadraticTo(w * 0.90f, h * 0.62f, w * 0.90f, h * 0.82f)
+        }
+        drawPath(rightBody, color = color.copy(alpha = 0.7f), style = Stroke(sw * 0.9f, cap = StrokeCap.Round))
+    }
+}
+
+@Composable
+fun SoftBroomIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    color: Color = Color(0xFF6B7280)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.1f
+
+        // Handle
+        drawLine(
+            color = color,
+            start = Offset(w * 0.75f, h * 0.15f),
+            end = Offset(w * 0.45f, h * 0.50f),
+            strokeWidth = sw,
+            cap = StrokeCap.Round
+        )
+
+        // Bristles base
+        val bristlePath = Path().apply {
+            moveTo(w * 0.35f, h * 0.45f)
+            lineTo(w * 0.55f, h * 0.55f)
+            lineTo(w * 0.30f, h * 0.85f)
+            lineTo(w * 0.15f, h * 0.70f)
+            close()
+        }
+        drawPath(bristlePath, color = color, style = Stroke(sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+
+        // Sparkle
+        drawCircle(color, radius = w * 0.05f, center = Offset(w * 0.75f, h * 0.60f))
+        drawCircle(color, radius = w * 0.035f, center = Offset(w * 0.85f, h * 0.45f))
+    }
+}
+
+@Composable
+fun SoftCheckIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 16.dp,
+    color: Color = Color.Black,
+    strokeWidth: Float = 2.2f
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = strokeWidth * density
+
+        val checkPath = Path().apply {
+            moveTo(w * 0.20f, h * 0.50f)
+            lineTo(w * 0.42f, h * 0.74f)
+            lineTo(w * 0.80f, h * 0.26f)
+        }
+        drawPath(
+            path = checkPath,
+            color = color,
+            style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+    }
+}
+
+@Composable
+fun SoftPersonAddIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    color: Color = Color(0xFFD97706)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.1f
+
+        // Person Head
+        drawCircle(color, radius = w * 0.18f, center = Offset(w * 0.40f, h * 0.32f), style = Stroke(sw))
+
+        // Person Body
+        val body = Path().apply {
+            moveTo(w * 0.14f, h * 0.84f)
+            quadraticTo(w * 0.14f, h * 0.58f, w * 0.40f, h * 0.58f)
+            quadraticTo(w * 0.66f, h * 0.58f, w * 0.66f, h * 0.84f)
+        }
+        drawPath(body, color = color, style = Stroke(sw, cap = StrokeCap.Round))
+
+        // Plus (+)
+        drawLine(color, Offset(w * 0.80f, h * 0.35f), Offset(w * 0.80f, h * 0.65f), sw, StrokeCap.Round)
+        drawLine(color, Offset(w * 0.65f, h * 0.50f), Offset(w * 0.95f, h * 0.50f), sw, StrokeCap.Round)
+    }
+}
+
+@Composable
+fun SoftDownloadIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    color: Color = Color.Black
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.11f
+
+        // Down Arrow stem
+        drawLine(
+            color = color,
+            start = Offset(w * 0.50f, h * 0.18f),
+            end = Offset(w * 0.50f, h * 0.62f),
+            strokeWidth = sw,
+            cap = StrokeCap.Round
+        )
+
+        // Arrow head
+        val arrowHead = Path().apply {
+            moveTo(w * 0.30f, h * 0.44f)
+            lineTo(w * 0.50f, h * 0.65f)
+            lineTo(w * 0.70f, h * 0.44f)
+        }
+        drawPath(
+            path = arrowHead,
+            color = color,
+            style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+
+        // Bottom tray line
+        drawLine(
+            color = color,
+            start = Offset(w * 0.20f, h * 0.82f),
+            end = Offset(w * 0.80f, h * 0.82f),
+            strokeWidth = sw,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+
 
 

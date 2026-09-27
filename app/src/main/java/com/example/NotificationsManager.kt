@@ -67,9 +67,24 @@ object NotificationsManager {
                 val response = SupabaseClient.api.getNotifications(auth = token)
                 if (response.isSuccessful && response.body() != null) {
                     val list = response.body()!!
+                    val prevUnread = _unreadCount.value
                     _notifications.value = list
-                    _unreadCount.value = list.count { !it.is_read }
-                    Log.d(TAG, "Fetched ${list.size} notifications, unread: ${_unreadCount.value}")
+                    val newUnread = list.count { !it.is_read }
+                    _unreadCount.value = newUnread
+                    Log.d(TAG, "Fetched ${list.size} notifications, unread: $newUnread")
+
+                    // If new unread notifications arrived, trigger system notification
+                    if (newUnread > prevUnread) {
+                        val latest = list.find { !it.is_read }
+                        if (latest != null) {
+                            com.example.util.SystemNotificationHelper.showSystemNotification(
+                                context = context,
+                                title = latest.title ?: "FunkyTalk Alert",
+                                message = latest.message ?: "You have a new update",
+                                channelId = com.example.util.SystemNotificationHelper.CHANNEL_UPDATES_ID
+                            )
+                        }
+                    }
                 } else {
                     Log.e(TAG, "Failed to fetch notifications: ${response.code()} ${response.message()}")
                 }

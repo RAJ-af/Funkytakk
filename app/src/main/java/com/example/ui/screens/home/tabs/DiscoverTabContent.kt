@@ -58,6 +58,7 @@ import com.example.ui.screens.LanguageData
 data class DiscoverPartner(
     val id: String,
     val name: String,
+    val username: String = "",
     val age: Int,
     val isOnline: Boolean,
     val avatarUrl: String,
@@ -220,15 +221,6 @@ fun DiscoverTabContent(
             if (activeCategoryFilter == "Online") {
                 options["is_online"] = "eq.true"
             }
-            
-            if (selectedInterestTag != null) {
-                options["hobbies"] = "cs.{\"$selectedInterestTag\"}"
-            }
-            
-            if (selectedLanguageFilter != "All") {
-                val langUpper = selectedLanguageFilter.uppercase()
-                options["or"] = "(native_languages.cs.{\"$langUpper\"},learning_languages.cs.{\"$langUpper\"})"
-            }
 
             val response = withContext(Dispatchers.IO) {
                 SupabaseClient.api.getDiscoverableProfiles(
@@ -246,6 +238,7 @@ fun DiscoverTabContent(
                     DiscoverPartner(
                         id = p.auth_user_id,
                         name = p.profile_name ?: p.username ?: "Anonymous",
+                        username = p.username ?: "",
                         age = p.age ?: 21,
                         isOnline = p.is_online ?: false,
                         avatarUrl = p.avatar_url ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500",
@@ -290,26 +283,27 @@ fun DiscoverTabContent(
             // Search query filter
             val matchesSearch = if (searchQuery.isBlank()) true else {
                 partner.name.contains(searchQuery, ignoreCase = true) ||
+                partner.username.contains(searchQuery, ignoreCase = true) ||
                 partner.bio.contains(searchQuery, ignoreCase = true) ||
                 partner.nativeLang.contains(searchQuery, ignoreCase = true) ||
                 partner.learningLang.contains(searchQuery, ignoreCase = true) ||
                 partner.nativeLangFull.contains(searchQuery, ignoreCase = true) ||
-                partner.learningLangFull.contains(searchQuery, ignoreCase = true) ||
-                partner.interests.any { it.contains(searchQuery, ignoreCase = true) }
+                partner.learningLangFull.contains(searchQuery, ignoreCase = true)
             }
 
             // Category filter
             val matchesCategory = when (activeCategoryFilter) {
                 "Online" -> partner.isOnline
                 "Same Vibe" -> partner.vibe == "Same Vibe"
-                "Interests" -> if (selectedInterestTag != null) partner.interests.contains(selectedInterestTag) else true
                 else -> true
             }
 
             // Language filter
             val matchesLanguage = if (selectedLanguageFilter == "All") true else {
-                partner.nativeLang.equals(selectedLanguageFilter, ignoreCase = true) ||
-                partner.learningLang.equals(selectedLanguageFilter, ignoreCase = true)
+                partner.nativeLang.split(" ").any { it.equals(selectedLanguageFilter, ignoreCase = true) } ||
+                partner.learningLang.split(" ").any { it.equals(selectedLanguageFilter, ignoreCase = true) } ||
+                partner.nativeLangFull.contains(selectedLanguageFilter, ignoreCase = true) ||
+                partner.learningLangFull.contains(selectedLanguageFilter, ignoreCase = true)
             }
 
             matchesSearch && matchesCategory && matchesLanguage
@@ -472,7 +466,7 @@ fun DiscoverTabContent(
                     }
                 )
 
-                // Same Vibe Chip
+                 // Same Vibe Chip
                 DiscoverFilterChip(
                     text = "Same Vibe",
                     leadingIcon = {
@@ -484,21 +478,6 @@ fun DiscoverTabContent(
                     isSelected = activeCategoryFilter == "Same Vibe",
                     onClick = {
                         activeCategoryFilter = if (activeCategoryFilter == "Same Vibe") "All" else "Same Vibe"
-                    }
-                )
-
-                // Interests Chip
-                DiscoverFilterChip(
-                    text = selectedInterestTag ?: "Interests",
-                    leadingIcon = {
-                        SoftGamepadIcon(
-                            color = if (activeCategoryFilter == "Interests" || selectedInterestTag != null) Color.Black else Color(0xFF64748B),
-                            size = 15.dp
-                        )
-                    },
-                    isSelected = activeCategoryFilter == "Interests" || selectedInterestTag != null,
-                    onClick = {
-                        showInterestsSheet = true
                     }
                 )
 
@@ -639,7 +618,7 @@ fun DiscoverTabContent(
                         }
                     }
                 } else {
-                    items(filteredPartners, key = { it.id }) { partner ->
+                    items(filteredPartners.distinctBy { it.id }, key = { it.id }) { partner ->
                         DiscoverUserCard(
                             partner = partner,
                             onCardClick = { showFullProfileScreenWithFeed = partner },
@@ -1558,7 +1537,7 @@ fun DiscoverUserCard(
 
                     Spacer(modifier = Modifier.height(3.dp))
 
-                    // Bio
+                     // Bio
                     Text(
                         text = partner.bio,
                         fontSize = 12.sp,
@@ -1567,58 +1546,6 @@ fun DiscoverUserCard(
                         overflow = TextOverflow.Ellipsis,
                         lineHeight = 16.sp
                     )
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    // Interest Pills
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        val displayTags = partner.interests.take(3)
-                        val remaining = partner.interests.size - displayTags.size
-
-                        displayTags.forEachIndexed { i, tag ->
-                            val bg = when (i % 3) {
-                                0 -> Color(0xFFFDF2F8) // Pink
-                                1 -> Color(0xFFF3E8FF) // Lavender
-                                else -> Color(0xFFE0F2FE) // Sky
-                            }
-                            val textCol = when (i % 3) {
-                                0 -> Color(0xFFBE185D)
-                                1 -> Color(0xFF7E22CE)
-                                else -> Color(0xFF0369A1)
-                            }
-
-                            Box(
-                                modifier = Modifier
-                                    .background(bg, RoundedCornerShape(8.dp))
-                                    .padding(horizontal = 7.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    text = tag,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = textCol
-                                )
-                            }
-                        }
-
-                        if (remaining > 0) {
-                            Box(
-                                modifier = Modifier
-                                    .background(Color(0xFFF1F5F9), RoundedCornerShape(8.dp))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    text = "+$remaining",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color(0xFF64748B)
-                                )
-                            }
-                        }
-                    }
                 }
 
                 Spacer(modifier = Modifier.width(8.dp))

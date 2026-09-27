@@ -9,9 +9,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -24,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.components.SoftCloseIcon
 import com.example.ui.screens.chat.model.ChatMessage
 
 @Composable
@@ -39,9 +37,7 @@ fun MessageComposer(
     modifier: Modifier = Modifier
 ) {
     Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
+        modifier = modifier.fillMaxWidth()
     ) {
         // Reply Preview Bar
         if (replyingToMessage != null) {
@@ -83,11 +79,9 @@ fun MessageComposer(
                         .clickable { onCancelReply() },
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Cancel reply",
-                        tint = Color(0xFF92400E),
-                        modifier = Modifier.size(16.dp)
+                    SoftCloseIcon(
+                        size = 14.dp,
+                        color = Color(0xFF92400E)
                     )
                 }
             }

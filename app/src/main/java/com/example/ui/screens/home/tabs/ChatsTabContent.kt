@@ -7,9 +7,11 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -18,6 +20,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -43,18 +48,23 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
-import com.example.ui.components.UserAvatarImage
-import coil.compose.AsyncImage
+import com.example.ChatPreferencesManager
 import com.example.SupportChatManager
 import com.example.crypto.VaultSecurityManager
 import com.example.crypto.VaultStatus
 import com.example.repository.EncryptedChatRepository
 import com.example.ui.components.*
+import com.example.ui.components.UserAvatarImage
+import androidx.compose.material3.Icon
 import com.example.ui.screens.chat.VaultManagementDialogs
+import com.example.ui.screens.home.dialogs.BlockedUsersBottomSheet
+import com.example.ui.screens.home.dialogs.ChatLongPressBottomSheet
+import com.example.ui.screens.home.dialogs.CreateGroupBottomSheet
 import com.example.ui.screens.home.models.DirectChat
 import com.example.ui.theme.GoldAccent
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChatsTabContent(
     conversationsList: List<DirectChat> = emptyList(),
@@ -67,6 +77,10 @@ fun ChatsTabContent(
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf("All") } // "All", "Unread", "Language", "Groups"
     var showOptionsMenu by remember { mutableStateOf(false) }
+    var showCreateGroupSheet by remember { mutableStateOf(false) }
+    var showBlockedUsersSheet by remember { mutableStateOf(false) }
+    var selectedChatForMenu by remember { mutableStateOf<DirectChat?>(null) }
+    var showClearAllConfirmDialog by remember { mutableStateOf(false) }
 
     val supportPreview by SupportChatManager.latestMessagePreview.collectAsState()
     val supportTime by SupportChatManager.latestMessageTime.collectAsState()
@@ -74,46 +88,77 @@ fun ChatsTabContent(
 
     val vaultStatus by VaultSecurityManager.vaultStatus.collectAsState()
     val dbConversations by EncryptedChatRepository.conversations.collectAsState()
+    val customGroups by ChatPreferencesManager.groups.collectAsState()
+    val mutedChats by ChatPreferencesManager.mutedChats.collectAsState()
+    val pinnedChats by ChatPreferencesManager.pinnedChats.collectAsState()
+    val blockedUsers by ChatPreferencesManager.blockedUsers.collectAsState()
+    val deletedChats by ChatPreferencesManager.deletedChats.collectAsState()
+    val unreadOverrides by ChatPreferencesManager.unreadOverrideChats.collectAsState()
 
     LaunchedEffect(Unit) {
         SupportChatManager.init(context)
         EncryptedChatRepository.init(context)
+        ChatPreferencesManager.init(context)
     }
 
-    // Merge real encrypted conversations from Room DB with any user-initiated active chats
-    val mergedConversations = remember(conversationsList, dbConversations) {
+    // Merge real encrypted conversations from Room DB, custom groups, and active partner chats
+    val mergedConversations = remember(conversationsList, dbConversations, customGroups, pinnedChats, mutedChats, blockedUsers, deletedChats, unreadOverrides) {
         val dbMapped = dbConversations.map { conv ->
+            val isUnreadOverridden = unreadOverrides.contains(conv.otherUserId)
             DirectChat(
                 id = conv.otherUserId,
                 name = conv.otherUserName,
                 avatar = conv.otherUserAvatar.orEmpty().ifBlank { "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200" },
                 lastMsg = conv.lastMessageText.ifBlank { "🔒 Encrypted conversation" },
                 time = formatTimeAgo(conv.lastMessageTime),
-                unreadCount = conv.unreadCount,
+                unreadCount = if (isUnreadOverridden) 1 else conv.unreadCount,
                 onlineStatus = "online",
                 isNativeLanguage = conv.otherUserFlag ?: "English"
             )
         }
-        val existingIds = dbMapped.map { it.id }.toSet()
-        val rest = conversationsList.filterNot { it.id in existingIds }
-        dbMapped + rest
+
+        val groupsMapped = customGroups.map { grp ->
+            val isUnreadOverridden = unreadOverrides.contains(grp.id)
+            DirectChat(
+                id = grp.id,
+                name = grp.name,
+                avatar = grp.avatarUrl.ifBlank { "https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=200" },
+                lastMsg = grp.lastMessageText,
+                time = formatTimeAgo(grp.lastMessageTime),
+                unreadCount = if (isUnreadOverridden) 1 else 0,
+                onlineStatus = "online",
+                isNativeLanguage = "Group (${grp.memberCount} members)"
+            )
+        }
+
+        val existingIds = (dbMapped.map { it.id } + groupsMapped.map { it.id }).toSet()
+        val rest = conversationsList.filterNot { it.id in existingIds }.distinctBy { it.id }
+        val combined = (groupsMapped + dbMapped + rest)
+            .filterNot { it.id in deletedChats || it.id in blockedUsers }
+            .distinctBy { it.id }
+
+        // Sort: Pinned chats first, then recent
+        combined.sortedWith(compareByDescending<DirectChat> { it.id in pinnedChats })
     }
 
     val filteredList = remember(mergedConversations, searchQuery, selectedFilter) {
-        mergedConversations.filter { chat ->
-            val matchesSearch = searchQuery.isBlank() ||
-                    chat.name.contains(searchQuery, ignoreCase = true) ||
-                    chat.lastMsg.contains(searchQuery, ignoreCase = true) ||
-                    chat.isNativeLanguage.contains(searchQuery, ignoreCase = true)
+        mergedConversations
+            .filter { chat ->
+                val isGroup = chat.isNativeLanguage.startsWith("Group")
+                val matchesSearch = searchQuery.isBlank() ||
+                        chat.name.contains(searchQuery, ignoreCase = true) ||
+                        chat.lastMsg.contains(searchQuery, ignoreCase = true) ||
+                        chat.isNativeLanguage.contains(searchQuery, ignoreCase = true)
 
-            val matchesFilter = when (selectedFilter) {
-                "Unread" -> chat.unreadCount > 0
-                "Language" -> true
-                "Groups" -> false
-                else -> true
+                val matchesFilter = when (selectedFilter) {
+                    "Unread" -> chat.unreadCount > 0
+                    "Language" -> !isGroup
+                    "Groups" -> isGroup
+                    else -> true
+                }
+                matchesSearch && matchesFilter
             }
-            matchesSearch && matchesFilter
-        }
+            .distinctBy { it.id }
     }
 
     val showSupportInSearch = remember(searchQuery, selectedFilter, supportUnreadCount) {
@@ -178,7 +223,7 @@ fun ChatsTabContent(
                     Box {
                         Box(
                             modifier = Modifier
-                                .size(38.dp)
+                                .size(40.dp)
                                 .clip(CircleShape)
                                 .background(Color(0xFFF3F4F6))
                                 .clickable { showOptionsMenu = true },
@@ -187,18 +232,173 @@ fun ChatsTabContent(
                             FunkyMoreIcon(color = Color.Black, modifier = Modifier.size(18.dp))
                         }
 
+                        // Redesigned modern 3-dots menu with Soft Custom Icons
                         DropdownMenu(
                             expanded = showOptionsMenu,
                             onDismissRequest = { showOptionsMenu = false },
-                            modifier = Modifier.background(Color.White)
+                            modifier = Modifier
+                                .width(240.dp)
+                                .background(Color.White)
                         ) {
+                            // 1. Create Group Option
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(30.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFFFEF3C7)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            SoftGroupIcon(size = 16.dp, color = Color(0xFFD97706))
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = "Create Group Chat",
+                                            color = Color.Black,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    showOptionsMenu = false
+                                    showCreateGroupSheet = true
+                                }
+                            )
+
+                            // 2. Blocked Users Option
+                            DropdownMenuItem(
+                                text = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(30.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFFFEE2E2)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            SoftBlockIcon(size = 16.dp, color = Color(0xFFDC2626))
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = "Blocked Users",
+                                            color = Color.Black,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        if (blockedUsers.isNotEmpty()) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(Color(0xFFDC2626))
+                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(
+                                                    text = "${blockedUsers.size}",
+                                                    color = Color.White,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Black
+                                                )
+                                            }
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    showOptionsMenu = false
+                                    showBlockedUsersSheet = true
+                                }
+                            )
+
+                            // 3. Mark all as read
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(30.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFFDBEAFE)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            SoftMailIcon(size = 16.dp, color = Color(0xFF3B82F6))
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = "Mark all as read",
+                                            color = Color.Black,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    showOptionsMenu = false
+                                    SupportChatManager.markSupportConversationRead(context)
+                                    scope.launch {
+                                        dbConversations.forEach { conv ->
+                                            EncryptedChatRepository.markConversationRead(conv.otherUserId)
+                                        }
+                                        Toast.makeText(context, "All conversations marked as read", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            )
+
+                            // 4. Contact Support
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(30.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFFD1FAE5)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            SoftHeadsetIcon(size = 16.dp, color = Color(0xFF059669))
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = "Contact Support",
+                                            color = Color.Black,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    showOptionsMenu = false
+                                    SupportChatManager.markSupportConversationRead(context)
+                                    onOpenSupportChat(null)
+                                }
+                            )
+
+                            // 5. Vault Lock option
                             if (isVaultUnlocked) {
                                 DropdownMenuItem(
                                     text = {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
-                                            SoftLockIcon(size = 16.dp, isUnlocked = false)
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text("Lock chats now", color = Color(0xFFDC2626), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(30.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(0xFFFEE2E2)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                SoftLockIcon(size = 16.dp, isUnlocked = false)
+                                            }
+                                            Spacer(modifier = Modifier.width(10.dp))
+                                            Text(
+                                                text = "Lock chats vault",
+                                                color = Color(0xFFDC2626),
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
                                         }
                                     },
                                     onClick = {
@@ -208,18 +408,33 @@ fun ChatsTabContent(
                                     }
                                 )
                             }
+
+                            HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
+
+                            // 6. Clear All Chats
                             DropdownMenuItem(
-                                text = { Text("Mark all as read", color = Color.Black, fontSize = 14.sp) },
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(30.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFFF3F4F6)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            SoftTrashIcon(size = 16.dp, color = Color(0xFF6B7280))
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = "Clear all chats",
+                                            color = Color(0xFF6B7280),
+                                            fontSize = 13.sp
+                                        )
+                                    }
+                                },
                                 onClick = {
                                     showOptionsMenu = false
-                                    Toast.makeText(context, "All conversations marked as read", Toast.LENGTH_SHORT).show()
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Contact Support", color = Color.Black, fontSize = 14.sp) },
-                                onClick = {
-                                    showOptionsMenu = false
-                                    onOpenSupportChat(null)
+                                    showClearAllConfirmDialog = true
                                 }
                             )
                         }
@@ -353,7 +568,10 @@ fun ChatsTabContent(
                             .fillMaxWidth()
                             .padding(horizontal = 20.dp)
                             .clip(RoundedCornerShape(22.dp))
-                            .clickable { onOpenSupportChat(null) }
+                            .clickable {
+                                SupportChatManager.markSupportConversationRead(context)
+                                onOpenSupportChat(null)
+                            }
                             .testTag("pinned_support_chat_item"),
                         shape = RoundedCornerShape(22.dp),
                         color = Color.White,
@@ -529,7 +747,7 @@ fun ChatsTabContent(
                             text = if (searchQuery.isNotBlank()) {
                                 "No conversation matches '$searchQuery'"
                             } else {
-                                "All 1:1 messages are end-to-end encrypted.\nFind partners in Discover or join a voice room to start chatting."
+                                "All 1:1 messages are end-to-end encrypted.\nFind partners in Discover or create a group to start chatting."
                             },
                             fontSize = 13.sp,
                             color = Color(0xFF6B7280),
@@ -540,24 +758,51 @@ fun ChatsTabContent(
 
                         if (searchQuery.isBlank()) {
                             Spacer(modifier = Modifier.height(20.dp))
-                            Button(
-                                onClick = onNavigateToDiscover,
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFC529)),
-                                shape = RoundedCornerShape(50.dp),
-                                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 12.dp)
-                            ) {
-                                Text(
-                                    text = "Discover People",
-                                    color = Color.Black,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    fontSize = 14.sp
-                                )
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Button(
+                                    onClick = onNavigateToDiscover,
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFC529)),
+                                    shape = RoundedCornerShape(50.dp),
+                                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
+                                ) {
+                                    Text(
+                                        text = "Discover People",
+                                        color = Color.Black,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 14.sp
+                                    )
+                                }
+
+                                OutlinedButton(
+                                    onClick = { showCreateGroupSheet = true },
+                                    shape = RoundedCornerShape(50.dp),
+                                    border = BorderStroke(1.5.dp, Color(0xFFD97706)),
+                                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.GroupAdd,
+                                        contentDescription = null,
+                                        tint = Color(0xFF92400E),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "New Group",
+                                        color = Color(0xFF92400E),
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    )
+                                }
                             }
                         }
                     }
                 }
             } else {
-                items(filteredList, key = { it.id }) { chat ->
+                items(filteredList.distinctBy { it.id }, key = { it.id }) { chat ->
+                    val isPinned = pinnedChats.contains(chat.id)
+                    val isMuted = mutedChats.contains(chat.id)
+                    val isGroup = chat.isNativeLanguage.startsWith("Group")
+
                     val flagCode = when (chat.isNativeLanguage.lowercase()) {
                         "english" -> "us"
                         "korean" -> "kr"
@@ -577,14 +822,21 @@ fun ChatsTabContent(
                             .fillMaxWidth()
                             .padding(horizontal = 20.dp, vertical = 5.dp)
                             .clip(RoundedCornerShape(22.dp))
-                            .clickable {
-                                if (isVaultUnlocked) {
-                                    onSelectChat(chat)
+                            .combinedClickable(
+                                onClick = {
+                                    if (isVaultUnlocked) {
+                                        onSelectChat(chat)
+                                    }
+                                },
+                                onLongClick = {
+                                    if (isVaultUnlocked) {
+                                        selectedChatForMenu = chat
+                                    }
                                 }
-                            },
+                            ),
                         shape = RoundedCornerShape(22.dp),
-                        color = Color.White,
-                        border = BorderStroke(1.dp, Color(0xFFF0F0EE)),
+                        color = if (isPinned) Color(0xFFFFFDF5) else Color.White,
+                        border = BorderStroke(1.dp, if (isPinned) Color(0xFFFDE68A) else Color(0xFFF0F0EE)),
                         shadowElevation = 0.dp
                     ) {
                         Row(
@@ -603,14 +855,33 @@ fun ChatsTabContent(
                                         .clip(CircleShape)
                                 )
 
-                                CircleFlag(
-                                    countryCode = flagCode,
-                                    modifier = Modifier
-                                        .size(18.dp)
-                                        .align(Alignment.BottomEnd)
-                                        .clip(CircleShape)
-                                        .border(1.5.dp, Color.White, CircleShape)
-                                )
+                                if (isGroup) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .align(Alignment.BottomEnd)
+                                            .clip(CircleShape)
+                                            .background(GoldAccent)
+                                            .border(1.5.dp, Color.White, CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Group,
+                                            contentDescription = "Group",
+                                            tint = Color.Black,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                    }
+                                } else {
+                                    CircleFlag(
+                                        countryCode = flagCode,
+                                        modifier = Modifier
+                                            .size(18.dp)
+                                            .align(Alignment.BottomEnd)
+                                            .clip(CircleShape)
+                                            .border(1.5.dp, Color.White, CircleShape)
+                                    )
+                                }
                             }
 
                             Spacer(modifier = Modifier.width(14.dp))
@@ -621,35 +892,73 @@ fun ChatsTabContent(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f, fill = false)
+                                    ) {
                                         Text(
                                             text = chat.name,
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 16.sp,
-                                            color = Color.Black
+                                            color = Color.Black,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
+
+                                        if (isPinned) {
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Icon(
+                                                imageVector = Icons.Default.PushPin,
+                                                contentDescription = "Pinned",
+                                                tint = Color(0xFFD97706),
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+
+                                        if (isMuted) {
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Icon(
+                                                imageVector = Icons.AutoMirrored.Filled.VolumeOff,
+                                                contentDescription = "Muted",
+                                                tint = Color(0xFF9CA3AF),
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+
                                         Spacer(modifier = Modifier.width(6.dp))
+
                                         Box(
                                             modifier = Modifier
                                                 .clip(RoundedCornerShape(4.dp))
-                                                .background(Color(0xFFDCFCE7))
+                                                .background(if (isGroup) Color(0xFFFEF3C7) else Color(0xFFDCFCE7))
                                                 .padding(horizontal = 5.dp, vertical = 1.dp)
                                         ) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                                SoftTinyLockIcon(
-                                                    size = 10.dp,
-                                                    tint = Color(0xFF15803D)
-                                                )
-                                                Spacer(modifier = Modifier.width(3.dp))
-                                                Text(
-                                                    text = "E2EE",
-                                                    fontSize = 9.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = Color(0xFF15803D)
-                                                )
+                                                if (isGroup) {
+                                                    Text(
+                                                        text = "GROUP",
+                                                        fontSize = 9.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = Color(0xFF92400E)
+                                                    )
+                                                } else {
+                                                    SoftTinyLockIcon(
+                                                        size = 10.dp,
+                                                        tint = Color(0xFF15803D)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(3.dp))
+                                                    Text(
+                                                        text = "E2EE",
+                                                        fontSize = 9.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = Color(0xFF15803D)
+                                                    )
+                                                }
                                             }
                                         }
                                     }
+
+                                    Spacer(modifier = Modifier.width(8.dp))
 
                                     Text(
                                         text = chat.time,
@@ -662,18 +971,22 @@ fun ChatsTabContent(
                                 Spacer(modifier = Modifier.height(2.dp))
 
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    CircleFlag(
-                                        countryCode = flagCode,
-                                        modifier = Modifier
-                                            .size(13.dp)
-                                            .clip(CircleShape)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
+                                    if (!isGroup) {
+                                        CircleFlag(
+                                            countryCode = flagCode,
+                                            modifier = Modifier
+                                                .size(13.dp)
+                                                .clip(CircleShape)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                    }
                                     Text(
                                         text = chat.isNativeLanguage,
                                         color = Color(0xFF6B7280),
                                         fontSize = 12.sp,
-                                        fontWeight = FontWeight.Normal
+                                        fontWeight = FontWeight.Normal,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
 
@@ -711,6 +1024,132 @@ fun ChatsTabContent(
                                             )
                                         }
                                     }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Context Menu on Long Press
+        selectedChatForMenu?.let { targetChat ->
+            ChatLongPressBottomSheet(
+                chat = targetChat,
+                onDismiss = { selectedChatForMenu = null },
+                onChatDeleted = { selectedChatForMenu = null },
+                onChatCleared = { selectedChatForMenu = null }
+            )
+        }
+
+        // Create Group Bottom Sheet
+        if (showCreateGroupSheet) {
+            CreateGroupBottomSheet(
+                onDismiss = { showCreateGroupSheet = false },
+                onGroupCreated = { newGrp ->
+                    showCreateGroupSheet = false
+                    selectedFilter = "Groups"
+                }
+            )
+        }
+
+        // Blocked Users Bottom Sheet
+        if (showBlockedUsersSheet) {
+            BlockedUsersBottomSheet(
+                onDismiss = { showBlockedUsersSheet = false }
+            )
+        }
+
+        // Clear All Chats Confirmation Dialog
+        if (showClearAllConfirmDialog) {
+            androidx.compose.ui.window.Dialog(
+                onDismissRequest = { showClearAllConfirmDialog = false },
+                properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.5f))
+                        .clickable { showClearAllConfirmDialog = false },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Surface(
+                        modifier = Modifier
+                            .padding(horizontal = 28.dp)
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(28.dp))
+                            .clickable(enabled = false) {},
+                        shape = RoundedCornerShape(28.dp),
+                        color = Color.White,
+                        shadowElevation = 16.dp
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFFEE2E2)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                SoftTrashIcon(size = 28.dp, color = Color(0xFFDC2626))
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            Text(
+                                text = "Clear All Chats?",
+                                fontSize = 19.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF111827)
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Text(
+                                text = "This will permanently erase all local encrypted messages across all direct conversations.",
+                                fontSize = 13.5.sp,
+                                color = Color(0xFF6B7280),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                lineHeight = 19.sp
+                            )
+
+                            Spacer(modifier = Modifier.height(24.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = { showClearAllConfirmDialog = false },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp),
+                                    shape = RoundedCornerShape(16.dp),
+                                    border = BorderStroke(1.dp, Color(0xFFE5E7EB))
+                                ) {
+                                    Text("Cancel", color = Color(0xFF374151), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                }
+
+                                Button(
+                                    onClick = {
+                                        showClearAllConfirmDialog = false
+                                        scope.launch {
+                                            EncryptedChatRepository.clearAllChatsLocally()
+                                            Toast.makeText(context, "All chat history cleared", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp),
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                                ) {
+                                    Text("Clear All", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
                                 }
                             }
                         }

@@ -638,6 +638,25 @@ object EncryptedChatRepository {
             )
             db.conversationDao().insertOrUpdate(newConv)
         }
+
+        // Trigger Android System Push Notification for incoming messages
+        val myUserId = SupabaseSessionManager.getUserId(context)
+        if (!myUserId.isNullOrBlank() && senderId != myUserId) {
+            val conv = db.conversationDao().getConversation(conversationId)
+            val senderTitle = conv?.otherUserName?.ifBlank { "FunkyTalk Chat" } ?: "New Message"
+            val displayPreview = when {
+                plaintext.startsWith("[img]") -> "Sent a photo"
+                plaintext.startsWith("[voice]") -> "Sent a voice note"
+                else -> plaintext
+            }
+            com.example.util.SystemNotificationHelper.showSystemNotification(
+                context = context,
+                title = senderTitle,
+                message = displayPreview,
+                partnerUserId = senderId,
+                channelId = com.example.util.SystemNotificationHelper.CHANNEL_MESSAGES_ID
+            )
+        }
     }
 
     private suspend fun deleteMessageFromServer(context: Context, token: String, messageId: String) {
@@ -986,6 +1005,57 @@ object EncryptedChatRepository {
             database?.conversationDao()?.markRead(conversationId)
         } catch (e: Exception) {
             Log.w(TAG, "Error marking conversation read", e)
+        }
+    }
+
+    suspend fun markConversationUnread(conversationId: String) = withContext(Dispatchers.IO) {
+        try {
+            database?.conversationDao()?.updateLastMessage(
+                conversationId = conversationId,
+                text = database?.conversationDao()?.getConversation(conversationId)?.lastMessageText ?: "",
+                time = database?.conversationDao()?.getConversation(conversationId)?.lastMessageTime ?: System.currentTimeMillis(),
+                unreadDelta = 1
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Error marking conversation unread", e)
+        }
+    }
+
+    suspend fun deleteConversationLocally(conversationId: String) = withContext(Dispatchers.IO) {
+        try {
+            database?.messageDao()?.clearConversationMessages(conversationId)
+            database?.conversationDao()?.deleteConversation(conversationId)
+            Log.d(TAG, "Deleted conversation and messages for: $conversationId")
+        } catch (e: Exception) {
+            Log.w(TAG, "Error deleting conversation locally", e)
+        }
+    }
+
+    suspend fun clearConversationMessages(conversationId: String) = clearConversationMessagesLocally(conversationId)
+
+    suspend fun clearConversationMessagesLocally(conversationId: String) = withContext(Dispatchers.IO) {
+        try {
+            database?.messageDao()?.clearConversationMessages(conversationId)
+            database?.conversationDao()?.updateLastMessage(
+                conversationId = conversationId,
+                text = "Chat history cleared",
+                time = System.currentTimeMillis(),
+                unreadDelta = 0
+            )
+            database?.conversationDao()?.markRead(conversationId)
+            Log.d(TAG, "Cleared messages for conversation: $conversationId")
+        } catch (e: Exception) {
+            Log.w(TAG, "Error clearing conversation messages", e)
+        }
+    }
+
+    suspend fun clearAllChatsLocally() = withContext(Dispatchers.IO) {
+        try {
+            database?.messageDao()?.deleteAllMessages()
+            database?.conversationDao()?.deleteAllConversations()
+            Log.d(TAG, "Cleared all local conversations and messages")
+        } catch (e: Exception) {
+            Log.w(TAG, "Error clearing all chats", e)
         }
     }
 

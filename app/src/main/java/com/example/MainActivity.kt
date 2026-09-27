@@ -27,12 +27,29 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // Create System Notification Channels
+        com.example.util.SystemNotificationHelper.createNotificationChannels(applicationContext)
+
         handleDeepLinkIntent(intent)
         intent?.getStringExtra("navigate_to")?.let {
             pendingNavigateTo = it
         }
         authViewModel.initializeFirebaseIfNeeded(applicationContext)
         setContent {
+            // Request Notification permission on Android 13+
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                val notificationPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+                    contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+                ) { isGranted ->
+                    android.util.Log.d("MainActivity", "POST_NOTIFICATIONS granted: $isGranted")
+                }
+                LaunchedEffect(Unit) {
+                    if (!com.example.util.SystemNotificationHelper.hasNotificationPermission(applicationContext)) {
+                        notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                }
+            }
             MyApplicationTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),

@@ -85,6 +85,19 @@ fun CreatePostScreen(
     var selectedPresetIndex by remember { mutableStateOf<Int?>(null) }
     var showPresetSelector by remember { mutableStateOf(false) }
 
+    // Gradient post themes
+    val gradientPresets = remember {
+        listOf(
+            listOf(Color(0xFF6366F1), Color(0xFFA855F7), Color(0xFFEC4899)), // 0: Sunset Violet
+            listOf(Color(0xFFF97316), Color(0xFFEF4444), Color(0xFFF59E0B)), // 1: Fire Flame
+            listOf(Color(0xFF10B981), Color(0xFF06B6D4), Color(0xFF3B82F6)), // 2: Ocean Teal
+            listOf(Color(0xFF0F172A), Color(0xFF1E1B4B), Color(0xFF4C1D95)), // 3: Midnight Neon
+            listOf(Color(0xFFF43F5E), Color(0xFFFB7185), Color(0xFFFDA4AF)), // 4: Rose Quartz
+            listOf(Color(0xFF18181B), Color(0xFF27272A), Color(0xFF3F3F46))  // 5: Dark Obsidian
+        )
+    }
+    var selectedGradientIndex by remember { mutableStateOf(0) }
+
     // App variables
     var captionText by remember { mutableStateOf("") }
     var selectedLocation by remember { mutableStateOf("Kuala Lumpur, Malaysia") }
@@ -253,6 +266,11 @@ fun CreatePostScreen(
                 // Format the post caption to combine text + selected metadata safely inside the "content" column,
                 // avoiding DB exceptions from non-existent schema columns (e.g. location, languages)!
                 val formattedContent = buildString {
+                    if (selectedTab == "Text") {
+                        append("[gradient:$selectedGradientIndex] ")
+                    } else if (selectedTab == "Video") {
+                        append("[video] ")
+                    }
                     append(captionText)
                     if (selectedLocation.isNotBlank() && selectedLocation != "Add location") {
                         append("\n\nLocation: ")
@@ -587,6 +605,64 @@ fun CreatePostScreen(
                         }
 
                         Spacer(modifier = Modifier.height(14.dp))
+                    }
+
+                    // 2.5 GRADIENT PREVIEW & PALETTE (Displayed for Text type)
+                    if (selectedTab == "Text") {
+                        // Live Card Preview
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(170.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(Brush.linearGradient(gradientPresets[selectedGradientIndex]))
+                                .padding(20.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (captionText.isBlank()) "Your text will appear centered on this gradient image..." else captionText,
+                                color = Color.White,
+                                fontSize = if (captionText.length > 100) 14.5.sp else 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center,
+                                lineHeight = 24.sp
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Gradient Color Swatches Selector
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Choose Background Color",
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A)
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                gradientPresets.forEachIndexed { idx, colors ->
+                                    val isSelected = selectedGradientIndex == idx
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .background(Brush.linearGradient(colors))
+                                            .border(
+                                                width = if (isSelected) 2.5.dp else 0.dp,
+                                                color = if (isSelected) Color(0xFFFFD43B) else Color.Transparent,
+                                                shape = CircleShape
+                                            )
+                                            .clickable { selectedGradientIndex = idx }
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
                     }
 
                     // 3. CAPTION SECTION (Clean, Rounded White Card)

@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.example.ui.screens.chat.components.ChatImagePreviewDialog
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -208,8 +209,9 @@ fun PostDetailScreen(
     val comments = remember { mutableStateListOf<PostComment>().apply { addAll(post.initialComments) } }
     var newCommentText by remember { mutableStateOf("") }
     
-    // Double tap heart animation overlay
+    // Double tap heart animation overlay & fullscreen image preview
     var showHeartPopup by remember { mutableStateOf(false) }
+    var fullscreenPreviewUrl by remember { mutableStateOf<String?>(null) }
 
     // Image Pager State
     val pagerState = rememberPagerState(pageCount = { post.images.size })
@@ -238,6 +240,9 @@ fun PostDetailScreen(
                         .fillMaxSize()
                         .pointerInput(Unit) {
                             detectTapGestures(
+                                onTap = {
+                                    fullscreenPreviewUrl = post.images.getOrElse(pagerState.currentPage) { post.images.firstOrNull() ?: "" }
+                                },
                                 onDoubleTap = {
                                     if (!isLiked) {
                                         isLiked = true
@@ -457,13 +462,52 @@ fun PostDetailScreen(
 
                         // 2.2 Post Caption
                         item {
-                            Text(
-                                text = post.caption,
-                                fontSize = 13.5.sp,
-                                lineHeight = 19.sp,
-                                color = Color(0xFF1E293B),
-                                fontWeight = FontWeight.Normal
-                            )
+                            val gradientThemes = remember {
+                                listOf(
+                                    listOf(Color(0xFF6366F1), Color(0xFFA855F7), Color(0xFFEC4899)),
+                                    listOf(Color(0xFFF97316), Color(0xFFEF4444), Color(0xFFF59E0B)),
+                                    listOf(Color(0xFF10B981), Color(0xFF06B6D4), Color(0xFF3B82F6)),
+                                    listOf(Color(0xFF0F172A), Color(0xFF1E1B4B), Color(0xFF4C1D95)),
+                                    listOf(Color(0xFFF43F5E), Color(0xFFFB7185), Color(0xFFFDA4AF)),
+                                    listOf(Color(0xFF18181B), Color(0xFF27272A), Color(0xFF3F3F46))
+                                )
+                            }
+                            val isGradient = post.caption.startsWith("[gradient:")
+                            val gradientIdx = if (isGradient) {
+                                post.caption.substringAfter("[gradient:").substringBefore("]").toIntOrNull() ?: 0
+                            } else 0
+                            val cleanCaption = post.caption
+                                .replace(Regex("^\\[gradient:\\d+\\]\\s*"), "")
+                                .replace(Regex("^\\[video\\]\\s*"), "")
+
+                            if (isGradient) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 160.dp)
+                                        .clip(RoundedCornerShape(18.dp))
+                                        .background(Brush.linearGradient(gradientThemes[gradientIdx.coerceIn(0, 5)]))
+                                        .padding(20.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = cleanCaption,
+                                        color = Color.White,
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                        lineHeight = 24.sp
+                                    )
+                                }
+                            } else if (cleanCaption.isNotBlank()) {
+                                Text(
+                                    text = cleanCaption,
+                                    fontSize = 13.5.sp,
+                                    lineHeight = 19.sp,
+                                    color = Color(0xFF1E293B),
+                                    fontWeight = FontWeight.Normal
+                                )
+                            }
 
                             Spacer(modifier = Modifier.height(12.dp))
                         }
@@ -701,6 +745,17 @@ fun PostDetailScreen(
                     }
                 }
             }
+        }
+
+        // Fullscreen Image Zoom & Save Preview
+        if (fullscreenPreviewUrl != null) {
+            ChatImagePreviewDialog(
+                imageUrl = fullscreenPreviewUrl,
+                imageUrls = post.images,
+                initialIndex = pagerState.currentPage,
+                senderName = post.authorName,
+                onDismiss = { fullscreenPreviewUrl = null }
+            )
         }
     }
 }
