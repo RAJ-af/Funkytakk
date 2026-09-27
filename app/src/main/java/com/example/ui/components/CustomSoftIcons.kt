@@ -1130,4 +1130,229 @@ fun SoftChevronDownIcon(
     }
 }
 
+@Composable
+fun SoftHeartIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    isLiked: Boolean = false,
+    color: Color = Color(0xFF64748B)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.11f
+        val path = Path().apply {
+            moveTo(w * 0.5f, h * 0.82f)
+            cubicTo(w * 0.5f, h * 0.82f, w * 0.15f, h * 0.55f, w * 0.15f, h * 0.33f)
+            cubicTo(w * 0.15f, h * 0.18f, w * 0.30f, h * 0.12f, w * 0.42f, h * 0.22f)
+            lineTo(w * 0.5f, h * 0.32f)
+            lineTo(w * 0.58f, h * 0.22f)
+            cubicTo(w * 0.70f, h * 0.12f, w * 0.85f, h * 0.18f, w * 0.85f, h * 0.33f)
+            cubicTo(w * 0.85f, h * 0.55f, w * 0.5f, h * 0.82f, w * 0.5f, h * 0.82f)
+            close()
+        }
+        if (isLiked) {
+            drawPath(path, color = Color(0xFFE11D48))
+        } else {
+            drawPath(path, color = color, style = Stroke(sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        }
+    }
+}
+
+
+
+@Composable
+fun SoftShareIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    color: Color = Color(0xFF64748B)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.11f
+        val path = Path().apply {
+            moveTo(w * 0.1f, h * 0.85f)
+            lineTo(w * 0.9f, h * 0.5f)
+            lineTo(w * 0.1f, h * 0.15f)
+            lineTo(w * 0.3f, h * 0.5f)
+            close()
+        }
+        drawPath(path, color, style = Stroke(sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawLine(color, Offset(w * 0.3f, h * 0.5f), Offset(w * 0.9f, h * 0.5f), sw, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+fun SoftBookmarkIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    isBookmarked: Boolean = false,
+    color: Color = Color(0xFF64748B)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.11f
+        val path = Path().apply {
+            moveTo(w * 0.2f, h * 0.15f)
+            lineTo(w * 0.8f, h * 0.15f)
+            lineTo(w * 0.8f, h * 0.9f)
+            lineTo(w * 0.5f, h * 0.72f)
+            lineTo(w * 0.2f, h * 0.9f)
+            close()
+        }
+        if (isBookmarked) {
+            drawPath(path, color = color)
+        } else {
+            drawPath(path, color = color, style = Stroke(sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        }
+    }
+}
+
+@Composable
+fun SoftFilterIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    color: Color = Color.Black
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.12f
+        drawLine(color, Offset(w * 0.1f, h * 0.3f), Offset(w * 0.9f, h * 0.3f), sw, cap = StrokeCap.Round)
+        drawCircle(color, radius = w * 0.15f, center = Offset(w * 0.35f, h * 0.3f))
+
+        drawLine(color, Offset(w * 0.1f, h * 0.7f), Offset(w * 0.9f, h * 0.7f), sw, cap = StrokeCap.Round)
+        drawCircle(color, radius = w * 0.15f, center = Offset(w * 0.65f, h * 0.7f))
+    }
+}
+
+@Composable
+fun SoftPlusIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    color: Color = Color.Black
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.15f
+        drawLine(color, Offset(w * 0.5f, h * 0.15f), Offset(w * 0.5f, h * 0.85f), sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(w * 0.15f, h * 0.5f), Offset(w * 0.85f, h * 0.5f), sw, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+fun SoftVerifiedBadge(
+    modifier: Modifier = Modifier,
+    size: Dp = 14.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        drawCircle(color = Color(0xFF3B82F6), radius = w / 2f)
+        val checkPath = Path().apply {
+            moveTo(w * 0.28f, h * 0.52f)
+            lineTo(w * 0.44f, h * 0.68f)
+            lineTo(w * 0.74f, h * 0.32f)
+        }
+        drawPath(checkPath, color = Color.White, style = Stroke(width = w * 0.15f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+@Composable
+fun SoftPlayIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 48.dp
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        drawCircle(color = Color.Black.copy(alpha = 0.6f), radius = w / 2f)
+        val triangle = Path().apply {
+            moveTo(w * 0.38f, h * 0.3f)
+            lineTo(w * 0.72f, h * 0.5f)
+            lineTo(w * 0.38f, h * 0.7f)
+            close()
+        }
+        drawPath(triangle, color = Color.White)
+    }
+}
+
+@Composable
+fun SoftXIcon(modifier: Modifier = Modifier, size: Dp = 20.dp, color: Color = Color.Black) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.15f
+        drawLine(color, Offset(w * 0.2f, h * 0.2f), Offset(w * 0.8f, h * 0.8f), sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(w * 0.8f, h * 0.2f), Offset(w * 0.2f, h * 0.8f), sw, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+fun SoftNextIcon(modifier: Modifier = Modifier, size: Dp = 20.dp, color: Color = Color.Black) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.15f
+        val path = Path().apply {
+            moveTo(w * 0.3f, h * 0.2f)
+            lineTo(w * 0.7f, h * 0.5f)
+            lineTo(w * 0.3f, h * 0.8f)
+        }
+        drawPath(path, color, style = Stroke(sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+@Composable
+fun SoftImageIcon(modifier: Modifier = Modifier, size: Dp = 24.dp, color: Color = Color.Black) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.1f
+        drawRect(color, topLeft = Offset(w * 0.15f, h * 0.2f), size = Size(w * 0.7f, h * 0.6f), style = Stroke(sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawCircle(color, radius = w * 0.15f, center = Offset(w * 0.65f, h * 0.35f))
+        val mountain = Path().apply {
+            moveTo(w * 0.15f, h * 0.8f)
+            lineTo(w * 0.4f, h * 0.45f)
+            lineTo(w * 0.6f, h * 0.65f)
+            lineTo(w * 0.85f, h * 0.3f)
+            lineTo(w * 0.85f, h * 0.8f)
+            close()
+        }
+        drawPath(mountain, color, style = Stroke(sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+@Composable
+fun SoftVideoIcon(modifier: Modifier = Modifier, size: Dp = 24.dp, color: Color = Color.Black) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.1f
+        drawRoundRect(color, topLeft = Offset(w * 0.1f, h * 0.25f), size = Size(w * 0.65f, h * 0.5f), cornerRadius = CornerRadius(w * 0.1f), style = Stroke(sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        val triangle = Path().apply {
+            moveTo(w * 0.8f, h * 0.3f)
+            lineTo(w * 0.95f, h * 0.5f)
+            lineTo(w * 0.8f, h * 0.7f)
+            close()
+        }
+        drawPath(triangle, color)
+    }
+}
+
+@Composable
+fun SoftTextIcon(modifier: Modifier = Modifier, size: Dp = 24.dp, color: Color = Color.Black) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.15f
+        drawLine(color, Offset(w * 0.2f, h * 0.25f), Offset(w * 0.8f, h * 0.25f), sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(w * 0.5f, h * 0.25f), Offset(w * 0.5f, h * 0.8f), sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(w * 0.35f, h * 0.8f), Offset(w * 0.65f, h * 0.8f), sw, cap = StrokeCap.Round)
+    }
+}
+
 

@@ -1,5 +1,6 @@
 package com.example.ui.screens.home.tabs
 
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -39,7 +40,10 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.AuthViewModel
+import com.example.BuildConfig
 import com.example.ModerationManager
+import com.example.SupabaseClient
+import com.example.SupabaseSessionManager
 import com.example.UserProfile
 import com.example.ui.components.CircleFlag
 import com.example.ui.components.DynamicHobbyChip
@@ -51,9 +55,12 @@ import com.example.ui.components.resolveAvatarModel
 import com.example.ui.screens.*
 import com.example.ui.screens.home.dialogs.ModerationReviewDialog
 import com.example.ui.screens.home.models.DarkText
+import com.example.ui.screens.profile.EditProfileScreen
 import com.example.ui.screens.home.models.GraySubtitle
 import com.example.ui.theme.GoldAccent
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,20 +81,146 @@ fun ProfileTabContent(
     var showOptionsMenuSheet by remember { mutableStateOf(false) }
     var isAdmin by remember { mutableStateOf(false) }
 
-    LaunchedEffect(currentUserProfile.uid) {
+    val userId = currentUserProfile.uid
+    var currentProfileName by remember(currentUserProfile.displayName) { mutableStateOf(currentUserProfile.displayName?.ifBlank { "pikaa" } ?: "pikaa") }
+    var currentUsername by remember(currentUserProfile.username) { mutableStateOf(currentUserProfile.username?.ifBlank { "pikaa" } ?: "pikaa") }
+    var currentAvatarUrl by remember(currentUserProfile.avatar) { mutableStateOf(currentUserProfile.avatar?.ifBlank { "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=500" } ?: "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=500") }
+    var currentBio by remember { mutableStateOf("I love music, sunset and good conversations! Always open to meet new people and learn about different cultures. Let's be friends! 💛") }
+    var currentCountry by remember { mutableStateOf(currentUserProfile.country?.ifBlank { "South Korea" } ?: "South Korea") }
+    var currentCountryCode by remember { mutableStateOf(currentUserProfile.countryCode?.ifBlank { "kr" } ?: "kr") }
+    var currentAge by remember { mutableStateOf(currentUserProfile.age ?: 19) }
+    var currentGender by remember { mutableStateOf(currentUserProfile.gender?.ifBlank { "Female" } ?: "Female") }
+    var isVerified by remember { mutableStateOf(false) }
+    var isOnline by remember { mutableStateOf(true) }
+    var postsCount by remember { mutableStateOf(0) }
+    var followersCount by remember { mutableStateOf(0) }
+    var followingCount by remember { mutableStateOf(0) }
+    var currentJoinedText by remember { mutableStateOf("Joined recently") }
+
+    val momentsList = remember { mutableStateListOf<FeedPost>() }
+    var isMomentsLoading by remember { mutableStateOf(false) }
+
+    LaunchedEffect(userId) {
         isAdmin = ModerationManager.checkIsAdmin(context)
+        if (userId.isBlank()) return@LaunchedEffect
+
+        val token = com.example.SupabaseSessionManager.getAuthenticatedBearerToken(context)
+            ?: com.example.SupabaseSessionManager.getBearerToken(context)
+            ?: "Bearer ${com.example.BuildConfig.SUPABASE_ANON_KEY}"
+
+        try {
+            val profileResp = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.example.SupabaseClient.api.getDiscoverableProfiles(
+                    apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
+                    auth = token,
+                    options = mapOf("auth_user_id" to "eq.$userId")
+                )
+            }
+            if (profileResp.isSuccessful) {
+                val p = profileResp.body()?.firstOrNull()
+                if (p != null) {
+                    currentProfileName = p.profile_name ?: p.username ?: currentProfileName
+                    currentUsername = p.username ?: p.profile_name?.lowercase()?.replace(" ", "") ?: currentUsername
+                    p.avatar_url?.let { if (it.isNotBlank()) currentAvatarUrl = it }
+                    p.bio?.let { if (it.isNotBlank()) currentBio = it }
+                    p.country?.let { currentCountry = it }
+                    currentCountryCode = resolveCountryCode(p.country, p.country_code)
+                    p.age?.let { currentAge = it }
+                    p.gender?.let { currentGender = it }
+                    isOnline = p.is_online ?: true
+                    isVerified = p.is_verified ?: false
+                    currentJoinedText = formatJoinedDate(p.created_at)
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("ProfileTabContent", "Error loading profile data", e)
+        }
+
+        try {
+            withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val postCountResp = com.example.SupabaseClient.api.countMomentsByUserId(
+                    apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
+                    auth = token,
+                    userIdEq = "eq.$userId"
+                )
+                if (postCountResp.isSuccessful) {
+                    val cr = postCountResp.headers()["Content-Range"]
+                    postsCount = cr?.substringAfter("/")?.toIntOrNull()
+                        ?: postCountResp.body()?.size ?: 0
+                }
+
+                val followerCountResp = com.example.SupabaseClient.api.countFollowers(
+                    apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
+                    auth = token,
+                    followingIdEq = "eq.$userId"
+                )
+                if (followerCountResp.isSuccessful) {
+                    val cr = followerCountResp.headers()["Content-Range"]
+                    followersCount = cr?.substringAfter("/")?.toIntOrNull()
+                        ?: followerCountResp.body()?.size ?: 0
+                }
+
+                val followingCountResp = com.example.SupabaseClient.api.countFollowing(
+                    apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
+                    auth = token,
+                    followerIdEq = "eq.$userId"
+                )
+                if (followingCountResp.isSuccessful) {
+                    val cr = followingCountResp.headers()["Content-Range"]
+                    followingCount = cr?.substringAfter("/")?.toIntOrNull()
+                        ?: followingCountResp.body()?.size ?: 0
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("ProfileTabContent", "Error loading stats counts", e)
+        }
+
+        try {
+            isMomentsLoading = true
+            val momentsResp = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.example.SupabaseClient.api.getMomentsByUserId(
+                    apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
+                    auth = token,
+                    userIdEq = "eq.$userId"
+                )
+            }
+            if (momentsResp.isSuccessful) {
+                val moments = momentsResp.body().orEmpty()
+                momentsList.clear()
+                moments.forEach { m ->
+                    val firstImg = m.image_urls?.firstOrNull()
+                    momentsList.add(
+                        FeedPost(
+                            id = m.id,
+                            type = if (!firstImg.isNullOrBlank()) PostType.IMAGE else PostType.TEXT,
+                            imageUrl = firstImg,
+                            allImages = m.image_urls ?: emptyList(),
+                            textContent = if (firstImg.isNullOrBlank()) m.content else null,
+                            caption = m.content.orEmpty(),
+                            likesCount = m.likes_count ?: 0,
+                            commentsCount = m.comments_count ?: 0,
+                            timestamp = formatMomentTimestamp(m.created_at)
+                        )
+                    )
+                }
+                postsCount = momentsList.size
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("ProfileTabContent", "Error loading moments", e)
+        } finally {
+            isMomentsLoading = false
+        }
     }
 
-    val profileDisplayName = currentUserProfile.displayName?.ifBlank { "pikaa" } ?: "pikaa"
-    val profileUsername = currentUserProfile.username?.ifBlank { "pikaa" } ?: "pikaa"
-    val profileAvatar = currentUserProfile.avatar?.ifBlank { "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=500" }
-        ?: "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=500"
+    val profileDisplayName = currentProfileName
+    val profileUsername = currentUsername
+    val profileAvatar = currentAvatarUrl
     val profileCover = "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=800"
-    val profileCountryCode = currentUserProfile.countryCode?.ifBlank { "kr" } ?: "kr"
-    val profileCountry = currentUserProfile.country?.ifBlank { "South Korea" } ?: "South Korea"
-    val profileCity = if (profileCountryCode.lowercase() == "kr") "Seoul, South Korea" else "${profileCountry}"
-    val profileAge = currentUserProfile.age?.toString()?.ifBlank { "19" } ?: "19"
-    val profileGender = currentUserProfile.gender?.ifBlank { "Female" } ?: "Female"
+    val profileCountryCode = currentCountryCode
+    val profileCountry = currentCountry
+    val profileCity = if (profileCountryCode.lowercase() == "kr") "Seoul, South Korea" else profileCountry
+    val profileAge = currentAge.toString()
+    val profileGender = currentGender
 
     // Multi-language parsing (supports up to 3 stacked flags)
     val parsedNative = remember(currentUserProfile.nativeLanguage, profileCountryCode) {
@@ -109,120 +242,10 @@ fun ProfileTabContent(
         else listOf("Music", "Photography", "Travel", "K-Drama", "Food", "Movies", "Gaming", "Yoga")
     }
 
-    // Default Bio matching reference
-    val profileBio = "I love music, sunset and good conversations! Always open to meet new people and learn about different cultures. Let's be friends! 💛"
+    val profileBio = currentBio
 
-    // Curated high-aesthetic feed posts
-    val posts = remember {
-        mutableStateListOf(
-            FeedPost(
-                id = "post1",
-                type = PostType.IMAGE,
-                imageUrl = "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=600",
-                caption = "Sunset selfie from the rooftop cafe! The golden hour view is absolutely stunning today. 🌇✨",
-                likesCount = 384,
-                commentsCount = 42,
-                timestamp = "1 hour ago",
-                isCarousel = true
-            ),
-            FeedPost(
-                id = "post2",
-                type = PostType.IMAGE,
-                imageUrl = "https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?w=600",
-                caption = "Spent my afternoon in this cozy coffee shop studying Japanese vocabulary. ☕✍️📚",
-                likesCount = 212,
-                commentsCount = 19,
-                timestamp = "4 hours ago"
-            ),
-            FeedPost(
-                id = "post3",
-                type = PostType.IMAGE,
-                imageUrl = "https://images.unsplash.com/photo-1538481199705-c710c4e965fc?w=600",
-                caption = "Seoul streets at night have a completely different vibe! Neon lights everywhere. 🌃🇰🇷",
-                likesCount = 529,
-                commentsCount = 68,
-                timestamp = "1 day ago",
-                isVideo = true
-            ),
-            FeedPost(
-                id = "post4",
-                type = PostType.TEXT,
-                textContent = "Excited to study Mandarin tonight! 📚 Anyone want to practice speaking together?",
-                textBgColor = Color(0xFFF0FDF4),
-                textTextColor = Color(0xFF166534),
-                caption = "Mandarin speaking practice! DM me if you're free tonight. 😊💬",
-                likesCount = 98,
-                commentsCount = 31,
-                timestamp = "1 day ago"
-            ),
-            FeedPost(
-                id = "post5",
-                type = PostType.IMAGE,
-                imageUrl = "https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?w=600",
-                caption = "Throwback to my amazing road trip through the national parks last year. Nature is breathtaking! 🌲🚗🎒",
-                likesCount = 416,
-                commentsCount = 23,
-                timestamp = "2 days ago",
-                isCarousel = true
-            ),
-            FeedPost(
-                id = "post6",
-                type = PostType.IMAGE,
-                imageUrl = "https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?w=600",
-                caption = "Look at this cute ginger cat I found near my hostel. It wanted some of my lunch! 🐱🍗",
-                likesCount = 605,
-                commentsCount = 74,
-                timestamp = "3 days ago"
-            ),
-            FeedPost(
-                id = "post7",
-                type = PostType.TEXT,
-                textContent = "Thinking about traveling to Kyoto next spring. Any suggestions for hidden gem spots? 🌸🏯",
-                textBgColor = Color(0xFFF5F3FF),
-                textTextColor = Color(0xFF5B21B6),
-                caption = "Kyoto trip planning! Let me know your favorite places in the comments below. 👇⛩️",
-                likesCount = 145,
-                commentsCount = 48,
-                timestamp = "4 days ago"
-            ),
-            FeedPost(
-                id = "post8",
-                type = PostType.IMAGE,
-                imageUrl = "https://images.unsplash.com/photo-1484755560695-a4c7300c5629?w=600",
-                caption = "Getting lost in my favorite playlist on my evening walk. Music speaks all languages. 🎧🚶‍♀️✨",
-                likesCount = 310,
-                commentsCount = 15,
-                timestamp = "5 days ago",
-                isCarousel = true
-            ),
-            FeedPost(
-                id = "post9",
-                type = PostType.IMAGE,
-                imageUrl = "https://images.unsplash.com/photo-1569718212165-3a8278d5f624?w=600",
-                caption = "Satisfying my ramen cravings with this authentic tonkotsu bowl. Absolutely delicious! 🍜😋🔥",
-                likesCount = 472,
-                commentsCount = 39,
-                timestamp = "6 days ago"
-            ),
-            FeedPost(
-                id = "post10",
-                type = PostType.IMAGE,
-                imageUrl = "https://images.unsplash.com/photo-1452780212940-6f5c0d14d848?w=600",
-                caption = "Captured some magical rays of light piercing through the forest canopy this morning. 📷🌲✨",
-                likesCount = 258,
-                commentsCount = 12,
-                timestamp = "1 week ago"
-            ),
-            FeedPost(
-                id = "post11",
-                type = PostType.IMAGE,
-                imageUrl = "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=600",
-                caption = "Laughter and late nights with some of the best people I met through this app. 💛🌍👋",
-                likesCount = 511,
-                commentsCount = 55,
-                timestamp = "1 week ago"
-            )
-        )
+    val posts = remember(momentsList) {
+        if (momentsList.isNotEmpty()) momentsList else emptyList()
     }
 
     val displayedPosts = remember(selectedFeedTab, posts) {
@@ -377,7 +400,9 @@ fun ProfileTabContent(
                         )
 
                         // Blue Verified Badge (Custom Canvas Drawn)
-                        ProfileVerifiedBadge(modifier = Modifier.size(18.dp))
+                        if (isVerified) {
+                            ProfileVerifiedBadge(modifier = Modifier.size(18.dp))
+                        }
 
                         // Green "🟢 Online" Status Pill
                         Box(
@@ -447,7 +472,7 @@ fun ProfileTabContent(
                         ) {
                             ProfileCalendarIcon(modifier = Modifier.size(13.dp), color = Color(0xFF64748B))
                             Text(
-                                text = "Joined 3 months ago",
+                                text = currentJoinedText,
                                 fontSize = 12.sp,
                                 color = Color(0xFF64748B),
                                 fontWeight = FontWeight.Normal
@@ -458,7 +483,7 @@ fun ProfileTabContent(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // ---------------------------------------------------------
-                    // 3. STATS ROW (12 Posts | 1.2K Followers | 128 Following)
+                    // 3. STATS ROW (Posts | Followers | Following)
                     // ---------------------------------------------------------
                     Row(
                         modifier = Modifier
@@ -466,21 +491,21 @@ fun ProfileTabContent(
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        StatItemExact(count = "12", label = "Posts", modifier = Modifier.weight(1f))
+                        StatItemExact(count = postsCount.toString(), label = "Posts", modifier = Modifier.weight(1f))
                         Box(
                             modifier = Modifier
                                 .width(1.dp)
                                 .height(28.dp)
                                 .background(Color(0xFFE2E8F0))
                         )
-                        StatItemExact(count = "1.2K", label = "Followers", modifier = Modifier.weight(1f))
+                        StatItemExact(count = followersCount.toString(), label = "Followers", modifier = Modifier.weight(1f))
                         Box(
                             modifier = Modifier
                                 .width(1.dp)
                                 .height(28.dp)
                                 .background(Color(0xFFE2E8F0))
                         )
-                        StatItemExact(count = "128", label = "Following", modifier = Modifier.weight(1f))
+                        StatItemExact(count = followingCount.toString(), label = "Following", modifier = Modifier.weight(1f))
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -1070,288 +1095,13 @@ fun ProfileTabContent(
         }
     }
 
-    // Edit Profile Dialog
+    // Edit Profile Dialog Fullscreen Redesign
     if (showEditProfileDialog) {
-        var editUsername by remember { mutableStateOf(currentUserProfile.username ?: "") }
-        var editDisplayName by remember { mutableStateOf(currentUserProfile.displayName ?: "") }
-        var editAvatar by remember { mutableStateOf(currentUserProfile.avatar ?: PresetAvatarList.first().second) }
-        var editCountry by remember { mutableStateOf(currentUserProfile.country ?: "South Korea") }
-        var editCountryCode by remember { mutableStateOf(currentUserProfile.countryCode ?: "kr") }
-        var showCountryPicker by remember { mutableStateOf(false) }
-        var errorMessage by remember { mutableStateOf<String?>(null) }
-        var isChecking by remember { mutableStateOf(false) }
-
-        AlertDialog(
-            onDismissRequest = { showEditProfileDialog = false },
-            containerColor = Color.White,
-            shape = RoundedCornerShape(24.dp),
-            title = {
-                Text(
-                    text = "Edit Profile",
-                    fontWeight = FontWeight.Black,
-                    fontSize = 20.sp,
-                    color = DarkText
-                )
-            },
-            text = {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    // Avatar preset picker row
-                    Column {
-                        Text("Choose Avatar Preset", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            PresetAvatarList.take(4).forEach { pair ->
-                                val url = pair.second
-                                val isSelected = editAvatar == url
-                                Box(
-                                    modifier = Modifier
-                                        .size(52.dp)
-                                        .border(
-                                            width = if (isSelected) 3.dp else 1.dp,
-                                            color = if (isSelected) GoldAccent else Color.LightGray.copy(alpha = 0.5f),
-                                            shape = CircleShape
-                                        )
-                                        .padding(2.dp)
-                                        .clip(CircleShape)
-                                        .clickable { editAvatar = url }
-                                ) {
-                                    AsyncImage(
-                                        model = pair.first,
-                                        contentDescription = "Preset Avatar",
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Username Input
-                    Column {
-                        Text("Username", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        OutlinedTextField(
-                            value = editUsername,
-                            onValueChange = { input ->
-                                errorMessage = null
-                                editUsername = input.filter { it.isLetterOrDigit() || it == '_' }.lowercase()
-                            },
-                            placeholder = { Text("e.g. pikaa_learner", color = Color.Gray) },
-                            singleLine = true,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("edit_username_input"),
-                            shape = RoundedCornerShape(12.dp),
-                            textStyle = androidx.compose.ui.text.TextStyle(color = DarkText, fontSize = 14.sp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = DarkText,
-                                unfocusedTextColor = DarkText,
-                                cursorColor = GoldAccent,
-                                focusedBorderColor = GoldAccent,
-                                unfocusedBorderColor = Color.LightGray
-                            )
-                        )
-                        Text(
-                            text = "Usernames must be unique and automatically lowercased",
-                            fontSize = 11.sp,
-                            color = Color.Gray,
-                            modifier = Modifier.padding(top = 2.dp)
-                        )
-                    }
-
-                    // Display Name Input
-                    Column {
-                        Text("Display Name", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        OutlinedTextField(
-                            value = editDisplayName,
-                            onValueChange = { editDisplayName = it },
-                            placeholder = { Text("Enter your display name", color = Color.Gray) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
-                            textStyle = androidx.compose.ui.text.TextStyle(color = DarkText, fontSize = 14.sp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = DarkText,
-                                unfocusedTextColor = DarkText,
-                                cursorColor = GoldAccent,
-                                focusedBorderColor = GoldAccent,
-                                unfocusedBorderColor = Color.LightGray
-                            )
-                        )
-                    }
-
-                    // Country & Flag Selector
-                    Column {
-                        Text("Country & Flag", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Surface(
-                            onClick = { showCountryPicker = true },
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, Color.LightGray),
-                            color = Color.White,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    CircleFlag(countryCode = editCountryCode, modifier = Modifier.size(20.dp).clip(CircleShape))
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(text = editCountry, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = DarkText)
-                                }
-                                Text("Change", fontSize = 12.sp, color = GoldAccent, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-
-                    if (errorMessage != null) {
-                        Text(
-                            text = errorMessage!!,
-                            color = Color.Red,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val cleanUsername = editUsername.trim().lowercase()
-                        if (cleanUsername.isBlank() || editDisplayName.isBlank()) {
-                            errorMessage = "Username and display name cannot be blank."
-                            return@Button
-                        }
-                        if (cleanUsername.length < 3) {
-                            errorMessage = "Username must be at least 3 characters."
-                            return@Button
-                        }
-
-                        val performUpdate = {
-                            if (viewModel != null) {
-                                viewModel.updateProfile(
-                                    context = context,
-                                    username = cleanUsername,
-                                    displayName = editDisplayName,
-                                    avatar = editAvatar,
-                                    dob = currentUserProfile.dob ?: "",
-                                    gender = currentUserProfile.gender ?: "",
-                                    nativeLanguage = currentUserProfile.nativeLanguage ?: "",
-                                    learningLanguage = currentUserProfile.learningLanguage ?: "",
-                                    country = editCountry,
-                                    countryCode = editCountryCode,
-                                    hobbies = currentUserProfile.hobbies,
-                                    onSuccess = {
-                                        Toast.makeText(context, "Profile updated successfully!", Toast.LENGTH_SHORT).show()
-                                        showEditProfileDialog = false
-                                    }
-                                )
-                            } else {
-                                showEditProfileDialog = false
-                            }
-                        }
-
-                        if (cleanUsername == (currentUserProfile.username ?: "").lowercase()) {
-                            performUpdate()
-                        } else {
-                            isChecking = true
-                            if (viewModel != null) {
-                                viewModel.checkUsernameUnique(cleanUsername, currentUserProfile.uid) { isUnique ->
-                                    isChecking = false
-                                    if (isUnique) {
-                                        performUpdate()
-                                    } else {
-                                        errorMessage = "This username is already taken. Please pick another."
-                                    }
-                                }
-                            } else {
-                                showEditProfileDialog = false
-                            }
-                        }
-                    },
-                    enabled = !isChecking,
-                    colors = ButtonDefaults.buttonColors(containerColor = GoldAccent),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    if (isChecking) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            color = Color.Black,
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Text("Save Changes", color = Color.Black, fontWeight = FontWeight.Bold)
-                    }
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showEditProfileDialog = false }) {
-                    Text("Cancel", color = Color.Gray)
-                }
-            }
+        EditProfileScreen(
+            currentUserProfile = currentUserProfile,
+            viewModel = viewModel,
+            onDismiss = { showEditProfileDialog = false }
         )
-
-        // Simple Country Picker Dialog
-        if (showCountryPicker) {
-            var countrySearch by remember { mutableStateOf("") }
-            val filteredCountries = remember(countrySearch) {
-                if (countrySearch.isBlank()) CountryData.popularCountries + CountryData.allCountries.take(30)
-                else CountryData.allCountries.filter { it.name.contains(countrySearch, ignoreCase = true) }
-            }
-
-            AlertDialog(
-                onDismissRequest = { showCountryPicker = false },
-                containerColor = Color.White,
-                title = { Text("Select Country", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = DarkText) },
-                text = {
-                    Column(modifier = Modifier.height(300.dp)) {
-                        OutlinedTextField(
-                            value = countrySearch,
-                            onValueChange = { countrySearch = it },
-                            placeholder = { Text("Search country...") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-                        )
-                        androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.fillMaxSize()) {
-                            items(filteredCountries.size) { idx ->
-                                val countryItem = filteredCountries[idx]
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            editCountry = countryItem.name
-                                            editCountryCode = countryItem.flagCode
-                                            showCountryPicker = false
-                                        }
-                                        .padding(vertical = 10.dp, horizontal = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    CircleFlag(countryCode = countryItem.flagCode, modifier = Modifier.size(22.dp).clip(CircleShape))
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text(countryItem.name, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = DarkText)
-                                }
-                            }
-                        }
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = { showCountryPicker = false }) {
-                        Text("Close", color = Color.Gray)
-                    }
-                }
-            )
-        }
     }
 
     if (showModerationDialog) {

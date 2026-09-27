@@ -14,13 +14,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.Chat
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -38,14 +31,22 @@ import com.example.SupabaseClient
 import com.example.SupabaseMomentLike
 import com.example.SupabaseMomentComment
 import com.example.SupabaseSessionManager
+import com.example.CloudinaryUploadResponse
+import com.example.ui.components.*
 import com.example.ui.screens.home.models.MomentPost
 import com.example.ui.screens.post.DetailedPost
 import com.example.ui.screens.post.PostComment
 import com.example.ui.screens.post.PostDetailScreen
-import com.google.firebase.storage.FirebaseStorage
+import com.example.ui.screens.post.CreatePostScreen
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
@@ -79,7 +80,6 @@ fun MomentsTabContent(
         }
     }
 
-    // Function to load moments from Supabase
     fun fetchMoments() {
         coroutineScope.launch {
             try {
@@ -100,7 +100,6 @@ fun MomentsTabContent(
                     val mappedList = mutableListOf<MomentPost>()
 
                     for (m in rawMoments) {
-                        // Fetch author profile
                         var authorName = "FunkyTalk User"
                         var authorUsername = "user"
                         var authorAvatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150"
@@ -127,7 +126,6 @@ fun MomentsTabContent(
                             } catch (_: Exception) {}
                         }
 
-                        // Check if liked by self
                         var isLikedByMe = false
                         if (selfUserId.isNotBlank()) {
                             try {
@@ -179,384 +177,358 @@ fun MomentsTabContent(
 
     val displayList = if (liveMoments.isNotEmpty()) liveMoments else momentsPosts
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xFFFAFAEE)),
-            contentPadding = PaddingValues(bottom = 80.dp)
-        ) {
-            item {
-                TabRow(
-                    selectedTabIndex = selectedTabIndex,
-                    containerColor = Color.White,
-                    contentColor = Color(0xFF0F172A)
-                ) {
-                    Tab(
-                        selected = selectedTabIndex == 0,
-                        onClick = { selectedTabIndex = 0 },
-                        text = { Text("Trending", fontWeight = if (selectedTabIndex == 0) FontWeight.Bold else FontWeight.Normal) }
+    Box(modifier = Modifier.fillMaxSize().background(Color(0xFFFAFAEE))) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Top Header matching design exactly
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.White)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Funky",
+                        fontSize = 26.sp,
+                        fontWeight = FontWeight.Black,
+                        color = Color(0xFFFFC107)
                     )
-                    Tab(
-                        selected = selectedTabIndex == 1,
-                        onClick = { selectedTabIndex = 1 },
-                        text = { Text("My Language", fontWeight = if (selectedTabIndex == 1) FontWeight.Bold else FontWeight.Normal) }
+                    Text(
+                        text = "Talk",
+                        fontSize = 26.sp,
+                        fontWeight = FontWeight.Black,
+                        color = Color(0xFF0F172A)
                     )
                 }
-            }
-
-            if (isLoadingMoments && liveMoments.isEmpty()) {
-                item {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .height(200.dp),
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFF1F5F9))
+                            .clickable { Toast.makeText(context, "Filter options", Toast.LENGTH_SHORT).show() },
                         contentAlignment = Alignment.Center
                     ) {
-                        CircularProgressIndicator(color = Color(0xFFFFD43B))
+                        SoftFilterIcon(size = 18.dp, color = Color(0xFF0F172A))
                     }
-                }
-            } else {
-                items(displayList) { post ->
-                    Card(
+                    Surface(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 6.dp, horizontal = 14.dp)
-                            .clickable {
-                                coroutineScope.launch {
-                                    val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
-                                        ?: SupabaseSessionManager.getBearerToken(context)
-                                        ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
-
-                                    val loadedComments = mutableListOf<PostComment>()
-                                    try {
-                                        val commentsResp = withContext(Dispatchers.IO) {
-                                            SupabaseClient.api.getMomentComments(
-                                                apiKey = BuildConfig.SUPABASE_ANON_KEY,
-                                                auth = token,
-                                                momentIdEq = "eq.${post.id}"
-                                            )
-                                        }
-                                        if (commentsResp.isSuccessful) {
-                                            val rawComments = commentsResp.body().orEmpty()
-                                            for (c in rawComments) {
-                                                var cName = "User"
-                                                var cUname = "user"
-                                                var cAvatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150"
-                                                try {
-                                                    val pResp = withContext(Dispatchers.IO) {
-                                                        SupabaseClient.api.getDiscoverableProfiles(
-                                                            apiKey = BuildConfig.SUPABASE_ANON_KEY,
-                                                            auth = token,
-                                                            options = mapOf("auth_user_id" to "eq.${c.user_id}")
-                                                        )
-                                                    }
-                                                    if (pResp.isSuccessful) {
-                                                        val p = pResp.body()?.firstOrNull()
-                                                        if (p != null) {
-                                                            cName = p.profile_name ?: p.username ?: cName
-                                                            cUname = p.username ?: cName.lowercase().replace(" ", "")
-                                                            if (!p.avatar_url.isNullOrBlank()) cAvatar = p.avatar_url!!
-                                                        }
-                                                    }
-                                                } catch (_: Exception) {}
-
-                                                loadedComments.add(
-                                                    PostComment(
-                                                        id = c.id ?: UUID.randomUUID().toString(),
-                                                        authorName = cName,
-                                                        username = cUname,
-                                                        avatarUrl = cAvatar,
-                                                        timeAgo = "Recently",
-                                                        text = c.content,
-                                                        likesCount = 0,
-                                                        isLiked = false
-                                                    )
-                                                )
-                                            }
-                                        }
-                                    } catch (e: Exception) {
-                                        Log.e("MomentsTab", "Error loading comments", e)
-                                    }
-
-                                    selectedPostForDetail = DetailedPost(
-                                        id = post.id,
-                                        authorName = post.author,
-                                        authorUsername = post.username,
-                                        authorAvatarUrl = post.avatar,
-                                        isAuthorVerified = true,
-                                        location = "Seoul, South Korea",
-                                        timeAgo = post.timeAgo,
-                                        images = if (post.imageUrl != null) listOf(post.imageUrl) else listOf("https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=1000"),
-                                        caption = post.content,
-                                        likesCount = post.initialLikes,
-                                        isLiked = post.isLiked,
-                                        isBookmarked = false,
-                                        initialComments = loadedComments
-                                    )
-                                }
-                            },
-                        colors = CardDefaults.cardColors(containerColor = Color.White),
-                        shape = RoundedCornerShape(18.dp),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp)
+                            .clip(RoundedCornerShape(24.dp))
+                            .clickable { showCreateDialog = true },
+                        color = Color(0xFFFFD43B),
+                        shape = RoundedCornerShape(24.dp)
                     ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp)
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                AsyncImage(
-                                    model = post.avatar,
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier
-                                        .size(44.dp)
-                                        .clip(CircleShape)
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(post.author, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A), fontSize = 15.sp)
-                                    Text("@" + post.username + " • " + post.timeAgo, color = Color(0xFF64748B), fontSize = 12.sp)
-                                }
-                                Icon(Icons.Default.MoreVert, contentDescription = null, tint = Color(0xFF94A3B8))
-                            }
-
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(post.content, color = Color(0xFF1E293B), fontSize = 14.sp, lineHeight = 20.sp)
-
-                            if (post.imageUrl != null) {
-                                Spacer(modifier = Modifier.height(12.dp))
-                                AsyncImage(
-                                    model = post.imageUrl,
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(200.dp)
-                                        .clip(RoundedCornerShape(14.dp))
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                // Like interaction
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .clickable {
-                                            coroutineScope.launch {
-                                                val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
-                                                    ?: SupabaseSessionManager.getBearerToken(context)
-                                                    ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
-
-                                                val targetState = !post.isLiked
-                                                post.isLiked = targetState
-                                                if (targetState) {
-                                                    try {
-                                                        withContext(Dispatchers.IO) {
-                                                            SupabaseClient.api.likeMoment(
-                                                                apiKey = BuildConfig.SUPABASE_ANON_KEY,
-                                                                auth = token,
-                                                                like = SupabaseMomentLike(moment_id = post.id, user_id = selfUserId)
-                                                            )
-                                                        }
-                                                    } catch (_: Exception) {}
-                                                } else {
-                                                    try {
-                                                        withContext(Dispatchers.IO) {
-                                                            SupabaseClient.api.unlikeMoment(
-                                                                apiKey = BuildConfig.SUPABASE_ANON_KEY,
-                                                                auth = token,
-                                                                momentIdEq = "eq.${post.id}",
-                                                                userIdEq = "eq.$selfUserId"
-                                                            )
-                                                        }
-                                                    } catch (_: Exception) {}
-                                                }
-                                                onToggleLike(post)
-                                            }
-                                        }
-                                        .padding(6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = if (post.isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                        contentDescription = "Likes",
-                                        tint = if (post.isLiked) Color(0xFFE11D48) else Color(0xFF64748B),
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "${if (post.isLiked) post.initialLikes + 1 else post.initialLikes}",
-                                        color = Color(0xFF0F172A),
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 13.sp
-                                    )
-                                }
-
-                                // Comments counter display & opener
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .clickable {
-                                            // Trigger detail view
-                                        }
-                                        .padding(6.dp)
-                                ) {
-                                    Icon(
-                                        Icons.AutoMirrored.Outlined.Chat,
-                                        contentDescription = "Comments",
-                                        tint = Color(0xFF64748B),
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("${post.commentsCount}", color = Color(0xFF0F172A), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                                }
-
-                                Icon(Icons.Default.Share, contentDescription = "Share", tint = Color(0xFF64748B), modifier = Modifier.size(20.dp))
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Floating Action Button to create new post
-        FloatingActionButton(
-            onClick = { showCreateDialog = true },
-            containerColor = Color(0xFFFFD43B),
-            contentColor = Color(0xFF0F172A),
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(20.dp)
-        ) {
-            Icon(Icons.Default.Add, contentDescription = "Create Moment")
-        }
-
-        // Create Moment Dialog
-        if (showCreateDialog) {
-            AlertDialog(
-                onDismissRequest = { if (!isUploading) showCreateDialog = false },
-                containerColor = Color.White,
-                shape = RoundedCornerShape(20.dp),
-                title = { Text("Create New Moment", fontWeight = FontWeight.Bold, color = Color(0xFF0F172A)) },
-                text = {
-                    Column {
-                        OutlinedTextField(
-                            value = newPostCaption,
-                            onValueChange = { newPostCaption = it },
-                            placeholder = { Text("What's on your mind? Share your language journey...") },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(120.dp),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        Button(
-                            onClick = {
-                                imagePickerLauncher.launch(
-                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                )
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF1F5F9)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(if (selectedImageUri == null) "Choose Image from Gallery" else "Image Selected ✅", color = Color(0xFF0F172A))
-                        }
-
-                        if (selectedImageUri != null) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            AsyncImage(
-                                model = selectedImageUri,
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(140.dp)
-                                    .clip(RoundedCornerShape(12.dp))
+                            SoftPlusIcon(size = 16.dp, color = Color(0xFF0F172A))
+                            Text(
+                                text = "Post",
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A),
+                                fontSize = 14.sp
                             )
                         }
                     }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            if (newPostCaption.isBlank() && selectedImageUri == null) {
-                                Toast.makeText(context, "Please add text or image", Toast.LENGTH_SHORT).show()
-                                return@Button
-                            }
-                            isUploading = true
-                            coroutineScope.launch {
-                                try {
-                                    var imageUrlStr: String? = null
-                                    if (selectedImageUri != null) {
-                                        val storageRef = FirebaseStorage.getInstance().reference
-                                            .child("moments/${System.currentTimeMillis()}_${UUID.randomUUID()}.jpg")
-                                        storageRef.putFile(selectedImageUri!!).await()
-                                        imageUrlStr = storageRef.downloadUrl.await().toString()
+                }
+            }
+
+            // Tab Row
+            TabRow(
+                selectedTabIndex = selectedTabIndex,
+                containerColor = Color.White,
+                contentColor = Color(0xFF0F172A),
+                divider = { HorizontalDivider(color = Color(0xFFE2E8F0), thickness = 1.dp) }
+            ) {
+                Tab(
+                    selected = selectedTabIndex == 0,
+                    onClick = { selectedTabIndex = 0 },
+                    text = { Text("Trending", fontWeight = if (selectedTabIndex == 0) FontWeight.Bold else FontWeight.Normal, color = if (selectedTabIndex == 0) Color(0xFF0F172A) else Color(0xFF64748B)) }
+                )
+                Tab(
+                    selected = selectedTabIndex == 1,
+                    onClick = { selectedTabIndex = 1 },
+                    text = { Text("My Language", fontWeight = if (selectedTabIndex == 1) FontWeight.Bold else FontWeight.Normal, color = if (selectedTabIndex == 1) Color(0xFF0F172A) else Color(0xFF64748B)) }
+                )
+            }
+
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentPadding = PaddingValues(bottom = 90.dp)
+            ) {
+                if (isLoadingMoments && liveMoments.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(220.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(color = Color(0xFFFFD43B))
+                        }
+                    }
+                } else {
+                    items(displayList) { post ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 6.dp, horizontal = 14.dp)
+                                .clickable {
+                                    coroutineScope.launch {
+                                        val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                                            ?: SupabaseSessionManager.getBearerToken(context)
+                                            ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+
+                                        val loadedComments = mutableListOf<PostComment>()
+                                        try {
+                                            val commentsResp = withContext(Dispatchers.IO) {
+                                                SupabaseClient.api.getMomentComments(
+                                                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                                                    auth = token,
+                                                    momentIdEq = "eq.${post.id}"
+                                                )
+                                            }
+                                            if (commentsResp.isSuccessful) {
+                                                val rawComments = commentsResp.body().orEmpty()
+                                                for (c in rawComments) {
+                                                    var cName = "User"
+                                                    var cUname = "user"
+                                                    var cAvatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150"
+                                                    try {
+                                                        val pResp = withContext(Dispatchers.IO) {
+                                                            SupabaseClient.api.getDiscoverableProfiles(
+                                                                apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                                                                auth = token,
+                                                                options = mapOf("auth_user_id" to "eq.${c.user_id}")
+                                                            )
+                                                        }
+                                                        if (pResp.isSuccessful) {
+                                                            val p = pResp.body()?.firstOrNull()
+                                                            if (p != null) {
+                                                                cName = p.profile_name ?: p.username ?: cName
+                                                                cUname = p.username ?: cName.lowercase().replace(" ", "")
+                                                                if (!p.avatar_url.isNullOrBlank()) cAvatar = p.avatar_url!!
+                                                            }
+                                                        }
+                                                    } catch (_: Exception) {}
+
+                                                    loadedComments.add(
+                                                        PostComment(
+                                                            id = c.id ?: UUID.randomUUID().toString(),
+                                                            authorName = cName,
+                                                            username = cUname,
+                                                            avatarUrl = cAvatar,
+                                                            timeAgo = "Recently",
+                                                            text = c.content,
+                                                            likesCount = 0,
+                                                            isLiked = false
+                                                        )
+                                                    )
+                                                }
+                                            }
+                                        } catch (e: Exception) {
+                                            Log.e("MomentsTab", "Error loading comments", e)
+                                        }
+
+                                        selectedPostForDetail = DetailedPost(
+                                            id = post.id,
+                                            authorName = post.author,
+                                            authorUsername = post.username,
+                                            authorAvatarUrl = post.avatar,
+                                            isAuthorVerified = true,
+                                            location = "Seoul, South Korea",
+                                            timeAgo = post.timeAgo,
+                                            images = if (post.imageUrl != null) listOf(post.imageUrl) else listOf("https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=1000"),
+                                            caption = post.content,
+                                            likesCount = post.initialLikes,
+                                            isLiked = post.isLiked,
+                                            isBookmarked = false,
+                                            initialComments = loadedComments
+                                        )
+                                    }
+                                },
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            shape = RoundedCornerShape(18.dp),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp)
+                            ) {
+                                // Author Header Row
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    AsyncImage(
+                                        model = post.avatar,
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .size(44.dp)
+                                            .clip(CircleShape)
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Text(post.author, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A), fontSize = 15.sp)
+                                            SoftVerifiedBadge(size = 14.dp)
+                                        }
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text("@" + post.username + " • Seoul, South Korea • " + post.timeAgo, color = Color(0xFF64748B), fontSize = 12.sp)
+                                    }
+                                    SoftThreeDotsIcon(size = 18.dp, color = Color(0xFF94A3B8))
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(post.content, color = Color(0xFF1E293B), fontSize = 14.sp, lineHeight = 20.sp)
+
+                                if (post.imageUrl != null) {
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(220.dp)
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .background(Color(0xFFE2E8F0))
+                                    ) {
+                                        AsyncImage(
+                                            model = post.imageUrl,
+                                            contentDescription = null,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                // Language tags (Clean pill design, zero emojis)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Surface(
+                                        color = Color(0xFFF1F5F9),
+                                        shape = RoundedCornerShape(16.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color(0xFFEF4444)))
+                                            Text("Korean (Native)", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color(0xFF1E293B))
+                                        }
                                     }
 
-                                    val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
-                                        ?: SupabaseSessionManager.getBearerToken(context)
-                                        ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+                                    Surface(
+                                        color = Color(0xFFF1F5F9),
+                                        shape = RoundedCornerShape(16.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF3B82F6)))
+                                            Text("English (Intermediate)", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color(0xFF1E293B))
+                                        }
+                                    }
+                                }
 
-                                    val momentBody = mapOf<String, Any?>(
-                                        "user_id" to selfUserId,
-                                        "content" to newPostCaption,
-                                        "image_urls" to if (imageUrlStr != null) listOf(imageUrlStr) else emptyList()
-                                    )
+                                Spacer(modifier = Modifier.height(16.dp))
 
-                                    val resp = withContext(Dispatchers.IO) {
-                                        SupabaseClient.api.createMoment(
-                                            apiKey = BuildConfig.SUPABASE_ANON_KEY,
-                                            auth = token,
-                                            moment = momentBody
+                                // Interaction Action Bar (Like, Comment, Share, Bookmark)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable {
+                                                coroutineScope.launch {
+                                                    val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                                                        ?: SupabaseSessionManager.getBearerToken(context)
+                                                        ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+
+                                                    val targetState = !post.isLiked
+                                                    post.isLiked = targetState
+                                                    if (targetState) {
+                                                        try {
+                                                            withContext(Dispatchers.IO) {
+                                                                SupabaseClient.api.likeMoment(
+                                                                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                                                                    auth = token,
+                                                                    like = SupabaseMomentLike(moment_id = post.id, user_id = selfUserId)
+                                                                )
+                                                            }
+                                                        } catch (_: Exception) {}
+                                                    } else {
+                                                        try {
+                                                            withContext(Dispatchers.IO) {
+                                                                SupabaseClient.api.unlikeMoment(
+                                                                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                                                                    auth = token,
+                                                                    momentIdEq = "eq.${post.id}",
+                                                                    userIdEq = "eq.$selfUserId"
+                                                                )
+                                                            }
+                                                        } catch (_: Exception) {}
+                                                    }
+                                                    onToggleLike(post)
+                                                }
+                                            }
+                                            .padding(6.dp)
+                                    ) {
+                                        SoftHeartIcon(isLiked = post.isLiked, size = 20.dp)
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "${if (post.isLiked) post.initialLikes + 1 else post.initialLikes}",
+                                            color = Color(0xFF0F172A),
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 13.sp
                                         )
                                     }
 
-                                    if (resp.isSuccessful) {
-                                        Toast.makeText(context, "Moment posted successfully!", Toast.LENGTH_SHORT).show()
-                                        showCreateDialog = false
-                                        newPostCaption = ""
-                                        selectedImageUri = null
-                                        fetchMoments()
-                                    } else {
-                                        Toast.makeText(context, "Failed to post moment", Toast.LENGTH_SHORT).show()
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(6.dp)
+                                    ) {
+                                        SoftChatBubbleIcon(size = 20.dp, color = Color(0xFF64748B))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("${post.commentsCount}", color = Color(0xFF0F172A), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                                     }
-                                } catch (e: Exception) {
-                                    Log.e("MomentsTab", "Error creating moment", e)
-                                    Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
-                                } finally {
-                                    isUploading = false
+
+                                    SoftShareIcon(size = 20.dp, color = Color(0xFF64748B))
+                                    SoftBookmarkIcon(size = 20.dp, isBookmarked = false, color = Color(0xFF64748B))
                                 }
                             }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD43B)),
-                        enabled = !isUploading
-                    ) {
-                        if (isUploading) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color(0xFF0F172A))
-                        } else {
-                            Text("Post Moment", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold)
                         }
                     }
-                },
-                dismissButton = {
-                    TextButton(onClick = { if (!isUploading) showCreateDialog = false }) {
-                        Text("Cancel", color = Color(0xFF64748B))
-                    }
+                }
+            }
+        }
+
+        // Create Post Screen
+        if (showCreateDialog) {
+            CreatePostScreen(
+                onDismiss = { showCreateDialog = false },
+                onPostCreated = {
+                    showCreateDialog = false
+                    fetchMoments()
                 }
             )
         }
 
-        // Fullscreen Post Detail overlay with swipeable carousel & live comments
+        // Fullscreen Post Detail overlay
         selectedPostForDetail?.let { detailedPost ->
             PostDetailScreen(
                 post = detailedPost,

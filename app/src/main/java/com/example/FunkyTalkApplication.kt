@@ -7,6 +7,7 @@ import coil.ImageLoaderFactory
 import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
 import coil.decode.SvgDecoder
+import com.example.service.PresenceManager
 
 class FunkyTalkApplication : Application(), ImageLoaderFactory {
     companion object {
@@ -17,6 +18,7 @@ class FunkyTalkApplication : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         appContext = applicationContext
+        PresenceManager.initialize(this)
     }
 
     override fun newImageLoader(): ImageLoader {

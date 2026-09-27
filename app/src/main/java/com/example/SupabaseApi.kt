@@ -286,6 +286,20 @@ data class SupabaseMomentComment(
     val created_at: String? = null
 )
 
+@JsonClass(generateAdapter = true)
+data class CloudinarySignatureResponse(
+    val signature: String,
+    val timestamp: Long,
+    val api_key: String,
+    val cloud_name: String,
+    val folder: String
+)
+
+@JsonClass(generateAdapter = true)
+data class CloudinaryUploadResponse(
+    val secure_url: String? = null
+)
+
 interface SupabaseApi {
 
     @POST("functions/v1/verify-firebase-token")
@@ -293,6 +307,12 @@ interface SupabaseApi {
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Body request: VerifyFirebaseTokenRequest
     ): Response<VerifyFirebaseTokenResponse>
+
+    @POST("functions/v1/get-cloudinary-signature")
+    suspend fun getCloudinarySignature(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String
+    ): Response<CloudinarySignatureResponse>
 
     @PATCH("rest/v1/users")
     suspend fun updateEmailVerification(
@@ -969,6 +989,20 @@ interface SupabaseApi {
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String,
         @Path(value = "path", encoded = true) path: String
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/heartbeat")
+    suspend fun heartbeat(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> = emptyMap()
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/go_offline")
+    suspend fun goOffline(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> = emptyMap()
     ): Response<ResponseBody>
 }
 
