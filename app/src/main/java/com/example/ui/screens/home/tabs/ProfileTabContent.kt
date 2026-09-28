@@ -41,16 +41,21 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.AuthViewModel
 import com.example.BuildConfig
+import com.example.GiftTransactionItem
 import com.example.ModerationManager
 import com.example.SupabaseClient
 import com.example.SupabaseSessionManager
 import com.example.UserProfile
+import com.example.gifting.AnimatedGiftMedia
+import com.example.gifting.CuteCoinIcon
+import com.example.gifting.GiftManager
 import com.example.ui.components.CircleFlag
 import com.example.ui.components.DynamicHobbyChip
 import com.example.ui.components.LanguageItem
 import com.example.ui.components.LanguageResolver
 import com.example.ui.components.MultiLanguageExchangeCard
 import com.example.ui.components.PresetAvatarList
+import com.example.ui.components.ProfileBadgesRow
 import com.example.ui.components.SoftBlockIcon
 import com.example.ui.components.resolveAvatarModel
 import com.example.ui.screens.*
@@ -89,14 +94,20 @@ fun ProfileTabContent(
     var activeClickedProfile by remember { mutableStateOf<com.example.DiscoverableProfile?>(null) }
 
     val userId = currentUserProfile.uid
+    val prefs = remember { context.getSharedPreferences("funky_talk_prefs", android.content.Context.MODE_PRIVATE) }
+    val savedBio = remember { prefs.getString("profile_bio_${userId}", null) }
+    val savedCity = remember { prefs.getString("profile_city_${userId}", null) }
+    val savedAge = remember { prefs.getInt("profile_age_${userId}", 0).takeIf { it > 0 } }
+
     var currentProfileName by remember(currentUserProfile.displayName) { mutableStateOf(currentUserProfile.displayName?.ifBlank { "pikaa" } ?: "pikaa") }
     var currentUsername by remember(currentUserProfile.username) { mutableStateOf(currentUserProfile.username?.ifBlank { "pikaa" } ?: "pikaa") }
     var currentAvatarUrl by remember(currentUserProfile.avatar) { mutableStateOf(currentUserProfile.avatar?.ifBlank { "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=500" } ?: "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=500") }
-    var currentBio by remember { mutableStateOf("I love music, sunset and good conversations! Always open to meet new people and learn about different cultures. Let's be friends! 💛") }
-    var currentCountry by remember { mutableStateOf(currentUserProfile.country?.ifBlank { "South Korea" } ?: "South Korea") }
-    var currentCountryCode by remember { mutableStateOf(currentUserProfile.countryCode?.ifBlank { "kr" } ?: "kr") }
-    var currentAge by remember { mutableStateOf(currentUserProfile.age ?: 19) }
-    var currentGender by remember { mutableStateOf(currentUserProfile.gender?.ifBlank { "Female" } ?: "Female") }
+    var currentBio by remember(currentUserProfile.bio) { mutableStateOf(currentUserProfile.bio ?: savedBio ?: "I love music, sunset and good conversations! Always open to meet new people and learn about different cultures. Let's be friends! 💛") }
+    var currentCountry by remember(currentUserProfile.country) { mutableStateOf(currentUserProfile.country?.ifBlank { "South Korea" } ?: "South Korea") }
+    var currentCountryCode by remember(currentUserProfile.countryCode) { mutableStateOf(currentUserProfile.countryCode?.ifBlank { "kr" } ?: "kr") }
+    var currentCity by remember(currentUserProfile.city) { mutableStateOf(currentUserProfile.city ?: savedCity ?: "") }
+    var currentAge by remember(currentUserProfile.age) { mutableStateOf(currentUserProfile.age ?: savedAge ?: 19) }
+    var currentGender by remember(currentUserProfile.gender) { mutableStateOf(currentUserProfile.gender?.ifBlank { "Female" } ?: "Female") }
     var isVerified by remember { mutableStateOf(false) }
     var isOnline by remember { mutableStateOf(true) }
     var postsCount by remember { mutableStateOf(0) }
@@ -107,9 +118,38 @@ fun ProfileTabContent(
     val momentsList = remember { mutableStateListOf<FeedPost>() }
     var isMomentsLoading by remember { mutableStateOf(false) }
 
+    val walletBalance by GiftManager.walletBalance.collectAsState()
+    val giftsReceived = remember { mutableStateListOf<GiftTransactionItem>() }
+    val userBadges = remember { mutableStateListOf<com.example.ProfileBadge>() }
+    var isGiftsLoading by remember { mutableStateOf(false) }
+
     LaunchedEffect(userId) {
         isAdmin = ModerationManager.checkIsAdmin(context)
         if (userId.isBlank()) return@LaunchedEffect
+
+        // Refresh coin wallet & catalog
+        GiftManager.refreshWallet(context)
+        GiftManager.fetchCatalog(context)
+
+        // Load profile badges
+        try {
+            val badges = com.example.BadgeManager.getBadgesForUser(userId)
+            userBadges.clear()
+            userBadges.addAll(badges)
+        } catch (e: Exception) {
+            android.util.Log.e("ProfileTabContent", "Error loading badges", e)
+        }
+        try {
+            isGiftsLoading = true
+            val gifts = GiftManager.fetchGiftsReceived(context, userId)
+            giftsReceived.clear()
+            giftsReceived.addAll(gifts)
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            android.util.Log.e("ProfileTabContent", "Error loading gifts", e)
+        } finally {
+            isGiftsLoading = false
+        }
 
         val token = com.example.SupabaseSessionManager.getAuthenticatedBearerToken(context)
             ?: com.example.SupabaseSessionManager.getBearerToken(context)
@@ -225,7 +265,17 @@ fun ProfileTabContent(
     val profileCover = "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=800"
     val profileCountryCode = currentCountryCode
     val profileCountry = currentCountry
-    val profileCity = if (profileCountryCode.lowercase() == "kr") "Seoul, South Korea" else profileCountry
+    val profileCity = remember(currentCity, profileCountry) {
+        when {
+            currentCity.isNotBlank() && profileCountry.isNotBlank() -> {
+                if (profileCountry.contains(currentCity, ignoreCase = true)) profileCountry
+                else "$currentCity, $profileCountry"
+            }
+            currentCity.isNotBlank() -> currentCity
+            profileCountry.isNotBlank() -> profileCountry
+            else -> "Seoul, South Korea"
+        }
+    }
     val profileAge = currentAge.toString()
     val profileGender = currentGender
 
@@ -409,6 +459,11 @@ fun ProfileTabContent(
                         // Blue Verified Badge (Custom Canvas Drawn)
                         if (isVerified) {
                             ProfileVerifiedBadge(modifier = Modifier.size(18.dp))
+                        }
+
+                        // Profile Badges (e.g. Founder, Early Adopter, etc.)
+                        if (userBadges.isNotEmpty()) {
+                            ProfileBadgesRow(badges = userBadges, badgeSize = 20.dp)
                         }
 
                         // Green "🟢 Online" Status Pill
@@ -792,6 +847,169 @@ fun ProfileTabContent(
                         }
                     }
                 }
+
+                // -------------------------------------------------------------
+                // CARD 5: COIN WALLET & REWARDS
+                // -------------------------------------------------------------
+                item {
+                    ProfileCardContainer(
+                        title = "Coin Wallet 🪙",
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 5.dp)
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(Color(0xFFFFFBEB))
+                                    .border(BorderStroke(1.dp, Color(0xFFFDE68A)), RoundedCornerShape(14.dp))
+                                    .padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CuteCoinIcon(modifier = Modifier.size(24.dp))
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = "$walletBalance coins",
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Color(0xFF92400E)
+                                        )
+                                        Text(
+                                            text = "100 free starter coins included",
+                                            fontSize = 11.5.sp,
+                                            color = Color(0xFFB45309)
+                                        )
+                                    }
+                                }
+
+                                Surface(
+                                    shape = RoundedCornerShape(50.dp),
+                                    color = Color(0xFFFEF3C7)
+                                ) {
+                                    Text(
+                                        text = "Active",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF92400E),
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Text(
+                                text = "✨ More ways to get coins coming soon (payment gateway is deferred). Use coins to send animated gifts to your language exchange partners!",
+                                fontSize = 12.sp,
+                                color = Color(0xFF64748B),
+                                lineHeight = 17.sp
+                            )
+                        }
+                    }
+                }
+
+                // -------------------------------------------------------------
+                // CARD 6: GIFTS RECEIVED & HISTORY
+                // -------------------------------------------------------------
+                item {
+                    ProfileCardContainer(
+                        title = "Gifts Received (${giftsReceived.size}) 🎁",
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 5.dp)
+                    ) {
+                        if (isGiftsLoading && giftsReceived.isEmpty()) {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().height(60.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(22.dp), color = GoldAccent)
+                            }
+                        } else if (giftsReceived.isEmpty()) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "🎁",
+                                    fontSize = 28.sp
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "No gifts received yet.",
+                                    fontSize = 13.sp,
+                                    color = Color(0xFF64748B),
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = "Chat and practice languages to receive animated gifts from friends!",
+                                    fontSize = 11.5.sp,
+                                    color = Color(0xFF94A3B8)
+                                )
+                            }
+                        } else {
+                            val distinctGifts = giftsReceived.groupBy { it.gift_name ?: "Gift" }
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                distinctGifts.entries.chunked(2).forEach { rowPairs ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        rowPairs.forEach { (name, items) ->
+                                            val first = items.first()
+                                            Surface(
+                                                modifier = Modifier.weight(1f),
+                                                shape = RoundedCornerShape(12.dp),
+                                                color = Color(0xFFFFFBEB),
+                                                border = BorderStroke(1.dp, Color(0xFFFDE68A))
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(8.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        if (!first.gift_icon_url.isNullOrBlank()) {
+                                                            AnimatedGiftMedia(
+                                                                url = first.gift_icon_url!!,
+                                                                modifier = Modifier.fillMaxSize()
+                                                            )
+                                                        } else {
+                                                            Text("🎁", fontSize = 18.sp)
+                                                        }
+                                                    }
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    Column {
+                                                        Text(
+                                                            text = name,
+                                                            fontSize = 12.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = Color(0xFF0F172A),
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                        Text(
+                                                            text = "x${items.size}",
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.ExtraBold,
+                                                            color = Color(0xFFB45309)
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if (rowPairs.size == 1) {
+                                            Spacer(modifier = Modifier.weight(1f))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             } else {
                 // -------------------------------------------------------------
                 // FEED TAB CONTENT: SUB-TABS (Grid, Video, Tagged) & 3-COLUMN GRID
@@ -1148,9 +1366,39 @@ fun ProfileTabContent(
     // Edit Profile Dialog Fullscreen Redesign
     if (showEditProfileDialog) {
         EditProfileScreen(
-            currentUserProfile = currentUserProfile,
+            currentUserProfile = currentUserProfile.copy(
+                displayName = currentProfileName,
+                username = currentUsername,
+                avatar = currentAvatarUrl,
+                bio = currentBio,
+                city = currentCity,
+                country = currentCountry,
+                countryCode = currentCountryCode,
+                age = currentAge,
+                gender = currentGender
+            ),
             viewModel = viewModel,
-            onDismiss = { showEditProfileDialog = false }
+            onDismiss = {
+                showEditProfileDialog = false
+                val p = context.getSharedPreferences("funky_talk_prefs", android.content.Context.MODE_PRIVATE)
+                val updatedBio = p.getString("profile_bio_${userId}", null)
+                val updatedCity = p.getString("profile_city_${userId}", null)
+                val updatedAge = p.getInt("profile_age_${userId}", 0).takeIf { it > 0 }
+                val updatedCountry = p.getString("profile_country_${userId}", null)
+                val updatedCountryCode = p.getString("profile_countryCode_${userId}", null)
+                val updatedDisplayName = p.getString("profile_displayName_${userId}", null)
+                val updatedUsername = p.getString("profile_username_${userId}", null)
+                val updatedAvatar = p.getString("profile_avatar_${userId}", null)
+
+                if (!updatedBio.isNullOrBlank()) currentBio = updatedBio
+                if (!updatedCity.isNullOrBlank()) currentCity = updatedCity
+                if (updatedAge != null) currentAge = updatedAge
+                if (!updatedCountry.isNullOrBlank()) currentCountry = updatedCountry
+                if (!updatedCountryCode.isNullOrBlank()) currentCountryCode = updatedCountryCode
+                if (!updatedDisplayName.isNullOrBlank()) currentProfileName = updatedDisplayName
+                if (!updatedUsername.isNullOrBlank()) currentUsername = updatedUsername
+                if (!updatedAvatar.isNullOrBlank()) currentAvatarUrl = updatedAvatar
+            }
         )
     }
 

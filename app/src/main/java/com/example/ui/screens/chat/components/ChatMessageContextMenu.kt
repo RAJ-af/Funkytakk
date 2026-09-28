@@ -33,6 +33,7 @@ fun ChatMessageContextMenuOverlay(
     onCopy: () -> Unit,
     onReactMore: () -> Unit,
     onMoreActions: () -> Unit,
+    onReportMessage: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val quickEmojis = listOf("❤️", "😂", "👍", "😮", "😢", "🔥")
@@ -197,6 +198,19 @@ fun ChatMessageContextMenuOverlay(
                             onDismiss()
                         }
                     )
+
+                    // Action 6: Report Message (for incoming messages)
+                    if (!targetMessage.isMe && onReportMessage != null) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        ContextMenuItemRow(
+                            icon = { SoftShieldIcon(color = Color(0xFFEF4444), size = 18.dp) },
+                            label = "Report Message",
+                            onClick = {
+                                onReportMessage()
+                                onDismiss()
+                            }
+                        )
+                    }
                 }
             }
         }

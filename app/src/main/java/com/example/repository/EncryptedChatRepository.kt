@@ -1207,6 +1207,7 @@ object EncryptedChatRepository {
                 false
             }
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             Log.e(TAG, "Error checking recipient key status", e)
             false
         }

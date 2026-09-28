@@ -30,6 +30,7 @@ fun MessageContextMenu(
     onCopy: () -> Unit,
     onReactMore: () -> Unit,
     onMoreActions: () -> Unit,
+    onReportMessage: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val quickReactionEmojis = listOf("❤️", "😂", "👍", "😮", "😢", "🔥")
@@ -229,6 +230,24 @@ fun MessageContextMenu(
                             onDismiss()
                         }
                     )
+
+                    // Action 6: Report Message (incoming message)
+                    if (!targetMessage.isMe && onReportMessage != null) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        ContextMenuItemRow(
+                            icon = {
+                                com.example.ui.components.SoftShieldIcon(
+                                    color = Color(0xFFEF4444),
+                                    size = 18.dp
+                                )
+                            },
+                            label = "Report Message",
+                            onClick = {
+                                onReportMessage()
+                                onDismiss()
+                            }
+                        )
+                    }
                 }
             }
         }

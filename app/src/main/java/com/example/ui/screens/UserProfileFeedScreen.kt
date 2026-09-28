@@ -6,6 +6,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -45,6 +46,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.example.GiftTransactionItem
+import com.example.gifting.AnimatedGiftMedia
+import com.example.gifting.GiftManager
+import com.example.gifting.SendGiftBottomSheet
+import com.example.moderation.ReportUserDialog
 import com.example.BuildConfig
 import com.example.SupabaseClient
 import com.example.SupabaseFollower
@@ -52,6 +58,7 @@ import com.example.SupabaseMoment
 import com.example.SupabaseSessionManager
 import com.example.repository.EncryptedChatRepository
 import com.example.ui.components.CircleFlag
+import com.example.ui.components.ProfileBadgesRow
 import com.example.ui.components.DynamicHobbyChip
 import com.example.ui.components.LanguageItem
 import com.example.ui.components.LanguageResolver
@@ -126,6 +133,7 @@ fun UserProfileFeedScreen(
     var currentAvatarUrl by remember(avatarUrl) { mutableStateOf(avatarUrl) }
     var currentBio by remember(bio) { mutableStateOf(bio) }
     var currentCountry by remember { mutableStateOf("") }
+    var currentCity by remember { mutableStateOf("") }
     var currentCountryCode by remember(countryCode) { mutableStateOf(countryCode) }
     var currentAge by remember { mutableStateOf<Int?>(null) }
     var currentGender by remember { mutableStateOf<String?>(null) }
@@ -155,6 +163,13 @@ fun UserProfileFeedScreen(
     var activeFollowerUserId by remember { mutableStateOf<String?>(null) }
     var activeFollowersMode by remember { mutableStateOf(true) } // true = followers, false = following
     var activeClickedProfile by remember { mutableStateOf<com.example.DiscoverableProfile?>(null) }
+
+    var showSendGiftSheet by remember { mutableStateOf(false) }
+    var showReportDialog by remember { mutableStateOf(false) }
+    var showMoreOptionsMenu by remember { mutableStateOf(false) }
+    val giftsReceived = remember { mutableStateListOf<GiftTransactionItem>() }
+    val userBadges = remember { mutableStateListOf<com.example.ProfileBadge>() }
+    var isGiftsLoading by remember { mutableStateOf(false) }
 
     // -------------------------------------------------------------------------
     // 1. FETCH REAL SUPABASE DATA ON LAUNCH
@@ -204,6 +219,26 @@ fun UserProfileFeedScreen(
             }
         } catch (e: Exception) {
             Log.e("UserProfileFeed", "Error loading profile data", e)
+        }
+
+        // Fetch badges for this user
+        try {
+            val badges = com.example.BadgeManager.getBadgesForUser(userId)
+            userBadges.clear()
+            userBadges.addAll(badges)
+        } catch (e: Exception) {
+            Log.e("UserProfileFeed", "Error loading user badges", e)
+        }
+
+        val selfUid = SupabaseSessionManager.getUserId(context)
+        if (userId == selfUid || isSelfProfile) {
+            val prefs = context.getSharedPreferences("funky_talk_prefs", android.content.Context.MODE_PRIVATE)
+            val savedCity = prefs.getString("profile_city_${userId}", null)
+            val savedBio = prefs.getString("profile_bio_${userId}", null)
+            val savedAge = prefs.getInt("profile_age_${userId}", 0).takeIf { it > 0 }
+            if (!savedCity.isNullOrBlank()) currentCity = savedCity
+            if (!savedBio.isNullOrBlank()) currentBio = savedBio
+            if (savedAge != null) currentAge = savedAge
         }
 
         // B. Fetch stats counts (Posts / Followers / Following)
@@ -307,6 +342,18 @@ fun UserProfileFeedScreen(
         } finally {
             isMomentsLoading = false
         }
+
+        // D. Fetch gifts received for profile
+        try {
+            isGiftsLoading = true
+            val fetchedGifts = GiftManager.fetchGiftsReceived(context, userId)
+            giftsReceived.clear()
+            giftsReceived.addAll(fetchedGifts)
+        } catch (e: Exception) {
+            Log.e("UserProfileFeed", "Error fetching gifts received", e)
+        } finally {
+            isGiftsLoading = false
+        }
     }
 
     // Follow / Unfollow Handler
@@ -400,6 +447,7 @@ fun UserProfileFeedScreen(
                     Log.d("UserProfileFeed", "E2EE keys missing for $currentProfileName, starting chat window.")
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.e("UserProfileFeed", "Error sending wave message", e)
             } finally {
                 isSendingHi = false
@@ -530,11 +578,42 @@ fun UserProfileFeedScreen(
                                 .background(Color.White, CircleShape)
                                 .shadow(elevation = 2.dp, shape = CircleShape)
                                 .clickable {
-                                    Toast.makeText(context, "More options", Toast.LENGTH_SHORT).show()
+                                    showMoreOptionsMenu = true
                                 },
                             contentAlignment = Alignment.Center
                         ) {
                             ProfileMoreDotsIcon(modifier = Modifier.size(16.dp), color = Color(0xFF1E293B))
+
+                            DropdownMenu(
+                                expanded = showMoreOptionsMenu,
+                                onDismissRequest = { showMoreOptionsMenu = false },
+                                modifier = Modifier.background(Color.White, RoundedCornerShape(14.dp))
+                            ) {
+                                if (!isSelfProfile) {
+                                    DropdownMenuItem(
+                                        text = { Text("Send Gift 🎁", fontWeight = FontWeight.Bold, color = Color(0xFFB45309)) },
+                                        onClick = {
+                                            showMoreOptionsMenu = false
+                                            showSendGiftSheet = true
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Report Profile 🚩", fontWeight = FontWeight.Medium, color = Color(0xFFEF4444)) },
+                                        onClick = {
+                                            showMoreOptionsMenu = false
+                                            showReportDialog = true
+                                        }
+                                    )
+                                } else {
+                                    DropdownMenuItem(
+                                        text = { Text("Share Profile 🔗", fontWeight = FontWeight.Medium, color = Color(0xFF0F172A)) },
+                                        onClick = {
+                                            showMoreOptionsMenu = false
+                                            Toast.makeText(context, "Profile link copied", Toast.LENGTH_SHORT).show()
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -621,6 +700,11 @@ fun UserProfileFeedScreen(
                             ProfileVerifiedBadge(modifier = Modifier.size(18.dp))
                         }
 
+                        // Profile Badges
+                        if (userBadges.isNotEmpty()) {
+                            ProfileBadgesRow(badges = userBadges, badgeSize = 20.dp)
+                        }
+
                         // Online Status Pill
                         if (isOnline) {
                             Box(
@@ -660,24 +744,52 @@ fun UserProfileFeedScreen(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Location (Country only, NO city) & Join Date Row
+                    // Location (City & Country), Age & Join Date Row
+                    val locationDisplay = remember(currentCity, currentCountry) {
+                        when {
+                            currentCity.isNotBlank() && currentCountry.isNotBlank() -> {
+                                if (currentCountry.contains(currentCity, ignoreCase = true)) currentCountry
+                                else "$currentCity, $currentCountry"
+                            }
+                            currentCity.isNotBlank() -> currentCity
+                            currentCountry.isNotBlank() -> currentCountry
+                            else -> ""
+                        }
+                    }
+
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        if (currentCountry.isNotBlank()) {
+                        if (locationDisplay.isNotBlank()) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 ProfileLocationPinIcon(modifier = Modifier.size(13.dp), color = Color(0xFF64748B))
                                 Text(
-                                    text = currentCountry,
+                                    text = locationDisplay,
                                     fontSize = 12.sp,
                                     color = Color(0xFF64748B),
                                     fontWeight = FontWeight.Normal
                                 )
                             }
+
+                            Text(
+                                text = "·",
+                                fontSize = 14.sp,
+                                color = Color(0xFF94A3B8),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        if (currentAge != null && currentAge!! > 0) {
+                            Text(
+                                text = "${currentAge} yrs",
+                                fontSize = 12.sp,
+                                color = Color(0xFF64748B),
+                                fontWeight = FontWeight.Medium
+                            )
 
                             Text(
                                 text = "·",
@@ -748,12 +860,12 @@ fun UserProfileFeedScreen(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // ---------------------------------------------------------
-                    // 4. ACTION BUTTONS: "👋 Say Hi" & "👤+ Follow / Following"
+                    // 4. ACTION BUTTONS: "👋 Say Hi", "🎁 Gift", "👤+ Follow / Following"
                     // ---------------------------------------------------------
                     if (!isSelfProfile) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             // Yellow Filled Button: Say Hi
                             Box(
@@ -766,14 +878,38 @@ fun UserProfileFeedScreen(
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                                 ) {
-                                    ProfileWavingHandIcon(modifier = Modifier.size(18.dp), color = Color(0xFF0F172A))
+                                    ProfileWavingHandIcon(modifier = Modifier.size(16.dp), color = Color(0xFF0F172A))
                                     Text(
                                         text = "Say Hi",
-                                        fontSize = 15.sp,
+                                        fontSize = 13.5.sp,
                                         fontWeight = FontWeight.ExtraBold,
                                         color = Color(0xFF0F172A)
+                                    )
+                                }
+                            }
+
+                            // Gift Button
+                            Box(
+                                modifier = Modifier
+                                    .weight(1.1f)
+                                    .height(46.dp)
+                                    .background(Color(0xFFFFFBEB), RoundedCornerShape(100.dp))
+                                    .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(100.dp))
+                                    .clickable { showSendGiftSheet = true },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    Text("🎁", fontSize = 15.sp)
+                                    Text(
+                                        text = "Send Gift",
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFB45309)
                                     )
                                 }
                             }
@@ -794,15 +930,15 @@ fun UserProfileFeedScreen(
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                                 ) {
                                     ProfileAddPersonIcon(
-                                        modifier = Modifier.size(18.dp),
+                                        modifier = Modifier.size(16.dp),
                                         color = if (isFollowing) Color(0xFF16A34A) else Color(0xFF0F172A)
                                     )
                                     Text(
                                         text = if (isFollowing) "Following" else "Follow",
-                                        fontSize = 15.sp,
+                                        fontSize = 13.5.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = if (isFollowing) Color(0xFF16A34A) else Color(0xFF0F172A)
                                     )
@@ -908,6 +1044,113 @@ fun UserProfileFeedScreen(
                             nativeLanguages = parsedNative,
                             learningLanguages = parsedLearning
                         )
+                    }
+                }
+
+                // -------------------------------------------------------------
+                // CARD 2B: GIFTS RECEIVED CARD
+                // -------------------------------------------------------------
+                item {
+                    ProfileCardContainer(
+                        title = "Gifts Received (${giftsReceived.size}) 🎁",
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 5.dp)
+                    ) {
+                        if (isGiftsLoading && giftsReceived.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(color = Color(0xFFFFC529), modifier = Modifier.size(24.dp))
+                            }
+                        } else if (giftsReceived.isEmpty()) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = if (isSelfProfile) "You haven't received any gifts yet." else "Be the first to send a gift to $currentProfileName!",
+                                    fontSize = 13.sp,
+                                    color = Color(0xFF64748B),
+                                    textAlign = TextAlign.Center
+                                )
+                                if (!isSelfProfile) {
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Surface(
+                                        onClick = { showSendGiftSheet = true },
+                                        color = Color(0xFFFFFBEB),
+                                        border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+                                        shape = RoundedCornerShape(100.dp)
+                                    ) {
+                                        Text(
+                                            text = "Send a Gift 🎁",
+                                            fontSize = 12.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFFB45309),
+                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                val distinctGifts = giftsReceived.groupBy { it.gift_name ?: "Gift" }
+                                distinctGifts.entries.take(4).forEach { (name, items) ->
+                                    val firstItem = items.first()
+                                    Surface(
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = Color(0xFFF8FAFC),
+                                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(8.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(42.dp)
+                                                    .clip(RoundedCornerShape(8.dp)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (!firstItem.gift_icon_url.isNullOrBlank()) {
+                                                    AnimatedGiftMedia(
+                                                        url = firstItem.gift_icon_url!!,
+                                                        contentDescription = name,
+                                                        modifier = Modifier.fillMaxSize()
+                                                    )
+                                                } else {
+                                                    Text("🎁", fontSize = 24.sp)
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = name,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF0F172A),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = "x${items.size}",
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = Color(0xFFD97706)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -1374,6 +1617,38 @@ fun UserProfileFeedScreen(
                     TextButton(onClick = { showWaveDialog = false }) {
                         Text("Cancel", color = Color(0xFF64748B))
                     }
+                }
+            )
+        }
+
+        // Send Gift Bottom Sheet
+        if (showSendGiftSheet) {
+            SendGiftBottomSheet(
+                recipientId = userId,
+                recipientName = currentProfileName,
+                recipientAvatar = currentAvatarUrl,
+                onDismiss = { showSendGiftSheet = false },
+                onGiftSent = { remainingBalance ->
+                    coroutineScope.launch {
+                        val updated = GiftManager.fetchGiftsReceived(context, userId)
+                        giftsReceived.clear()
+                        giftsReceived.addAll(updated)
+                    }
+                }
+            )
+        }
+
+        // Report Profile Dialog
+        if (showReportDialog) {
+            ReportUserDialog(
+                reportedUserId = userId,
+                reportedUserName = currentProfileName,
+                contextType = "profile",
+                contextId = null,
+                onDismiss = { showReportDialog = false },
+                onReportSubmitted = {
+                    showReportDialog = false
+                    Toast.makeText(context, "Report submitted. Thank you for keeping FunkyTalk safe.", Toast.LENGTH_SHORT).show()
                 }
             )
         }

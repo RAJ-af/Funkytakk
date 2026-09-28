@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.NotificationsManager
 import com.example.SupabaseNotification
+import com.example.ui.screens.chat.GroupInviteSheet
 import com.example.ui.components.*
 import com.example.ui.theme.GoldAccent
 
@@ -40,6 +41,7 @@ fun NotificationsScreen(
     val isLoading by NotificationsManager.isLoading.collectAsState()
 
     var selectedFilter by remember { mutableStateOf("All") }
+    var activeGroupInvite by remember { mutableStateOf<SupabaseNotification?>(null) }
 
     LaunchedEffect(Unit) {
         NotificationsManager.init(context)
@@ -308,7 +310,9 @@ fun NotificationsScreen(
                                 notification = item,
                                 onClick = {
                                     NotificationsManager.markAsRead(context, item.id)
-                                    if (!item.report_id.isNullOrBlank()) {
+                                    if (item.type?.lowercase() == "group_invite" || !item.group_id.isNullOrBlank()) {
+                                        activeGroupInvite = item
+                                    } else if (!item.report_id.isNullOrBlank()) {
                                         onOpenSupportChat(item.report_id)
                                     }
                                 }
@@ -324,6 +328,22 @@ fun NotificationsScreen(
                     )
                 }
             }
+        }
+
+        // Group Invite Bottom Sheet
+        activeGroupInvite?.let { invite ->
+            val groupId = invite.group_id ?: invite.id
+            val rawName = invite.title?.replace("Invited to ", "", ignoreCase = true)?.ifBlank { "FunkyTalk Group" } ?: "FunkyTalk Group"
+            GroupInviteSheet(
+                groupId = groupId,
+                groupName = rawName,
+                invitedBy = invite.message,
+                onDismiss = { activeGroupInvite = null },
+                onAccepted = {
+                    activeGroupInvite = null
+                    onBack()
+                }
+            )
         }
     }
 }

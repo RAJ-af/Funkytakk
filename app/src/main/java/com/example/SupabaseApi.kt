@@ -218,10 +218,12 @@ data class SupabaseProfile(
     val username: String? = null,
     val profile_name: String? = null,
     val avatar_url: String? = null,
+    val cover_url: String? = null,
     val age: Int? = null,
     val gender: String? = null,
     val country: String? = null,
     val country_code: String? = null,
+    val city: String? = null,
     val bio: String? = null,
     val email: String? = null,
     val native_languages: List<String>? = null,
@@ -236,18 +238,56 @@ data class DiscoverableProfile(
     val username: String? = null,
     val profile_name: String? = null,
     val avatar_url: String? = null,
+    val cover_url: String? = null,
     val age: Int? = null,
     val gender: String? = null,
     val native_languages: List<String>? = null,
     val learning_languages: List<String>? = null,
     val country: String? = null,
     val country_code: String? = null,
+    val city: String? = null,
     val hobbies: List<String>? = null,
     val bio: String? = null,
     val is_online: Boolean? = null,
     val last_seen: String? = null,
     val created_at: String? = null,
     val is_verified: Boolean? = false
+)
+
+@JsonClass(generateAdapter = true)
+data class BadgeCatalogItem(
+    val id: Long? = null,
+    val code: String,
+    val name: String,
+    val description: String? = null,
+    val icon_url: String? = null,
+    val is_active: Boolean? = true
+)
+
+@JsonClass(generateAdapter = true)
+data class UserBadgeItem(
+    val id: Long? = null,
+    val badge_id: Long? = null,
+    val user_id: String? = null,
+    val awarded_at: String? = null,
+    val awarded_by: String? = null,
+    val badge_catalog: BadgeCatalogItem? = null,
+    val name: String? = null,
+    val description: String? = null,
+    val icon_url: String? = null,
+    val code: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class AwardBadgeRequest(
+    val p_user_id: String,
+    val p_badge_code: String
+)
+
+@JsonClass(generateAdapter = true)
+data class RevokeBadgeRequest(
+    val p_user_id: String,
+    val p_badge_code: String
 )
 
 @JsonClass(generateAdapter = true)
@@ -415,6 +455,13 @@ interface SupabaseApi {
         @Query("order") order: String = "created_at.desc"
     ): Response<List<SupabaseMoment>>
 
+    @GET("rest/v1/moments?select=id,user_id,content,image_urls,likes_count,comments_count,created_at")
+    suspend fun getMomentById(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("id") idEq: String // e.g. "eq.<id>"
+    ): Response<List<SupabaseMoment>>
+
     @GET("rest/v1/moments?select=id")
     suspend fun countMomentsByUserId(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
@@ -426,7 +473,7 @@ interface SupabaseApi {
     @GET("rest/v1/followers?select=*")
     suspend fun getFollowers(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String,
+        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
         @Query("follower_id") followerIdEq: String? = null,
         @Query("following_id") followingIdEq: String? = null
     ): Response<List<SupabaseFollower>>
@@ -434,7 +481,7 @@ interface SupabaseApi {
     @GET("rest/v1/followers?select=id")
     suspend fun countFollowers(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String,
+        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
         @Header("Prefer") prefer: String = "count=exact",
         @Query("following_id") followingIdEq: String // e.g. "eq.<profileId>"
     ): Response<List<Map<String, Any>>>
@@ -442,7 +489,7 @@ interface SupabaseApi {
     @GET("rest/v1/followers?select=id")
     suspend fun countFollowing(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String,
+        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
         @Header("Prefer") prefer: String = "count=exact",
         @Query("follower_id") followerIdEq: String // e.g. "eq.<profileId>"
     ): Response<List<Map<String, Any>>>
@@ -821,6 +868,52 @@ interface SupabaseApi {
         @Body body: RequestBody
     ): Response<ResponseBody>
 
+    @GET("rest/v1/badge_catalog?select=*&is_active=eq.true&order=id.asc")
+    suspend fun getBadgeCatalog(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+    ): Response<List<BadgeCatalogItem>>
+
+    @GET("rest/v1/user_badges?select=id,badge_id,user_id,awarded_at,awarded_by,badge_catalog(id,code,name,description,icon_url)&order=awarded_at.asc")
+    suspend fun getUserBadges(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
+        @Query("user_id") userIdEq: String // e.g. "eq.<userId>"
+    ): Response<List<UserBadgeItem>>
+
+    @POST("rest/v1/rpc/award_badge")
+    suspend fun awardBadge(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: AwardBadgeRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/revoke_badge")
+    suspend fun revokeBadge(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: RevokeBadgeRequest
+    ): Response<ResponseBody>
+
+    @Multipart
+    @POST("storage/v1/object/covers/{path}")
+    suspend fun uploadCoverMultipart(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Path(value = "path", encoded = true) path: String,
+        @Part file: MultipartBody.Part
+    ): Response<ResponseBody>
+
+    @POST("storage/v1/object/covers/{path}")
+    suspend fun uploadCoverRawBytes(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Header("x-upsert") upsert: String = "true",
+        @Header("Content-Type") contentType: String = "image/jpeg",
+        @Path(value = "path", encoded = true) path: String,
+        @Body body: RequestBody
+    ): Response<ResponseBody>
+
     @POST("storage/v1/object/sign/{bucket}/{filename}")
     suspend fun createSignedUrl(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
@@ -1004,6 +1097,146 @@ interface SupabaseApi {
         @Header("Authorization") auth: String,
         @Body body: Map<String, String> = emptyMap()
     ): Response<ResponseBody>
+
+    // ----------------------------------------------------
+    // GIFTING & WALLET
+    // ----------------------------------------------------
+    @GET("rest/v1/gift_catalog?select=*&is_active=eq.true&order=price_coins.asc")
+    suspend fun getActiveGiftCatalog(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String
+    ): Response<List<GiftCatalogItem>>
+
+    @POST("rest/v1/rpc/get_or_create_wallet")
+    suspend fun getOrCreateWallet(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> = emptyMap()
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/send_gift")
+    suspend fun sendGift(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: SendGiftRequest
+    ): Response<ResponseBody>
+
+    @GET("rest/v1/gift_transactions?select=*&order=created_at.desc")
+    suspend fun getGiftTransactions(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("recipient_id") recipientIdFilter: String? = null,
+        @Query("sender_id") senderIdFilter: String? = null
+    ): Response<List<GiftTransactionItem>>
+
+    // ----------------------------------------------------
+    // GROUP CHAT (E2EE FAN-OUT)
+    // ----------------------------------------------------
+    @POST("rest/v1/rpc/create_group")
+    suspend fun createGroup(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: CreateGroupRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/accept_group_invite")
+    suspend fun acceptGroupInvite(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: AcceptGroupInviteRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/decline_group_invite")
+    suspend fun declineGroupInvite(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: DeclineGroupInviteRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/add_group_member")
+    suspend fun addGroupMember(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: AddGroupMemberRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/remove_group_member")
+    suspend fun removeGroupMember(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: RemoveGroupMemberRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/send_group_message")
+    suspend fun sendGroupMessage(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: SendGroupMessageRequest
+    ): Response<ResponseBody>
+
+    @GET("rest/v1/group_conversations?select=*")
+    suspend fun getGroupConversations(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("id") idFilter: String? = null
+    ): Response<List<SupabaseGroupConversation>>
+
+    @GET("rest/v1/group_members?select=*")
+    suspend fun getGroupMembers(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("group_id") groupIdFilter: String? = null,
+        @Query("user_id") userIdFilter: String? = null,
+        @Query("status") statusFilter: String? = null
+    ): Response<List<SupabaseGroupMember>>
+
+    @GET("rest/v1/group_message_recipients?select=*&order=created_at.asc")
+    suspend fun getPendingGroupMessageRecipients(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("recipient_id") recipientIdFilter: String
+    ): Response<List<SupabaseGroupRecipientRow>>
+
+    @GET("rest/v1/group_messages?select=*")
+    suspend fun getGroupMessagesByIds(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("id") idFilter: String
+    ): Response<List<SupabaseGroupMessageMeta>>
+
+    @DELETE("rest/v1/group_message_recipients")
+    suspend fun deleteGroupMessageRecipient(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("id") idFilter: String
+    ): Response<ResponseBody>
+
+    @POST("storage/v1/object/group-media/{path}")
+    suspend fun uploadGroupMedia(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Header("x-upsert") upsert: String = "true",
+        @Header("Content-Type") contentType: String = "application/octet-stream",
+        @Path(value = "path", encoded = true) path: String,
+        @Body body: RequestBody
+    ): Response<ResponseBody>
+
+    @GET("storage/v1/object/group-media/{path}")
+    suspend fun downloadGroupMedia(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Path(value = "path", encoded = true) path: String
+    ): Response<ResponseBody>
+
+    // ----------------------------------------------------
+    // GENERALIZED REPORTING
+    // ----------------------------------------------------
+    @POST("rest/v1/rpc/report_user")
+    suspend fun reportUser(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: ReportUserRequest
+    ): Response<ResponseBody>
 }
 
 @JsonClass(generateAdapter = true)
@@ -1052,6 +1285,9 @@ data class RoomReportItem(
     val id: String? = null,
     val room_id: String? = null,
     val reporter_id: String? = null,
+    val reported_user_id: String? = null,
+    val context_type: String? = "room",
+    val context_id: String? = null,
     val category: String? = null,
     val reason: String? = null,
     val message_snapshot: List<ReportMessageSnapshot>? = null,
@@ -1115,6 +1351,7 @@ data class SupabaseNotification(
     val title: String? = null,
     val message: String? = null,
     val report_id: String? = null,
+    val group_id: String? = null,
     val action_type: String? = null,
     val is_read: Boolean = false,
     val created_at: String? = null
@@ -1219,6 +1456,139 @@ data class SupabaseDmMessage(
     val created_at: String? = null,
     val delivered_at: String? = null
 )
+
+// ----------------------------------------------------
+// GIFTING MODELS
+// ----------------------------------------------------
+@JsonClass(generateAdapter = true)
+data class GiftCatalogItem(
+    val id: String = "",
+    val name: String = "",
+    val icon_url: String = "",
+    val price_coins: Int = 0,
+    val is_active: Boolean = true,
+    val created_at: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class SendGiftRequest(
+    val p_recipient_id: String,
+    val p_gift_id: String,
+    val p_message: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class GiftTransactionItem(
+    val id: String = "",
+    val sender_id: String? = null,
+    val recipient_id: String? = null,
+    val gift_id: String? = null,
+    val message: String? = null,
+    val created_at: String? = null,
+    val gift_name: String? = null,
+    val gift_icon_url: String? = null,
+    val gift_price_coins: Int? = null
+)
+
+// ----------------------------------------------------
+// GROUP CHAT MODELS
+// ----------------------------------------------------
+@JsonClass(generateAdapter = true)
+data class CreateGroupRequest(
+    val p_name: String,
+    val p_member_ids: List<String>
+)
+
+@JsonClass(generateAdapter = true)
+data class AcceptGroupInviteRequest(
+    val p_group_id: String
+)
+
+@JsonClass(generateAdapter = true)
+data class DeclineGroupInviteRequest(
+    val p_group_id: String
+)
+
+@JsonClass(generateAdapter = true)
+data class AddGroupMemberRequest(
+    val p_group_id: String,
+    val p_user_id: String
+)
+
+@JsonClass(generateAdapter = true)
+data class RemoveGroupMemberRequest(
+    val p_group_id: String,
+    val p_user_id: String
+)
+
+@JsonClass(generateAdapter = true)
+data class GroupRecipientPayload(
+    val recipient_id: String,
+    val ciphertext: String,
+    val nonce: String = "",
+    val storage_path: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class SendGroupMessageRequest(
+    val p_group_id: String,
+    val p_message_type: String = "text",
+    val p_recipients: List<GroupRecipientPayload>
+)
+
+@JsonClass(generateAdapter = true)
+data class SupabaseGroupConversation(
+    val id: String = "",
+    val name: String = "",
+    val avatar_url: String? = null,
+    val created_by: String? = null,
+    val created_at: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class SupabaseGroupMember(
+    val id: String? = null,
+    val group_id: String = "",
+    val user_id: String = "",
+    val role: String = "member", // "admin" or "member"
+    val status: String = "invited", // "invited", "joined", "left"
+    val joined_at: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class SupabaseGroupRecipientRow(
+    val id: String = "",
+    val message_id: String = "",
+    val recipient_id: String = "",
+    val ciphertext: String = "",
+    val nonce: String = "",
+    val storage_path: String? = null,
+    val is_read: Boolean = false,
+    val created_at: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class SupabaseGroupMessageMeta(
+    val id: String = "",
+    val group_id: String = "",
+    val sender_id: String = "",
+    val message_type: String = "text",
+    val created_at: String? = null
+)
+
+// ----------------------------------------------------
+// GENERALIZED REPORTING MODELS
+// ----------------------------------------------------
+@JsonClass(generateAdapter = true)
+data class ReportUserRequest(
+    val p_reported_user_id: String,
+    val p_context_type: String, // "profile", "dm", "moment"
+    val p_category: String,
+    val p_reason: String,
+    val p_context_id: String? = null,
+    val p_screenshot_url: String? = null
+)
+
 
 
 

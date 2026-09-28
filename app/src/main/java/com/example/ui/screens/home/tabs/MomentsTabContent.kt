@@ -37,6 +37,7 @@ import com.example.CloudinaryUploadResponse
 import com.example.ui.components.*
 import com.example.ui.screens.chat.components.ChatImagePreviewDialog
 import com.example.ui.screens.home.models.MomentPost
+import com.example.moderation.ReportUserDialog
 import com.example.ui.screens.post.DetailedPost
 import com.example.ui.screens.post.PostComment
 import com.example.ui.screens.post.PostDetailScreen
@@ -64,6 +65,7 @@ fun MomentsTabContent(
 
     var selectedPostForDetail by remember { mutableStateOf<DetailedPost?>(null) }
     var selectedTabIndex by remember { mutableStateOf(0) }
+    var reportingPost by remember { mutableStateOf<MomentPost?>(null) }
 
     // Live Supabase moments list
     val liveMoments = remember { mutableStateListOf<MomentPost>() }
@@ -150,6 +152,7 @@ fun MomentsTabContent(
                         mappedList.add(
                             MomentPost(
                                 id = m.id,
+                                userId = m.user_id.orEmpty(),
                                 author = authorName,
                                 username = authorUsername,
                                 avatar = authorAvatar,
@@ -385,7 +388,35 @@ fun MomentsTabContent(
                                         Spacer(modifier = Modifier.height(2.dp))
                                         Text("@" + post.username + " • Seoul, South Korea • " + post.timeAgo, color = Color(0xFF64748B), fontSize = 12.sp)
                                     }
-                                    SoftThreeDotsIcon(size = 18.dp, color = Color(0xFF94A3B8))
+                                    var showPostMenu by remember { mutableStateOf(false) }
+                                    Box {
+                                        IconButton(
+                                            onClick = { showPostMenu = true },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            SoftThreeDotsIcon(size = 18.dp, color = Color(0xFF94A3B8))
+                                        }
+
+                                        DropdownMenu(
+                                            expanded = showPostMenu,
+                                            onDismissRequest = { showPostMenu = false },
+                                            modifier = Modifier.background(Color.White, RoundedCornerShape(14.dp))
+                                        ) {
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        SoftShieldIcon(size = 15.dp, color = Color(0xFFEF4444))
+                                                        Spacer(modifier = Modifier.width(8.dp))
+                                                        Text("Report Post", color = Color(0xFFEF4444), fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                                    }
+                                                },
+                                                onClick = {
+                                                    showPostMenu = false
+                                                    reportingPost = post
+                                                }
+                                            )
+                                        }
+                                    }
                                 }
 
                                 val gradientThemes = remember {
@@ -627,6 +658,21 @@ fun MomentsTabContent(
                         found.isLiked = isLiked
                         onToggleLike(found)
                     }
+                }
+            )
+        }
+
+        // Report Moment Dialog
+        reportingPost?.let { p ->
+            ReportUserDialog(
+                reportedUserId = p.userId,
+                reportedUserName = p.author,
+                contextType = "moment",
+                contextId = p.id,
+                onDismiss = { reportingPost = null },
+                onReportSubmitted = {
+                    reportingPost = null
+                    Toast.makeText(context, "Post reported. Thank you for your feedback.", Toast.LENGTH_SHORT).show()
                 }
             )
         }

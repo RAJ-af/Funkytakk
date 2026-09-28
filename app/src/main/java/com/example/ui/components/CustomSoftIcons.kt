@@ -23,6 +23,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -1750,6 +1751,172 @@ fun SoftDownloadIcon(
             start = Offset(w * 0.20f, h * 0.82f),
             end = Offset(w * 0.80f, h * 0.82f),
             strokeWidth = sw,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+@Composable
+fun SoftRefreshIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    color: Color = Color.Black
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.11f
+
+        // Circular arrow arc
+        drawArc(
+            color = color,
+            startAngle = 40f,
+            sweepAngle = 270f,
+            useCenter = false,
+            topLeft = Offset(w * 0.18f, h * 0.18f),
+            size = Size(w * 0.64f, h * 0.64f),
+            style = Stroke(width = sw, cap = StrokeCap.Round)
+        )
+
+        // Arrow tip at top
+        val tip = Path().apply {
+            moveTo(w * 0.70f, h * 0.12f)
+            lineTo(w * 0.86f, h * 0.24f)
+            lineTo(w * 0.68f, h * 0.36f)
+        }
+        drawPath(path = tip, color = color, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+@Composable
+fun SoftPauseIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    color: Color = Color.Black
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.18f
+        drawLine(color = color, start = Offset(w * 0.35f, h * 0.22f), end = Offset(w * 0.35f, h * 0.78f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(color = color, start = Offset(w * 0.65f, h * 0.22f), end = Offset(w * 0.65f, h * 0.78f), strokeWidth = sw, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+fun SoftGavelIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    color: Color = Color.Black
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.12f
+
+        // Handle angled
+        drawLine(color = color, start = Offset(w * 0.22f, h * 0.78f), end = Offset(w * 0.52f, h * 0.48f), strokeWidth = sw, cap = StrokeCap.Round)
+
+        // Head block
+        rotate(degrees = -45f, pivot = Offset(w * 0.62f, h * 0.38f)) {
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(w * 0.48f, h * 0.26f),
+                size = Size(w * 0.28f, h * 0.24f),
+                cornerRadius = CornerRadius(w * 0.06f, w * 0.06f)
+            )
+        }
+    }
+}
+
+@Composable
+fun SoftCopyIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 16.dp,
+    color: Color = Color.Black
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.10f
+
+        // Back sheet
+        drawRoundRect(
+            color = color.copy(alpha = 0.45f),
+            topLeft = Offset(w * 0.30f, h * 0.10f),
+            size = Size(w * 0.58f, h * 0.62f),
+            cornerRadius = CornerRadius(w * 0.12f, w * 0.12f),
+            style = Stroke(width = sw, cap = StrokeCap.Round)
+        )
+
+        // Front sheet
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(w * 0.12f, h * 0.28f),
+            size = Size(w * 0.58f, h * 0.62f),
+            cornerRadius = CornerRadius(w * 0.12f, w * 0.12f),
+            style = Stroke(width = sw, cap = StrokeCap.Round)
+        )
+    }
+}
+
+@Composable
+fun SoftPersonIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    color: Color = Color.Black
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.10f
+
+        // Head
+        drawCircle(
+            color = color,
+            radius = w * 0.20f,
+            center = Offset(w * 0.50f, h * 0.32f),
+            style = Stroke(width = sw, cap = StrokeCap.Round)
+        )
+
+        // Shoulders arc
+        drawArc(
+            color = color,
+            startAngle = 180f,
+            sweepAngle = 180f,
+            useCenter = false,
+            topLeft = Offset(w * 0.18f, h * 0.56f),
+            size = Size(w * 0.64f, h * 0.38f),
+            style = Stroke(width = sw, cap = StrokeCap.Round)
+        )
+    }
+}
+
+@Composable
+fun SoftSearchIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    color: Color = Color.Black
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.11f
+
+        // Glass circle
+        drawCircle(
+            color = color,
+            radius = w * 0.28f,
+            center = Offset(w * 0.44f, h * 0.44f),
+            style = Stroke(width = sw, cap = StrokeCap.Round)
+        )
+
+        // Handle
+        drawLine(
+            color = color,
+            start = Offset(w * 0.64f, h * 0.64f),
+            end = Offset(w * 0.84f, h * 0.84f),
+            strokeWidth = sw * 1.2f,
             cap = StrokeCap.Round
         )
     }

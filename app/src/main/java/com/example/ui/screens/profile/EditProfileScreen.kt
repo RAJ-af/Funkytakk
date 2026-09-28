@@ -29,6 +29,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -36,6 +38,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -43,6 +46,7 @@ import coil.compose.AsyncImage
 import com.example.AuthViewModel
 import com.example.UserProfile
 import com.example.ui.components.CircleFlag
+import com.example.ui.components.LocationConsentDialog
 import com.example.ui.screens.CountryData
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -56,28 +60,88 @@ fun EditProfileScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
+    val prefs = remember { context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE) }
+    val savedBio = remember { prefs.getString("profile_bio_${currentUserProfile.uid}", null) }
+    val savedCity = remember { prefs.getString("profile_city_${currentUserProfile.uid}", null) }
+    val savedAge = remember { prefs.getInt("profile_age_${currentUserProfile.uid}", 0).takeIf { it > 0 } }
+
     // Screen States mapping exactly to UserProfile model
     var editUsername by remember { mutableStateOf(currentUserProfile.username ?: "") }
     var editDisplayName by remember { mutableStateOf(currentUserProfile.displayName ?: "") }
     var editAvatar by remember { mutableStateOf(currentUserProfile.avatar ?: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=300") }
-    var editCover by remember { mutableStateOf("https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800") } // default premium cover
+    var editCover by remember { mutableStateOf(currentUserProfile.coverUrl ?: "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800") }
 
-    var editBio by remember { mutableStateOf(currentUserProfile.dob ?: "Nothing much") } // Use dob as persistent bio storage
-    var editAge by remember { mutableStateOf(currentUserProfile.age?.toString() ?: "28") }
+    var editBio by remember { mutableStateOf(currentUserProfile.bio ?: savedBio ?: currentUserProfile.dob ?: "Excited to practice languages and make new friends!") }
+    var editAge by remember { mutableStateOf((currentUserProfile.age ?: savedAge ?: 28).toString()) }
     var editGender by remember { mutableStateOf(currentUserProfile.gender ?: "Male") }
     var editCountry by remember { mutableStateOf(currentUserProfile.country ?: "Malaysia") }
     var editCountryCode by remember { mutableStateOf(currentUserProfile.countryCode ?: "my") }
-    var editCity by remember { mutableStateOf("Kuala Lumpur") }
+    var editCity by remember { mutableStateOf(currentUserProfile.city ?: savedCity ?: "Kuala Lumpur") }
 
     // Lists of Native & Learning languages
-    val nativeLanguages = remember { mutableStateListOf("English", "Spanish") }
-    val learningLanguages = remember { mutableStateListOf("Arabic", "Korean") }
+    val nativeLanguages = remember { mutableStateListOf<String>() }
+    val learningLanguages = remember { mutableStateListOf<String>() }
 
     // Intersecting topics lists (interests)
-    val selectedInterests = remember {
-        mutableStateListOf(
-            "Music", "Movies", "Technology" // matches yellow checked chips in mockup
-        )
+    val selectedInterests = remember { mutableStateListOf<String>() }
+
+    // Fetch live Supabase Profile on initial load
+    LaunchedEffect(Unit) {
+        try {
+            val supaUid = com.example.SupabaseSessionManager.getUserId(context) ?: currentUserProfile.uid
+            val bearerAuth = com.example.SupabaseSessionManager.getBearerToken(context)
+            val res = com.example.SupabaseClient.api.getProfile(auth = bearerAuth, authUserIdEq = "eq.$supaUid")
+            if (res.isSuccessful) {
+                val p = res.body()?.firstOrNull()
+                if (p != null) {
+                    if (!p.profile_name.isNullOrBlank()) editDisplayName = p.profile_name
+                    if (!p.username.isNullOrBlank()) editUsername = p.username
+                    if (!p.avatar_url.isNullOrBlank()) editAvatar = p.avatar_url
+                    if (!p.cover_url.isNullOrBlank()) editCover = p.cover_url
+                    if (!p.bio.isNullOrBlank()) editBio = p.bio
+                    if (p.age != null && p.age > 0) editAge = p.age.toString()
+                    if (!p.gender.isNullOrBlank()) editGender = p.gender
+                    if (!p.country.isNullOrBlank()) editCountry = p.country
+                    if (!p.country_code.isNullOrBlank()) editCountryCode = p.country_code
+                    if (!p.city.isNullOrBlank()) editCity = p.city
+
+                    if (!p.native_languages.isNullOrEmpty()) {
+                        nativeLanguages.clear()
+                        nativeLanguages.addAll(p.native_languages)
+                    } else if (currentUserProfile.nativeLanguage != null) {
+                        nativeLanguages.clear()
+                        nativeLanguages.addAll(currentUserProfile.nativeLanguage.split(",").map { it.trim() }.filter { it.isNotEmpty() })
+                    } else if (nativeLanguages.isEmpty()) {
+                        nativeLanguages.addAll(listOf("English", "Spanish"))
+                    }
+
+                    if (!p.learning_languages.isNullOrEmpty()) {
+                        learningLanguages.clear()
+                        learningLanguages.addAll(p.learning_languages)
+                    } else if (currentUserProfile.learningLanguage != null) {
+                        learningLanguages.clear()
+                        learningLanguages.addAll(currentUserProfile.learningLanguage.split(",").map { it.trim() }.filter { it.isNotEmpty() })
+                    } else if (learningLanguages.isEmpty()) {
+                        learningLanguages.addAll(listOf("Arabic", "Korean"))
+                    }
+
+                    if (!p.hobbies.isNullOrEmpty()) {
+                        selectedInterests.clear()
+                        selectedInterests.addAll(p.hobbies)
+                    } else if (currentUserProfile.hobbies.isNotEmpty()) {
+                        selectedInterests.clear()
+                        selectedInterests.addAll(currentUserProfile.hobbies)
+                    } else if (selectedInterests.isEmpty()) {
+                        selectedInterests.addAll(listOf("Music", "Movies", "Technology"))
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("EditProfileScreen", "Failed to load profile data from Supabase", e)
+            if (nativeLanguages.isEmpty()) nativeLanguages.addAll(listOf("English", "Spanish"))
+            if (learningLanguages.isEmpty()) learningLanguages.addAll(listOf("Arabic", "Korean"))
+            if (selectedInterests.isEmpty()) selectedInterests.addAll(listOf("Music", "Movies", "Technology"))
+        }
     }
 
     // Modal dialog pickers
@@ -86,6 +150,22 @@ fun EditProfileScreen(
     var showGenderPicker by remember { mutableStateOf(false) }
     var showCityPicker by remember { mutableStateOf(false) }
     var showAddLanguagePanel by remember { mutableStateOf(false) }
+    var showLocationConsentDialog by remember { mutableStateOf(false) }
+    var showAddInterestDialog by remember { mutableStateOf(false) }
+    var newInterestInput by remember { mutableStateOf("") }
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        coroutineScope.launch {
+            editCity = "Detecting..."
+            val loc = com.example.util.LocationDetector.detectCurrentLocation(context)
+            editCity = loc.city
+            editCountry = loc.country
+            editCountryCode = loc.countryCode
+            Toast.makeText(context, "Location detected: ${loc.fullString}", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     var isSaving by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -109,13 +189,24 @@ fun EditProfileScreen(
 
     // Action to commit saved changes to Supabase & SharedPrefs
     fun saveProfileChanges() {
+        errorMessage = null
         val cleanUsername = editUsername.trim().lowercase()
-        if (cleanUsername.isBlank() || editDisplayName.isBlank()) {
-            errorMessage = "Username and display name cannot be blank."
+        if (cleanUsername.isBlank()) {
+            errorMessage = "Username cannot be blank."
             return
         }
         if (cleanUsername.length < 3) {
             errorMessage = "Username must be at least 3 characters."
+            return
+        }
+        if (editDisplayName.trim().isBlank()) {
+            errorMessage = "Display Name cannot be blank."
+            return
+        }
+
+        val ageInt = editAge.trim().toIntOrNull()
+        if (ageInt == null || ageInt < 13 || ageInt > 120) {
+            errorMessage = "Please enter a valid adult age (18-120)."
             return
         }
 
@@ -126,17 +217,26 @@ fun EditProfileScreen(
                     viewModel.updateProfile(
                         context = context,
                         username = cleanUsername,
-                        displayName = editDisplayName,
+                        displayName = editDisplayName.trim(),
                         avatar = editAvatar,
-                        dob = editBio, // save bio to dob slot
+                        coverUrl = editCover,
+                        dob = editBio,
                         gender = editGender,
                         nativeLanguage = nativeLanguages.joinToString(","),
                         learningLanguage = learningLanguages.joinToString(","),
                         country = editCountry,
                         countryCode = editCountryCode,
                         hobbies = selectedInterests.toList(),
+                        age = ageInt,
+                        bio = editBio.trim(),
+                        city = editCity.trim(),
+                        onError = { err ->
+                            errorMessage = err
+                            isSaving = false
+                        },
                         onSuccess = {
                             Toast.makeText(context, "Profile updated successfully!", Toast.LENGTH_SHORT).show()
+                            isSaving = false
                             onDismiss()
                         }
                     )
@@ -146,7 +246,6 @@ fun EditProfileScreen(
             } catch (e: Exception) {
                 errorMessage = e.message ?: "Failed to save changes"
                 Log.e("EditProfileScreen", "Error saving profile", e)
-            } finally {
                 isSaving = false
             }
         }
@@ -419,10 +518,17 @@ fun EditProfileScreen(
                                 .background(Color(0xFFFEF3C7))
                                 .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(16.dp))
                                 .clickable {
-                                    coroutineScope.launch {
-                                        editCity = "Detecting..."
-                                        delay(1000)
-                                        editCity = "Kuala Lumpur"
+                                    if (com.example.util.LocationDetector.hasLocationPermission(context)) {
+                                        coroutineScope.launch {
+                                            editCity = "Detecting..."
+                                            val loc = com.example.util.LocationDetector.detectCurrentLocation(context)
+                                            editCity = loc.city
+                                            editCountry = loc.country
+                                            editCountryCode = loc.countryCode
+                                            Toast.makeText(context, "Location auto-detected: ${loc.fullString}", Toast.LENGTH_SHORT).show()
+                                        }
+                                    } else {
+                                        showLocationConsentDialog = true
                                     }
                                 },
                             contentAlignment = Alignment.Center
@@ -572,6 +678,43 @@ fun EditProfileScreen(
                             }
                         }
 
+                        // Custom interests added by user
+                        val defaultNames = setOf("Gaming", "Music", "Photography", "Travel", "Food", "Movies", "Sports", "Technology", "Writing", "Cooking", "K-Drama", "Fitness", "Reading", "Art", "Nature", "Pets")
+                        val customInterests = selectedInterests.filter { !defaultNames.contains(it) }
+                        customInterests.forEach { customName ->
+                            Surface(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .clickable { selectedInterests.remove(customName) },
+                                color = Color(0xFFFFD43B).copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(18.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFD97706))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    com.example.ui.components.SoftHeartIcon(size = 14.dp, color = Color(0xFFD97706))
+                                    Text(
+                                        text = customName,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFD97706)
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(12.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFFD97706)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CustomCheckOutlineIcon(iconSize = 6.dp, color = Color.White)
+                                    }
+                                }
+                            }
+                        }
+
                         // Dashed "+ Add Interest" pill
                         Box(
                             modifier = Modifier
@@ -590,7 +733,8 @@ fun EditProfileScreen(
                                     )
                                 }
                                 .clickable {
-                                    Toast.makeText(context, "More interests can be added", Toast.LENGTH_SHORT).show()
+                                    newInterestInput = ""
+                                    showAddInterestDialog = true
                                 }
                                 .padding(horizontal = 14.dp),
                             contentAlignment = Alignment.Center
@@ -605,6 +749,64 @@ fun EditProfileScreen(
 
                 Spacer(modifier = Modifier.height(40.dp))
             }
+        }
+
+        // --- CUSTOM ADD INTEREST DIALOG ---
+        if (showAddInterestDialog) {
+            AlertDialog(
+                onDismissRequest = { showAddInterestDialog = false },
+                containerColor = Color.White,
+                shape = RoundedCornerShape(20.dp),
+                title = {
+                    Text(
+                        text = "Add Custom Interest",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp,
+                        color = Color(0xFF0F172A)
+                    )
+                },
+                text = {
+                    Column {
+                        Text(
+                            text = "Enter any hobby, topic, or language learning goal:",
+                            fontSize = 13.sp,
+                            color = Color(0xFF64748B)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = newInterestInput,
+                            onValueChange = { newInterestInput = it },
+                            placeholder = { Text("e.g. Astrophysics, Anime, Poetry...", fontSize = 13.sp) },
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val trimmed = newInterestInput.trim()
+                            if (trimmed.isNotBlank() && !selectedInterests.contains(trimmed)) {
+                                selectedInterests.add(trimmed)
+                            }
+                            showAddInterestDialog = false
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFFFD43B),
+                            contentColor = Color(0xFF0F172A)
+                        ),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("Add", fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showAddInterestDialog = false }) {
+                        Text("Cancel", color = Color(0xFF64748B))
+                    }
+                }
+            )
         }
 
         // --- POPUP DIALOG PICKERS ---
@@ -644,33 +846,110 @@ fun EditProfileScreen(
         }
 
         if (showAgePicker) {
+            var tempAgeInput by remember { mutableStateOf(editAge) }
             AlertDialog(
                 onDismissRequest = { showAgePicker = false },
                 containerColor = Color.White,
-                title = { Text("Select Age", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF0F172A)) },
+                shape = RoundedCornerShape(24.dp),
+                title = { Text("Select Your Age", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Color(0xFF0F172A)) },
                 text = {
-                    Column(modifier = Modifier.height(200.dp)) {
-                        androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.fillMaxSize()) {
-                            items(80) { idx ->
-                                val ageVal = (18 + idx).toString()
-                                Text(
-                                    text = ageVal,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = Color(0xFF0F172A),
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        // Quick +/- Stepper & Direct input
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFF1F5F9))
+                                    .clickable {
+                                        val cur = tempAgeInput.toIntOrNull() ?: 28
+                                        if (cur > 13) tempAgeInput = (cur - 1).toString()
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("-", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                            }
+
+                            OutlinedTextField(
+                                value = tempAgeInput,
+                                onValueChange = { input ->
+                                    val filtered = input.filter { it.isDigit() }.take(3)
+                                    tempAgeInput = filtered
+                                },
+                                singleLine = true,
+                                textStyle = TextStyle(fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center),
+                                modifier = Modifier.width(90.dp),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFF1F5F9))
+                                    .clickable {
+                                        val cur = tempAgeInput.toIntOrNull() ?: 28
+                                        if (cur < 100) tempAgeInput = (cur + 1).toString()
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("+", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                            }
+                        }
+
+                        Text("Quick select common ages:", fontSize = 12.sp, color = Color(0xFF64748B), modifier = Modifier.padding(top = 8.dp, bottom = 6.dp))
+
+                        // Age chips
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            listOf("18", "21", "25", "28", "32").forEach { quickAge ->
+                                val isSel = tempAgeInput == quickAge
+                                Surface(
                                     modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            editAge = ageVal
-                                            showAgePicker = false
-                                        }
-                                        .padding(vertical = 12.dp, horizontal = 8.dp)
-                                )
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable { tempAgeInput = quickAge },
+                                    color = if (isSel) Color(0xFFFFD43B) else Color(0xFFF8FAFC),
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, if (isSel) Color(0xFFEAB308) else Color(0xFFE2E8F0))
+                                ) {
+                                    Text(
+                                        text = quickAge,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF0F172A),
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(vertical = 8.dp)
+                                    )
+                                }
                             }
                         }
                     }
                 },
                 confirmButton = {
+                    Button(
+                        onClick = {
+                            val valid = tempAgeInput.toIntOrNull() ?: 28
+                            editAge = valid.coerceIn(13, 100).toString()
+                            showAgePicker = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD43B)),
+                        shape = RoundedCornerShape(100.dp)
+                    ) {
+                        Text("Save Age", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
                     TextButton(onClick = { showAgePicker = false }) { Text("Cancel", color = Color.Gray) }
                 }
             )
@@ -680,6 +959,7 @@ fun EditProfileScreen(
             AlertDialog(
                 onDismissRequest = { showGenderPicker = false },
                 containerColor = Color.White,
+                shape = RoundedCornerShape(24.dp),
                 title = { Text("Select Gender", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF0F172A)) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -707,29 +987,72 @@ fun EditProfileScreen(
         }
 
         if (showCityPicker) {
+            var customCityText by remember { mutableStateOf(editCity) }
             AlertDialog(
                 onDismissRequest = { showCityPicker = false },
                 containerColor = Color.White,
-                title = { Text("Select City", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF0F172A)) },
+                shape = RoundedCornerShape(24.dp),
+                title = { Text("Enter Your City", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Color(0xFF0F172A)) },
                 text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("Kuala Lumpur", "Seoul", "London", "Tokyo", "Madrid").forEach { c ->
-                            Text(
-                                text = c,
-                                fontSize = 14.sp,
-                                color = Color(0xFF0F172A),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        editCity = c
-                                        showCityPicker = false
-                                    }
-                                    .padding(vertical = 12.dp, horizontal = 8.dp)
-                            )
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedTextField(
+                            value = customCityText,
+                            onValueChange = { customCityText = it },
+                            label = { Text("City Name") },
+                            placeholder = { Text("e.g. Mumbai, New Delhi, London") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+
+                        Text("Quick Suggestions:", fontSize = 12.sp, color = Color(0xFF64748B), fontWeight = FontWeight.Medium)
+
+                        // Wrap of quick cities
+                        @OptIn(ExperimentalLayoutApi::class)
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            listOf("New Delhi", "Mumbai", "Kuala Lumpur", "London", "New York", "Tokyo", "Dubai", "Singapore", "Paris", "Toronto").forEach { c ->
+                                Surface(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .clickable { customCityText = c },
+                                    color = if (customCityText.equals(c, ignoreCase = true)) Color(0xFFFEF3C7) else Color(0xFFF1F5F9),
+                                    shape = RoundedCornerShape(16.dp),
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        1.dp,
+                                        if (customCityText.equals(c, ignoreCase = true)) Color(0xFFF59E0B) else Color.Transparent
+                                    )
+                                ) {
+                                    Text(
+                                        text = c,
+                                        fontSize = 12.sp,
+                                        color = Color(0xFF0F172A),
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 },
                 confirmButton = {
+                    Button(
+                        onClick = {
+                            if (customCityText.isNotBlank()) {
+                                editCity = customCityText.trim()
+                            }
+                            showCityPicker = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD43B)),
+                        shape = RoundedCornerShape(100.dp)
+                    ) {
+                        Text("Save City", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
                     TextButton(onClick = { showCityPicker = false }) { Text("Cancel", color = Color.Gray) }
                 }
             )
@@ -762,6 +1085,32 @@ fun EditProfileScreen(
                 },
                 confirmButton = {
                     TextButton(onClick = { showAddLanguagePanel = false }) { Text("Close", color = Color.Gray) }
+                }
+            )
+        }
+
+        if (showLocationConsentDialog) {
+            LocationConsentDialog(
+                onDismiss = { showLocationConsentDialog = false },
+                onConfirmConsent = {
+                    showLocationConsentDialog = false
+                    if (com.example.util.LocationDetector.hasLocationPermission(context)) {
+                        coroutineScope.launch {
+                            editCity = "Detecting..."
+                            val loc = com.example.util.LocationDetector.detectCurrentLocation(context)
+                            editCity = loc.city
+                            editCountry = loc.country
+                            editCountryCode = loc.countryCode
+                            Toast.makeText(context, "Location auto-detected: ${loc.fullString}", Toast.LENGTH_SHORT).show()
+                        }
+                    } else {
+                        locationPermissionLauncher.launch(
+                            arrayOf(
+                                android.Manifest.permission.ACCESS_FINE_LOCATION,
+                                android.Manifest.permission.ACCESS_COARSE_LOCATION
+                            )
+                        )
+                    }
                 }
             )
         }
@@ -806,26 +1155,49 @@ fun EditableFieldBlock(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(labelText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF94A3B8))
-            Text(charCountText, fontSize = 10.sp, color = Color(0xFF94A3B8))
+            Text(labelText, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF475569))
+            Text(charCountText, fontSize = 11.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.Medium)
         }
-        Spacer(modifier = Modifier.height(4.dp))
-        TextField(
+        Spacer(modifier = Modifier.height(6.dp))
+        
+        val placeholderText = when (labelText) {
+            "Display Name" -> "Enter your full display name..."
+            "Username" -> "Enter your username..."
+            "Bio" -> "Write a short bio about yourself..."
+            else -> "Enter $labelText..."
+        }
+
+        OutlinedTextField(
             value = textValue,
-            onValueChange = { text -> if (text.length <= maxLen) onValueChange(text) },
-            singleLine = labelText != "Bio",
-            textStyle = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A)),
-            colors = TextFieldDefaults.colors(
-                focusedContainerColor = Color(0xFFF8FAFC),
-                unfocusedContainerColor = Color(0xFFF8FAFC),
-                focusedIndicatorColor = Color.Transparent,
-                unfocusedIndicatorColor = Color.Transparent,
-                cursorColor = Color(0xFF0F172A)
-            ),
-            shape = RoundedCornerShape(8.dp),
+            onValueChange = { text ->
+                if (text.length <= maxLen) onValueChange(text)
+            },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(if (labelText == "Bio") 68.dp else 42.dp)
+                .then(if (labelText == "Bio") Modifier.heightIn(min = 105.dp) else Modifier),
+            singleLine = labelText != "Bio",
+            maxLines = if (labelText == "Bio") 4 else 1,
+            placeholder = {
+                Text(
+                    text = placeholderText,
+                    fontSize = 14.sp,
+                    color = Color(0xFF94A3B8),
+                    fontWeight = FontWeight.Normal
+                )
+            },
+            textStyle = TextStyle(
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF0F172A)
+            ),
+            shape = RoundedCornerShape(14.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = Color(0xFFFFFFFF),
+                unfocusedContainerColor = Color(0xFFF8FAFC),
+                focusedBorderColor = Color(0xFFFFD43B),
+                unfocusedBorderColor = Color(0xFFCBD5E1),
+                cursorColor = Color(0xFF0F172A)
+            )
         )
     }
 }

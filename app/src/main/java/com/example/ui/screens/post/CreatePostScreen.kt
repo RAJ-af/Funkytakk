@@ -54,6 +54,8 @@ import coil.compose.AsyncImage
 import com.example.BuildConfig
 import com.example.SupabaseClient
 import com.example.SupabaseSessionManager
+import com.example.ui.components.LocationConsentDialog
+import com.example.util.LocationDetector
 import com.example.CloudinaryUploadResponse
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -102,6 +104,20 @@ fun CreatePostScreen(
     var captionText by remember { mutableStateOf("") }
     var selectedLocation by remember { mutableStateOf("Kuala Lumpur, Malaysia") }
     var isDetectingLocation by remember { mutableStateOf(false) }
+    var showLocationConsentDialog by remember { mutableStateOf(false) }
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        coroutineScope.launch {
+            isDetectingLocation = true
+            selectedLocation = "Detecting Location..."
+            val loc = LocationDetector.detectCurrentLocation(context)
+            selectedLocation = loc.fullString
+            isDetectingLocation = false
+            Toast.makeText(context, "Location tagged: ${loc.fullString}", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     // Multi-select for optional lists
     val selectedLanguages = remember { mutableStateListOf("Malay", "English") }
@@ -771,12 +787,17 @@ fun CreatePostScreen(
                                     .background(Color(0xFFFAF9F5))
                                     .border(1.dp, Color(0xFFECEBE6), CircleShape)
                                     .clickable {
-                                        coroutineScope.launch {
-                                            isDetectingLocation = true
-                                            selectedLocation = "Detecting Location..."
-                                            delay(1200)
-                                            selectedLocation = "Kuala Lumpur, Malaysia"
-                                            isDetectingLocation = false
+                                        if (LocationDetector.hasLocationPermission(context)) {
+                                            coroutineScope.launch {
+                                                isDetectingLocation = true
+                                                selectedLocation = "Detecting Location..."
+                                                val loc = LocationDetector.detectCurrentLocation(context)
+                                                selectedLocation = loc.fullString
+                                                isDetectingLocation = false
+                                                Toast.makeText(context, "Location tagged: ${loc.fullString}", Toast.LENGTH_SHORT).show()
+                                            }
+                                        } else {
+                                            showLocationConsentDialog = true
                                         }
                                     },
                                 contentAlignment = Alignment.Center
@@ -990,6 +1011,32 @@ fun CreatePostScreen(
                     Spacer(modifier = Modifier.height(40.dp))
                 }
             }
+        }
+
+        if (showLocationConsentDialog) {
+            LocationConsentDialog(
+                onDismiss = { showLocationConsentDialog = false },
+                onConfirmConsent = {
+                    showLocationConsentDialog = false
+                    if (LocationDetector.hasLocationPermission(context)) {
+                        coroutineScope.launch {
+                            isDetectingLocation = true
+                            selectedLocation = "Detecting Location..."
+                            val loc = LocationDetector.detectCurrentLocation(context)
+                            selectedLocation = loc.fullString
+                            isDetectingLocation = false
+                            Toast.makeText(context, "Location tagged: ${loc.fullString}", Toast.LENGTH_SHORT).show()
+                        }
+                    } else {
+                        locationPermissionLauncher.launch(
+                            arrayOf(
+                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                Manifest.permission.ACCESS_COARSE_LOCATION
+                            )
+                        )
+                    }
+                }
+            )
         }
     }
 }

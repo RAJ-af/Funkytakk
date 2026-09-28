@@ -27,7 +27,8 @@ fun ChatHeader(
     isOnline: Boolean = true,
     onBackClick: () -> Unit,
     onMenuClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    menuContent: @Composable () -> Unit = {}
 ) {
     val cleanFlagCode = when {
         partnerCountryCode.isNotBlank() -> partnerCountryCode.trim().lowercase()
@@ -128,19 +129,24 @@ fun ChatHeader(
             }
         }
 
-        // 3 Dots Menu Button
+        // 3 Dots Menu Button & Anchored Menu
         Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .clickable { onMenuClick() },
-            contentAlignment = Alignment.Center
+            modifier = Modifier.wrapContentSize(Alignment.TopEnd)
         ) {
-            AppSvgIcon(
-                icon = ChatIconAsset.MoreVertical,
-                tint = Color(0xFF111827),
-                modifier = Modifier.size(20.dp)
-            )
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .clickable { onMenuClick() },
+                contentAlignment = Alignment.Center
+            ) {
+                AppSvgIcon(
+                    icon = ChatIconAsset.MoreVertical,
+                    tint = Color(0xFF111827),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            menuContent()
         }
     }
 }

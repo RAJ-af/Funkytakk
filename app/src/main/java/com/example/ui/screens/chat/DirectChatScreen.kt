@@ -49,6 +49,8 @@ import com.example.ui.screens.chat.components.*
 import com.example.ui.screens.chat.model.ChatMessage
 import com.example.ui.screens.chat.model.ChatMessageType
 import com.example.ui.screens.home.dialogs.BlockedUsersBottomSheet
+import com.example.gifting.SendGiftBottomSheet
+import com.example.moderation.ReportUserDialog
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -84,6 +86,9 @@ fun DirectChatScreen(
     var showBlockConfirmDialog by remember { mutableStateOf(false) }
     var showClearConfirmDialog by remember { mutableStateOf(false) }
     var showBlockedUsersSheet by remember { mutableStateOf(false) }
+    var reportingMessage by remember { mutableStateOf<ChatMessage?>(null) }
+    var showSendGiftSheet by remember { mutableStateOf(false) }
+    var showReportUserDialog by remember { mutableStateOf(false) }
 
     // Edge case check state: does recipient have public encryption key?
     var recipientKeyReady by remember { mutableStateOf<Boolean?>(null) }
@@ -372,28 +377,28 @@ fun DirectChatScreen(
         Scaffold(
             containerColor = Color(0xFFFAFAEE),
             topBar = {
-                Box(modifier = Modifier.fillMaxWidth()) {
-                    ChatHeader(
-                        partnerName = partnerName,
-                        partnerAvatarUrl = partnerAvatarUrl,
-                        partnerCountry = partnerCountry,
-                        partnerCountryCode = partnerCountryCode,
-                        isOnline = true,
-                        onBackClick = onBack,
-                        onMenuClick = {
-                            showOptionsMenu = true
-                        }
-                    )
-
-                    DropdownMenu(
-                        expanded = showOptionsMenu,
-                        onDismissRequest = { showOptionsMenu = false },
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(top = 48.dp, end = 16.dp)
-                            .width(230.dp)
-                            .background(Color.White)
-                    ) {
+                ChatHeader(
+                    partnerName = partnerName,
+                    partnerAvatarUrl = partnerAvatarUrl,
+                    partnerCountry = partnerCountry,
+                    partnerCountryCode = partnerCountryCode,
+                    isOnline = true,
+                    onBackClick = onBack,
+                    onMenuClick = {
+                        showOptionsMenu = true
+                    },
+                    menuContent = {
+                        DropdownMenu(
+                            expanded = showOptionsMenu,
+                            onDismissRequest = { showOptionsMenu = false },
+                            shape = RoundedCornerShape(20.dp),
+                            containerColor = Color.White,
+                            shadowElevation = 8.dp,
+                            modifier = Modifier
+                                .width(230.dp)
+                                .background(Color.White, RoundedCornerShape(20.dp))
+                                .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(20.dp))
+                        ) {
                         // 1. Mute / Unmute
                         DropdownMenuItem(
                             text = {
@@ -460,6 +465,8 @@ fun DirectChatScreen(
                             }
                         )
 
+                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
+
                         // 3. Block / Unblock User
                         DropdownMenuItem(
                             text = {
@@ -496,8 +503,6 @@ fun DirectChatScreen(
                                 }
                             }
                         )
-
-                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
 
                         // 4. Blocked Users List
                         DropdownMenuItem(
@@ -545,10 +550,51 @@ fun DirectChatScreen(
                                 showBlockedUsersSheet = true
                             }
                         )
+
+                        // 5. Send Gift
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("🎁", fontSize = 16.sp)
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text(
+                                        text = "Send a Gift",
+                                        color = Color(0xFFB45309),
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            },
+                            onClick = {
+                                showOptionsMenu = false
+                                showSendGiftSheet = true
+                            }
+                        )
+
+                        // 6. Report User
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    SoftShieldIcon(size = 15.dp, color = Color(0xFFDC2626))
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text(
+                                        text = "Report User",
+                                        color = Color(0xFFDC2626),
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            },
+                            onClick = {
+                                showOptionsMenu = false
+                                showReportUserDialog = true
+                            }
+                        )
                     }
                 }
-            },
-            bottomBar = {
+            )
+        },
+        bottomBar = {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1144,7 +1190,46 @@ fun DirectChatScreen(
                 },
                 onMoreActions = {
                     selectedMessageForMenu = null
+                },
+                onReportMessage = {
+                    reportingMessage = target
+                    selectedMessageForMenu = null
                 }
+            )
+        }
+
+        // Report DM Message Dialog (Generates encrypted screenshot evidence & uploads to report-evidence)
+        reportingMessage?.let { msg ->
+            ReportUserDialog(
+                reportedUserId = partnerUserId,
+                reportedUserName = partnerName,
+                contextType = "dm",
+                contextId = msg.id,
+                dmMessageText = msg.text,
+                onDismiss = { reportingMessage = null },
+                onReportSubmitted = { reportingMessage = null }
+            )
+        }
+
+        // Report User Dialog (general profile context)
+        if (showReportUserDialog) {
+            ReportUserDialog(
+                reportedUserId = partnerUserId,
+                reportedUserName = partnerName,
+                contextType = "profile",
+                contextId = null,
+                onDismiss = { showReportUserDialog = false },
+                onReportSubmitted = { showReportUserDialog = false }
+            )
+        }
+
+        // Send Gift Bottom Sheet
+        if (showSendGiftSheet) {
+            SendGiftBottomSheet(
+                recipientId = partnerUserId,
+                recipientName = partnerName,
+                recipientAvatar = partnerAvatarUrl,
+                onDismiss = { showSendGiftSheet = false }
             )
         }
 

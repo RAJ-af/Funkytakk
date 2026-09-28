@@ -78,6 +78,12 @@ sealed class RealtimeTableEvent {
         val senderId: String?,
         val conversationId: String?
     ) : RealtimeTableEvent()
+    data class GroupMessageReceived(
+        val eventType: String,
+        val record: JSONObject?,
+        val recipientId: String?,
+        val messageId: String?
+    ) : RealtimeTableEvent()
     data class Reconnected(val timestamp: Long = System.currentTimeMillis()) : RealtimeTableEvent()
 }
 
@@ -634,10 +640,54 @@ object VoiceRoomRealtimeManager {
                             conversationId = convId
                         )
                     )
+                } else if (table == "group_message_recipients" || topic.contains("group_message_recipients")) {
+                    val recipientId = record?.optString("recipient_id")
+                    val messageId = record?.optString("message_id")
+                    Log.d(TAG, "[Realtime] Received group_message_recipients event ($eventType) for recipient $recipientId, messageId $messageId")
+                    _events.tryEmit(
+                        RealtimeTableEvent.GroupMessageReceived(
+                            eventType = eventType,
+                            record = record,
+                            recipientId = recipientId,
+                            messageId = messageId
+                        )
+                    )
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error handling message", e)
+        }
+    }
+
+    fun subscribeGroupInbox(recipientId: String) {
+        if (recipientId.isBlank()) return
+        val ws = webSocket ?: return
+        try {
+            val token = currentAuthToken
+            val joinMsg = JSONObject().apply {
+                put("topic", "realtime:public:group_message_recipients:recipient_id=eq.$recipientId")
+                put("event", "phx_join")
+                put("payload", JSONObject().apply {
+                    if (!token.isNullOrBlank()) {
+                        put("access_token", token)
+                    }
+                    put("config", JSONObject().apply {
+                        put("postgres_changes", org.json.JSONArray().apply {
+                            put(JSONObject().apply {
+                                put("event", "INSERT")
+                                put("schema", "public")
+                                put("table", "group_message_recipients")
+                                put("filter", "recipient_id=eq.$recipientId")
+                            })
+                        })
+                    })
+                })
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(joinMsg.toString())
+            Log.d(TAG, "Subscribed to postgres_changes group_message_recipients for recipient:$recipientId")
+        } catch (e: Exception) {
+            Log.w(TAG, "Error sending join for group_message_recipients recipient channel $recipientId: ${e.message}")
         }
     }
 

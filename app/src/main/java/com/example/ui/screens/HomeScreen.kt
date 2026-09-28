@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight
+import com.example.BuildConfig
 import com.example.SupabaseSessionManager
 import com.example.ui.theme.GoldAccent
 
@@ -142,10 +143,8 @@ fun HomeScreen(
         } else {
             activeFriends
         }
-        mapped.filter { f ->
-            val status = f.statusText.lowercase()
-            status != "offline" && status.isNotBlank()
-        }
+        // Place genuine online users first, followed by offline users with moon badges
+        mapped.sortedByDescending { it.isOnline }
     }
 
     // Dynamic Rooms list state loaded from Supabase voice_rooms in real-time
@@ -181,18 +180,39 @@ fun HomeScreen(
                 val liveParticipants = com.example.realtime.VoiceRoomRealtimeManager.getAllLiveParticipants()
                 val allParticipants = (supaParticipants + liveParticipants).distinctBy { "${it.room_id}_${it.user_id}" }
 
-                // 3. Derive friends & presence from allParticipants & supabaseProfiles
+                // 3. Derive real followed friends & presence from Supabase DB followers and room participants
+                val followedUserIds = try {
+                    val followersResp = SupabaseClient.api.getFollowers(
+                        auth = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
+                        followerIdEq = "eq.$currentUserId"
+                    )
+                    if (followersResp.isSuccessful) {
+                        followersResp.body()?.map { it.following_id }?.toSet() ?: emptySet()
+                    } else emptySet()
+                } catch (e: Exception) {
+                    Log.w("HomeScreen", "Could not fetch followed IDs: ${e.message}")
+                    emptySet()
+                }
+
                 if (supabaseProfiles.isNotEmpty()) {
-                    val otherProfiles = supabaseProfiles.filter {
-                        it.uid != currentUserId
+                    val followedProfiles = supabaseProfiles.filter {
+                        it.uid != currentUserId && followedUserIds.contains(it.uid)
                     }
-                    val derivedFriends = otherProfiles.take(8).map { p ->
+                    val targetProfiles = if (followedProfiles.isNotEmpty()) {
+                        followedProfiles
+                    } else {
+                        // User has not followed anyone yet: showcase community learners
+                        supabaseProfiles.filter { it.uid != currentUserId }.take(10)
+                    }
+
+                    val derivedFriends = targetProfiles.map { p ->
                         val pId = p.uid
                         val activePart = allParticipants.firstOrNull { it.user_id == pId || it.user_id == p.uid }
-                        val isSpeaking = activePart != null && (activePart.role == "speaker" || activePart.role == "host") && activePart.is_mic_enabled
+                        val isOnline = activePart != null
+                        val isSpeaking = isOnline && (activePart.role == "speaker" || activePart.role == "host") && activePart.is_mic_enabled
                         val statusText = when {
-                            activePart == null -> "Online"
-                            activePart.role == "speaker" || activePart.role == "host" -> "Speaking"
+                            !isOnline -> "Offline"
+                            activePart?.role == "speaker" || activePart?.role == "host" -> "Speaking"
                             else -> "Listening"
                         }
                         FollowedFriend(
@@ -202,12 +222,11 @@ fun HomeScreen(
                             flagCode = p.countryCode?.ifBlank { null } ?: "in",
                             isSpeaking = isSpeaking,
                             statusText = statusText,
-                            currentRoomId = activePart?.room_id ?: ""
+                            currentRoomId = activePart?.room_id ?: "",
+                            isOnline = isOnline
                         )
                     }
-                    if (derivedFriends.isNotEmpty()) {
-                        activeFriends = derivedFriends
-                    }
+                    activeFriends = derivedFriends
                 }
 
                 // 4. Map Supabase voice_rooms to CustomRoom

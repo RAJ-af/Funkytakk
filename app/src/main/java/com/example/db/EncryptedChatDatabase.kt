@@ -8,13 +8,20 @@ import net.sqlcipher.database.SQLiteDatabase
 import net.sqlcipher.database.SupportFactory
 
 @Database(
-    entities = [LocalDmConversation::class, LocalDmMessage::class],
-    version = 1,
+    entities = [
+        LocalDmConversation::class,
+        LocalDmMessage::class,
+        LocalGroupConversation::class,
+        LocalGroupMessage::class
+    ],
+    version = 2,
     exportSchema = false
 )
 abstract class EncryptedChatDatabase : RoomDatabase() {
     abstract fun conversationDao(): DmConversationDao
     abstract fun messageDao(): DmMessageDao
+    abstract fun groupConversationDao(): GroupConversationDao
+    abstract fun groupMessageDao(): GroupMessageDao
 
     companion object {
         const val DB_NAME = "encrypted_dm_chat_vault.db"

@@ -56,6 +56,8 @@ fun CreateGroupBottomSheet(
     var memberInputText by remember { mutableStateOf("") }
     val selectedMembers = remember { mutableStateListOf<String>() }
     val suggestedFriends = remember { mutableStateListOf<Pair<String, String>>() } // id, name
+    val friendNameToIdMap = remember { mutableStateMapOf<String, String>() }
+    var isCreating by remember { mutableStateOf(false) }
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -72,10 +74,12 @@ fun CreateGroupBottomSheet(
                     val myId = SupabaseSessionManager.getUserId(context)
                     val otherProfiles = profilesRes.body()!!
                         .filterNot { it.auth_user_id == myId }
-                        .take(10)
+                        .take(15)
                         .map { (it.auth_user_id ?: it.id.toString()) to (it.profile_name ?: it.username ?: "Partner") }
                     suggestedFriends.clear()
                     suggestedFriends.addAll(otherProfiles)
+                    friendNameToIdMap.clear()
+                    otherProfiles.forEach { (id, name) -> friendNameToIdMap[name] = id }
                 }
             }
         } catch (_: Exception) {}
@@ -411,31 +415,56 @@ fun CreateGroupBottomSheet(
                         Toast.makeText(context, "Please enter a group name", Toast.LENGTH_SHORT).show()
                         return@Button
                     }
-                    val created = ChatPreferencesManager.createGroup(
-                        context = context,
-                        name = groupName.trim(),
-                        description = groupDescription.trim(),
-                        memberNames = selectedMembers.toList(),
-                        avatarUrl = selectedAvatar
-                    )
-                    Toast.makeText(context, "Group \"${created.name}\" created successfully!", Toast.LENGTH_SHORT).show()
-                    onGroupCreated(created)
-                    onDismiss()
+                    isCreating = true
+                    val memberIds = selectedMembers.mapNotNull { friendNameToIdMap[it] }
+
+                    scope.launch {
+                        val serverRes = com.example.repository.GroupChatRepository.createGroup(
+                            context = context,
+                            name = groupName.trim(),
+                            memberUserIds = memberIds,
+                            avatarUrl = selectedAvatar
+                        )
+                        isCreating = false
+
+                        val created = ChatPreferencesManager.createGroup(
+                            context = context,
+                            name = groupName.trim(),
+                            description = groupDescription.trim(),
+                            memberNames = selectedMembers.toList(),
+                            avatarUrl = selectedAvatar
+                        )
+
+                        if (serverRes.isSuccess) {
+                            Toast.makeText(context, "Group \"${groupName.trim()}\" created & invitations sent!", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "Group created: ${serverRes.exceptionOrNull()?.message ?: ""}", Toast.LENGTH_SHORT).show()
+                        }
+                        onGroupCreated(created)
+                        onDismiss()
+                    }
                 },
+                enabled = !isCreating,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(50.dp),
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = GoldAccent)
             ) {
-                SoftGroupIcon(size = 20.dp, color = Color.Black)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Create Group Chat",
-                    color = Color.Black,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 15.sp
-                )
+                if (isCreating) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.Black, strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Creating Group...", color = Color.Black, fontWeight = FontWeight.Bold)
+                } else {
+                    SoftGroupIcon(size = 20.dp, color = Color.Black)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Create Group Chat",
+                        color = Color.Black,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 15.sp
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))

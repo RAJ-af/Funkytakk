@@ -45,6 +45,7 @@ data class UserProfile(
     val selectedLanguages: List<String> = emptyList(),
     val username: String? = null,
     val avatar: String? = null,
+    val coverUrl: String? = null,
     val dob: String? = null,
     val age: Int? = null,
     val gender: String? = null,
@@ -53,7 +54,9 @@ data class UserProfile(
     val country: String? = null,
     val countryCode: String? = null,
     val hobbies: List<String> = emptyList(),
-    val onboardingComplete: Boolean = false
+    val onboardingComplete: Boolean = false,
+    val bio: String? = null,
+    val city: String? = null
 )
 
 class AuthViewModel : ViewModel() {
@@ -2361,31 +2364,41 @@ class AuthViewModel : ViewModel() {
         country: String,
         countryCode: String,
         hobbies: List<String>,
+        age: Int? = null,
+        bio: String? = null,
+        city: String? = null,
+        coverUrl: String? = null,
+        onError: ((String) -> Unit)? = null,
         onSuccess: () -> Unit
     ) {
         val currentState = _authState.value
         if (currentState is AuthState.Success) {
             viewModelScope.launch {
+                val cleanUsername = username.trim().lowercase()
                 var finalAvatar = avatar
+                var finalCover = coverUrl
+                val supaUid = SupabaseSessionManager.getUserId(context) ?: currentState.user.uid
+                val bearerAuth = SupabaseSessionManager.getBearerToken(context)
+
                 try {
-                    // 1. Upload avatar to Supabase Storage if it's a content URI or local file path
-                    var inputStream: java.io.InputStream? = null
+                    // 1. Upload avatar to Supabase Storage if it's a local URI or file path
+                    var avatarInputStream: java.io.InputStream? = null
                     if (avatar.startsWith("content://")) {
                         val uri = android.net.Uri.parse(avatar)
-                        inputStream = context.contentResolver.openInputStream(uri)
+                        avatarInputStream = context.contentResolver.openInputStream(uri)
                     } else if (avatar.startsWith("/") || avatar.startsWith("file://")) {
                         val purePath = avatar.removePrefix("file://")
                         val file = java.io.File(purePath)
                         if (file.exists()) {
-                            inputStream = java.io.FileInputStream(file)
+                            avatarInputStream = java.io.FileInputStream(file)
                         }
                     }
-                    if (inputStream != null) {
-                        val bytes = inputStream.readBytes()
-                        inputStream.close()
+                    if (avatarInputStream != null) {
+                        val bytes = avatarInputStream.readBytes()
+                        avatarInputStream.close()
                         val mediaType = "image/*".toMediaTypeOrNull()
                         val requestFile = bytes.toRequestBody(mediaType, 0, bytes.size)
-                        val filename = "avatar_${currentState.user.uid}_${System.currentTimeMillis()}.jpg"
+                        val filename = "avatar_${supaUid}_${System.currentTimeMillis()}.jpg"
                         val body = okhttp3.MultipartBody.Part.createFormData("file", filename, requestFile)
                         val response = SupabaseClient.api.uploadAvatar(filename = filename, file = body)
                         if (response.isSuccessful) {
@@ -2399,38 +2412,106 @@ class AuthViewModel : ViewModel() {
                         }
                     }
 
-                    val supaUid = SupabaseSessionManager.getUserId(context) ?: currentState.user.uid
-                    val bearerAuth = SupabaseSessionManager.getBearerToken(context)
+                    // 2. Upload cover photo to Supabase Storage bucket 'covers' at path covers/{auth_user_id}/{filename}
+                    if (!coverUrl.isNullOrBlank() && (coverUrl.startsWith("content://") || coverUrl.startsWith("file://") || coverUrl.startsWith("/"))) {
+                        var coverInputStream: java.io.InputStream? = null
+                        if (coverUrl.startsWith("content://")) {
+                            val uri = android.net.Uri.parse(coverUrl)
+                            coverInputStream = context.contentResolver.openInputStream(uri)
+                        } else {
+                            val purePath = coverUrl.removePrefix("file://")
+                            val file = java.io.File(purePath)
+                            if (file.exists()) {
+                                coverInputStream = java.io.FileInputStream(file)
+                            }
+                        }
+                        if (coverInputStream != null) {
+                            val bytes = coverInputStream.readBytes()
+                            coverInputStream.close()
+                            val filename = "cover_${System.currentTimeMillis()}.jpg"
+                            val storagePath = "$supaUid/$filename"
+                            val mediaType = "image/*".toMediaTypeOrNull()
+                            val requestFile = bytes.toRequestBody(mediaType, 0, bytes.size)
+                            val body = okhttp3.MultipartBody.Part.createFormData("file", filename, requestFile)
+                            val response = SupabaseClient.api.uploadCoverMultipart(auth = bearerAuth, path = storagePath, file = body)
+                            if (response.isSuccessful) {
+                                val baseUrl = BuildConfig.SUPABASE_URL.let {
+                                    if (!it.startsWith("http")) "https://$it" else it
+                                }.trimEnd('/')
+                                finalCover = "$baseUrl/storage/v1/object/public/covers/$storagePath"
+                                Log.d("AuthViewModel", "Cover uploaded to Supabase: $finalCover")
+                            } else {
+                                Log.e("AuthViewModel", "Failed to upload cover: ${response.code()} ${response.message()}")
+                            }
+                        }
+                    }
+
                     val nativeList = nativeLanguage.split(",").map { it.trim() }.filter { it.isNotEmpty() }
                     val learningList = learningLanguage.split(",").map { it.trim() }.filter { it.isNotEmpty() }
 
-                    SupabaseClient.api.patchProfile(
+                    val updates = mutableMapOf<String, Any?>(
+                        "username" to cleanUsername,
+                        "profile_name" to displayName,
+                        "avatar_url" to finalAvatar,
+                        "gender" to gender,
+                        "country" to country,
+                        "country_code" to countryCode,
+                        "native_languages" to nativeList,
+                        "learning_languages" to learningList,
+                        "hobbies" to hobbies,
+                        "bio" to (bio ?: dob),
+                        "onboarding_complete" to true
+                    )
+                    if (age != null && age > 0) {
+                        updates["age"] = age
+                    }
+                    if (!city.isNullOrBlank()) {
+                        updates["city"] = city.trim()
+                    }
+                    if (!finalCover.isNullOrBlank()) {
+                        updates["cover_url"] = finalCover
+                    }
+
+                    val patchRes = SupabaseClient.api.patchProfile(
                         auth = bearerAuth,
                         authUserIdEq = "eq.$supaUid",
-                        updates = mapOf(
-                            "username" to username,
-                            "profile_name" to displayName,
-                            "avatar_url" to finalAvatar,
-                            "gender" to gender,
-                            "country" to country,
-                            "country_code" to countryCode,
-                            "native_languages" to nativeList,
-                            "learning_languages" to learningList,
-                            "hobbies" to hobbies,
-                            "onboarding_complete" to true
-                        )
+                        updates = updates
                     )
+
+                    if (!patchRes.isSuccessful) {
+                        val errBody = patchRes.errorBody()?.string() ?: ""
+                        Log.e("AuthViewModel", "Supabase patchProfile failed (${patchRes.code()}): $errBody")
+                        if (errBody.contains("username", ignoreCase = true) || 
+                            errBody.contains("duplicate", ignoreCase = true) || 
+                            errBody.contains("unique", ignoreCase = true) || 
+                            errBody.contains("23505")) {
+                            onError?.invoke("Username '@$cleanUsername' is already taken. Please choose another username.")
+                            return@launch
+                        } else {
+                            onError?.invoke("Failed to update profile: ${patchRes.message()}")
+                            return@launch
+                        }
+                    }
                 } catch (e: Exception) {
                     Log.e("AuthViewModel", "Supabase update error: ${e.message}", e)
+                    val msg = e.message ?: ""
+                    if (msg.contains("username", ignoreCase = true) || msg.contains("duplicate", ignoreCase = true) || msg.contains("unique", ignoreCase = true)) {
+                        onError?.invoke("Username is already taken. Please choose another username.")
+                        return@launch
+                    }
                 }
 
                 val userId = currentState.user.uid
                 val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
                 prefs.edit().apply {
-                    putString("profile_username_${userId}", username)
+                    putString("profile_username_${userId}", cleanUsername)
                     putString("profile_displayName_${userId}", displayName)
                     putString("profile_avatar_${userId}", finalAvatar)
+                    if (!finalCover.isNullOrBlank()) putString("profile_cover_${userId}", finalCover)
                     putString("profile_dob_${userId}", dob)
+                    putString("profile_bio_${userId}", bio ?: dob)
+                    if (age != null && age > 0) putInt("profile_age_${userId}", age)
+                    if (!city.isNullOrBlank()) putString("profile_city_${userId}", city)
                     putString("profile_gender_${userId}", gender)
                     putString("profile_nativeLanguage_${userId}", nativeLanguage)
                     putString("profile_learningLanguage_${userId}", learningLanguage)
@@ -2442,10 +2523,14 @@ class AuthViewModel : ViewModel() {
                 }
 
                 val updatedUser = currentState.user.copy(
-                    username = username,
+                    username = cleanUsername,
                     displayName = displayName,
                     avatar = finalAvatar,
+                    coverUrl = finalCover ?: currentState.user.coverUrl,
                     dob = dob,
+                    bio = bio ?: dob,
+                    age = age ?: currentState.user.age,
+                    city = city ?: currentState.user.city,
                     gender = gender,
                     nativeLanguage = nativeLanguage,
                     learningLanguage = learningLanguage,
@@ -2470,6 +2555,8 @@ class AuthViewModel : ViewModel() {
         val avatar = prefs.getString("profile_avatar_${userId}", null)
         val ageVal = prefs.getInt("profile_age_${userId}", 0).takeIf { it > 0 }
         val dob = prefs.getString("profile_dob_${userId}", null)
+        val bioVal = prefs.getString("profile_bio_${userId}", null)
+        val cityVal = prefs.getString("profile_city_${userId}", null)
         val gender = prefs.getString("profile_gender_${userId}", null)
         val nativeLanguage = prefs.getString("profile_nativeLanguage_${userId}", null)
         val learningLanguage = prefs.getString("profile_learningLanguage_${userId}", null)
@@ -2489,6 +2576,8 @@ class AuthViewModel : ViewModel() {
             avatar = avatar,
             age = ageVal,
             dob = dob,
+            bio = bioVal ?: dob,
+            city = cityVal,
             gender = gender,
             nativeLanguage = nativeLanguage,
             learningLanguage = learningLanguage,
@@ -2505,6 +2594,8 @@ class AuthViewModel : ViewModel() {
             avatar = avatar ?: currentProfile.avatar,
             age = ageVal ?: currentProfile.age,
             dob = dob ?: currentProfile.dob,
+            bio = bioVal ?: currentProfile.bio ?: dob,
+            city = cityVal ?: currentProfile.city,
             gender = gender ?: currentProfile.gender,
             nativeLanguage = nativeLanguage ?: currentProfile.nativeLanguage,
             learningLanguage = learningLanguage ?: currentProfile.learningLanguage,
@@ -2529,12 +2620,14 @@ class AuthViewModel : ViewModel() {
                         val nativeStr = supaProfile.native_languages?.joinToString(", ")
                         val learningStr = supaProfile.learning_languages?.joinToString(", ")
                         val hobbiesList = supaProfile.hobbies ?: emptyList()
+                        val supaBio = supaProfile.bio?.ifBlank { null } ?: bioVal
 
                         prefs.edit().apply {
                             putString("profile_username_${userId}", supaProfile.username ?: "")
                             putString("profile_displayName_${userId}", supaProfile.profile_name ?: "")
                             putString("profile_avatar_${userId}", supaProfile.avatar_url ?: "")
-                            putInt("profile_age_${userId}", supaProfile.age ?: 0)
+                            putInt("profile_age_${userId}", supaProfile.age ?: (ageVal ?: 0))
+                            if (!supaBio.isNullOrBlank()) putString("profile_bio_${userId}", supaBio)
                             putString("profile_gender_${userId}", supaProfile.gender ?: "")
                             putString("profile_nativeLanguage_${userId}", nativeStr ?: "")
                             putString("profile_learningLanguage_${userId}", learningStr ?: "")
@@ -2551,6 +2644,8 @@ class AuthViewModel : ViewModel() {
                             displayName = supaProfile.profile_name ?: mergedProfile.displayName,
                             avatar = supaProfile.avatar_url ?: mergedProfile.avatar,
                             age = supaProfile.age ?: mergedProfile.age,
+                            bio = supaBio ?: mergedProfile.bio,
+                            city = cityVal ?: mergedProfile.city,
                             gender = supaProfile.gender ?: mergedProfile.gender,
                             nativeLanguage = nativeStr ?: mergedProfile.nativeLanguage,
                             learningLanguage = learningStr ?: mergedProfile.learningLanguage,

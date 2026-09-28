@@ -17,14 +17,12 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -43,14 +41,17 @@ import androidx.compose.ui.window.DialogProperties
 import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import com.example.BuildConfig
+import com.example.DiscoverableProfile
 import com.example.MyModerationStatus
 import com.example.ModerationManager
 import com.example.ReportMessageSnapshot
 import com.example.ReportSpeakerLogItem
 import com.example.RoomReportItem
 import com.example.SupabaseClient
+import com.example.SupabaseMoment
 import com.example.SupabaseSessionManager
 import com.example.UserProfile
+import com.example.ui.components.*
 import com.example.ui.screens.home.models.DarkText
 import com.example.ui.screens.home.models.GraySubtitle
 import com.example.ui.theme.GoldPrimary
@@ -60,9 +61,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.io.File
-import java.io.FileOutputStream
 import java.util.*
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
@@ -157,7 +156,7 @@ class ReportAudioPlayerState(
                     }
                 }
 
-                // Final safety check: ensure the downloaded file is a valid audio file and not an HTML/JSON error
+                // Final safety check: ensure the downloaded file is a valid audio file
                 if (!localAudioFile.exists() || localAudioFile.length() < 512L || isErrorPayload(localAudioFile)) {
                     localAudioFile.delete()
                     withContext(Dispatchers.Main) {
@@ -224,12 +223,6 @@ class ReportAudioPlayerState(
         }
     }
 
-    private fun isErrorBytes(bytes: ByteArray): Boolean {
-        if (bytes.isEmpty()) return true
-        val sample = String(bytes.take(64).toByteArray(), Charsets.UTF_8).trim()
-        return sample.startsWith("{") || sample.startsWith("<!DOCTYPE") || sample.startsWith("<html") || sample.contains("NoSuchKey") || sample.contains("Bucket not found")
-    }
-
     private fun isErrorPayload(file: File): Boolean {
         return try {
             if (!file.exists() || file.length() < 64) return true
@@ -241,13 +234,6 @@ class ReportAudioPlayerState(
         } catch (_: Exception) {
             false
         }
-    }
-
-    fun seekTo(positionMs: Int) {
-        try {
-            mediaPlayer?.seekTo(positionMs)
-            currentPositionMs = positionMs
-        } catch (_: Exception) {}
     }
 
     fun stop() {
@@ -278,7 +264,6 @@ fun ModerationReviewDialog(
     val scope = rememberCoroutineScope()
 
     val adminUnreadSupportCount by com.example.AdminSupportManager.unreadConversationsCount.collectAsState()
-
     val audioPlayer = remember(scope) { ReportAudioPlayerState(context, scope) }
 
     DisposableEffect(Unit) {
@@ -303,7 +288,7 @@ fun ModerationReviewDialog(
 
     var reportsList by remember { mutableStateOf<List<RoomReportItem>>(emptyList()) }
     var activePenaltiesList by remember { mutableStateOf<List<MyModerationStatus>>(emptyList()) }
-    var selectedAdminTab by remember { mutableIntStateOf(0) } // 0: Reports, 1: Active Restrictions
+    var selectedAdminTab by remember { mutableIntStateOf(0) } // 0: Reports, 1: Active Restrictions, 2: Support Inbox
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var searchQuery by remember { mutableStateOf("") }
@@ -339,7 +324,7 @@ fun ModerationReviewDialog(
                     withContext(Dispatchers.Main) {
                         reportsList = emptyList()
                         activePenaltiesList = emptyList()
-                        errorMessage = "Access Restricted: Your account has role 'user'. In Supabase dashboard, set your role to 'admin' in public.user_roles to view and manage incident reports."
+                        errorMessage = "Access Restricted: Administrator permissions required in public.user_roles."
                         isLoading = false
                     }
                     return@launch
@@ -386,14 +371,20 @@ fun ModerationReviewDialog(
                 "Solved" -> (report.status ?: "").equals("solved", ignoreCase = true) || (report.status ?: "").equals("resolved", ignoreCase = true)
                 "Urgent" -> (report.category ?: "").contains("Abuse", ignoreCase = true) ||
                         (report.category ?: "").contains("Harassment", ignoreCase = true)
+                "Profile" -> (report.context_type ?: "room").equals("profile", ignoreCase = true)
+                "DM" -> (report.context_type ?: "room").equals("dm", ignoreCase = true)
+                "Moment" -> (report.context_type ?: "room").equals("moment", ignoreCase = true)
+                "Room" -> (report.context_type ?: "room").equals("room", ignoreCase = true)
                 else -> true
             }
             val matchesSearch = if (searchQuery.isBlank()) true else {
                 val q = searchQuery.trim().lowercase()
                 (report.room_id?.lowercase()?.contains(q) == true) ||
                         (report.reporter_id?.lowercase()?.contains(q) == true) ||
+                        (report.reported_user_id?.lowercase()?.contains(q) == true) ||
                         (report.category?.lowercase()?.contains(q) == true) ||
                         (report.reason?.lowercase()?.contains(q) == true) ||
+                        (report.context_type?.lowercase()?.contains(q) == true) ||
                         (report.additional_details?.lowercase()?.contains(q) == true)
             }
             matchesFilter && matchesSearch
@@ -418,7 +409,7 @@ fun ModerationReviewDialog(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(0.92f)
+                    .fillMaxHeight(0.94f)
                     .clip(RoundedCornerShape(28.dp)),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFFF9FAFB)),
                 elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
@@ -445,12 +436,7 @@ fun ModerationReviewDialog(
                                         .background(Color(0xFFFEF3C7)),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Shield,
-                                        contentDescription = "Admin Shield",
-                                        tint = Color(0xFFD97706),
-                                        modifier = Modifier.size(24.dp)
-                                    )
+                                    SoftShieldIcon(size = 22.dp, color = Color(0xFFD97706))
                                 }
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
@@ -493,12 +479,7 @@ fun ModerationReviewDialog(
                                         .clip(CircleShape)
                                         .background(Color(0xFFF3F4F6))
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Refresh,
-                                        contentDescription = "Refresh Reports",
-                                        tint = Color(0xFF374151),
-                                        modifier = Modifier.size(18.dp)
-                                    )
+                                    SoftRefreshIcon(size = 18.dp, color = Color(0xFF374151))
                                 }
                                 Spacer(modifier = Modifier.width(8.dp))
                                 IconButton(
@@ -509,12 +490,7 @@ fun ModerationReviewDialog(
                                         .background(Color(0xFFF3F4F6))
                                         .testTag("close_moderation_dialog")
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Close",
-                                        tint = Color(0xFF374151),
-                                        modifier = Modifier.size(20.dp)
-                                    )
+                                    SoftCloseIcon(size = 16.dp, color = Color(0xFF374151))
                                 }
                             }
                         }
@@ -532,7 +508,7 @@ fun ModerationReviewDialog(
                             onClick = { selectedAdminTab = 0 },
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Assessment, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Soft3DRulesActionIcon(modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text("Reports (${reportsList.size})", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                 }
@@ -543,7 +519,7 @@ fun ModerationReviewDialog(
                             onClick = { selectedAdminTab = 1 },
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Block, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    SoftBlockIcon(size = 16.dp, color = Color(0xFFDC2626))
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text("Active Penalties (${activePenaltiesList.size})", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                 }
@@ -551,10 +527,10 @@ fun ModerationReviewDialog(
                         )
                         Tab(
                             selected = selectedAdminTab == 2,
-                            onClick = { selectedAdminTab = 2 },
+                            onClick = { selectedAdminTab == 2 },
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.SupportAgent, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    SoftHeadsetIcon(size = 16.dp, color = Color(0xFF4F46E5))
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text("Support Inbox", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                     if (adminUnreadSupportCount > 0) {
@@ -576,6 +552,17 @@ fun ModerationReviewDialog(
                                 }
                             }
                         )
+                        Tab(
+                            selected = selectedAdminTab == 3,
+                            onClick = { selectedAdminTab = 3 },
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    SoftStarIcon(size = 16.dp, color = Color(0xFFD97706))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Badges", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                            }
+                        )
                     }
 
                     HorizontalDivider(color = Color(0xFFE5E7EB), thickness = 1.dp)
@@ -592,12 +579,11 @@ fun ModerationReviewDialog(
                             item {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     ModernStatBadge(
                                         title = "Pending",
                                         count = pendingCount.toString(),
-                                        icon = Icons.Outlined.PendingActions,
                                         containerColor = Color(0xFFFFFBEB),
                                         accentColor = Color(0xFFD97706),
                                         modifier = Modifier.weight(1f)
@@ -605,7 +591,6 @@ fun ModerationReviewDialog(
                                     ModernStatBadge(
                                         title = "Urgent",
                                         count = urgentCount.toString(),
-                                        icon = Icons.Outlined.WarningAmber,
                                         containerColor = Color(0xFFFEF2F2),
                                         accentColor = Color(0xFFDC2626),
                                         modifier = Modifier.weight(1f)
@@ -613,7 +598,6 @@ fun ModerationReviewDialog(
                                     ModernStatBadge(
                                         title = "Resolved",
                                         count = solvedCount.toString(),
-                                        icon = Icons.Outlined.CheckCircle,
                                         containerColor = Color(0xFFECFDF5),
                                         accentColor = Color(0xFF059669),
                                         modifier = Modifier.weight(1f)
@@ -621,7 +605,6 @@ fun ModerationReviewDialog(
                                     ModernStatBadge(
                                         title = "Total",
                                         count = reportsList.size.toString(),
-                                        icon = Icons.Outlined.Assignment,
                                         containerColor = Color(0xFFF3F4F6),
                                         accentColor = Color(0xFF4B5563),
                                         modifier = Modifier.weight(1f)
@@ -634,14 +617,14 @@ fun ModerationReviewDialog(
                                 OutlinedTextField(
                                     value = searchQuery,
                                     onValueChange = { searchQuery = it },
-                                    placeholder = { Text("Search by Room, User, or Keyword...", fontSize = 13.sp, color = Color(0xFF9CA3AF)) },
+                                    placeholder = { Text("Search by Context, User, or Keyword...", fontSize = 13.sp, color = Color(0xFF9CA3AF)) },
                                     leadingIcon = {
-                                        Icon(Icons.Default.Search, contentDescription = "Search", tint = Color(0xFF9CA3AF), modifier = Modifier.size(20.dp))
+                                        SoftSearchIcon(size = 18.dp, color = Color(0xFF9CA3AF))
                                     },
                                     trailingIcon = {
                                         if (searchQuery.isNotEmpty()) {
                                             IconButton(onClick = { searchQuery = "" }) {
-                                                Icon(Icons.Default.Clear, contentDescription = "Clear", tint = Color(0xFF9CA3AF), modifier = Modifier.size(16.dp))
+                                                SoftCloseIcon(size = 14.dp, color = Color(0xFF9CA3AF))
                                             }
                                         }
                                     },
@@ -661,7 +644,7 @@ fun ModerationReviewDialog(
 
                             // Filter Chips Row
                             item {
-                                val filters = listOf("All", "Pending", "Urgent", "Solved")
+                                val filters = listOf("All", "Pending", "Urgent", "Profile", "DM", "Moment", "Room", "Solved")
                                 LazyRow(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     modifier = Modifier.fillMaxWidth()
@@ -708,7 +691,7 @@ fun ModerationReviewDialog(
                                             modifier = Modifier.padding(14.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = Color(0xFFDC2626), modifier = Modifier.size(22.dp))
+                                            SoftWarningIcon(size = 20.dp, color = Color(0xFFDC2626))
                                             Spacer(modifier = Modifier.width(10.dp))
                                             Text(
                                                 text = errorMessage!!,
@@ -756,12 +739,7 @@ fun ModerationReviewDialog(
                                                     .background(Color(0xFFECFDF5)),
                                                 contentAlignment = Alignment.Center
                                             ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.CheckCircle,
-                                                    contentDescription = null,
-                                                    tint = Color(0xFF10B981),
-                                                    modifier = Modifier.size(32.dp)
-                                                )
+                                                SoftCheckIcon(size = 30.dp, color = Color(0xFF10B981))
                                             }
                                             Spacer(modifier = Modifier.height(14.dp))
                                             Text(
@@ -815,7 +793,7 @@ fun ModerationReviewDialog(
                                     color = DarkText
                                 )
                                 Text(
-                                    text = "Manage and revoke active warnings, suspensions, or mutes across all rooms.",
+                                    text = "Manage and revoke active warnings, suspensions, or mutes across FunkyTalk.",
                                     fontSize = 12.sp,
                                     color = Color(0xFF6B7280)
                                 )
@@ -855,12 +833,7 @@ fun ModerationReviewDialog(
                                                     .background(Color(0xFFF3F4F6)),
                                                 contentAlignment = Alignment.Center
                                             ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Shield,
-                                                    contentDescription = null,
-                                                    tint = Color(0xFF10B981),
-                                                    modifier = Modifier.size(28.dp)
-                                                )
+                                                SoftShieldIcon(size = 28.dp, color = Color(0xFF10B981))
                                             }
                                             Spacer(modifier = Modifier.height(12.dp))
                                             Text(
@@ -929,7 +902,7 @@ fun ModerationReviewDialog(
                                                     shape = RoundedCornerShape(10.dp),
                                                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                                                 ) {
-                                                    Icon(Icons.Default.Restore, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                                    SoftSwapIcon(size = 14.dp, color = Color.White)
                                                     Spacer(modifier = Modifier.width(4.dp))
                                                     Text("Revoke Action", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                                 }
@@ -953,8 +926,8 @@ fun ModerationReviewDialog(
                                                     color = Color(0xFF2563EB),
                                                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
                                                 )
-                                                Spacer(modifier = Modifier.width(4.dp))
-                                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = Color(0xFF2563EB), modifier = Modifier.size(12.dp))
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                SoftCopyIcon(size = 12.dp, color = Color(0xFF2563EB))
                                             }
 
                                             if (!penalty.reason.isNullOrBlank()) {
@@ -989,6 +962,17 @@ fun ModerationReviewDialog(
                                     selectedAdminTab = 0
                                     searchQuery = reportId
                                 }
+                            )
+                        }
+                    } else if (selectedAdminTab == 3) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .weight(1f)
+                        ) {
+                            AdminBadgesManagementView(
+                                supabaseProfiles = supabaseProfiles,
+                                onBadgeModified = { fetchAllData() }
                             )
                         }
                     }
@@ -1068,7 +1052,7 @@ fun RevokeModerationConfirmDialog(
                             .background(Color(0xFFECFDF5)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.Restore, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(20.dp))
+                        SoftSwapIcon(size = 20.dp, color = Color(0xFF10B981))
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
@@ -1173,16 +1157,20 @@ private fun AdminModerationActionDialog(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    // Parse offenders from speaker_log
+    // Parse offenders from speaker_log or reported_user_id
     val speakerLog = remember(report) { report.speaker_log ?: emptyList() }
     val validTargets = remember(speakerLog) {
         speakerLog.filter { SupabaseSessionManager.isValidUuid(it.user_id) }
     }
 
+    val prefilledTarget = remember(report) {
+        report.reported_user_id?.takeIf { SupabaseSessionManager.isValidUuid(it) }
+    }
+
     var manualUserIdInput by remember { mutableStateOf("") }
     var selectedTargetUserId by remember(validTargets, report) {
         val nonReporter = validTargets.firstOrNull { it.user_id != report.reporter_id }?.user_id
-        mutableStateOf(nonReporter ?: validTargets.firstOrNull()?.user_id ?: "")
+        mutableStateOf(prefilledTarget ?: nonReporter ?: validTargets.firstOrNull()?.user_id ?: "")
     }
 
     val effectiveTargetUserId = remember(manualUserIdInput, selectedTargetUserId) {
@@ -1191,7 +1179,7 @@ private fun AdminModerationActionDialog(
 
     var actionType by remember { mutableStateOf("suspend") } // "suspend", "warning", "mute"
     var durationHours by remember { mutableIntStateOf(24) } // 1..90 for suspend
-    var reasonInput by remember { mutableStateOf("") }
+    var reasonInput by remember { mutableStateOf(report.reason ?: "") }
     var isSubmitting by remember { mutableStateOf(false) }
 
     Dialog(
@@ -1218,22 +1206,69 @@ private fun AdminModerationActionDialog(
                             .background(Color(0xFFFEF2F2)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.Gavel, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(20.dp))
+                        SoftGavelIcon(size = 20.dp, color = Color(0xFFEF4444))
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         Text("Apply Moderation Action", fontWeight = FontWeight.Black, fontSize = 17.sp, color = DarkText)
-                        Text("Room #${report.room_id?.take(8) ?: "N/A"}", fontSize = 12.sp, color = Color(0xFF6B7280))
+                        val contextLabel = when (report.context_type?.lowercase()) {
+                            "profile" -> "Profile Incident"
+                            "dm" -> "Direct Message Incident"
+                            "moment" -> "Moment Post Incident"
+                            else -> "Room #${report.room_id?.take(8) ?: "N/A"}"
+                        }
+                        Text(contextLabel, fontSize = 12.sp, color = Color(0xFF6B7280))
                     }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Target Offender Selection
-                Text("Select Target Offender (from Speaker Log):", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = DarkText)
+                Text("Target Offender:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = DarkText)
                 Spacer(modifier = Modifier.height(6.dp))
 
-                if (validTargets.isEmpty()) {
+                if (!prefilledTarget.isNullOrBlank()) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFFEFF6FF),
+                        border = BorderStroke(1.5.dp, Color(0xFF3B82F6)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { selectedTargetUserId = prefilledTarget }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFDBEAFE)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                SoftPersonIcon(size = 18.dp, color = Color(0xFF2563EB))
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Reported Offender", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1D4ED8))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(Color(0xFF2563EB))
+                                            .padding(horizontal = 5.dp, vertical = 1.dp)
+                                    ) {
+                                        Text("AUTO-SELECTED", color = Color.White, fontSize = 8.5.sp, fontWeight = FontWeight.Black)
+                                    }
+                                }
+                                Text(prefilledTarget, fontSize = 12.sp, color = Color(0xFF1E293B), fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                } else if (validTargets.isEmpty()) {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFBEB)),
                         shape = RoundedCornerShape(12.dp),
@@ -1244,10 +1279,10 @@ private fun AdminModerationActionDialog(
                             modifier = Modifier.padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.WarningAmber, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(18.dp))
+                            SoftWarningIcon(size = 18.dp, color = Color(0xFFD97706))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "No offenders captured in speaker log. Cannot apply moderation without a valid user UUID.",
+                                text = "No reported user UUID attached. Please enter the target UUID below.",
                                 fontSize = 12.sp,
                                 color = Color(0xFF92400E)
                             )
@@ -1304,16 +1339,6 @@ private fun AdminModerationActionDialog(
                                                 fontSize = 11.sp,
                                                 color = Color(0xFF6B7280)
                                             )
-                                        }
-                                    }
-                                    if (item.is_mic_enabled) {
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(6.dp))
-                                                .background(Color(0xFFDCFCE7))
-                                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                                        ) {
-                                            Text("Mic ON", color = Color(0xFF15803D), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                         }
                                     }
                                 }
@@ -1429,7 +1454,7 @@ private fun AdminModerationActionDialog(
                         Text("⚠️ Fixed 1 hour penalty: Messaging disabled, user cannot send chat messages or replies.", fontSize = 11.sp, color = Color(0xFFB45309))
                     }
                     "mute" -> {
-                        Text("🔇 Indefinite Mute: User may remain in room but outgoing messaging is blocked until updated.", fontSize = 11.sp, color = Color(0xFF4B5563))
+                        Text("🔇 Indefinite Mute: User outgoing messaging is blocked until revoked.", fontSize = 11.sp, color = Color(0xFF4B5563))
                     }
                 }
 
@@ -1439,7 +1464,7 @@ private fun AdminModerationActionDialog(
                 OutlinedTextField(
                     value = reasonInput,
                     onValueChange = { reasonInput = it },
-                    placeholder = { Text("Reason for moderation (optional)...", fontSize = 12.sp, color = Color(0xFF9CA3AF)) },
+                    placeholder = { Text("Reason for moderation...", fontSize = 12.sp, color = Color(0xFF9CA3AF)) },
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
@@ -1450,47 +1475,6 @@ private fun AdminModerationActionDialog(
                 )
 
                 Spacer(modifier = Modifier.height(14.dp))
-
-                // Revoke Action button (if active action exists or admin wants to lift restrictions for this offender)
-                OutlinedButton(
-                    onClick = {
-                        if (effectiveTargetUserId.isBlank()) {
-                            Toast.makeText(context, "Please select an offender or enter a target UUID.", Toast.LENGTH_SHORT).show()
-                            return@OutlinedButton
-                        }
-                        if (!SupabaseSessionManager.isValidUuid(effectiveTargetUserId)) {
-                            Toast.makeText(context, "Invalid UUID format: '$effectiveTargetUserId'", Toast.LENGTH_LONG).show()
-                            return@OutlinedButton
-                        }
-                        isSubmitting = true
-                        scope.launch {
-                            val result = ModerationManager.revokeModerationAction(
-                                context = context,
-                                targetUserId = effectiveTargetUserId,
-                                reason = reasonInput.ifBlank { "Revoked by admin from Incident #${report.id?.take(8)}" }
-                            )
-                            isSubmitting = false
-                            result.onSuccess { msg ->
-                                Toast.makeText(context, "✓ $msg", Toast.LENGTH_LONG).show()
-                                ModerationManager.fetchMyModerationStatus(context)
-                                onActionApplied()
-                            }.onFailure { e ->
-                                Toast.makeText(context, "Revocation Failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
-                            }
-                        }
-                    },
-                    enabled = !isSubmitting && effectiveTargetUserId.isNotBlank(),
-                    border = BorderStroke(1.dp, Color(0xFF10B981)),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF059669)),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth().height(42.dp)
-                ) {
-                    Icon(Icons.Default.Restore, contentDescription = null, tint = Color(0xFF059669), modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Revoke Action for User", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
 
                 // Submit Buttons
                 Row(
@@ -1557,7 +1541,6 @@ private fun AdminModerationActionDialog(
 private fun ModernStatBadge(
     title: String,
     count: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
     containerColor: Color,
     accentColor: Color,
     modifier: Modifier = Modifier
@@ -1571,11 +1554,9 @@ private fun ModernStatBadge(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 10.dp, horizontal = 8.dp),
+                .padding(vertical = 10.dp, horizontal = 6.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Icon(imageVector = icon, contentDescription = null, tint = accentColor, modifier = Modifier.size(18.dp))
-            Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = count,
                 fontSize = 18.sp,
@@ -1605,10 +1586,9 @@ private fun ModernReportCard(
     val context = LocalContext.current
     val isSolved = (report.status ?: "").lowercase() in listOf("solved", "resolved", "closed")
     val isUrgent = (report.category ?: "").contains("Abuse", ignoreCase = true) || (report.category ?: "").contains("Harassment", ignoreCase = true)
+    val contextType = (report.context_type ?: "room").lowercase().trim()
 
     var isSnapshotsExpanded by remember { mutableStateOf(false) }
-
-    val token = remember { SupabaseSessionManager.getAccessToken(context) ?: BuildConfig.SUPABASE_ANON_KEY }
 
     Card(
         modifier = Modifier
@@ -1619,7 +1599,7 @@ private fun ModernReportCard(
         border = BorderStroke(1.dp, if (isUrgent && !isSolved) Color(0xFFFECACA) else Color(0xFFE5E7EB))
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // Header Row: Category Badge + Status Badge
+            // Header Row: Category Badge + Context Type Badge + Status Badge
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -1644,6 +1624,24 @@ private fun ModernReportCard(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
                         )
+                    }
+
+                    Spacer(modifier = Modifier.width(6.dp))
+
+                    // Context Type Pill
+                    val (ctxBg, ctxText, ctxLabel) = when (contextType) {
+                        "profile" -> Triple(Color(0xFFEFF6FF), Color(0xFF1D4ED8), "👤 Profile")
+                        "dm" -> Triple(Color(0xFFFAF5FF), Color(0xFF7E22CE), "💬 E2EE DM")
+                        "moment" -> Triple(Color(0xFFECFDF5), Color(0xFF047857), "📸 Moment")
+                        else -> Triple(Color(0xFFFFF7ED), Color(0xFFC2410C), "🎙️ Voice Room")
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(ctxBg)
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(ctxLabel, color = ctxText, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
 
                     if (isUrgent && !isSolved) {
@@ -1702,57 +1700,44 @@ private fun ModernReportCard(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Room and Reporter ID Chips
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFFF3F4F6))
-                        .clickable { onCopyText(report.room_id ?: "", "Room ID") }
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Outlined.MeetingRoom, contentDescription = null, tint = Color(0xFF6B7280), modifier = Modifier.size(13.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Room: ${(report.room_id ?: "N/A").take(8)}...", fontSize = 11.sp, color = Color(0xFF374151), fontWeight = FontWeight.Medium)
-                        }
-                        Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy", tint = Color(0xFF9CA3AF), modifier = Modifier.size(11.dp))
-                    }
+            // =========================================================================
+            // CONTEXT-SPECIFIC DETAIL SECTION: room | profile | dm | moment
+            // =========================================================================
+            when (contextType) {
+                "profile" -> {
+                    ReportedProfileContentSection(
+                        reportedUserId = report.reported_user_id ?: "",
+                        reporterId = report.reporter_id ?: "",
+                        onCopyText = onCopyText
+                    )
                 }
-
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFFF3F4F6))
-                        .clickable { onCopyText(report.reporter_id ?: "", "Reporter ID") }
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Outlined.Person, contentDescription = null, tint = Color(0xFF6B7280), modifier = Modifier.size(13.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Reporter: ${(report.reporter_id ?: "Anon").take(8)}...", fontSize = 11.sp, color = Color(0xFF374151), fontWeight = FontWeight.Medium)
-                        }
-                        Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy", tint = Color(0xFF9CA3AF), modifier = Modifier.size(11.dp))
-                    }
+                "dm" -> {
+                    ReportedDmContentSection(
+                        reportedUserId = report.reported_user_id ?: "",
+                        reporterId = report.reporter_id ?: "",
+                        onCopyText = onCopyText
+                    )
+                }
+                "moment" -> {
+                    ReportedMomentContentSection(
+                        momentId = report.context_id ?: "",
+                        reportedUserId = report.reported_user_id ?: "",
+                        reporterId = report.reporter_id ?: "",
+                        onViewImage = onViewScreenshot,
+                        onCopyText = onCopyText
+                    )
+                }
+                else -> {
+                    // Room context (default/unchanged)
+                    ReportedRoomContentSection(
+                        roomId = report.room_id ?: "",
+                        reporterId = report.reporter_id ?: "",
+                        onCopyText = onCopyText
+                    )
                 }
             }
 
-            // Attached Media: Screenshot Thumbnail & Audio Clip Player
+            // Attached Media: Screenshot Evidence Thumbnail & Audio Clip Player
             val hasScreenshot = !report.screenshot_url.isNullOrBlank()
             val hasAudio = !report.audio_clip_url.isNullOrBlank()
 
@@ -1788,7 +1773,7 @@ private fun ModernReportCard(
                         Box(
                             modifier = Modifier
                                 .weight(1f)
-                                .height(82.dp)
+                                .height(88.dp)
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(Color(0xFFF3F4F6))
                                 .border(1.dp, Color(0xFFE5E7EB), RoundedCornerShape(12.dp))
@@ -1825,8 +1810,8 @@ private fun ModernReportCard(
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Icon(Icons.Default.BrokenImage, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(18.dp))
-                                            Text("Preview", fontSize = 10.sp, color = Color(0xFFDC2626), fontWeight = FontWeight.Bold)
+                                            SoftImageIcon(size = 18.dp, color = Color(0xFFEF4444))
+                                            Text("Evidence", fontSize = 10.sp, color = Color(0xFFDC2626), fontWeight = FontWeight.Bold)
                                         }
                                     }
                                 }
@@ -1847,9 +1832,9 @@ private fun ModernReportCard(
                                         .background(Color.Black.copy(alpha = 0.65f))
                                         .padding(horizontal = 6.dp, vertical = 3.dp)
                                 ) {
-                                    Icon(Icons.Default.ZoomIn, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
+                                    SoftEyeIcon(size = 12.dp, visible = true, tint = Color.White)
                                     Spacer(modifier = Modifier.width(3.dp))
-                                    Text("Screenshot", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                    Text("View Evidence", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -1864,7 +1849,7 @@ private fun ModernReportCard(
                         Box(
                             modifier = Modifier
                                 .weight(1f)
-                                .height(82.dp)
+                                .height(88.dp)
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(if (isThisPlaying) Color(0xFFFFFBEB) else Color(0xFFF9FAFB))
                                 .border(
@@ -1897,13 +1882,10 @@ private fun ModernReportCard(
                                                 color = Color.White,
                                                 strokeWidth = 2.dp
                                             )
+                                        } else if (isThisPlaying) {
+                                            SoftPauseIcon(size = 16.dp, color = Color.White)
                                         } else {
-                                            Icon(
-                                                imageVector = if (isThisPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                                contentDescription = if (isThisPlaying) "Pause Audio" else "Play Audio",
-                                                tint = Color.White,
-                                                modifier = Modifier.size(20.dp)
-                                            )
+                                            SoftPlayIcon(size = 16.dp)
                                         }
                                     }
 
@@ -1951,85 +1933,86 @@ private fun ModernReportCard(
                 }
             }
 
-            // Evidence: Captured Message & Speaker Snapshots
-            val hasMessages = !report.message_snapshot.isNullOrEmpty()
-            val hasSpeakers = !report.speaker_log.isNullOrEmpty()
+            // Evidence: Captured Message & Speaker Snapshots (Room context only)
+            if (contextType == "room") {
+                val hasMessages = !report.message_snapshot.isNullOrEmpty()
+                val hasSpeakers = !report.speaker_log.isNullOrEmpty()
 
-            if (hasMessages || hasSpeakers) {
-                Spacer(modifier = Modifier.height(10.dp))
-                Surface(
-                    onClick = { isSnapshotsExpanded = !isSnapshotsExpanded },
-                    shape = RoundedCornerShape(10.dp),
-                    color = Color(0xFFF8FAFC),
-                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(10.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.HistoryEdu, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(15.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "Captured Evidence (${report.speaker_log?.size ?: 0} speakers, ${report.message_snapshot?.size ?: 0} msgs)",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF475569)
+                if (hasMessages || hasSpeakers) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Surface(
+                        onClick = { isSnapshotsExpanded = !isSnapshotsExpanded },
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFFF8FAFC),
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Soft3DMessageStackIcon(modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Room Logs (${report.speaker_log?.size ?: 0} speakers, ${report.message_snapshot?.size ?: 0} msgs)",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF475569)
+                                    )
+                                }
+                                SoftChevronDownIcon(
+                                    size = 14.dp,
+                                    color = Color(0xFF64748B),
+                                    modifier = Modifier.rotate(if (isSnapshotsExpanded) 180f else 0f)
                                 )
                             }
-                            Icon(
-                                imageVector = if (isSnapshotsExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                contentDescription = null,
-                                tint = Color(0xFF64748B),
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
 
-                        if (isSnapshotsExpanded) {
-                            Spacer(modifier = Modifier.height(8.dp))
+                            if (isSnapshotsExpanded) {
+                                Spacer(modifier = Modifier.height(8.dp))
 
-                            // Speaker log list
-                            if (hasSpeakers) {
-                                Text("Speakers Captured:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = DarkText)
-                                Spacer(modifier = Modifier.height(4.dp))
-                                report.speaker_log!!.forEach { spk ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 2.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text(
-                                            text = "• ${spk.name} (${spk.role})",
-                                            fontSize = 11.sp,
-                                            color = Color(0xFF334155)
-                                        )
-                                        Text(
-                                            text = "ID: ${spk.user_id.take(8)}...",
-                                            fontSize = 10.sp,
-                                            color = Color(0xFF94A3B8)
-                                        )
+                                // Speaker log list
+                                if (hasSpeakers) {
+                                    Text("Speakers Captured:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = DarkText)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    report.speaker_log!!.forEach { spk ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 2.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = "• ${spk.name} (${spk.role})",
+                                                fontSize = 11.sp,
+                                                color = Color(0xFF334155)
+                                            )
+                                            Text(
+                                                text = "ID: ${spk.user_id.take(8)}...",
+                                                fontSize = 10.sp,
+                                                color = Color(0xFF94A3B8)
+                                            )
+                                        }
                                     }
                                 }
-                            }
 
-                            // Message snapshot
-                            if (hasMessages) {
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text("Chat Messages Snapshot:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = DarkText)
-                                Spacer(modifier = Modifier.height(4.dp))
-                                report.message_snapshot!!.takeLast(5).forEach { msg ->
-                                    Text(
-                                        text = "${msg.sender}: ${msg.text}",
-                                        fontSize = 11.sp,
-                                        color = Color(0xFF475569),
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
+                                // Message snapshot
+                                if (hasMessages) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text("Chat Messages Snapshot:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = DarkText)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    report.message_snapshot!!.takeLast(5).forEach { msg ->
+                                        Text(
+                                            text = "${msg.sender}: ${msg.text}",
+                                            fontSize = 11.sp,
+                                            color = Color(0xFF475569),
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -2048,7 +2031,7 @@ private fun ModernReportCard(
                     .fillMaxWidth()
                     .height(42.dp)
             ) {
-                Icon(Icons.Default.Gavel, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                SoftGavelIcon(size = 16.dp, color = Color.White)
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = if (isSolved) "Review / Update Action" else "Enforce Moderation Action",
@@ -2056,6 +2039,477 @@ private fun ModernReportCard(
                     fontWeight = FontWeight.Bold,
                     fontSize = 13.sp
                 )
+            }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// PROFILE REPORT SECTION: Admin view of reported profile
+// -----------------------------------------------------------------------------
+@Composable
+private fun ReportedProfileContentSection(
+    reportedUserId: String,
+    reporterId: String,
+    onCopyText: (String, String) -> Unit
+) {
+    val context = LocalContext.current
+    var profileData by remember { mutableStateOf<DiscoverableProfile?>(null) }
+    var isFetchingProfile by remember { mutableStateOf(true) }
+
+    LaunchedEffect(reportedUserId) {
+        if (reportedUserId.isNotBlank()) {
+            isFetchingProfile = true
+            withContext(Dispatchers.IO) {
+                try {
+                    val auth = SupabaseSessionManager.getAuthenticatedBearerToken(context) ?: BuildConfig.SUPABASE_ANON_KEY
+                    val res = SupabaseClient.api.getDiscoverableProfiles(
+                        auth = auth,
+                        options = mapOf("id" to "eq.$reportedUserId")
+                    )
+                    if (res.isSuccessful && !res.body().isNullOrEmpty()) {
+                        withContext(Dispatchers.Main) {
+                            profileData = res.body()!!.first()
+                            isFetchingProfile = false
+                        }
+                    } else {
+                        withContext(Dispatchers.Main) { isFetchingProfile = false }
+                    }
+                } catch (_: Exception) {
+                    withContext(Dispatchers.Main) { isFetchingProfile = false }
+                }
+            }
+        } else {
+            isFetchingProfile = false
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // User IDs info bar
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFFEFF6FF))
+                    .clickable { onCopyText(reportedUserId, "Target User ID") }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        SoftPersonIcon(size = 13.dp, color = Color(0xFF2563EB))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Target: ${reportedUserId.take(8)}...", fontSize = 11.sp, color = Color(0xFF1E40AF), fontWeight = FontWeight.SemiBold)
+                    }
+                    SoftCopyIcon(size = 11.dp, color = Color(0xFF3B82F6))
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFFF3F4F6))
+                    .clickable { onCopyText(reporterId, "Reporter ID") }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        SoftPersonIcon(size = 13.dp, color = Color(0xFF6B7280))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Reporter: ${reporterId.take(8)}...", fontSize = 11.sp, color = Color(0xFF374151), fontWeight = FontWeight.Medium)
+                    }
+                    SoftCopyIcon(size = 11.dp, color = Color(0xFF9CA3AF))
+                }
+            }
+        }
+
+        // Mini Profile Card
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = Color(0xFFF8FAFC),
+            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            if (isFetchingProfile) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = GoldPrimary)
+                }
+            } else if (profileData != null) {
+                val p = profileData!!
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    UserAvatarImage(
+                        avatarUrl = p.avatar_url,
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(CircleShape)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = p.profile_name ?: p.username ?: "Anonymous",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = DarkText
+                        )
+                        Text(
+                            text = "@${p.username ?: "user"}",
+                            fontSize = 11.5.sp,
+                            color = Color(0xFF64748B)
+                        )
+                        if (!p.bio.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                text = p.bio,
+                                fontSize = 12.sp,
+                                color = Color(0xFF334155),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            } else {
+                Text(
+                    text = "Profile data: $reportedUserId",
+                    fontSize = 12.sp,
+                    color = Color(0xFF64748B),
+                    modifier = Modifier.padding(12.dp)
+                )
+            }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// DM REPORT SECTION: E2EE Explanation and Evidence Snapshot Notice
+// -----------------------------------------------------------------------------
+@Composable
+private fun ReportedDmContentSection(
+    reportedUserId: String,
+    reporterId: String,
+    onCopyText: (String, String) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFFFAF5FF))
+                    .clickable { onCopyText(reportedUserId, "Reported Sender ID") }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        SoftPersonIcon(size = 13.dp, color = Color(0xFF7E22CE))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Sender: ${reportedUserId.take(8)}...", fontSize = 11.sp, color = Color(0xFF6B21A8), fontWeight = FontWeight.SemiBold)
+                    }
+                    SoftCopyIcon(size = 11.dp, color = Color(0xFFA855F7))
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFFF3F4F6))
+                    .clickable { onCopyText(reporterId, "Reporter ID") }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        SoftPersonIcon(size = 13.dp, color = Color(0xFF6B7280))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Reporter: ${reporterId.take(8)}...", fontSize = 11.sp, color = Color(0xFF374151), fontWeight = FontWeight.Medium)
+                    }
+                    SoftCopyIcon(size = 11.dp, color = Color(0xFF9CA3AF))
+                }
+            }
+        }
+
+        // E2EE Notice Card
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFFAF5FF)),
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, Color(0xFFF3E8FF)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SoftLockIcon(size = 16.dp, isUnlocked = false)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "End-to-End Encrypted Message: Plaintext is never stored on servers. The decrypted snapshot was captured locally by the reporter and attached below.",
+                    fontSize = 11.sp,
+                    color = Color(0xFF6B21A8),
+                    lineHeight = 15.sp
+                )
+            }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// MOMENT REPORT SECTION: Shows the reported post text, likes, images
+// -----------------------------------------------------------------------------
+@Composable
+private fun ReportedMomentContentSection(
+    momentId: String,
+    reportedUserId: String,
+    reporterId: String,
+    onViewImage: (String) -> Unit,
+    onCopyText: (String, String) -> Unit
+) {
+    val context = LocalContext.current
+    var momentData by remember { mutableStateOf<SupabaseMoment?>(null) }
+    var isFetchingMoment by remember { mutableStateOf(true) }
+
+    LaunchedEffect(momentId) {
+        if (momentId.isNotBlank()) {
+            isFetchingMoment = true
+            withContext(Dispatchers.IO) {
+                try {
+                    val auth = SupabaseSessionManager.getAuthenticatedBearerToken(context) ?: BuildConfig.SUPABASE_ANON_KEY
+                    val res = SupabaseClient.api.getMomentById(
+                        auth = auth,
+                        idEq = "eq.$momentId"
+                    )
+                    if (res.isSuccessful && !res.body().isNullOrEmpty()) {
+                        withContext(Dispatchers.Main) {
+                            momentData = res.body()!!.first()
+                            isFetchingMoment = false
+                        }
+                    } else {
+                        withContext(Dispatchers.Main) { isFetchingMoment = false }
+                    }
+                } catch (_: Exception) {
+                    withContext(Dispatchers.Main) { isFetchingMoment = false }
+                }
+            }
+        } else {
+            isFetchingMoment = false
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFFECFDF5))
+                    .clickable { onCopyText(momentId, "Moment Post ID") }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        SoftImageIcon(size = 13.dp, color = Color(0xFF047857))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Post: ${momentId.take(8)}...", fontSize = 11.sp, color = Color(0xFF065F46), fontWeight = FontWeight.SemiBold)
+                    }
+                    SoftCopyIcon(size = 11.dp, color = Color(0xFF10B981))
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFFF3F4F6))
+                    .clickable { onCopyText(reporterId, "Reporter ID") }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        SoftPersonIcon(size = 13.dp, color = Color(0xFF6B7280))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Reporter: ${reporterId.take(8)}...", fontSize = 11.sp, color = Color(0xFF374151), fontWeight = FontWeight.Medium)
+                    }
+                    SoftCopyIcon(size = 11.dp, color = Color(0xFF9CA3AF))
+                }
+            }
+        }
+
+        // Moment Post Preview Card
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = Color(0xFFF8FAFC),
+            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            if (isFetchingMoment) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = GoldPrimary)
+                }
+            } else if (momentData != null) {
+                val m = momentData!!
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = m.content ?: "[No post text]",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = DarkText
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Image thumbnail if attached to the moment
+                    if (!m.image_urls.isNullOrEmpty()) {
+                        val firstImg = m.image_urls.first()
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(120.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFFE2E8F0))
+                                .clickable { onViewImage(firstImg) }
+                        ) {
+                            SubcomposeAsyncImage(
+                                model = firstImg,
+                                contentDescription = "Reported Moment Image",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            SoftHeartIcon(size = 14.dp, isLiked = true)
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text("${m.likes_count ?: 0} likes", fontSize = 11.sp, color = Color(0xFF64748B))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            SoftChatBubbleIcon(size = 14.dp, color = Color(0xFF64748B))
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text("${m.comments_count ?: 0} comments", fontSize = 11.sp, color = Color(0xFF64748B))
+                        }
+                        Text(
+                            text = "Author: ${(m.user_id ?: reportedUserId).take(8)}...",
+                            fontSize = 10.5.sp,
+                            color = Color(0xFF94A3B8)
+                        )
+                    }
+                }
+            } else {
+                Text(
+                    text = "Reported Moment Post ID: $momentId",
+                    fontSize = 12.sp,
+                    color = Color(0xFF64748B),
+                    modifier = Modifier.padding(12.dp)
+                )
+            }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// ROOM REPORT SECTION: Room ID and Reporter Chips
+// -----------------------------------------------------------------------------
+@Composable
+private fun ReportedRoomContentSection(
+    roomId: String,
+    reporterId: String,
+    onCopyText: (String, String) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color(0xFFF3F4F6))
+                .clickable { onCopyText(roomId, "Room ID") }
+                .padding(horizontal = 10.dp, vertical = 6.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SoftGlobeIcon(size = 13.dp, color = Color(0xFF6B7280))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Room: ${roomId.take(8)}...", fontSize = 11.sp, color = Color(0xFF374151), fontWeight = FontWeight.Medium)
+                }
+                SoftCopyIcon(size = 11.dp, color = Color(0xFF9CA3AF))
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color(0xFFF3F4F6))
+                .clickable { onCopyText(reporterId, "Reporter ID") }
+                .padding(horizontal = 10.dp, vertical = 6.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SoftPersonIcon(size = 13.dp, color = Color(0xFF6B7280))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Reporter: ${reporterId.take(8)}...", fontSize = 11.sp, color = Color(0xFF374151), fontWeight = FontWeight.Medium)
+                }
+                SoftCopyIcon(size = 11.dp, color = Color(0xFF9CA3AF))
             }
         }
     }
@@ -2096,7 +2550,7 @@ private fun ReportScreenshotPreviewModal(
         Card(
             modifier = Modifier
                 .fillMaxWidth(0.95f)
-                .fillMaxHeight(0.85f)
+                .fillMaxHeight(0.88f)
                 .clip(RoundedCornerShape(24.dp)),
             colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A))
         ) {
@@ -2120,7 +2574,7 @@ private fun ReportScreenshotPreviewModal(
                                 .background(Color(0xFF1E293B)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.Image, contentDescription = null, tint = GoldPrimary, modifier = Modifier.size(18.dp))
+                            SoftImageIcon(size = 18.dp, color = GoldPrimary)
                         }
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
@@ -2140,7 +2594,7 @@ private fun ReportScreenshotPreviewModal(
                                 }
                             }
                         ) {
-                            Icon(Icons.Default.OpenInNew, contentDescription = "Open in browser", tint = Color(0xFF94A3B8))
+                            SoftGlobeIcon(size = 18.dp, color = Color(0xFF94A3B8))
                         }
 
                         IconButton(
@@ -2149,11 +2603,11 @@ private fun ReportScreenshotPreviewModal(
                                 Toast.makeText(context, "Image URL copied to clipboard", Toast.LENGTH_SHORT).show()
                             }
                         ) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy Link", tint = Color(0xFF94A3B8))
+                            SoftCopyIcon(size = 16.dp, color = Color(0xFF94A3B8))
                         }
 
                         IconButton(onClick = onDismiss) {
-                            Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                            SoftCloseIcon(size = 18.dp, color = Color.White)
                         }
                     }
                 }
@@ -2193,7 +2647,7 @@ private fun ReportScreenshotPreviewModal(
                                     verticalArrangement = Arrangement.Center,
                                     modifier = Modifier.padding(24.dp)
                                 ) {
-                                    Icon(Icons.Default.BrokenImage, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(48.dp))
+                                    SoftImageIcon(size = 36.dp, color = Color(0xFFEF4444))
                                     Spacer(modifier = Modifier.height(10.dp))
                                     Text("Screenshot file unavailable", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                                     Spacer(modifier = Modifier.height(4.dp))
@@ -2205,7 +2659,7 @@ private fun ReportScreenshotPreviewModal(
                                         },
                                         colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary)
                                     ) {
-                                        Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                                        SoftRefreshIcon(size = 16.dp, color = Color.Black)
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text("Retry Loading", color = Color.Black, fontWeight = FontWeight.Bold)
                                     }
@@ -2269,4 +2723,383 @@ private fun formatDurationMs(ms: Int): String {
     val minutes = totalSec / 60
     val seconds = totalSec % 60
     return String.format(Locale.getDefault(), "%d:%02d", minutes, seconds)
+}
+
+@Composable
+fun AdminBadgesManagementView(
+    initialUserId: String? = null,
+    supabaseProfiles: List<UserProfile> = emptyList(),
+    onBadgeModified: () -> Unit = {}
+) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
+    var targetUserId by remember { mutableStateOf(initialUserId ?: "") }
+    val catalogBadges = remember { mutableStateListOf<com.example.BadgeCatalogItem>() }
+    val userBadges = remember { mutableStateListOf<com.example.ProfileBadge>() }
+    var isLoadingCatalog by remember { mutableStateOf(false) }
+    var isLoadingUserBadges by remember { mutableStateOf(false) }
+    var actionInProgress by remember { mutableStateOf<String?>(null) }
+
+    fun refreshUserBadges(uid: String) {
+        if (uid.isBlank()) return
+        isLoadingUserBadges = true
+        coroutineScope.launch {
+            try {
+                val badges = com.example.BadgeManager.getBadgesForUser(uid.trim())
+                userBadges.clear()
+                userBadges.addAll(badges)
+            } catch (e: Exception) {
+                android.util.Log.e("AdminBadges", "Failed to load user badges", e)
+            } finally {
+                isLoadingUserBadges = false
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        isLoadingCatalog = true
+        try {
+            val cat = com.example.BadgeManager.fetchActiveCatalog()
+            catalogBadges.clear()
+            catalogBadges.addAll(cat)
+        } catch (e: Exception) {
+            android.util.Log.e("AdminBadges", "Failed to load catalog", e)
+        } finally {
+            isLoadingCatalog = false
+        }
+        if (targetUserId.isNotBlank()) {
+            refreshUserBadges(targetUserId)
+        }
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // 1. Header & Description
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFBEB)),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFF59E0B)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        SoftStarIcon(size = 22.dp, color = Color.White)
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Badges & Honors Management",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = Color(0xFF92400E)
+                        )
+                        Text(
+                            text = "Manually award or revoke prestigious badges (e.g. Founder, VIP) to community members.",
+                            fontSize = 12.sp,
+                            color = Color(0xFFB45309),
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        // 2. Target User Input / Picker
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Target User UUID / ID",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF374151)
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = targetUserId,
+                            onValueChange = { targetUserId = it },
+                            placeholder = { Text("Enter user auth UUID...", fontSize = 13.sp) },
+                            singleLine = true,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f)
+                        )
+                        Button(
+                            onClick = { refreshUserBadges(targetUserId) },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD43B), contentColor = Color(0xFF0F172A)),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            SoftSearchIcon(size = 14.dp, color = Color(0xFF0F172A))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Inspect", fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    // Quick User Suggestion Chips
+                    if (supabaseProfiles.isNotEmpty()) {
+                        Text(
+                            text = "Quick Select:",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF9CA3AF)
+                        )
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            items(supabaseProfiles.take(8)) { profile ->
+                                Surface(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(100.dp))
+                                        .clickable {
+                                            targetUserId = profile.uid
+                                            refreshUserBadges(profile.uid)
+                                        },
+                                    color = if (targetUserId == profile.uid) Color(0xFFFEF3C7) else Color(0xFFF3F4F6),
+                                    shape = RoundedCornerShape(100.dp),
+                                    border = BorderStroke(1.dp, if (targetUserId == profile.uid) Color(0xFFF59E0B) else Color(0xFFE5E7EB))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            text = profile.displayName ?: profile.username ?: profile.uid.take(6),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (targetUserId == profile.uid) Color(0xFF92400E) else Color(0xFF374151)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. User's Current Awarded Badges (with Revoke action)
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Currently Awarded Badges (${userBadges.size})",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF1F2937)
+                        )
+                        if (isLoadingUserBadges) {
+                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color(0xFFD97706))
+                        }
+                    }
+
+                    if (targetUserId.isBlank()) {
+                        Text(
+                            text = "Enter a user ID above to view and manage their badges.",
+                            fontSize = 12.sp,
+                            color = Color(0xFF9CA3AF)
+                        )
+                    } else if (userBadges.isEmpty()) {
+                        Text(
+                            text = "This user currently has no assigned badges.",
+                            fontSize = 12.sp,
+                            color = Color(0xFF6B7280)
+                        )
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            userBadges.forEach { badge ->
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color(0xFFF9FAFB),
+                                    border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            ProfileBadgeChip(badge = badge, size = 24.dp)
+                                            Column {
+                                                Text(
+                                                    text = badge.name,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 13.sp,
+                                                    color = Color(0xFF111827)
+                                                )
+                                                Text(
+                                                    text = "code: ${badge.code}",
+                                                    fontSize = 10.sp,
+                                                    color = Color(0xFF9CA3AF)
+                                                )
+                                            }
+                                        }
+
+                                        Button(
+                                            onClick = {
+                                                actionInProgress = badge.code
+                                                coroutineScope.launch {
+                                                    val res = com.example.BadgeManager.revokeBadge(context, targetUserId.trim(), badge.code)
+                                                    if (res.isSuccess) {
+                                                        Toast.makeText(context, "Revoked ${badge.name}", Toast.LENGTH_SHORT).show()
+                                                        refreshUserBadges(targetUserId)
+                                                        onBadgeModified()
+                                                    } else {
+                                                        Toast.makeText(context, res.exceptionOrNull()?.message ?: "Revoke failed", Toast.LENGTH_LONG).show()
+                                                    }
+                                                    actionInProgress = null
+                                                }
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFEE2E2), contentColor = Color(0xFFDC2626)),
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                            enabled = actionInProgress == null
+                                        ) {
+                                            Text("Revoke", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Available Catalog Badges (with Award action)
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Available Badges in Catalog",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF1F2937)
+                    )
+
+                    if (isLoadingCatalog) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Color(0xFFD97706))
+                    } else if (catalogBadges.isEmpty()) {
+                        Text("No badges found in catalog.", fontSize = 12.sp, color = Color(0xFF9CA3AF))
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            catalogBadges.forEach { catBadge ->
+                                val isAlreadyAwarded = userBadges.any { it.code.equals(catBadge.code, ignoreCase = true) }
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (isAlreadyAwarded) Color(0xFFF3F4F6) else Color(0xFFFFFBEB).copy(alpha = 0.5f),
+                                    border = BorderStroke(1.dp, if (isAlreadyAwarded) Color(0xFFE5E7EB) else Color(0xFFFDE68A)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            EmblemVectorBadge(badgeCode = catBadge.code, size = 26.dp)
+                                            Column {
+                                                Text(
+                                                    text = catBadge.name,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 13.sp,
+                                                    color = Color(0xFF1F2937)
+                                                )
+                                                Text(
+                                                    text = catBadge.description ?: "Special community badge",
+                                                    fontSize = 11.sp,
+                                                    color = Color(0xFF6B7280),
+                                                    maxLines = 2,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+
+                                        Button(
+                                            onClick = {
+                                                if (targetUserId.isBlank()) {
+                                                    Toast.makeText(context, "Please enter a target User UUID first", Toast.LENGTH_SHORT).show()
+                                                    return@Button
+                                                }
+                                                actionInProgress = catBadge.code
+                                                coroutineScope.launch {
+                                                    val res = com.example.BadgeManager.awardBadge(context, targetUserId.trim(), catBadge.code)
+                                                    if (res.isSuccess) {
+                                                        Toast.makeText(context, "Awarded ${catBadge.name}!", Toast.LENGTH_SHORT).show()
+                                                        refreshUserBadges(targetUserId)
+                                                        onBadgeModified()
+                                                    } else {
+                                                        Toast.makeText(context, res.exceptionOrNull()?.message ?: "Award failed", Toast.LENGTH_LONG).show()
+                                                    }
+                                                    actionInProgress = null
+                                                }
+                                            },
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = if (isAlreadyAwarded) Color(0xFFE5E7EB) else Color(0xFFFFD43B),
+                                                contentColor = Color(0xFF0F172A)
+                                            ),
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                            enabled = actionInProgress == null && !isAlreadyAwarded
+                                        ) {
+                                            Text(
+                                                text = if (isAlreadyAwarded) "Awarded" else "Award",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

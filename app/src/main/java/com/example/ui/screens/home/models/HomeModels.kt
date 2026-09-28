@@ -151,6 +151,7 @@ data class CustomRoom(
 
 data class MomentPost(
     val id: String,
+    val userId: String = "",
     val author: String,
     val username: String,
     val avatar: String,
@@ -191,7 +192,8 @@ data class FollowedFriend(
     val flagCode: String,
     val isSpeaking: Boolean,
     val statusText: String,
-    val currentRoomId: String? = null
+    val currentRoomId: String? = null,
+    val isOnline: Boolean = true
 )
 
 fun parseColorHex(hex: String, defaultColor: Color): Color {

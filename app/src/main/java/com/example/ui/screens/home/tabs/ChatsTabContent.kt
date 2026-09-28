@@ -56,6 +56,8 @@ import com.example.repository.EncryptedChatRepository
 import com.example.ui.components.*
 import com.example.ui.components.UserAvatarImage
 import androidx.compose.material3.Icon
+import com.example.ui.screens.chat.GroupChatScreen
+import com.example.ui.screens.chat.GroupInviteSheet
 import com.example.ui.screens.chat.VaultManagementDialogs
 import com.example.ui.screens.home.dialogs.BlockedUsersBottomSheet
 import com.example.ui.screens.home.dialogs.ChatLongPressBottomSheet
@@ -89,6 +91,10 @@ fun ChatsTabContent(
     val vaultStatus by VaultSecurityManager.vaultStatus.collectAsState()
     val dbConversations by EncryptedChatRepository.conversations.collectAsState()
     val customGroups by ChatPreferencesManager.groups.collectAsState()
+    val joinedGroups by com.example.repository.GroupChatRepository.joinedGroups.collectAsState()
+    val pendingInvites by com.example.repository.GroupChatRepository.pendingInvites.collectAsState()
+    var selectedGroupChat by remember { mutableStateOf<com.example.db.LocalGroupConversation?>(null) }
+    var selectedPendingInvite by remember { mutableStateOf<com.example.db.LocalGroupConversation?>(null) }
     val mutedChats by ChatPreferencesManager.mutedChats.collectAsState()
     val pinnedChats by ChatPreferencesManager.pinnedChats.collectAsState()
     val blockedUsers by ChatPreferencesManager.blockedUsers.collectAsState()
@@ -99,10 +105,11 @@ fun ChatsTabContent(
         SupportChatManager.init(context)
         EncryptedChatRepository.init(context)
         ChatPreferencesManager.init(context)
+        com.example.repository.GroupChatRepository.init(context)
     }
 
-    // Merge real encrypted conversations from Room DB, custom groups, and active partner chats
-    val mergedConversations = remember(conversationsList, dbConversations, customGroups, pinnedChats, mutedChats, blockedUsers, deletedChats, unreadOverrides) {
+    // Merge real encrypted conversations from Room DB, joined groups, and active partner chats
+    val mergedConversations = remember(conversationsList, dbConversations, joinedGroups, customGroups, pinnedChats, mutedChats, blockedUsers, deletedChats, unreadOverrides) {
         val dbMapped = dbConversations.map { conv ->
             val isUnreadOverridden = unreadOverrides.contains(conv.otherUserId)
             DirectChat(
@@ -117,15 +124,16 @@ fun ChatsTabContent(
             )
         }
 
-        val groupsMapped = customGroups.map { grp ->
+        // Map joined groups (invited-but-not-accepted groups are excluded)
+        val groupsMapped = joinedGroups.map { grp ->
             val isUnreadOverridden = unreadOverrides.contains(grp.id)
             DirectChat(
                 id = grp.id,
                 name = grp.name,
                 avatar = grp.avatarUrl.ifBlank { "https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=200" },
-                lastMsg = grp.lastMessageText,
+                lastMsg = grp.lastMessageText.ifBlank { "🔒 E2EE Group Chat" },
                 time = formatTimeAgo(grp.lastMessageTime),
-                unreadCount = if (isUnreadOverridden) 1 else 0,
+                unreadCount = if (isUnreadOverridden) 1 else grp.unreadCount,
                 onlineStatus = "online",
                 isNativeLanguage = "Group (${grp.memberCount} members)"
             )
@@ -716,6 +724,135 @@ fun ChatsTabContent(
                 }
             }
 
+            // NEW GROUP ENTRY POINT (ALONGSIDE PINNED FUNKYTALK SUPPORT ENTRY)
+            item {
+                Spacer(modifier = Modifier.height(10.dp))
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .clip(RoundedCornerShape(22.dp))
+                        .clickable {
+                            if (isVaultUnlocked) {
+                                showCreateGroupSheet = true
+                            } else {
+                                Toast.makeText(context, "Unlock vault to access encrypted groups", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        .testTag("new_group_action_entry"),
+                    shape = RoundedCornerShape(22.dp),
+                    color = Color.White,
+                    border = BorderStroke(1.dp, Color(0xFFF0F0EE)),
+                    shadowElevation = 0.5.dp
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFFEF3C7)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            SoftGroupIcon(size = 24.dp, color = Color(0xFFB45309))
+                        }
+
+                        Spacer(modifier = Modifier.width(14.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "New Group Chat",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = Color.Black
+                            )
+                            Text(
+                                text = "Start an end-to-end encrypted group",
+                                fontSize = 12.sp,
+                                color = Color(0xFF6B7280)
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(GoldAccent),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("+", color = Color.Black, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                        }
+                    }
+                }
+            }
+
+            // PENDING GROUP INVITATIONS AREA
+            if (pendingInvites.isNotEmpty()) {
+                item {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .clickable {
+                                selectedPendingInvite = pendingInvites.firstOrNull()
+                            }
+                            .testTag("pending_invites_banner"),
+                        shape = RoundedCornerShape(18.dp),
+                        color = Color(0xFFFFFBEB),
+                        border = BorderStroke(1.5.dp, Color(0xFFFDE68A))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFFDE68A)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                SoftGroupIcon(size = 18.dp, color = Color(0xFF92400E))
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Pending Group Invites (${pendingInvites.size})",
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF92400E)
+                                )
+                                Text(
+                                    text = "${pendingInvites.first().name} · Tap to accept or decline",
+                                    fontSize = 11.5.sp,
+                                    color = Color(0xFFB45309)
+                                )
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(50.dp),
+                                color = GoldAccent
+                            ) {
+                                Text(
+                                    text = "Review",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Black,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             item {
                 Spacer(modifier = Modifier.height(8.dp))
             }
@@ -825,7 +962,12 @@ fun ChatsTabContent(
                             .combinedClickable(
                                 onClick = {
                                     if (isVaultUnlocked) {
-                                        onSelectChat(chat)
+                                        val grp = joinedGroups.find { it.id == chat.id }
+                                        if (grp != null) {
+                                            selectedGroupChat = grp
+                                        } else {
+                                            onSelectChat(chat)
+                                        }
                                     }
                                 },
                                 onLongClick = {
@@ -1156,6 +1298,29 @@ fun ChatsTabContent(
                     }
                 }
             }
+        }
+
+        // --- 3. PENDING INVITE SHEET ---
+        selectedPendingInvite?.let { invite ->
+            GroupInviteSheet(
+                groupId = invite.id,
+                groupName = invite.name,
+                groupAvatar = invite.avatarUrl,
+                invitedBy = invite.createdBy,
+                onDismiss = { selectedPendingInvite = null },
+                onAccepted = {
+                    selectedPendingInvite = null
+                    selectedGroupChat = invite.copy(myStatus = "joined")
+                }
+            )
+        }
+
+        // --- 4. ACTIVE GROUP CHAT SCREEN ---
+        selectedGroupChat?.let { grp ->
+            GroupChatScreen(
+                group = grp,
+                onBack = { selectedGroupChat = null }
+            )
         }
 
         // --- 2. BLUR GLASS OVERLAY & MODERN PASSWORD POPUP (When Vault is Locked / Not Configured) ---
