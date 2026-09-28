@@ -8,6 +8,7 @@ import com.example.GiftTransactionItem
 import com.example.SendGiftRequest
 import com.example.SupabaseClient
 import com.example.SupabaseSessionManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -49,6 +50,8 @@ object GiftManager {
             } else {
                 Log.w(TAG, "Failed to load catalog: ${resp.code()} ${resp.message()}")
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching gift catalog", e)
         } finally {
@@ -81,6 +84,8 @@ object GiftManager {
             } else {
                 Log.w(TAG, "get_or_create_wallet returned ${resp.code()} ${resp.message()}")
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Error refreshing wallet balance", e)
         }
@@ -170,6 +175,8 @@ object GiftManager {
             }
         } catch (e: InsufficientCoinsException) {
             Result.failure(e)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Exception sending gift", e)
             Result.failure(e)
@@ -205,6 +212,8 @@ object GiftManager {
                     )
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching gifts received", e)
         }
@@ -237,6 +246,8 @@ object GiftManager {
                 }
                 return@withContext (received + enrichedSent).distinctBy { it.id }.sortedByDescending { it.created_at }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching sent gifts", e)
         }

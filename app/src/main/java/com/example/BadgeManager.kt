@@ -2,6 +2,7 @@ package com.example
 
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -40,6 +41,8 @@ object BadgeManager {
             } else {
                 Log.w(TAG, "getUserBadges returned code ${res.code()}: ${res.errorBody()?.string()}")
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching user badges", e)
         }
@@ -52,6 +55,8 @@ object BadgeManager {
             if (res.isSuccessful) {
                 return@withContext res.body() ?: emptyList()
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching badge catalog", e)
         }
@@ -69,6 +74,8 @@ object BadgeManager {
                 val err = res.errorBody()?.string() ?: "Failed to award badge (HTTP ${res.code()})"
                 Result.failure(Exception(err))
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -85,6 +92,8 @@ object BadgeManager {
                 val err = res.errorBody()?.string() ?: "Failed to revoke badge (HTTP ${res.code()})"
                 Result.failure(Exception(err))
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }

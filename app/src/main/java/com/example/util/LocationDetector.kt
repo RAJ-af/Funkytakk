@@ -30,11 +30,18 @@ object LocationDetector {
         return fine || coarse
     }
 
+    fun isGpsEnabled(context: Context): Boolean {
+        val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return false
+        val gps = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+        val net = locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        return gps || net
+    }
+
     suspend fun detectCurrentLocation(context: Context): DetectedLocation = withContext(Dispatchers.IO) {
         try {
             if (hasLocationPermission(context)) {
                 val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
-                if (locationManager != null) {
+                if (locationManager != null && isGpsEnabled(context)) {
                     val providers = listOf(
                         LocationManager.GPS_PROVIDER,
                         LocationManager.NETWORK_PROVIDER,

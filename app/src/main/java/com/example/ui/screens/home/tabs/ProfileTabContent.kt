@@ -102,6 +102,7 @@ fun ProfileTabContent(
     var currentProfileName by remember(currentUserProfile.displayName) { mutableStateOf(currentUserProfile.displayName?.ifBlank { "pikaa" } ?: "pikaa") }
     var currentUsername by remember(currentUserProfile.username) { mutableStateOf(currentUserProfile.username?.ifBlank { "pikaa" } ?: "pikaa") }
     var currentAvatarUrl by remember(currentUserProfile.avatar) { mutableStateOf(currentUserProfile.avatar?.ifBlank { "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=500" } ?: "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=500") }
+    var currentCoverUrl by remember(currentUserProfile.coverUrl) { mutableStateOf(currentUserProfile.coverUrl?.ifBlank { "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=800" } ?: "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=800") }
     var currentBio by remember(currentUserProfile.bio) { mutableStateOf(currentUserProfile.bio ?: savedBio ?: "I love music, sunset and good conversations! Always open to meet new people and learn about different cultures. Let's be friends! 💛") }
     var currentCountry by remember(currentUserProfile.country) { mutableStateOf(currentUserProfile.country?.ifBlank { "South Korea" } ?: "South Korea") }
     var currentCountryCode by remember(currentUserProfile.countryCode) { mutableStateOf(currentUserProfile.countryCode?.ifBlank { "kr" } ?: "kr") }
@@ -136,6 +137,8 @@ fun ProfileTabContent(
             val badges = com.example.BadgeManager.getBadgesForUser(userId)
             userBadges.clear()
             userBadges.addAll(badges)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             android.util.Log.e("ProfileTabContent", "Error loading badges", e)
         }
@@ -144,8 +147,9 @@ fun ProfileTabContent(
             val gifts = GiftManager.fetchGiftsReceived(context, userId)
             giftsReceived.clear()
             giftsReceived.addAll(gifts)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
-            if (e is kotlinx.coroutines.CancellationException) throw e
             android.util.Log.e("ProfileTabContent", "Error loading gifts", e)
         } finally {
             isGiftsLoading = false
@@ -179,6 +183,8 @@ fun ProfileTabContent(
                     currentJoinedText = formatJoinedDate(p.created_at)
                 }
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             android.util.Log.e("ProfileTabContent", "Error loading profile data", e)
         }
@@ -218,6 +224,8 @@ fun ProfileTabContent(
                         ?: followingCountResp.body()?.size ?: 0
                 }
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             android.util.Log.e("ProfileTabContent", "Error loading stats counts", e)
         }
@@ -252,6 +260,8 @@ fun ProfileTabContent(
                 }
                 postsCount = momentsList.size
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             android.util.Log.e("ProfileTabContent", "Error loading moments", e)
         } finally {

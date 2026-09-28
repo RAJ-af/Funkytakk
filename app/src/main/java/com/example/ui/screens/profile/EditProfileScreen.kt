@@ -136,6 +136,8 @@ fun EditProfileScreen(
                     }
                 }
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             android.util.Log.e("EditProfileScreen", "Failed to load profile data from Supabase", e)
             if (nativeLanguages.isEmpty()) nativeLanguages.addAll(listOf("English", "Spanish"))
@@ -243,6 +245,8 @@ fun EditProfileScreen(
                 } else {
                     onDismiss()
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 errorMessage = e.message ?: "Failed to save changes"
                 Log.e("EditProfileScreen", "Error saving profile", e)
