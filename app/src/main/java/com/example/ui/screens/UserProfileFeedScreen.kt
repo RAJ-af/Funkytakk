@@ -131,6 +131,7 @@ fun UserProfileFeedScreen(
     var currentProfileName by remember(profileName) { mutableStateOf(profileName) }
     var currentUsername by remember(username) { mutableStateOf(username) }
     var currentAvatarUrl by remember(avatarUrl) { mutableStateOf(avatarUrl) }
+    var currentCoverUrl by remember(coverUrl) { mutableStateOf(coverUrl) }
     var currentBio by remember(bio) { mutableStateOf(bio) }
     var currentCountry by remember { mutableStateOf("") }
     var currentCity by remember { mutableStateOf("") }
@@ -196,8 +197,10 @@ fun UserProfileFeedScreen(
                     currentProfileName = p.profile_name ?: p.username ?: currentProfileName
                     currentUsername = p.username ?: p.profile_name?.lowercase()?.replace(" ", "") ?: currentUsername
                     p.avatar_url?.let { if (it.isNotBlank()) currentAvatarUrl = it }
+                    p.cover_url?.let { if (it.isNotBlank()) currentCoverUrl = it }
                     p.bio?.let { if (it.isNotBlank()) currentBio = it }
                     p.country?.let { currentCountry = it }
+                    p.city?.let { if (it.isNotBlank()) currentCity = it }
                     currentCountryCode = resolveCountryCode(p.country, p.country_code)
                     currentAge = p.age
                     currentGender = p.gender
@@ -216,6 +219,30 @@ fun UserProfileFeedScreen(
                 }
             } else {
                 Log.w("UserProfileFeed", "Failed to fetch profile: ${profileResp.code()} ${profileResp.message()}")
+            }
+
+            // Direct fetch from profiles table to ensure cover_url and latest details are loaded
+            try {
+                val directResp = withContext(Dispatchers.IO) {
+                    SupabaseClient.api.getProfile(
+                        apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                        auth = token,
+                        authUserIdEq = "eq.$userId"
+                    )
+                }
+                if (directResp.isSuccessful) {
+                    val p = directResp.body()?.firstOrNull()
+                    if (p != null) {
+                        if (!p.cover_url.isNullOrBlank()) currentCoverUrl = p.cover_url
+                        if (!p.city.isNullOrBlank()) currentCity = p.city
+                        if (!p.avatar_url.isNullOrBlank()) currentAvatarUrl = p.avatar_url
+                        if (!p.profile_name.isNullOrBlank()) currentProfileName = p.profile_name
+                        if (!p.username.isNullOrBlank()) currentUsername = p.username
+                        if (!p.bio.isNullOrBlank()) currentBio = p.bio
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("UserProfileFeed", "Error fetching direct profile for cover and city", e)
             }
         } catch (e: Exception) {
             Log.e("UserProfileFeed", "Error loading profile data", e)
@@ -236,9 +263,12 @@ fun UserProfileFeedScreen(
             val savedCity = prefs.getString("profile_city_${userId}", null)
             val savedBio = prefs.getString("profile_bio_${userId}", null)
             val savedAge = prefs.getInt("profile_age_${userId}", 0).takeIf { it > 0 }
+            val savedCover = prefs.getString("profile_cover_${userId}", null)
+                ?: (if (selfUid != null) prefs.getString("profile_cover_${selfUid}", null) else null)
             if (!savedCity.isNullOrBlank()) currentCity = savedCity
             if (!savedBio.isNullOrBlank()) currentBio = savedBio
             if (savedAge != null) currentAge = savedAge
+            if (!savedCover.isNullOrBlank()) currentCoverUrl = savedCover
         }
 
         // B. Fetch stats counts (Posts / Followers / Following)
@@ -523,9 +553,10 @@ fun UserProfileFeedScreen(
                         .height(235.dp)
                 ) {
                     // Sunset / City Cover Image
+                    val displayCover = currentCoverUrl.ifBlank { "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=800" }
                     AsyncImage(
                         model = ImageRequest.Builder(context)
-                            .data(coverUrl)
+                            .data(displayCover)
                             .crossfade(true)
                             .build(),
                         contentDescription = "Cover Image",
@@ -748,7 +779,7 @@ fun UserProfileFeedScreen(
                     val locationDisplay = remember(currentCity, currentCountry) {
                         when {
                             currentCity.isNotBlank() && currentCountry.isNotBlank() -> {
-                                if (currentCountry.contains(currentCity, ignoreCase = true)) currentCountry
+                                if (currentCity.equals(currentCountry, ignoreCase = true)) currentCountry
                                 else "$currentCity, $currentCountry"
                             }
                             currentCity.isNotBlank() -> currentCity
@@ -1671,6 +1702,7 @@ fun UserProfileFeedScreen(
                 username = user.username ?: "anonymous",
                 profileName = user.profile_name ?: user.username ?: "Anonymous",
                 avatarUrl = user.avatar_url ?: "",
+                coverUrl = user.cover_url ?: "",
                 countryCode = user.country_code ?: "us",
                 bio = user.bio ?: "",
                 onBack = { activeClickedProfile = null },

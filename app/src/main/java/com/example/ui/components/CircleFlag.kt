@@ -189,6 +189,9 @@ fun AvatarWithCircularFlag(
             model = ImageRequest.Builder(LocalContext.current)
                 .data(avatarModel)
                 .crossfade(true)
+                .placeholder(com.example.R.drawable.male_avatar_1781324792347)
+                .error(com.example.R.drawable.male_avatar_1781324792347)
+                .fallback(com.example.R.drawable.male_avatar_1781324792347)
                 .build(),
             contentDescription = "Avatar",
             modifier = Modifier
@@ -224,6 +227,9 @@ fun DiscoverSquareAvatarWithFlag(
             model = ImageRequest.Builder(LocalContext.current)
                 .data(avatarModel)
                 .crossfade(true)
+                .placeholder(com.example.R.drawable.male_avatar_1781324792347)
+                .error(com.example.R.drawable.male_avatar_1781324792347)
+                .fallback(com.example.R.drawable.male_avatar_1781324792347)
                 .build(),
             contentDescription = "Avatar",
             contentScale = ContentScale.Crop,

@@ -2,6 +2,7 @@ package com.example.ui.screens.home.tabs
 
 import android.util.Log
 import android.widget.Toast
+import kotlinx.coroutines.launch
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -95,14 +96,21 @@ fun ProfileTabContent(
 
     val userId = currentUserProfile.uid
     val prefs = remember { context.getSharedPreferences("funky_talk_prefs", android.content.Context.MODE_PRIVATE) }
+    val supaUid = remember { com.example.SupabaseSessionManager.getUserId(context) ?: userId }
     val savedBio = remember { prefs.getString("profile_bio_${userId}", null) }
     val savedCity = remember { prefs.getString("profile_city_${userId}", null) }
     val savedAge = remember { prefs.getInt("profile_age_${userId}", 0).takeIf { it > 0 } }
+    val savedCover = remember {
+        prefs.getString("profile_cover_${userId}", null)
+            ?: (if (supaUid != userId) prefs.getString("profile_cover_${supaUid}", null) else null)
+    }
 
     var currentProfileName by remember(currentUserProfile.displayName) { mutableStateOf(currentUserProfile.displayName?.ifBlank { "pikaa" } ?: "pikaa") }
     var currentUsername by remember(currentUserProfile.username) { mutableStateOf(currentUserProfile.username?.ifBlank { "pikaa" } ?: "pikaa") }
-    var currentAvatarUrl by remember(currentUserProfile.avatar) { mutableStateOf(currentUserProfile.avatar?.ifBlank { "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=500" } ?: "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=500") }
-    var currentCoverUrl by remember(currentUserProfile.coverUrl) { mutableStateOf(currentUserProfile.coverUrl?.ifBlank { "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=800" } ?: "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=800") }
+    var currentAvatarUrl by remember(currentUserProfile.avatar) { mutableStateOf(currentUserProfile.avatar.orEmpty()) }
+    var currentCoverUrl by remember(currentUserProfile.coverUrl) {
+        mutableStateOf(currentUserProfile.coverUrl?.ifBlank { null } ?: savedCover.orEmpty())
+    }
     var currentBio by remember(currentUserProfile.bio) { mutableStateOf(currentUserProfile.bio ?: savedBio ?: "I love music, sunset and good conversations! Always open to meet new people and learn about different cultures. Let's be friends! 💛") }
     var currentCountry by remember(currentUserProfile.country) { mutableStateOf(currentUserProfile.country?.ifBlank { "South Korea" } ?: "South Korea") }
     var currentCountryCode by remember(currentUserProfile.countryCode) { mutableStateOf(currentUserProfile.countryCode?.ifBlank { "kr" } ?: "kr") }
@@ -124,6 +132,97 @@ fun ProfileTabContent(
     val userBadges = remember { mutableStateListOf<com.example.ProfileBadge>() }
     var isGiftsLoading by remember { mutableStateOf(false) }
 
+    val coroutineScope = rememberCoroutineScope()
+
+    // Keep locally-held state synced when currentUserProfile prop updates from parent
+    LaunchedEffect(currentUserProfile.avatar) {
+        if (!currentUserProfile.avatar.isNullOrBlank()) {
+            currentAvatarUrl = currentUserProfile.avatar
+        }
+    }
+    LaunchedEffect(currentUserProfile.coverUrl) {
+        if (!currentUserProfile.coverUrl.isNullOrBlank()) {
+            currentCoverUrl = currentUserProfile.coverUrl.orEmpty()
+        }
+    }
+    LaunchedEffect(currentUserProfile.displayName) {
+        if (!currentUserProfile.displayName.isNullOrBlank()) {
+            currentProfileName = currentUserProfile.displayName
+        }
+    }
+    LaunchedEffect(currentUserProfile.username) {
+        if (!currentUserProfile.username.isNullOrBlank()) {
+            currentUsername = currentUserProfile.username
+        }
+    }
+
+    val refreshProfileData: suspend () -> Unit = {
+        val supaUid = com.example.SupabaseSessionManager.getUserId(context) ?: userId
+        val effectiveUid = supaUid.takeIf { com.example.SupabaseSessionManager.isValidUuid(it) }
+            ?: (if (com.example.SupabaseSessionManager.isValidUuid(userId)) userId else supaUid)
+        val token = com.example.SupabaseSessionManager.getAuthenticatedBearerToken(context)
+            ?: com.example.SupabaseSessionManager.getBearerToken(context)
+            ?: "Bearer ${com.example.BuildConfig.SUPABASE_ANON_KEY}"
+
+        var remoteProfileLoaded = false
+        try {
+            val res = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.example.SupabaseClient.api.getProfile(
+                    apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
+                    auth = token,
+                    authUserIdEq = "eq.$effectiveUid"
+                )
+            }
+            if (res.isSuccessful) {
+                val p = res.body()?.firstOrNull()
+                if (p != null) {
+                    remoteProfileLoaded = true
+                    if (!p.profile_name.isNullOrBlank()) currentProfileName = p.profile_name
+                    if (!p.username.isNullOrBlank()) currentUsername = p.username
+                    currentAvatarUrl = p.avatar_url.orEmpty()
+                    currentCoverUrl = p.cover_url.orEmpty()
+                    if (!p.bio.isNullOrBlank()) currentBio = p.bio
+                    if (p.age != null && p.age > 0) currentAge = p.age
+                    if (!p.gender.isNullOrBlank()) currentGender = p.gender
+                    if (!p.country.isNullOrBlank()) currentCountry = p.country
+                    if (!p.city.isNullOrBlank()) currentCity = p.city
+                    currentCountryCode = resolveCountryCode(p.country, p.country_code)
+
+                    // Sync remote profile into SharedPreferences to avoid stale local cache
+                    val prefsEditor = context.getSharedPreferences("funky_talk_prefs", android.content.Context.MODE_PRIVATE).edit()
+                    p.avatar_url?.let {
+                        prefsEditor.putString("profile_avatar_${userId}", it)
+                        if (supaUid != userId) prefsEditor.putString("profile_avatar_${supaUid}", it)
+                    } ?: run {
+                        prefsEditor.remove("profile_avatar_${userId}")
+                        if (supaUid != userId) prefsEditor.remove("profile_avatar_${supaUid}")
+                    }
+                    p.cover_url?.let {
+                        prefsEditor.putString("profile_cover_${userId}", it)
+                        if (supaUid != userId) prefsEditor.putString("profile_cover_${supaUid}", it)
+                    } ?: run {
+                        prefsEditor.remove("profile_cover_${userId}")
+                        if (supaUid != userId) prefsEditor.remove("profile_cover_${supaUid}")
+                    }
+                    prefsEditor.apply()
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("ProfileTabContent", "Error re-fetching profile from Supabase", e)
+        }
+
+        // Secondary fallback to SharedPreferences ONLY if remote fetch did not succeed
+        if (!remoteProfileLoaded) {
+            val p = context.getSharedPreferences("funky_talk_prefs", android.content.Context.MODE_PRIVATE)
+            val updatedAvatar = p.getString("profile_avatar_${userId}", null)
+                ?: p.getString("profile_avatar_${supaUid}", null)
+            if (!updatedAvatar.isNullOrBlank() && currentAvatarUrl.isBlank()) currentAvatarUrl = updatedAvatar
+            val updatedCover = p.getString("profile_cover_${userId}", null)
+                ?: p.getString("profile_cover_${supaUid}", null)
+            if (!updatedCover.isNullOrBlank() && currentCoverUrl.isBlank()) currentCoverUrl = updatedCover
+        }
+    }
+
     LaunchedEffect(userId) {
         isAdmin = ModerationManager.checkIsAdmin(context)
         if (userId.isBlank()) return@LaunchedEffect
@@ -131,6 +230,9 @@ fun ProfileTabContent(
         // Refresh coin wallet & catalog
         GiftManager.refreshWallet(context)
         GiftManager.fetchCatalog(context)
+
+        // Load live profile data immediately
+        refreshProfileData()
 
         // Load profile badges
         try {
@@ -175,6 +277,7 @@ fun ProfileTabContent(
                     p.avatar_url?.let { if (it.isNotBlank()) currentAvatarUrl = it }
                     p.bio?.let { if (it.isNotBlank()) currentBio = it }
                     p.country?.let { currentCountry = it }
+                    p.city?.let { if (it.isNotBlank()) currentCity = it }
                     currentCountryCode = resolveCountryCode(p.country, p.country_code)
                     p.age?.let { currentAge = it }
                     p.gender?.let { currentGender = it }
@@ -272,7 +375,7 @@ fun ProfileTabContent(
     val profileDisplayName = currentProfileName
     val profileUsername = currentUsername
     val profileAvatar = currentAvatarUrl
-    val profileCover = "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=800"
+    val profileCover = currentCoverUrl.ifBlank { "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=800" }
     val profileCountryCode = currentCountryCode
     val profileCountry = currentCountry
     val profileCity = remember(currentCity, profileCountry) {
@@ -407,8 +510,28 @@ fun ProfileTabContent(
                                 .clip(CircleShape)
                                 .background(Color.White)
                         ) {
+                            val avatarModel = resolveAvatarModel(profileAvatar)
+                            val imageRequest = remember(avatarModel) {
+                                ImageRequest.Builder(context)
+                                    .data(avatarModel)
+                                    .crossfade(true)
+                                    .memoryCacheKey(avatarModel.toString())
+                                    .diskCacheKey(avatarModel.toString())
+                                    .placeholder(com.example.R.drawable.male_avatar_1781324792347)
+                                    .error(com.example.R.drawable.male_avatar_1781324792347)
+                                    .fallback(com.example.R.drawable.male_avatar_1781324792347)
+                                    .listener(
+                                        onError = { _, result ->
+                                            Log.w("ProfileTabContent", "Avatar load fallback for $avatarModel: ${result.throwable.message}")
+                                        },
+                                        onSuccess = { _, _ ->
+                                            Log.d("ProfileTabContent", "Avatar loaded successfully: $avatarModel")
+                                        }
+                                    )
+                                    .build()
+                            }
                             AsyncImage(
-                                model = resolveAvatarModel(profileAvatar),
+                                model = imageRequest,
                                 contentDescription = "Avatar",
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier.fillMaxSize()
@@ -1380,6 +1503,7 @@ fun ProfileTabContent(
                 displayName = currentProfileName,
                 username = currentUsername,
                 avatar = currentAvatarUrl,
+                coverUrl = currentCoverUrl.ifBlank { null },
                 bio = currentBio,
                 city = currentCity,
                 country = currentCountry,
@@ -1390,16 +1514,36 @@ fun ProfileTabContent(
             viewModel = viewModel,
             onDismiss = {
                 showEditProfileDialog = false
+                try {
+                    val loader = coil.Coil.imageLoader(context)
+                    loader.memoryCache?.clear()
+                    loader.diskCache?.clear()
+                } catch (_: Exception) {}
+
+                coroutineScope.launch {
+                    refreshProfileData()
+                }
+
+                val supaUid = com.example.SupabaseSessionManager.getUserId(context) ?: userId
                 val p = context.getSharedPreferences("funky_talk_prefs", android.content.Context.MODE_PRIVATE)
                 val updatedBio = p.getString("profile_bio_${userId}", null)
+                    ?: p.getString("profile_bio_${supaUid}", null)
                 val updatedCity = p.getString("profile_city_${userId}", null)
-                val updatedAge = p.getInt("profile_age_${userId}", 0).takeIf { it > 0 }
+                    ?: p.getString("profile_city_${supaUid}", null)
+                val updatedAge = (p.getInt("profile_age_${userId}", 0).takeIf { it > 0 })
+                    ?: (p.getInt("profile_age_${supaUid}", 0).takeIf { it > 0 })
                 val updatedCountry = p.getString("profile_country_${userId}", null)
+                    ?: p.getString("profile_country_${supaUid}", null)
                 val updatedCountryCode = p.getString("profile_countryCode_${userId}", null)
+                    ?: p.getString("profile_countryCode_${supaUid}", null)
                 val updatedDisplayName = p.getString("profile_displayName_${userId}", null)
+                    ?: p.getString("profile_displayName_${supaUid}", null)
                 val updatedUsername = p.getString("profile_username_${userId}", null)
-                val updatedAvatar = p.getString("profile_avatar_${userId}", null)
+                    ?: p.getString("profile_username_${supaUid}", null)
+                val updatedCover = p.getString("profile_cover_${userId}", null)
+                    ?: p.getString("profile_cover_${supaUid}", null)
 
+                if (!updatedCover.isNullOrBlank()) currentCoverUrl = updatedCover
                 if (!updatedBio.isNullOrBlank()) currentBio = updatedBio
                 if (!updatedCity.isNullOrBlank()) currentCity = updatedCity
                 if (updatedAge != null) currentAge = updatedAge
@@ -1407,7 +1551,6 @@ fun ProfileTabContent(
                 if (!updatedCountryCode.isNullOrBlank()) currentCountryCode = updatedCountryCode
                 if (!updatedDisplayName.isNullOrBlank()) currentProfileName = updatedDisplayName
                 if (!updatedUsername.isNullOrBlank()) currentUsername = updatedUsername
-                if (!updatedAvatar.isNullOrBlank()) currentAvatarUrl = updatedAvatar
             }
         )
     }
@@ -1439,6 +1582,7 @@ fun ProfileTabContent(
             username = user.username ?: "anonymous",
             profileName = user.profile_name ?: user.username ?: "Anonymous",
             avatarUrl = user.avatar_url ?: "",
+            coverUrl = user.cover_url ?: "",
             countryCode = user.country_code ?: "us",
             bio = user.bio ?: "",
             onBack = { activeClickedProfile = null },

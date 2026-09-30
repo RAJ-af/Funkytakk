@@ -3,6 +3,8 @@ package com.example.repository
 import android.content.Context
 import android.util.Base64
 import android.util.Log
+import com.example.AppwriteUploader
+import com.example.CloudinaryUploader
 import com.example.CreateSignedUrlRequest
 import com.example.GetOrCreateDmConversationRequest
 import com.example.SendDmMessageRequest
@@ -20,6 +22,7 @@ import com.example.realtime.VoiceRoomRealtimeManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
@@ -334,6 +337,35 @@ object EncryptedChatRepository {
         convId: String,
         msgId: String
     ): ByteArray? {
+        if (rawPath.startsWith("data:")) {
+            return try {
+                val base64Data = rawPath.substringAfter(",")
+                Base64.decode(base64Data, Base64.DEFAULT)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed decoding base64 data URI in downloadDmMediaBlob", e)
+                null
+            }
+        }
+
+        if (rawPath.startsWith("http://") || rawPath.startsWith("https://")) {
+            try {
+                val isSupa = rawPath.contains("supabase.co")
+                val resp = SupabaseClient.api.downloadFromUrl(
+                    url = rawPath,
+                    apiKey = if (isSupa) com.example.BuildConfig.SUPABASE_ANON_KEY else null,
+                    auth = if (isSupa) authToken else null
+                )
+                if (resp.isSuccessful && resp.body() != null) {
+                    val bytes = resp.body()!!.bytes()
+                    if (bytes.isNotEmpty() && !isJsonErrorBytes(bytes)) {
+                        return bytes
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed downloading from direct URL in downloadDmMediaBlob: $rawPath", e)
+            }
+        }
+
         val candidates = linkedSetOf<String>()
         val stripped = cleanPath.trim().removePrefix("/").removePrefix("dm-media/").removePrefix("/")
         if (stripped.isNotBlank()) {
@@ -548,6 +580,10 @@ object EncryptedChatRepository {
 
     private suspend fun deleteStorageObjectFromServer(context: Context, token: String, path: String) {
         if (path.isBlank()) return
+        if (path.startsWith("http://") || path.startsWith("https://") || path.startsWith("data:")) {
+            // Appwrite storage proxy or external URL - no supabase storage object to delete
+            return
+        }
         try {
             val cleanPath = cleanStoragePath(path)
             if (cleanPath.isBlank()) return
@@ -878,34 +914,52 @@ object EncryptedChatRepository {
                 ?: return@withContext Result.failure(IllegalStateException("Failed to get valid conversation ID"))
 
             // Step 3: Generate client-side message_id UUID & storage paths
-            val messageId = UUID.randomUUID().toString()
-            val storagePath = "dm-media/$conversationId/$messageId"
-            val relativeStoragePath = "$conversationId/$messageId"
+            val messageId: String
+            val relativeStoragePath: String
+            val storagePath: String
+            try {
+                messageId = UUID.randomUUID().toString()
+                if (!SupabaseSessionManager.isValidUuid(conversationId) || !SupabaseSessionManager.isValidUuid(messageId)) {
+                    throw IllegalArgumentException("Invalid UUID in path construction: conversationId='$conversationId', messageId='$messageId'")
+                }
+                relativeStoragePath = "$conversationId/$messageId"
+                storagePath = "dm-media/$relativeStoragePath"
+            } catch (e: Exception) {
+                Log.e(TAG, "sendMediaMessage: Failed constructing storage path for conversationId='$conversationId'", e)
+                return@withContext Result.failure(IllegalStateException("Path construction error: ${e.message}", e))
+            }
 
             // Step 4: Encrypt raw media bytes with random one-time AES-256-GCM key + 12-byte nonce
             val (encryptedMediaBytes, keyBytes, nonceBytes) = E2EEMediaManager.encryptMediaPayload(rawBytes)
 
-            // Step 5: Upload encrypted ciphertext blob to Supabase Storage at dm-media/{conversation_id}/{message_id}
-            val requestBody = encryptedMediaBytes.toRequestBody("application/octet-stream".toMediaTypeOrNull())
-            Log.d(TAG, "sendMediaMessage: uploading encrypted blob (rawSize=${rawBytes.size}, cipherSize=${encryptedMediaBytes.size}) to path=$relativeStoragePath...")
-            val uploadResp = SupabaseClient.api.uploadDmMedia(
-                apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
-                auth = token,
-                path = relativeStoragePath,
-                body = requestBody
+            // Step 5: Upload encrypted ciphertext blob to Appwrite Storage via upload-to-appwrite proxy
+            Log.d(TAG, "sendMediaMessage: uploading encrypted media blob via Appwrite proxy (conversationId='$conversationId', messageId='$messageId', size=${encryptedMediaBytes.size})...")
+            val uploadResult = AppwriteUploader.uploadWithToken(
+                token = token,
+                fileBytes = encryptedMediaBytes,
+                filename = "$messageId.bin",
+                mimeType = "application/octet-stream",
+                purpose = "dm-media",
+                folderSuffix = conversationId,
+                maxRetries = 1
             )
-            Log.d(TAG, "sendMediaMessage: upload response code=${uploadResp.code()}, isSuccessful=${uploadResp.isSuccessful}")
-            if (!uploadResp.isSuccessful) {
-                val errStr = uploadResp.errorBody()?.string() ?: uploadResp.message()
-                Log.e(TAG, "Failed to upload encrypted media blob: code=${uploadResp.code()} err=$errStr")
-                return@withContext Result.failure(IllegalStateException("Failed to upload encrypted media: code ${uploadResp.code()} - $errStr"))
+
+            val finalResolvedPath = when (uploadResult) {
+                is AppwriteUploader.UploadResult.Success -> {
+                    Log.d(TAG, "sendMediaMessage: Appwrite upload success: url=${uploadResult.url}, fileId=${uploadResult.fileId}")
+                    uploadResult.url
+                }
+                is AppwriteUploader.UploadResult.Error -> {
+                    Log.e(TAG, "sendMediaMessage: Appwrite upload failed (${uploadResult.statusCode}): ${uploadResult.message}")
+                    return@withContext Result.failure(IllegalStateException(uploadResult.message))
+                }
             }
 
             // Step 6: Build JSON descriptor & encrypt it with Tink HPKE (recipient's identity public key)
             val keyBase64 = Base64.encodeToString(keyBytes, Base64.NO_WRAP)
             val nonceBase64 = Base64.encodeToString(nonceBytes, Base64.NO_WRAP)
             val descriptorJson = JSONObject().apply {
-                put("storage_path", storagePath)
+                put("storage_path", finalResolvedPath)
                 put("media_key", keyBase64)
                 put("media_nonce", nonceBase64)
                 put("mime_type", mimeType)
@@ -917,7 +971,7 @@ object EncryptedChatRepository {
             val encryptedDescriptor = E2EEManager.encryptMessage(recipientPublicKey, descriptorJson)
 
             // Step 7: Insert into dm_messages row
-            Log.d(TAG, "sendMediaMessage: inserting dm_messages row (messageId=$messageId, type=$messageType, path=$storagePath)...")
+            Log.d(TAG, "sendMediaMessage: inserting dm_messages row (messageId=$messageId, type=$messageType, path=$finalResolvedPath)...")
             val sendResp = SupabaseClient.api.sendDmMessage(
                 apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
                 auth = token,
@@ -930,15 +984,13 @@ object EncryptedChatRepository {
                     nonce = "",
                     key_version = keyItem.key_version,
                     message_type = messageType,
-                    storage_path = storagePath
+                    storage_path = finalResolvedPath
                 )
             )
             Log.d(TAG, "sendMediaMessage: insert dm_messages response code=${sendResp.code()}, isSuccessful=${sendResp.isSuccessful}")
             if (!sendResp.isSuccessful) {
                 val errStr = sendResp.errorBody()?.string() ?: sendResp.message()
                 Log.e(TAG, "Failed to insert dm_messages row: code=${sendResp.code()} err=$errStr")
-                // Rollback storage object
-                deleteStorageObjectFromServer(context, token, relativeStoragePath)
                 return@withContext Result.failure(IllegalStateException("Failed to send media message: code ${sendResp.code()} - $errStr"))
             }
 

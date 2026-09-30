@@ -471,6 +471,7 @@ fun OnboardingProfileScreen(
             // Next Step Action Pill
             Button(
                 onClick = {
+                    if (isCheckingUsername) return@Button
                     val cleanUsername = username.trim().lowercase()
                     if (cleanUsername.isBlank() || displayName.isBlank()) {
                         Toast.makeText(context, "Please enter both username and display name.", Toast.LENGTH_SHORT).show()

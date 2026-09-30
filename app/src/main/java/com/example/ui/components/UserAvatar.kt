@@ -49,8 +49,20 @@ fun UserAvatarImage(
     contentScale: ContentScale = ContentScale.Crop
 ) {
     val model = resolveAvatarModel(avatarUrl)
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val imageRequest = androidx.compose.runtime.remember(model) {
+        coil.request.ImageRequest.Builder(context)
+            .data(model)
+            .crossfade(true)
+            .memoryCacheKey(model.toString())
+            .diskCacheKey(model.toString())
+            .placeholder(R.drawable.male_avatar_1781324792347)
+            .error(R.drawable.male_avatar_1781324792347)
+            .fallback(R.drawable.male_avatar_1781324792347)
+            .build()
+    }
     AsyncImage(
-        model = model,
+        model = imageRequest,
         contentDescription = contentDescription,
         modifier = modifier,
         contentScale = contentScale

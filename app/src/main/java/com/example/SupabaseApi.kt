@@ -340,7 +340,27 @@ data class CloudinaryUploadResponse(
     val secure_url: String? = null
 )
 
+@JsonClass(generateAdapter = true)
+data class UploadToAppwriteResponse(
+    val ok: Boolean? = null,
+    val file_id: String? = null,
+    val url: String? = null,
+    val error: String? = null,
+    val message: String? = null,
+    val detail: String? = null
+)
+
 interface SupabaseApi {
+
+    @Multipart
+    @POST("functions/v1/upload-to-appwrite")
+    suspend fun uploadToAppwrite(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Part file: MultipartBody.Part,
+        @Part("purpose") purpose: RequestBody,
+        @Part("folder_suffix") folderSuffix: RequestBody? = null
+    ): Response<UploadToAppwriteResponse>
 
     @POST("functions/v1/verify-firebase-token")
     suspend fun verifyFirebaseToken(
@@ -396,6 +416,7 @@ interface SupabaseApi {
     suspend fun uploadAvatar(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
+        @Header("x-upsert") upsert: String = "true",
         @Path("filename") filename: String,
         @Part file: MultipartBody.Part
     ): Response<Unit>
@@ -587,7 +608,7 @@ interface SupabaseApi {
         @Body profile: SupabaseProfile
     ): Response<Unit>
 
-    @GET("rest/v1/voice_rooms?select=*&is_live=eq.true&status=neq.ended&order=created_at.desc")
+    @GET("rest/v1/voice_rooms?select=*&is_live=eq.true&order=created_at.desc")
     suspend fun getVoiceRooms(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
@@ -852,19 +873,19 @@ interface SupabaseApi {
     suspend fun uploadStorageFile(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
+        @Header("x-upsert") upsert: String = "true",
         @Path("bucket") bucket: String,
         @Path("filename") filename: String,
         @Part file: MultipartBody.Part
     ): Response<ResponseBody>
 
-    @POST("storage/v1/object/{bucket}/{filename}")
+    @POST("storage/v1/object/{bucket}/{path}")
     suspend fun uploadStorageRawBytes(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
         @Header("x-upsert") upsert: String = "true",
-        @Header("Content-Type") contentType: String,
         @Path("bucket") bucket: String,
-        @Path("filename") filename: String,
+        @Path(value = "path", encoded = true) path: String,
         @Body body: RequestBody
     ): Response<ResponseBody>
 
@@ -900,6 +921,7 @@ interface SupabaseApi {
     suspend fun uploadCoverMultipart(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String,
+        @Header("x-upsert") upsert: String = "true",
         @Path(value = "path", encoded = true) path: String,
         @Part file: MultipartBody.Part
     ): Response<ResponseBody>
@@ -909,7 +931,6 @@ interface SupabaseApi {
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String,
         @Header("x-upsert") upsert: String = "true",
-        @Header("Content-Type") contentType: String = "image/jpeg",
         @Path(value = "path", encoded = true) path: String,
         @Body body: RequestBody
     ): Response<ResponseBody>
@@ -1051,9 +1072,18 @@ interface SupabaseApi {
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String,
         @Header("x-upsert") upsert: String = "true",
-        @Header("Content-Type") contentType: String = "application/octet-stream",
         @Path(value = "path", encoded = true) path: String,
         @Body body: RequestBody
+    ): Response<ResponseBody>
+
+    @Multipart
+    @POST("storage/v1/object/dm-media/{path}")
+    suspend fun uploadDmMediaMultipart(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Header("x-upsert") upsert: String = "true",
+        @Path(value = "path", encoded = true) path: String,
+        @Part file: MultipartBody.Part
     ): Response<ResponseBody>
 
     @GET("storage/v1/object/authenticated/dm-media/{path}")
@@ -1073,7 +1103,7 @@ interface SupabaseApi {
     @GET
     suspend fun downloadFromUrl(
         @Url url: String,
-        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("apikey") apiKey: String? = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String? = null
     ): Response<ResponseBody>
 
@@ -1216,7 +1246,6 @@ interface SupabaseApi {
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String,
         @Header("x-upsert") upsert: String = "true",
-        @Header("Content-Type") contentType: String = "application/octet-stream",
         @Path(value = "path", encoded = true) path: String,
         @Body body: RequestBody
     ): Response<ResponseBody>

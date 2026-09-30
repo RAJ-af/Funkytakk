@@ -1356,8 +1356,7 @@ fun VoiceRoomScreen(
                         val rawRes = SupabaseClient.api.uploadStorageRawBytes(
                             auth = bearerAuth,
                             bucket = "avatars",
-                            filename = filename,
-                            contentType = "image/jpeg",
+                            path = filename,
                             body = reqBody
                         )
                         if (rawRes.isSuccessful) {
@@ -1380,8 +1379,7 @@ fun VoiceRoomScreen(
                                 val repRes = SupabaseClient.api.uploadStorageRawBytes(
                                     auth = bearerAuth,
                                     bucket = "reports",
-                                    filename = filename,
-                                    contentType = "image/jpeg",
+                                    path = filename,
                                     body = reqBody
                                 )
                                 if (repRes.isSuccessful) {
@@ -1447,8 +1445,7 @@ fun VoiceRoomScreen(
                         val rawRes = SupabaseClient.api.uploadStorageRawBytes(
                             auth = bearerAuth,
                             bucket = "avatars",
-                            filename = filename,
-                            contentType = "audio/mpeg",
+                            path = filename,
                             body = reqBody
                         )
                         if (rawRes.isSuccessful) {
@@ -1471,8 +1468,7 @@ fun VoiceRoomScreen(
                                 val repRes = SupabaseClient.api.uploadStorageRawBytes(
                                     auth = bearerAuth,
                                     bucket = "reports",
-                                    filename = filename,
-                                    contentType = "audio/mpeg",
+                                    path = filename,
                                     body = reqBody
                                 )
                                 if (repRes.isSuccessful) {

@@ -312,8 +312,7 @@ private suspend fun submitReport(
                 val uploadRes = SupabaseClient.api.uploadStorageRawBytes(
                     auth = token,
                     bucket = "report-evidence",
-                    filename = filename,
-                    contentType = "image/jpeg",
+                    path = filename,
                     body = reqBody
                 )
 
@@ -326,8 +325,7 @@ private suspend fun submitReport(
                     val fbRes = SupabaseClient.api.uploadStorageRawBytes(
                         auth = token,
                         bucket = "avatars",
-                        filename = filename,
-                        contentType = "image/jpeg",
+                        path = filename,
                         body = reqBody
                     )
                     if (fbRes.isSuccessful) {

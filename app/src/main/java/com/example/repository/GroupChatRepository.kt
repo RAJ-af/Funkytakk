@@ -533,22 +533,33 @@ object GroupChatRepository {
 
             // 1. Layer 1: Encrypt raw media bytes with one-time AES-256-GCM key + 12-byte nonce
             val encResult = E2EEMediaManager.encryptMediaPayload(rawBytes)
-            val requestBody = encResult.ciphertextBytes.toRequestBody("application/octet-stream".toMediaTypeOrNull())
 
-            val uploadResp = SupabaseClient.api.uploadGroupMedia(
-                apiKey = BuildConfig.SUPABASE_ANON_KEY,
-                auth = token,
-                path = relativeStoragePath,
-                body = requestBody
+            // Step 2: Upload encrypted ciphertext blob to Appwrite Storage via upload-to-appwrite proxy
+            Log.d(TAG, "sendGroupMediaMessage: uploading encrypted media blob via Appwrite proxy (groupId='$groupId', messageId='$messageId', size=${encResult.ciphertextBytes.size})...")
+            val uploadResult = AppwriteUploader.uploadWithToken(
+                token = token,
+                fileBytes = encResult.ciphertextBytes,
+                filename = "$messageId.bin",
+                mimeType = "application/octet-stream",
+                purpose = "group-media",
+                folderSuffix = groupId,
+                maxRetries = 1
             )
-            if (!uploadResp.isSuccessful) {
-                val err = uploadResp.errorBody()?.string() ?: "Failed to upload group media"
-                return@withContext Result.failure(Exception("Storage upload error: $err"))
+
+            val mediaUrl = when (uploadResult) {
+                is AppwriteUploader.UploadResult.Success -> {
+                    Log.d(TAG, "sendGroupMediaMessage: Appwrite upload success: url=${uploadResult.url}, fileId=${uploadResult.fileId}")
+                    uploadResult.url
+                }
+                is AppwriteUploader.UploadResult.Error -> {
+                    Log.e(TAG, "sendGroupMediaMessage: Appwrite upload failed (${uploadResult.statusCode}): ${uploadResult.message}")
+                    return@withContext Result.failure(Exception(uploadResult.message))
+                }
             }
 
             // 2. Layer 2: Prepare media descriptor JSON
             val descriptorJson = JSONObject().apply {
-                put("storage_path", fullStoragePath)
+                put("storage_path", mediaUrl)
                 put("media_key", Base64.encodeToString(encResult.keyBytes, Base64.NO_WRAP))
                 put("media_nonce", Base64.encodeToString(encResult.nonceBytes, Base64.NO_WRAP))
                 put("mime_type", mimeType)
@@ -584,7 +595,7 @@ object GroupChatRepository {
                             recipient_id = uid,
                             ciphertext = ciphertext,
                             nonce = UUID.randomUUID().toString(),
-                            storage_path = fullStoragePath
+                            storage_path = mediaUrl
                         )
                     )
                 }
@@ -694,18 +705,34 @@ object GroupChatRepository {
                             val keyBase64 = mediaDescriptor.optString("media_key")
                             val nonceBase64 = mediaDescriptor.optString("media_nonce")
                             val storagePath = mediaDescriptor.optString("storage_path").ifBlank { row.storage_path.orEmpty() }
-                            val relativePath = storagePath.removePrefix("group-media/").removePrefix("/")
 
-                            if (keyBase64.isNotBlank() && nonceBase64.isNotBlank() && relativePath.isNotBlank()) {
+                            if (keyBase64.isNotBlank() && nonceBase64.isNotBlank() && storagePath.isNotBlank()) {
                                 val keyBytes = Base64.decode(keyBase64, Base64.DEFAULT)
                                 val nonceBytes = Base64.decode(nonceBase64, Base64.DEFAULT)
-                                val dlResp = SupabaseClient.api.downloadGroupMedia(
-                                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
-                                    auth = token,
-                                    path = relativePath
-                                )
-                                if (dlResp.isSuccessful && dlResp.body() != null) {
-                                    val encBytes = dlResp.body()!!.bytes()
+
+                                val encBytes = if (storagePath.startsWith("http://") || storagePath.startsWith("https://")) {
+                                    val isSupa = storagePath.contains("supabase.co")
+                                    val dlResp = SupabaseClient.api.downloadFromUrl(
+                                        url = storagePath,
+                                        apiKey = if (isSupa) BuildConfig.SUPABASE_ANON_KEY else null,
+                                        auth = if (isSupa) token else null
+                                    )
+                                    if (dlResp.isSuccessful && dlResp.body() != null) {
+                                        dlResp.body()!!.bytes()
+                                    } else null
+                                } else {
+                                    val relativePath = storagePath.removePrefix("group-media/").removePrefix("/")
+                                    val dlResp = SupabaseClient.api.downloadGroupMedia(
+                                        apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                                        auth = token,
+                                        path = relativePath
+                                    )
+                                    if (dlResp.isSuccessful && dlResp.body() != null) {
+                                        dlResp.body()!!.bytes()
+                                    } else null
+                                }
+
+                                if (encBytes != null && encBytes.isNotEmpty()) {
                                     val rawBytes = E2EEMediaManager.decryptMediaPayload(encBytes, keyBytes, nonceBytes)
                                     val localDir = File(context.filesDir, "encrypted_vault_media").apply { mkdirs() }
                                     val localFile = File(localDir, "group_${row.message_id}.jpg")

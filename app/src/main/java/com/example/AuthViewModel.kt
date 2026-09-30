@@ -2302,47 +2302,70 @@ class AuthViewModel : ViewModel() {
     ) {
         viewModelScope.launch {
             var finalAvatar = avatar
-            try {
-                var inputStream: java.io.InputStream? = null
-                if (avatar.startsWith("content://")) {
-                    val uri = android.net.Uri.parse(avatar)
-                    inputStream = context.contentResolver.openInputStream(uri)
-                } else if (avatar.startsWith("/") || avatar.startsWith("file://")) {
-                    val purePath = avatar.removePrefix("file://")
-                    val file = java.io.File(purePath)
-                    if (file.exists()) {
-                        inputStream = java.io.FileInputStream(file)
+            val cleanUsername = username.trim().lowercase()
+
+            if (avatar.startsWith("content://") || avatar.startsWith("file://") || avatar.startsWith("/")) {
+                SupabaseSessionManager.ensureActiveSession(context)
+                val supaUid = SupabaseSessionManager.getUserId(context) ?: "anon"
+                val bearerAuth = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                    ?: SupabaseSessionManager.getBearerToken(context)
+
+                var avatarBytes: ByteArray? = null
+                try {
+                    if (avatar.startsWith("content://")) {
+                        val uri = android.net.Uri.parse(avatar)
+                        context.contentResolver.openInputStream(uri)?.use { avatarBytes = it.readBytes() }
+                    } else {
+                        val purePath = avatar.removePrefix("file://")
+                        val file = java.io.File(purePath)
+                        if (file.exists()) avatarBytes = file.readBytes()
+                    }
+                } catch (e: Exception) {
+                    Log.e("AuthViewModel", "Error reading avatar file bytes in step 1", e)
+                    onError("Failed to read selected avatar photo: ${e.message}")
+                    return@launch
+                }
+
+                if (avatarBytes == null || avatarBytes!!.isEmpty()) {
+                    onError("Selected avatar image could not be read.")
+                    return@launch
+                }
+
+                val bytes = avatarBytes!!
+                val uniqueId = java.util.UUID.randomUUID().toString()
+                val filename = "avatar_${supaUid}_${uniqueId}_${System.currentTimeMillis()}.jpg"
+
+                val uploadResult = AppwriteUploader.upload(
+                    context = context,
+                    fileBytes = bytes,
+                    filename = filename,
+                    mimeType = "image/jpeg",
+                    purpose = "avatar",
+                    folderSuffix = null
+                )
+
+                when (uploadResult) {
+                    is AppwriteUploader.UploadResult.Success -> {
+                        finalAvatar = uploadResult.url
+                        Log.d("AuthViewModel", "Avatar uploaded via Appwrite proxy in step 1: $finalAvatar")
+                    }
+                    is AppwriteUploader.UploadResult.Error -> {
+                        Log.e("AuthViewModel", "Failed to upload avatar in step 1: ${uploadResult.message}")
+                        onError("Failed to upload avatar: ${uploadResult.message}")
+                        return@launch
                     }
                 }
-                if (inputStream != null) {
-                    val bytes = inputStream.readBytes()
-                    inputStream.close()
-                    val mediaType = "image/*".toMediaTypeOrNull()
-                    val requestFile = bytes.toRequestBody(mediaType, 0, bytes.size)
-                    val supaUid = SupabaseSessionManager.getUserId(context) ?: "anon"
-                    val filename = "avatar_${supaUid}_${System.currentTimeMillis()}.jpg"
-                    val body = okhttp3.MultipartBody.Part.createFormData("file", filename, requestFile)
-                    val bearerAuth = SupabaseSessionManager.getBearerToken(context)
-                    val response = SupabaseClient.api.uploadAvatar(
-                        auth = bearerAuth,
-                        filename = filename,
-                        file = body
-                    )
-                    if (response.isSuccessful) {
-                        val baseUrl = BuildConfig.SUPABASE_URL.let {
-                            if (!it.startsWith("http")) "https://$it" else it
-                        }.trimEnd('/')
-                        finalAvatar = "$baseUrl/storage/v1/object/public/avatars/$filename"
-                    }
+
+                if (!finalAvatar.startsWith("http://") && !finalAvatar.startsWith("https://")) {
+                    onError("Failed to obtain valid avatar upload URL.")
+                    return@launch
                 }
-            } catch (e: Exception) {
-                Log.e("AuthViewModel", "Avatar upload exception", e)
             }
 
             patchProfileStep(
                 context = context,
                 updates = mapOf(
-                    "username" to username,
+                    "username" to cleanUsername,
                     "profile_name" to displayName,
                     "avatar_url" to finalAvatar
                 ),
@@ -2376,74 +2399,129 @@ class AuthViewModel : ViewModel() {
             viewModelScope.launch {
                 val cleanUsername = username.trim().lowercase()
                 var finalAvatar = avatar
-                var finalCover = coverUrl
+                var finalCover = coverUrl?.trim()?.ifBlank { null }
+
+                SupabaseSessionManager.ensureActiveSession(context)
                 val supaUid = SupabaseSessionManager.getUserId(context) ?: currentState.user.uid
-                val bearerAuth = SupabaseSessionManager.getBearerToken(context)
+                val bearerAuth = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                    ?: SupabaseSessionManager.getBearerToken(context)
+
+                val baseUrl = BuildConfig.SUPABASE_URL.let {
+                    if (!it.startsWith("http")) "https://$it" else it
+                }.trimEnd('/')
 
                 try {
-                    // 1. Upload avatar to Supabase Storage if it's a local URI or file path
-                    var avatarInputStream: java.io.InputStream? = null
-                    if (avatar.startsWith("content://")) {
-                        val uri = android.net.Uri.parse(avatar)
-                        avatarInputStream = context.contentResolver.openInputStream(uri)
-                    } else if (avatar.startsWith("/") || avatar.startsWith("file://")) {
-                        val purePath = avatar.removePrefix("file://")
-                        val file = java.io.File(purePath)
-                        if (file.exists()) {
-                            avatarInputStream = java.io.FileInputStream(file)
+                    // 1. Upload avatar to Appwrite Storage proxy if local URI selected
+                    if (avatar.startsWith("content://") || avatar.startsWith("file://") || avatar.startsWith("/")) {
+                        var avatarBytes: ByteArray? = null
+                        try {
+                            if (avatar.startsWith("content://")) {
+                                val uri = android.net.Uri.parse(avatar)
+                                context.contentResolver.openInputStream(uri)?.use { avatarBytes = it.readBytes() }
+                            } else {
+                                val purePath = avatar.removePrefix("file://")
+                                val file = java.io.File(purePath)
+                                if (file.exists()) avatarBytes = file.readBytes()
+                            }
+                        } catch (e: Exception) {
+                            Log.e("AuthViewModel", "Error reading avatar file bytes", e)
+                            onError?.invoke("Failed to read selected avatar photo: ${e.message}")
+                            return@launch
                         }
-                    }
-                    if (avatarInputStream != null) {
-                        val bytes = avatarInputStream.readBytes()
-                        avatarInputStream.close()
-                        val mediaType = "image/*".toMediaTypeOrNull()
-                        val requestFile = bytes.toRequestBody(mediaType, 0, bytes.size)
-                        val filename = "avatar_${supaUid}_${System.currentTimeMillis()}.jpg"
-                        val body = okhttp3.MultipartBody.Part.createFormData("file", filename, requestFile)
-                        val response = SupabaseClient.api.uploadAvatar(filename = filename, file = body)
-                        if (response.isSuccessful) {
-                            val baseUrl = BuildConfig.SUPABASE_URL.let {
-                                if (!it.startsWith("http")) "https://$it" else it
-                            }.trimEnd('/')
-                            finalAvatar = "$baseUrl/storage/v1/object/public/avatars/$filename"
-                            Log.d("AuthViewModel", "Avatar uploaded to Supabase: $finalAvatar")
-                        } else {
-                            Log.e("AuthViewModel", "Failed to upload avatar: ${response.code()} ${response.message()}")
+
+                        if (avatarBytes == null || avatarBytes!!.isEmpty()) {
+                            Log.e("AuthViewModel", "Avatar image bytes are empty")
+                            onError?.invoke("Selected avatar image could not be read.")
+                            return@launch
+                        }
+
+                        val bytes = avatarBytes!!
+                        val uniqueId = java.util.UUID.randomUUID().toString()
+                        val filename = "avatar_${supaUid}_${uniqueId}_${System.currentTimeMillis()}.jpg"
+
+                        val uploadResult = AppwriteUploader.upload(
+                            context = context,
+                            fileBytes = bytes,
+                            filename = filename,
+                            mimeType = "image/jpeg",
+                            purpose = "avatar",
+                            folderSuffix = null
+                        )
+
+                        when (uploadResult) {
+                            is AppwriteUploader.UploadResult.Success -> {
+                                finalAvatar = uploadResult.url
+                                Log.d("AuthViewModel", "Avatar uploaded via Appwrite proxy: $finalAvatar")
+                            }
+                            is AppwriteUploader.UploadResult.Error -> {
+                                Log.e("AuthViewModel", "Failed to upload avatar: ${uploadResult.message}")
+                                onError?.invoke("Failed to upload avatar: ${uploadResult.message}")
+                                return@launch
+                            }
                         }
                     }
 
-                    // 2. Upload cover photo to Supabase Storage bucket 'covers' at path covers/{auth_user_id}/{filename}
-                    if (!coverUrl.isNullOrBlank() && (coverUrl.startsWith("content://") || coverUrl.startsWith("file://") || coverUrl.startsWith("/"))) {
-                        var coverInputStream: java.io.InputStream? = null
-                        if (coverUrl.startsWith("content://")) {
-                            val uri = android.net.Uri.parse(coverUrl)
-                            coverInputStream = context.contentResolver.openInputStream(uri)
-                        } else {
-                            val purePath = coverUrl.removePrefix("file://")
-                            val file = java.io.File(purePath)
-                            if (file.exists()) {
-                                coverInputStream = java.io.FileInputStream(file)
-                            }
-                        }
-                        if (coverInputStream != null) {
-                            val bytes = coverInputStream.readBytes()
-                            coverInputStream.close()
-                            val filename = "cover_${System.currentTimeMillis()}.jpg"
-                            val storagePath = "$supaUid/$filename"
-                            val mediaType = "image/*".toMediaTypeOrNull()
-                            val requestFile = bytes.toRequestBody(mediaType, 0, bytes.size)
-                            val body = okhttp3.MultipartBody.Part.createFormData("file", filename, requestFile)
-                            val response = SupabaseClient.api.uploadCoverMultipart(auth = bearerAuth, path = storagePath, file = body)
-                            if (response.isSuccessful) {
-                                val baseUrl = BuildConfig.SUPABASE_URL.let {
-                                    if (!it.startsWith("http")) "https://$it" else it
-                                }.trimEnd('/')
-                                finalCover = "$baseUrl/storage/v1/object/public/covers/$storagePath"
-                                Log.d("AuthViewModel", "Cover uploaded to Supabase: $finalCover")
+                    // 2. Upload cover photo to Appwrite Storage proxy if local URI selected
+                    if (!finalCover.isNullOrBlank() && (finalCover.startsWith("content://") || finalCover.startsWith("file://") || finalCover.startsWith("/"))) {
+                        var coverBytes: ByteArray? = null
+                        try {
+                            if (finalCover.startsWith("content://")) {
+                                val uri = android.net.Uri.parse(finalCover)
+                                context.contentResolver.openInputStream(uri)?.use { coverBytes = it.readBytes() }
                             } else {
-                                Log.e("AuthViewModel", "Failed to upload cover: ${response.code()} ${response.message()}")
+                                val purePath = finalCover.removePrefix("file://")
+                                val file = java.io.File(purePath)
+                                if (file.exists()) coverBytes = file.readBytes()
+                            }
+                        } catch (e: Exception) {
+                            Log.e("AuthViewModel", "Error reading cover file bytes", e)
+                            onError?.invoke("Failed to read selected cover photo: ${e.message}")
+                            return@launch
+                        }
+
+                        if (coverBytes == null || coverBytes!!.isEmpty()) {
+                            Log.e("AuthViewModel", "Cover image bytes are empty")
+                            onError?.invoke("Selected cover image could not be read.")
+                            return@launch
+                        }
+
+                        val bytes = coverBytes!!
+                        val uniqueId = java.util.UUID.randomUUID().toString()
+                        val filename = "cover_${uniqueId}_${System.currentTimeMillis()}.jpg"
+
+                        val uploadResult = AppwriteUploader.upload(
+                            context = context,
+                            fileBytes = bytes,
+                            filename = filename,
+                            mimeType = "image/jpeg",
+                            purpose = "cover",
+                            folderSuffix = null
+                        )
+
+                        when (uploadResult) {
+                            is AppwriteUploader.UploadResult.Success -> {
+                                finalCover = uploadResult.url
+                                Log.d("AuthViewModel", "Cover uploaded via Appwrite proxy: $finalCover")
+                            }
+                            is AppwriteUploader.UploadResult.Error -> {
+                                Log.e("AuthViewModel", "Failed to upload cover: ${uploadResult.message}")
+                                onError?.invoke("Failed to upload cover photo: ${uploadResult.message}")
+                                return@launch
                             }
                         }
+                    }
+
+                    // STRICT SAFEGUARD: Only save HTTP / HTTPS public URLs to database (or preset avatars)!
+                    val isPreset = com.example.ui.components.PresetAvatarList.any { it.second == finalAvatar }
+                    if (!finalAvatar.startsWith("http://") && !finalAvatar.startsWith("https://") && !isPreset) {
+                        Log.e("AuthViewModel", "Prevented saving invalid avatar_url: $finalAvatar")
+                        onError?.invoke("Invalid avatar URL.")
+                        return@launch
+                    }
+                    if (!finalCover.isNullOrBlank() && !finalCover.startsWith("http://") && !finalCover.startsWith("https://")) {
+                        Log.e("AuthViewModel", "Prevented saving invalid cover_url: $finalCover")
+                        onError?.invoke("Invalid cover photo URL.")
+                        return@launch
                     }
 
                     val nativeList = nativeLanguage.split(",").map { it.trim() }.filter { it.isNotEmpty() }
@@ -2507,7 +2585,18 @@ class AuthViewModel : ViewModel() {
                     putString("profile_username_${userId}", cleanUsername)
                     putString("profile_displayName_${userId}", displayName)
                     putString("profile_avatar_${userId}", finalAvatar)
-                    if (!finalCover.isNullOrBlank()) putString("profile_cover_${userId}", finalCover)
+                    if (supaUid != userId) {
+                        putString("profile_username_${supaUid}", cleanUsername)
+                        putString("profile_displayName_${supaUid}", displayName)
+                        putString("profile_avatar_${supaUid}", finalAvatar)
+                    }
+                    if (!finalCover.isNullOrBlank()) {
+                        putString("profile_cover_${userId}", finalCover)
+                        if (supaUid != userId) putString("profile_cover_${supaUid}", finalCover)
+                    } else {
+                        remove("profile_cover_${userId}")
+                        if (supaUid != userId) remove("profile_cover_${supaUid}")
+                    }
                     putString("profile_dob_${userId}", dob)
                     putString("profile_bio_${userId}", bio ?: dob)
                     if (age != null && age > 0) putInt("profile_age_${userId}", age)
@@ -2521,6 +2610,13 @@ class AuthViewModel : ViewModel() {
                     putBoolean("profile_onboarding_complete_${userId}", true)
                     apply()
                 }
+
+                // Invalidate Coil cache so fresh avatar is loaded
+                try {
+                    val loader = coil.Coil.imageLoader(context)
+                    loader.memoryCache?.clear()
+                    loader.diskCache?.clear()
+                } catch (_: Exception) {}
 
                 val updatedUser = currentState.user.copy(
                     username = cleanUsername,
@@ -2553,6 +2649,7 @@ class AuthViewModel : ViewModel() {
         val username = prefs.getString("profile_username_${userId}", null)
         val displayName = prefs.getString("profile_displayName_${userId}", null)
         val avatar = prefs.getString("profile_avatar_${userId}", null)
+        val coverVal = prefs.getString("profile_cover_${userId}", null)
         val ageVal = prefs.getInt("profile_age_${userId}", 0).takeIf { it > 0 }
         val dob = prefs.getString("profile_dob_${userId}", null)
         val bioVal = prefs.getString("profile_bio_${userId}", null)
@@ -2574,6 +2671,7 @@ class AuthViewModel : ViewModel() {
             isEmailVerified = resolvedVerified,
             username = username,
             avatar = avatar,
+            coverUrl = coverVal,
             age = ageVal,
             dob = dob,
             bio = bioVal ?: dob,
@@ -2592,6 +2690,7 @@ class AuthViewModel : ViewModel() {
             username = username ?: currentProfile.username,
             displayName = displayName ?: currentProfile.displayName,
             avatar = avatar ?: currentProfile.avatar,
+            coverUrl = coverVal ?: currentProfile.coverUrl,
             age = ageVal ?: currentProfile.age,
             dob = dob ?: currentProfile.dob,
             bio = bioVal ?: currentProfile.bio ?: dob,
@@ -2608,9 +2707,11 @@ class AuthViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 val bearerToken = SupabaseSessionManager.getBearerToken(context)
+                val supaUid = SupabaseSessionManager.getUserId(context)
+                val queryUid = if (supaUid != null && SupabaseSessionManager.isValidUuid(supaUid)) supaUid else userId
                 val response = SupabaseClient.api.getProfile(
                     auth = bearerToken,
-                    authUserIdEq = "eq.$userId"
+                    authUserIdEq = "eq.$queryUid"
                 )
                 if (response.isSuccessful) {
                     val supaProfiles = response.body()
@@ -2626,6 +2727,18 @@ class AuthViewModel : ViewModel() {
                             putString("profile_username_${userId}", supaProfile.username ?: "")
                             putString("profile_displayName_${userId}", supaProfile.profile_name ?: "")
                             putString("profile_avatar_${userId}", supaProfile.avatar_url ?: "")
+                            if (supaUid != null && supaUid != userId) {
+                                putString("profile_username_${supaUid}", supaProfile.username ?: "")
+                                putString("profile_displayName_${supaUid}", supaProfile.profile_name ?: "")
+                                putString("profile_avatar_${supaUid}", supaProfile.avatar_url ?: "")
+                            }
+                            if (!supaProfile.cover_url.isNullOrBlank()) {
+                                putString("profile_cover_${userId}", supaProfile.cover_url)
+                                if (supaUid != null && supaUid != userId) putString("profile_cover_${supaUid}", supaProfile.cover_url)
+                            } else {
+                                remove("profile_cover_${userId}")
+                                if (supaUid != null && supaUid != userId) remove("profile_cover_${supaUid}")
+                            }
                             putInt("profile_age_${userId}", supaProfile.age ?: (ageVal ?: 0))
                             if (!supaBio.isNullOrBlank()) putString("profile_bio_${userId}", supaBio)
                             putString("profile_gender_${userId}", supaProfile.gender ?: "")
@@ -2643,6 +2756,7 @@ class AuthViewModel : ViewModel() {
                             username = supaProfile.username ?: mergedProfile.username,
                             displayName = supaProfile.profile_name ?: mergedProfile.displayName,
                             avatar = supaProfile.avatar_url ?: mergedProfile.avatar,
+                            coverUrl = supaProfile.cover_url ?: mergedProfile.coverUrl,
                             age = supaProfile.age ?: mergedProfile.age,
                             bio = supaBio ?: mergedProfile.bio,
                             city = cityVal ?: mergedProfile.city,

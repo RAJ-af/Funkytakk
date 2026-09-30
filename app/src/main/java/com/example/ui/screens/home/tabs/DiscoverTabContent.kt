@@ -62,6 +62,7 @@ data class DiscoverPartner(
     val age: Int,
     val isOnline: Boolean,
     val avatarUrl: String,
+    val coverUrl: String? = null,
     val countryCode: String,
     val nativeLang: String,
     val learningLang: String,
@@ -70,7 +71,9 @@ data class DiscoverPartner(
     val vibe: String = "Chill",
     val isWaved: Boolean = false,
     val nativeLangFull: String = "",
-    val learningLangFull: String = ""
+    val learningLangFull: String = "",
+    val city: String = "",
+    val country: String = ""
 )
 
 fun formatLanguageToCode(langStr: String): String {
@@ -242,6 +245,7 @@ fun DiscoverTabContent(
                         age = p.age ?: 21,
                         isOnline = p.is_online ?: false,
                         avatarUrl = p.avatar_url ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500",
+                        coverUrl = p.cover_url,
                         countryCode = resolveCountryCode(p.country, p.country_code),
                         nativeLang = formatLanguagesToCodes(rawNativeList),
                         learningLang = formatLanguagesToCodes(rawLearningList),
@@ -250,7 +254,9 @@ fun DiscoverTabContent(
                         vibe = if (p.is_online == true) "Same Vibe" else "Chill",
                         isWaved = false,
                         nativeLangFull = rawNativeList.joinToString(", "),
-                        learningLangFull = rawLearningList.joinToString(", ")
+                        learningLangFull = rawLearningList.joinToString(", "),
+                        city = p.city ?: "",
+                        country = p.country ?: ""
                     )
                 }
             } else {
@@ -792,6 +798,24 @@ fun DiscoverTabContent(
                     )
                 }
 
+                val locStr = when {
+                    user.city.isNotBlank() && user.country.isNotBlank() -> {
+                        if (user.city.equals(user.country, ignoreCase = true)) user.country
+                        else "${user.city}, ${user.country}"
+                    }
+                    user.city.isNotBlank() -> user.city
+                    user.country.isNotBlank() -> user.country
+                    else -> ""
+                }
+                if (locStr.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        com.example.ui.screens.ProfileLocationPinIcon(modifier = Modifier.size(12.dp), color = Color(0xFF64748B))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(text = locStr, fontSize = 12.sp, color = Color(0xFF64748B), fontWeight = FontWeight.Medium)
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(8.dp))
 
                 // Language pair badge
@@ -894,6 +918,7 @@ fun DiscoverTabContent(
             username = partner.name.lowercase().replace(" ", ""),
             profileName = partner.name,
             avatarUrl = partner.avatarUrl,
+            coverUrl = partner.coverUrl ?: "",
             countryCode = partner.countryCode,
             bio = partner.bio,
             onBack = { showFullProfileScreenWithFeed = null },

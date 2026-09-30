@@ -297,7 +297,7 @@ fun HomeScreen(
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.e("HomeScreen", "Error refreshing rooms & participants from Supabase", e)
+                Log.w("HomeScreen", "Supabase database table access temporarily unavailable or undergoing schema maintenance: ${e.message}")
             }
         }
 

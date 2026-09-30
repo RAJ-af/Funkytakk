@@ -47,6 +47,7 @@ import com.example.AuthViewModel
 import com.example.UserProfile
 import com.example.ui.components.CircleFlag
 import com.example.ui.components.LocationConsentDialog
+import com.example.ui.components.resolveAvatarModel
 import com.example.ui.screens.CountryData
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -68,8 +69,8 @@ fun EditProfileScreen(
     // Screen States mapping exactly to UserProfile model
     var editUsername by remember { mutableStateOf(currentUserProfile.username ?: "") }
     var editDisplayName by remember { mutableStateOf(currentUserProfile.displayName ?: "") }
-    var editAvatar by remember { mutableStateOf(currentUserProfile.avatar ?: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=300") }
-    var editCover by remember { mutableStateOf(currentUserProfile.coverUrl ?: "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800") }
+    var editAvatar by remember { mutableStateOf(currentUserProfile.avatar.orEmpty()) }
+    var editCover by remember { mutableStateOf(currentUserProfile.coverUrl.orEmpty()) }
 
     var editBio by remember { mutableStateOf(currentUserProfile.bio ?: savedBio ?: currentUserProfile.dob ?: "Excited to practice languages and make new friends!") }
     var editAge by remember { mutableStateOf((currentUserProfile.age ?: savedAge ?: 28).toString()) }
@@ -191,6 +192,7 @@ fun EditProfileScreen(
 
     // Action to commit saved changes to Supabase & SharedPrefs
     fun saveProfileChanges() {
+        if (isSaving) return
         errorMessage = null
         val cleanUsername = editUsername.trim().lowercase()
         if (cleanUsername.isBlank()) {
@@ -221,7 +223,7 @@ fun EditProfileScreen(
                         username = cleanUsername,
                         displayName = editDisplayName.trim(),
                         avatar = editAvatar,
-                        coverUrl = editCover,
+                        coverUrl = editCover.trim().ifBlank { null },
                         dob = editBio,
                         gender = editGender,
                         nativeLanguage = nativeLanguages.joinToString(","),
@@ -364,8 +366,20 @@ fun EditProfileScreen(
                                 .background(Color.White)
                                 .border(3.dp, Color.White, CircleShape)
                         ) {
+                            val avatarModel = resolveAvatarModel(editAvatar)
+                            val imageRequest = remember(avatarModel) {
+                                coil.request.ImageRequest.Builder(context)
+                                    .data(avatarModel)
+                                    .crossfade(true)
+                                    .memoryCacheKey(avatarModel.toString())
+                                    .diskCacheKey(avatarModel.toString())
+                                    .placeholder(com.example.R.drawable.male_avatar_1781324792347)
+                                    .error(com.example.R.drawable.male_avatar_1781324792347)
+                                    .fallback(com.example.R.drawable.male_avatar_1781324792347)
+                                    .build()
+                            }
                             AsyncImage(
-                                model = editAvatar,
+                                model = imageRequest,
                                 contentDescription = "Profile Avatar",
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Crop
