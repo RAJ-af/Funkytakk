@@ -118,7 +118,7 @@ r_sha256 = (re.search(r"SHA256:\s+([0-9A-Fa-f:]+)", rel_out) or ["", "Unknown"])
 txt_content = f"""================================================================================
 FUNKYTALK ANDROID APP - SHA FINGERPRINTS & KEYSTORE DETAILS
 ================================================================================
-Package Name: com.aistudio.funkytalk.kxmpzq
+Package Name: com.funkytalk.app
 
 [1] DEBUG KEYSTORE (Used by app-debug.apk):
 --------------------------------------------------------------------------------
@@ -151,7 +151,7 @@ HOW TO FIX GOOGLE SIGN-IN (ERROR 10) IN FIREBASE:
 ================================================================================
 1. Open Google Firebase Console: https://console.firebase.google.com/
 2. Go to Project Settings (Gear icon) -> General.
-3. Under "Your apps", find "com.aistudio.funkytalk.kxmpzq".
+3. Under "Your apps", find "com.funkytalk.app".
 4. Click "Add fingerprint".
 5. Paste the SHA-1 for the APK you are installing:
    - For Debug APK (app-debug.apk):
@@ -208,7 +208,7 @@ if github_summary:
 ### 📱 Debug Keystore (Used by `app-debug.apk`)
 | Property | Value |
 | :--- | :--- |
-| **Package Name** | `com.aistudio.funkytalk.kxmpzq` |
+| **Package Name** | `com.funkytalk.app` |
 | **Keystore File** | `debug.keystore` (attached below) |
 | **Alias** | `androiddebugkey` |
 | **Password** | `android` |
@@ -241,7 +241,7 @@ if github_summary:
 ### 🚀 How to Add to Firebase Console:
 1. Open [Firebase Console](https://console.firebase.google.com/)
 2. Open your project -> **Project Settings** ⚙️ -> **General** tab
-3. Under **Your apps**, select `com.aistudio.funkytalk.kxmpzq`
+3. Under **Your apps**, select `com.funkytalk.app`
 4. Click **Add fingerprint** and paste the **SHA-1**
 5. Click **Save**! Google Sign-in will work immediately.
 """

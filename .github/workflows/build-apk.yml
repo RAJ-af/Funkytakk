@@ -119,7 +119,7 @@ jobs:
                 "client_info": {
                   "mobilesdk_app_id": "1:1093102729820:android:adf5504386d9f6f184c499",
                   "android_client_info": {
-                    "package_name": "com.aistudio.funkytalk.kxmpzq"
+                    "package_name": "com.funkytalk.app"
                   }
                 },
                 "oauth_client": [
@@ -127,7 +127,7 @@ jobs:
                     "client_id": "1093102729820-4mdub6gveu7mbl6hf16e7pu1tvk2smeb.apps.googleusercontent.com",
                     "client_type": 1,
                     "android_info": {
-                      "package_name": "com.aistudio.funkytalk.kxmpzq",
+                      "package_name": "com.funkytalk.app",
                       "certificate_hash": "ca4a705395fcc3ec0316deff4392ca8a2bb5d164"
                     }
                   },
@@ -196,7 +196,7 @@ jobs:
             ### 🚀 FunkyTalk Automated Android APK Build #${{ github.run_number }}
             
             - **Commit**: `${{ github.sha }}`
-            - **Package**: `com.aistudio.funkytalk.kxmpzq`
+            - **Package**: `com.funkytalk.app`
             - **Type**: Debug APK (Ready to install directly on Android phones)
             
             ---
@@ -223,7 +223,7 @@ jobs:
             
             ### 🛠️ Google Sign-in Setup in Firebase (Error 10 Fix):
             1. Open [Firebase Console](https://console.firebase.google.com/) -> **Project Settings** (Gear icon) -> **General**.
-            2. Scroll down to **Your apps** -> Select `com.aistudio.funkytalk.kxmpzq`.
+            2. Scroll down to **Your apps** -> Select `com.funkytalk.app`.
             3. Click **Add fingerprint** and paste the **SHA-1** above.
             4. Save!
             
