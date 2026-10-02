@@ -284,9 +284,10 @@ object GroupChatRepository {
      */
     suspend fun acceptGroupInvite(context: Context, groupId: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            // 1. Check current logged-in Supabase session details
+            // 1. Ensure active Supabase session is refreshed and valid
+            val activeUid = SupabaseSessionManager.ensureActiveSession(context)
             val sessionToken = SupabaseSessionManager.getAuthenticatedBearerToken(context)
-            val sessionUserId = SupabaseSessionManager.getUserId(context)
+            val sessionUserId = activeUid ?: SupabaseSessionManager.getUserId(context)
             val jwtAuthUid = SupabaseSessionManager.extractUserIdFromJwt(
                 SupabaseSessionManager.getAccessToken(context)
             )
@@ -295,63 +296,71 @@ object GroupChatRepository {
             val firebaseUid = firebaseUser?.uid
 
             Log.i(TAG, "=== [ACCEPT GROUP INVITE DIAGNOSTIC] ===")
-            Log.i(TAG, "Group ID: $groupId")
+            Log.i(TAG, "Requested Group ID: '$groupId' (length=${groupId.length})")
             Log.i(TAG, "Firebase User: uid=$firebaseUid, email=$firebaseEmail")
             Log.i(TAG, "Supabase Session: userId=$sessionUserId, JWT auth.uid()=$jwtAuthUid")
             Log.i(TAG, "Bearer Token Present: ${!sessionToken.isNullOrBlank()}")
 
-            if (sessionToken.isNullOrBlank()) {
+            if (sessionToken.isNullOrBlank() || sessionUserId.isNullOrBlank()) {
                 Log.e(TAG, "Accept invite rejected: No authenticated Supabase session found.")
                 return@withContext Result.failure(Exception("Not authenticated. Please log in again."))
             }
 
-            // 2. Fetch group_members record to verify invited user_id vs session auth.uid()
+            var targetGroupId = groupId.trim()
+
+            // 2. Fetch group_members record to verify pending invite and target group_id
             try {
-                val memberResp = SupabaseClient.api.getGroupMembers(
+                // Check if direct groupId has pending invite
+                val directMemberResp = SupabaseClient.api.getGroupMembers(
                     apiKey = BuildConfig.SUPABASE_ANON_KEY,
                     auth = sessionToken,
-                    groupIdFilter = "eq.$groupId"
+                    groupIdFilter = "eq.$targetGroupId",
+                    userIdFilter = "eq.$sessionUserId"
                 )
-                if (memberResp.isSuccessful) {
-                    val members = memberResp.body().orEmpty()
-                    Log.i(TAG, "Total group_members for group $groupId: ${members.size}")
-                    val invitedMembers = members.filter { it.status == "invited" }
-                    for (m in members) {
-                        Log.i(TAG, "group_member: user_id=${m.user_id}, role=${m.role}, status=${m.status}")
-                    }
-                    val isMyUidInvited = members.any { it.user_id == sessionUserId && it.status == "invited" }
-                    val isMyJwtUidInvited = members.any { it.user_id == jwtAuthUid && it.status == "invited" }
-                    if (!isMyUidInvited && !isMyJwtUidInvited) {
-                        val invitedIds = invitedMembers.map { it.user_id }
-                        Log.w(
-                            TAG,
-                            "⚠️ ACCOUNT MISMATCH DETECTED: Logged in auth.uid() is '$jwtAuthUid' (session: '$sessionUserId'), but invited user_id(s) in group_members are: $invitedIds"
-                        )
-                    } else {
-                        Log.i(TAG, "✅ Account match verified: session user_id '$sessionUserId' has a pending invite in group_members.")
+                val directMatches = directMemberResp.body().orEmpty()
+                val hasDirectPending = directMatches.any { it.status == "invited" }
+
+                if (!hasDirectPending) {
+                    // Fallback check: lookup user's pending invites across all groups
+                    val allPendingResp = SupabaseClient.api.getGroupMembers(
+                        apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                        auth = sessionToken,
+                        userIdFilter = "eq.$sessionUserId",
+                        statusFilter = "eq.invited"
+                    )
+                    val pendingList = allPendingResp.body().orEmpty()
+                    Log.i(TAG, "User '$sessionUserId' has ${pendingList.size} pending invite(s) in group_members: ${pendingList.map { it.group_id }}")
+                    
+                    val matchingInvite = pendingList.firstOrNull { it.group_id.equals(targetGroupId, ignoreCase = true) }
+                        ?: pendingList.firstOrNull()
+                    
+                    if (matchingInvite != null) {
+                        Log.i(TAG, "Found matching pending group_id: '${matchingInvite.group_id}' (replacing requested '$targetGroupId')")
+                        targetGroupId = matchingInvite.group_id
                     }
                 } else {
-                    Log.w(TAG, "Could not pre-fetch group_members: ${memberResp.code()} ${memberResp.errorBody()?.string()}")
+                    Log.i(TAG, "✅ Direct match verified: session user '$sessionUserId' is invited to group '$targetGroupId'")
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Pre-check getGroupMembers check threw: ${e.message}")
+                Log.w(TAG, "Pre-check getGroupMembers threw: ${e.message}")
             }
 
+            Log.i(TAG, "Sending accept_group_invite RPC with parameter p_group_id='$targetGroupId'")
             val resp = SupabaseClient.api.acceptGroupInvite(
                 apiKey = BuildConfig.SUPABASE_ANON_KEY,
                 auth = sessionToken,
-                body = AcceptGroupInviteRequest(p_group_id = groupId)
+                body = AcceptGroupInviteRequest(p_group_id = targetGroupId)
             )
 
             if (resp.isSuccessful) {
-                Log.i(TAG, "✅ accept_group_invite RPC succeeded for group $groupId by user $sessionUserId")
-                database?.groupConversationDao()?.updateStatus(groupId, "joined")
+                Log.i(TAG, "✅ accept_group_invite RPC succeeded for group $targetGroupId by user $sessionUserId")
+                database?.groupConversationDao()?.updateStatus(targetGroupId, "joined")
                 syncUserGroups(context)
                 fetchAndProcessPendingGroupMessages(context)
                 Result.success(Unit)
             } else {
                 val err = resp.errorBody()?.string() ?: "Failed to accept invite"
-                Log.e(TAG, "❌ accept_group_invite RPC failed (${resp.code()}): $err (Logged in auth.uid: $jwtAuthUid / $sessionUserId)")
+                Log.e(TAG, "❌ accept_group_invite RPC failed (${resp.code()}): $err (p_group_id: '$targetGroupId', auth.uid: $jwtAuthUid / $sessionUserId)")
                 Result.failure(Exception(err))
             }
         } catch (e: Exception) {
@@ -366,20 +375,24 @@ object GroupChatRepository {
      */
     suspend fun declineGroupInvite(context: Context, groupId: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            SupabaseSessionManager.ensureActiveSession(context)
             val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
                 ?: return@withContext Result.failure(Exception("Not authenticated"))
 
+            val targetGroupId = groupId.trim()
+            Log.i(TAG, "Sending decline_group_invite RPC with parameter p_group_id='$targetGroupId'")
             val resp = SupabaseClient.api.declineGroupInvite(
                 apiKey = BuildConfig.SUPABASE_ANON_KEY,
                 auth = token,
-                body = DeclineGroupInviteRequest(p_group_id = groupId)
+                body = DeclineGroupInviteRequest(p_group_id = targetGroupId)
             )
 
             if (resp.isSuccessful) {
-                database?.groupConversationDao()?.deleteGroup(groupId)
+                database?.groupConversationDao()?.deleteGroup(targetGroupId)
                 Result.success(Unit)
             } else {
                 val err = resp.errorBody()?.string() ?: "Failed to decline invite"
+                Log.e(TAG, "❌ decline_group_invite RPC failed (${resp.code()}): $err")
                 Result.failure(Exception(err))
             }
         } catch (e: Exception) {

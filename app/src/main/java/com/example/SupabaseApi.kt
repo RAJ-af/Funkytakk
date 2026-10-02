@@ -958,7 +958,8 @@ interface SupabaseApi {
     @GET("rest/v1/notifications?select=*&order=created_at.desc")
     suspend fun getNotifications(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String
+        @Header("Authorization") auth: String,
+        @Query("user_id") userIdFilter: String? = null // e.g. "eq.<uuid>"
     ): Response<List<SupabaseNotification>>
 
     @PATCH("rest/v1/notifications")

@@ -34,8 +34,10 @@ object NotificationsManager {
                 VoiceRoomRealtimeManager.events.collect { event ->
                     when (event) {
                         is RealtimeTableEvent.NotificationChanged -> {
-                            Log.d(TAG, "Notification changed via Realtime: ${event.eventType}")
-                            fetchNotifications(context)
+                            if (event.userId.isNullOrBlank() || event.userId == currentUserId) {
+                                Log.d(TAG, "Notification changed via Realtime for user $currentUserId: ${event.eventType}")
+                                fetchNotifications(context)
+                            }
                         }
                         is RealtimeTableEvent.Reconnected -> {
                             fetchNotifications(context)
@@ -48,30 +50,47 @@ object NotificationsManager {
         fetchNotifications(context)
     }
 
+    fun clear() {
+        currentUserId = null
+        _notifications.value = emptyList()
+        _unreadCount.value = 0
+        _isLoading.value = false
+    }
+
     fun fetchNotifications(context: Context) {
         scope.launch {
             try {
                 val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
-                if (token.isNullOrBlank()) {
-                    Log.d(TAG, "fetchNotifications: No active session, skipping")
+                val uid = SupabaseSessionManager.getUserId(context)
+                if (token.isNullOrBlank() || uid.isNullOrBlank()) {
+                    Log.d(TAG, "fetchNotifications: No active session or user ID, clearing notifications")
+                    _notifications.value = emptyList()
+                    _unreadCount.value = 0
                     return@launch
                 }
 
-                val uid = SupabaseSessionManager.getUserId(context)
-                if (uid != null && uid != currentUserId) {
+                if (uid != currentUserId) {
+                    // Switched user account: clear prior account's data immediately
+                    _notifications.value = emptyList()
+                    _unreadCount.value = 0
                     currentUserId = uid
                     VoiceRoomRealtimeManager.subscribeUserNotifications(uid)
                 }
 
                 _isLoading.value = true
-                val response = SupabaseClient.api.getNotifications(auth = token)
+                // Strictly filter on database query by user_id = eq.$uid
+                val response = SupabaseClient.api.getNotifications(
+                    auth = token,
+                    userIdFilter = "eq.$uid"
+                )
                 if (response.isSuccessful && response.body() != null) {
-                    val list = response.body()!!
+                    // Strictly filter on client side: only ever show the current session's own rows
+                    val list = response.body()!!.filter { it.user_id == uid }
                     val prevUnread = _unreadCount.value
                     _notifications.value = list
                     val newUnread = list.count { !it.is_read }
                     _unreadCount.value = newUnread
-                    Log.d(TAG, "Fetched ${list.size} notifications, unread: $newUnread")
+                    Log.d(TAG, "Fetched ${list.size} notifications for user $uid, unread: $newUnread")
 
                     // If new unread notifications arrived, trigger system notification
                     if (newUnread > prevUnread) {

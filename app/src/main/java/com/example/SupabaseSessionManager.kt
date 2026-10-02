@@ -263,5 +263,8 @@ object SupabaseSessionManager {
         cachedRefreshToken = null
         cachedUserId = null
         getPrefs(context).edit().clear().apply()
+        try {
+            NotificationsManager.clear()
+        } catch (_: Exception) {}
     }
 }

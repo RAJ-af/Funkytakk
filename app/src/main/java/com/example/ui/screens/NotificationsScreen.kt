@@ -52,56 +52,16 @@ fun NotificationsScreen(
         onBack()
     }
 
-    // High quality sample notifications fallback if live list is empty
-    val fallbackNotifications = remember {
-        listOf(
-            SupabaseNotification(
-                id = "sample_1",
-                title = "Welcome to FunkyTalk",
-                message = "Your encrypted chat vault and language exchange profile are active.",
-                type = "system",
-                is_read = false,
-                created_at = "Just now"
-            ),
-            SupabaseNotification(
-                id = "sample_2",
-                title = "Support Team Reply",
-                message = "Your feedback regarding E2EE key sync has been updated.",
-                type = "support",
-                report_id = "rep_102",
-                is_read = false,
-                created_at = "10m ago"
-            ),
-            SupabaseNotification(
-                id = "sample_3",
-                title = "Language Room Invite",
-                message = "Yuki Tanaka invited you to join Korean & English Exchange Room.",
-                type = "room",
-                is_read = true,
-                created_at = "2h ago"
-            ),
-            SupabaseNotification(
-                id = "sample_4",
-                title = "Security & Privacy Audit",
-                message = "Zero data leaks detected. Your encrypted vault is 100% secure.",
-                type = "moderation",
-                is_read = true,
-                created_at = "1d ago"
-            )
-        )
-    }
-
     val displayNotifications = remember(notificationsState, selectedFilter) {
-        val baseList = if (notificationsState.isEmpty()) fallbackNotifications else notificationsState
         when (selectedFilter) {
-            "Unread" -> baseList.filter { !it.is_read }
-            "Support" -> baseList.filter { it.type?.lowercase() in listOf("support", "support_message", "support_reply") }
-            "System" -> baseList.filter { it.type?.lowercase() in listOf("system", "moderation", "warning") }
-            else -> baseList
+            "Unread" -> notificationsState.filter { !it.is_read }
+            "Support" -> notificationsState.filter { it.type?.lowercase() in listOf("support", "support_message", "support_reply") }
+            "System" -> notificationsState.filter { it.type?.lowercase() in listOf("system", "moderation", "warning") }
+            else -> notificationsState
         }
     }
 
-    val totalUnread = if (notificationsState.isEmpty()) 2 else unreadCountState
+    val totalUnread = unreadCountState
 
     Scaffold(
         containerColor = Color(0xFFFCFBF7),
@@ -331,19 +291,30 @@ fun NotificationsScreen(
         }
 
         // Group Invite Bottom Sheet
+        val pendingInvitesList by com.example.repository.GroupChatRepository.pendingInvites.collectAsState()
         activeGroupInvite?.let { invite ->
-            val groupId = invite.group_id ?: invite.id
+            val resolvedGroupId = invite.group_id?.takeIf { it.isNotBlank() }
+                ?: pendingInvitesList.firstOrNull { it.name.equals(invite.title?.replace("Invited to ", "", ignoreCase = true)?.trim(), ignoreCase = true) }?.id
+                ?: pendingInvitesList.firstOrNull()?.id
+                ?: ""
             val rawName = invite.title?.replace("Invited to ", "", ignoreCase = true)?.ifBlank { "FunkyTalk Group" } ?: "FunkyTalk Group"
-            GroupInviteSheet(
-                groupId = groupId,
-                groupName = rawName,
-                invitedBy = invite.message,
-                onDismiss = { activeGroupInvite = null },
-                onAccepted = {
-                    activeGroupInvite = null
-                    onBack()
+            if (resolvedGroupId.isNotBlank()) {
+                GroupInviteSheet(
+                    groupId = resolvedGroupId,
+                    groupName = rawName,
+                    invitedBy = invite.message,
+                    onDismiss = { activeGroupInvite = null },
+                    onAccepted = {
+                        activeGroupInvite = null
+                        onBack()
+                    }
+                )
+            } else {
+                // If group_id is not directly known, sync user groups first to resolve
+                LaunchedEffect(invite.id) {
+                    com.example.repository.GroupChatRepository.syncUserGroups(context)
                 }
-            )
+            }
         }
     }
 }
