@@ -25,7 +25,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.BuildConfig
+import com.example.util.ChatBackupConcurrencyManager
+import kotlinx.coroutines.sync.withLock
 import com.example.RecordChatBackupRequest
 import com.example.SupabaseClient
 import com.example.SupabaseSessionManager

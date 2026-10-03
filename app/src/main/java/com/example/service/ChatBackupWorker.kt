@@ -16,9 +16,11 @@ import com.example.SupabaseSessionManager
 import com.example.crypto.ChatBackupArchiveManager
 import com.example.crypto.ChatBackupCryptoManager
 import com.example.crypto.VaultSecurityManager
+import com.example.util.ChatBackupConcurrencyManager
 import com.example.util.ChatBackupPreferencesManager
 import com.example.util.GoogleDriveBackupHelper
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
 
@@ -70,63 +72,64 @@ class ChatBackupWorker(
             try {
                 Log.d(TAG, "Starting auto-backup background execution...")
 
-            val googleAccount = GoogleDriveBackupHelper.getSignedInAccount(appContext)
-                ?: return@withContext Result.failure().also { Log.w(TAG, "No Google Drive account connected") }
+                val googleAccount = GoogleDriveBackupHelper.getSignedInAccount(appContext)
+                    ?: return@withLock Result.failure().also { Log.w(TAG, "No Google Drive account connected") }
 
-            val token = GoogleDriveBackupHelper.fetchOAuthToken(appContext, googleAccount)
-                ?: return@withContext Result.retry().also { Log.w(TAG, "Failed to fetch OAuth token for Drive") }
+                val token = GoogleDriveBackupHelper.fetchOAuthToken(appContext, googleAccount)
+                    ?: return@withLock Result.retry().also { Log.w(TAG, "Failed to fetch OAuth token for Drive") }
 
-            val vaultPassword = ChatBackupPreferencesManager.getCachedVaultPassword(appContext)
-                ?: return@withContext Result.failure().also { Log.w(TAG, "No cached vault password available for auto-backup") }
+                val vaultPassword = ChatBackupPreferencesManager.getCachedVaultPassword(appContext)
+                    ?: return@withLock Result.failure().also { Log.w(TAG, "No cached vault password available for auto-backup") }
 
-            val vaultKey = VaultSecurityManager.getActiveVaultKey()
-            val includesMedia = ChatBackupPreferencesManager.getIncludeMedia(appContext)
+                val vaultKey = VaultSecurityManager.getActiveVaultKey()
+                val includesMedia = ChatBackupPreferencesManager.getIncludeMedia(appContext)
 
-            // 1. Pack archive
-            val archiveBytes = ChatBackupArchiveManager.createArchive(appContext, includesMedia, vaultKey)
+                // 1. Pack archive
+                val archiveBytes = ChatBackupArchiveManager.createArchive(appContext, includesMedia, vaultKey)
 
-            // 2. Encrypt with AES-256-GCM + PBKDF2
-            val encryptedBytes = ChatBackupCryptoManager.encryptBackup(vaultPassword, archiveBytes)
+                // 2. Encrypt with AES-256-GCM + PBKDF2
+                val encryptedBytes = ChatBackupCryptoManager.encryptBackup(vaultPassword, archiveBytes)
 
-            // 3. Upload to Google Drive appDataFolder
-            val uploadResult = GoogleDriveBackupHelper.uploadBackupFile(token, encryptedBytes)
-            if (uploadResult.isFailure) {
-                Log.e(TAG, "Failed to upload backup during background auto-backup", uploadResult.exceptionOrNull())
-                return@withContext Result.retry()
-            }
-
-            val fileId = uploadResult.getOrNull()
-            Log.d(TAG, "Auto-backup uploaded successfully. FileId: $fileId")
-
-            // 4. Update local preferences
-            val now = System.currentTimeMillis()
-            ChatBackupPreferencesManager.setLastBackupTimestamp(appContext, now)
-            ChatBackupPreferencesManager.setLastBackupSizeBytes(appContext, encryptedBytes.size.toLong())
-
-            // 5. Notify Supabase RPC record_chat_backup
-            val supaAuth = SupabaseSessionManager.getBearerToken(appContext)
-            if (!supaAuth.isNullOrBlank()) {
-                try {
-                    val resp = SupabaseClient.api.recordChatBackup(
-                        apiKey = BuildConfig.SUPABASE_ANON_KEY,
-                        auth = supaAuth,
-                        body = RecordChatBackupRequest(
-                            p_size_bytes = encryptedBytes.size.toLong(),
-                            p_format_version = 1,
-                            p_includes_media = includesMedia,
-                            p_key_version = 1
-                        )
-                    )
-                    Log.d(TAG, "Recorded chat backup metadata on Supabase. Code: ${resp.code()}")
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error recording chat backup metadata on Supabase", e)
+                // 3. Upload to Google Drive appDataFolder
+                val uploadResult = GoogleDriveBackupHelper.uploadBackupFile(token, encryptedBytes)
+                if (uploadResult.isFailure) {
+                    Log.e(TAG, "Failed to upload backup during background auto-backup", uploadResult.exceptionOrNull())
+                    return@withLock Result.retry()
                 }
-            }
 
-            Result.success()
-        } catch (e: Exception) {
-            Log.e(TAG, "Unhandled exception in ChatBackupWorker", e)
-            Result.failure()
+                val fileId = uploadResult.getOrNull()
+                Log.d(TAG, "Auto-backup uploaded successfully. FileId: $fileId")
+
+                // 4. Update local preferences
+                val now = System.currentTimeMillis()
+                ChatBackupPreferencesManager.setLastBackupTimestamp(appContext, now)
+                ChatBackupPreferencesManager.setLastBackupSizeBytes(appContext, encryptedBytes.size.toLong())
+
+                // 5. Notify Supabase RPC record_chat_backup
+                val supaAuth = SupabaseSessionManager.getBearerToken(appContext)
+                if (!supaAuth.isNullOrBlank()) {
+                    try {
+                        val resp = SupabaseClient.api.recordChatBackup(
+                            apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                            auth = supaAuth,
+                            body = RecordChatBackupRequest(
+                                p_size_bytes = encryptedBytes.size.toLong(),
+                                p_format_version = 1,
+                                p_includes_media = includesMedia,
+                                p_key_version = 1
+                            )
+                        )
+                        Log.d(TAG, "Recorded chat backup metadata on Supabase. Code: ${resp.code()}")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error recording chat backup metadata on Supabase", e)
+                    }
+                }
+
+                Result.success()
+            } catch (e: Exception) {
+                Log.e(TAG, "Unhandled exception in ChatBackupWorker", e)
+                Result.failure()
+            }
         }
     }
 }
