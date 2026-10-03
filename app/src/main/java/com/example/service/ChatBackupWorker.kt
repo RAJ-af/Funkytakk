@@ -62,8 +62,13 @@ class ChatBackupWorker(
     }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        try {
-            Log.d(TAG, "Starting auto-backup background execution...")
+        if (ChatBackupConcurrencyManager.backupMutex.isLocked) {
+            Log.w(TAG, "Another backup is currently in progress. Skipping background auto-backup job.")
+            return@withContext Result.retry()
+        }
+        ChatBackupConcurrencyManager.backupMutex.withLock {
+            try {
+                Log.d(TAG, "Starting auto-backup background execution...")
 
             val googleAccount = GoogleDriveBackupHelper.getSignedInAccount(appContext)
                 ?: return@withContext Result.failure().also { Log.w(TAG, "No Google Drive account connected") }
