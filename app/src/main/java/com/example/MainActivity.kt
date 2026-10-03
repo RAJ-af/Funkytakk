@@ -16,6 +16,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import com.example.ui.screens.*
+import com.example.ui.screens.chat.RestoreChatBackupScreen
 import com.example.ui.components.FloatingBubbleOverlay
 import com.example.ui.theme.MyApplicationTheme
 
@@ -117,6 +118,7 @@ class MainActivity : FragmentActivity() {
                     var tempHobbies by remember { mutableStateOf<List<String>>(emptyList()) }
                     var createRoomIsPrivate by rememberSaveable { mutableStateOf(false) }
                     var activeSupportReportId by rememberSaveable { mutableStateOf<String?>(null) }
+                    var pendingBackupStatus by remember { mutableStateOf<ChatBackupStatusResponse?>(null) }
 
                     LaunchedEffect(authState) {
                         if (authState is AuthState.Success) {
@@ -135,7 +137,26 @@ class MainActivity : FragmentActivity() {
                             if (!user.isEmailVerified) {
                                 currentScreen = "verify_email"
                             } else if (user.onboardingComplete) {
-                                currentScreen = "home"
+                                val supaAuth = SupabaseSessionManager.getBearerToken(applicationContext)
+                                val isVaultConfigured = com.example.crypto.VaultSecurityManager.isVaultConfigured(applicationContext)
+                                if (!supaAuth.isNullOrBlank() && !isVaultConfigured) {
+                                    try {
+                                        val statusResp = SupabaseClient.api.getChatBackupStatus(
+                                            apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                                            auth = supaAuth
+                                        )
+                                        if (statusResp.isSuccessful && statusResp.body()?.has_backup == true) {
+                                            pendingBackupStatus = statusResp.body()
+                                            currentScreen = "restore_chat_backup"
+                                        } else {
+                                            currentScreen = "home"
+                                        }
+                                    } catch (_: Exception) {
+                                        currentScreen = "home"
+                                    }
+                                } else {
+                                    currentScreen = "home"
+                                }
                             } else {
                                 currentScreen = when {
                                     user.username.isNullOrBlank() || user.displayName.isNullOrBlank() -> "onboarding_profile"
@@ -207,6 +228,15 @@ class MainActivity : FragmentActivity() {
                             "privacy" -> PrivacyScreen(
                                 onContinueClick = {
                                     currentScreen = "auth"
+                                }
+                            )
+                            "restore_chat_backup" -> RestoreChatBackupScreen(
+                                backupStatus = pendingBackupStatus ?: ChatBackupStatusResponse(has_backup = true),
+                                onRestoreSuccess = {
+                                    currentScreen = "home"
+                                },
+                                onSkipRestore = {
+                                    currentScreen = "home"
                                 }
                             )
                             "auth" -> AuthScreen(

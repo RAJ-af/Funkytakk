@@ -58,8 +58,10 @@ import com.example.ui.components.MultiLanguageExchangeCard
 import com.example.ui.components.PresetAvatarList
 import com.example.ui.components.ProfileBadgesRow
 import com.example.ui.components.SoftBlockIcon
+import com.example.ui.components.Soft3DCloudIcon
 import com.example.ui.components.resolveAvatarModel
 import com.example.ui.screens.*
+import com.example.ui.screens.profile.ChatBackupScreen
 import com.example.ui.screens.home.dialogs.BlockedUsersBottomSheet
 import com.example.ui.screens.home.dialogs.ModerationReviewDialog
 import com.example.ui.screens.home.models.DarkText
@@ -87,6 +89,7 @@ fun ProfileTabContent(
     var showEditProfileDialog by remember { mutableStateOf(false) }
     var showModerationDialog by remember { mutableStateOf(false) }
     var showBlockedUsersSheet by remember { mutableStateOf(false) }
+    var showChatBackupScreen by remember { mutableStateOf(false) }
     var showOptionsMenuSheet by remember { mutableStateOf(false) }
     var isAdmin by remember { mutableStateOf(false) }
 
@@ -1466,6 +1469,29 @@ fun ProfileTabContent(
                     }
                 }
 
+                // 5. Encrypted Chat Backup & Recovery
+                Surface(
+                    onClick = {
+                        showOptionsMenuSheet = false
+                        showChatBackupScreen = true
+                    },
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0xFFFEF3C7),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Soft3DCloudIcon(size = 20.dp)
+                        Column {
+                            Text("Chat Backup & Recovery", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB45309))
+                            Text("Encrypted Google Drive backup", fontSize = 11.sp, color = Color(0xFF92400E))
+                        }
+                    }
+                }
+
                 // 5. Logout
                 Surface(
                     onClick = {
@@ -1590,5 +1616,17 @@ fun ProfileTabContent(
                 activeClickedProfile = null
             }
         )
+    }
+
+    if (showChatBackupScreen) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.White)
+        ) {
+            ChatBackupScreen(
+                onBackClick = { showChatBackupScreen = false }
+            )
+        }
     }
 }

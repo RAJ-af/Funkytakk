@@ -1869,13 +1869,7 @@ class AuthViewModel : ViewModel() {
 
     private fun logoutDueToSessionMismatch(context: Context, uid: String) {
         viewModelScope.launch(Dispatchers.Main) {
-            withContext(Dispatchers.IO) {
-                firebaseAuth?.signOut()
-                val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
-                prefs.edit().remove("active_session_id_${uid}").apply()
-            }
-            
-            _authState.value = AuthState.Idle
+            logout(context)
             Toast.makeText(context, "Security Alert: Signed out because your account was logged in from another device/browser.", Toast.LENGTH_LONG).show()
         }
     }
@@ -2176,6 +2170,20 @@ class AuthViewModel : ViewModel() {
             if (effectiveUid.isNotEmpty()) {
                 val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
                 prefs.edit().remove("active_session_id_${effectiveUid}").apply()
+            }
+            com.example.util.ChatBackupPreferencesManager.clearAll(context)
+            try {
+                androidx.work.WorkManager.getInstance(context).cancelUniqueWork(com.example.service.ChatBackupWorker.WORK_NAME)
+            } catch (e: Exception) {
+                Log.w("AuthViewModel", "Error cancelling backup work on logout", e)
+            }
+            com.example.crypto.VaultSecurityManager.lock()
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    com.example.util.GoogleDriveBackupHelper.signOut(context)
+                } catch (e: Exception) {
+                    Log.w("AuthViewModel", "Error signing out Drive account on logout", e)
+                }
             }
         }
     }

@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
@@ -981,6 +982,57 @@ fun Soft3DBellNotificationIcon(modifier: Modifier = Modifier.size(22.dp)) {
             color = Color(0xFFB45309),
             radius = w * 0.08f,
             center = Offset(w * 0.5f, h * 0.84f)
+        )
+    }
+}
+
+@Composable
+fun Soft3DCloudIcon(modifier: Modifier = Modifier, size: Dp = 24.dp) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+
+        val cloudPath = Path().apply {
+            moveTo(w * 0.22f, h * 0.72f)
+            cubicTo(w * 0.10f, h * 0.72f, w * 0.08f, h * 0.52f, w * 0.22f, h * 0.44f)
+            cubicTo(w * 0.20f, h * 0.22f, w * 0.46f, h * 0.16f, w * 0.58f, h * 0.32f)
+            cubicTo(w * 0.72f, h * 0.22f, w * 0.92f, h * 0.38f, w * 0.84f, h * 0.54f)
+            cubicTo(w * 0.95f, h * 0.64f, w * 0.88f, h * 0.72f, w * 0.78f, h * 0.72f)
+            close()
+        }
+
+        drawPath(
+            path = cloudPath,
+            brush = Brush.radialGradient(
+                listOf(Color(0xFFFEF08A), Color(0xFFF59E0B), Color(0xFFD97706)),
+                center = Offset(w * 0.45f, h * 0.35f),
+                radius = w * 0.6f
+            )
+        )
+    }
+}
+
+@Composable
+fun Soft3DShieldIcon(modifier: Modifier = Modifier, size: Dp = 24.dp) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+
+        val shieldPath = Path().apply {
+            moveTo(w * 0.5f, h * 0.12f)
+            lineTo(w * 0.84f, h * 0.24f)
+            cubicTo(w * 0.84f, h * 0.62f, w * 0.64f, h * 0.84f, w * 0.5f, h * 0.90f)
+            cubicTo(w * 0.36f, h * 0.84f, w * 0.16f, h * 0.62f, w * 0.16f, h * 0.24f)
+            close()
+        }
+
+        drawPath(
+            path = shieldPath,
+            brush = Brush.radialGradient(
+                listOf(Color(0xFFFDE68A), Color(0xFFF59E0B), Color(0xFFB45309)),
+                center = Offset(w * 0.45f, h * 0.30f),
+                radius = w * 0.6f
+            )
         )
     }
 }

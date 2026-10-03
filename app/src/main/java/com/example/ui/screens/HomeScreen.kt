@@ -376,6 +376,7 @@ fun HomeScreen(
 
     // Real conversations list - user-initiated contacts from Discover or Empty
     val dynamicInitiatedChats = remember { mutableStateListOf<DirectChat>() }
+    var activeGroupChat by remember { mutableStateOf<com.example.db.LocalGroupConversation?>(null) }
 
     // Dialogs
     if (showLogoutDialog) {
@@ -548,7 +549,10 @@ fun HomeScreen(
                                 activeChatWindowContact = chat
                             },
                             onOpenSupportChat = onOpenSupportChat,
-                            onNavigateToDiscover = { activeTab = "rooms" }
+                            onNavigateToDiscover = { activeTab = "rooms" },
+                            onOpenGroupChat = { grp ->
+                                activeGroupChat = grp
+                            }
                         )
                     }
                     "profile" -> {
@@ -573,6 +577,13 @@ fun HomeScreen(
                     val updated = currentThread + (text to true)
                     chatMessagesStorage[contact.id] = updated
                 }
+            )
+        }
+
+        activeGroupChat?.let { grp ->
+            com.example.ui.screens.chat.GroupFlowContainer(
+                initialGroup = grp,
+                onCloseGroup = { activeGroupChat = null }
             )
         }
     }

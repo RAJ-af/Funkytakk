@@ -284,6 +284,9 @@ fun OnboardingChatVaultScreen(
                     scope.launch {
                         val setupRes = VaultSecurityManager.setupVaultWithPassword(context, password)
                         setupRes.onSuccess {
+                            // Cache vault password for background backups
+                            com.example.util.ChatBackupPreferencesManager.setCachedVaultPassword(context, password)
+
                             // Ensure Tink identity key initialized
                             E2EEManager.ensureIdentityKeyInitialized(context)
 

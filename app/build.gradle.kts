@@ -126,6 +126,7 @@ dependencies {
   implementation(libs.tink.android)
   implementation(libs.sqlcipher.android)
   implementation(libs.androidx.biometric)
+  implementation(libs.androidx.work.runtime.ktx)
   implementation(libs.coil.compose)
   implementation(libs.coil.svg)
   implementation(libs.coil.gif)

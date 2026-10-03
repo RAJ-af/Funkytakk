@@ -72,7 +72,8 @@ fun ChatsTabContent(
     conversationsList: List<DirectChat> = emptyList(),
     onSelectChat: (DirectChat) -> Unit,
     onOpenSupportChat: (reportId: String?) -> Unit = {},
-    onNavigateToDiscover: () -> Unit = {}
+    onNavigateToDiscover: () -> Unit = {},
+    onOpenGroupChat: (com.example.db.LocalGroupConversation) -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -93,7 +94,6 @@ fun ChatsTabContent(
     val customGroups by ChatPreferencesManager.groups.collectAsState()
     val joinedGroups by com.example.repository.GroupChatRepository.joinedGroups.collectAsState()
     val pendingInvites by com.example.repository.GroupChatRepository.pendingInvites.collectAsState()
-    var selectedGroupChat by remember { mutableStateOf<com.example.db.LocalGroupConversation?>(null) }
     var selectedPendingInvite by remember { mutableStateOf<com.example.db.LocalGroupConversation?>(null) }
     val mutedChats by ChatPreferencesManager.mutedChats.collectAsState()
     val pinnedChats by ChatPreferencesManager.pinnedChats.collectAsState()
@@ -131,7 +131,7 @@ fun ChatsTabContent(
                 id = grp.id,
                 name = grp.name,
                 avatar = grp.avatarUrl.ifBlank { "https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=200" },
-                lastMsg = grp.lastMessageText.ifBlank { "🔒 E2EE Group Chat" },
+                lastMsg = grp.lastMessageText.ifBlank { "End-to-end encrypted group" },
                 time = formatTimeAgo(grp.lastMessageTime),
                 unreadCount = if (isUnreadOverridden) 1 else grp.unreadCount,
                 onlineStatus = "online",
@@ -962,9 +962,16 @@ fun ChatsTabContent(
                             .combinedClickable(
                                 onClick = {
                                     if (isVaultUnlocked) {
-                                        val grp = joinedGroups.find { it.id == chat.id }
-                                        if (grp != null) {
-                                            selectedGroupChat = grp
+                                        val isGroupChat = chat.isNativeLanguage.startsWith("Group") || joinedGroups.any { it.id == chat.id }
+                                        if (isGroupChat) {
+                                            val grp = joinedGroups.find { it.id == chat.id } ?: com.example.db.LocalGroupConversation(
+                                                id = chat.id,
+                                                name = chat.name,
+                                                avatarUrl = chat.avatar,
+                                                myRole = "member",
+                                                myStatus = "joined"
+                                            )
+                                            onOpenGroupChat(grp)
                                         } else {
                                             onSelectChat(chat)
                                         }
@@ -1310,16 +1317,8 @@ fun ChatsTabContent(
                 onDismiss = { selectedPendingInvite = null },
                 onAccepted = {
                     selectedPendingInvite = null
-                    selectedGroupChat = invite.copy(myStatus = "joined")
+                    onOpenGroupChat(invite.copy(myStatus = "joined"))
                 }
-            )
-        }
-
-        // --- 4. ACTIVE GROUP CHAT SCREEN ---
-        selectedGroupChat?.let { grp ->
-            GroupChatScreen(
-                group = grp,
-                onBack = { selectedGroupChat = null }
             )
         }
 

@@ -1267,6 +1267,30 @@ interface SupabaseApi {
         @Header("Authorization") auth: String,
         @Body body: ReportUserRequest
     ): Response<ResponseBody>
+
+    // ----------------------------------------------------
+    // CHAT BACKUP & RESTORE
+    // ----------------------------------------------------
+    @POST("rest/v1/rpc/record_chat_backup")
+    suspend fun recordChatBackup(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: RecordChatBackupRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/get_chat_backup_status")
+    suspend fun getChatBackupStatus(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> = emptyMap()
+    ): Response<ChatBackupStatusResponse>
+
+    @POST("rest/v1/rpc/delete_chat_backup_meta")
+    suspend fun deleteChatBackupMeta(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> = emptyMap()
+    ): Response<ResponseBody>
 }
 
 @JsonClass(generateAdapter = true)
@@ -1618,6 +1642,29 @@ data class ReportUserRequest(
     val p_context_id: String? = null,
     val p_screenshot_url: String? = null
 )
+
+// ----------------------------------------------------
+// CHAT BACKUP & RESTORE MODELS
+// ----------------------------------------------------
+@JsonClass(generateAdapter = true)
+data class RecordChatBackupRequest(
+    val p_size_bytes: Long,
+    val p_format_version: Int = 1,
+    val p_includes_media: Boolean = false,
+    val p_key_version: Int = 1
+)
+
+@JsonClass(generateAdapter = true)
+data class ChatBackupStatusResponse(
+    val has_backup: Boolean = false,
+    val last_backup_at: String? = null,
+    val size_bytes: Long = 0,
+    val format_version: Int = 1,
+    val includes_media: Boolean = false,
+    val backup_key_version: Int = 1,
+    val current_key_version: Int = 1
+)
+
 
 
 

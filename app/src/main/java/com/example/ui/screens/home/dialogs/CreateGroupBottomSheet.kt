@@ -113,7 +113,7 @@ fun CreateGroupBottomSheet(
                             .background(Color(0xFFFEF3C7)),
                         contentAlignment = Alignment.Center
                     ) {
-                        SoftGroupIcon(size = 20.dp, color = Color(0xFFB45309))
+                        GroupUsersIcon(size = 20.dp, color = Color(0xFFB45309))
                     }
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
@@ -131,7 +131,7 @@ fun CreateGroupBottomSheet(
                         .clip(CircleShape)
                         .background(Color(0xFFF3F4F6))
                 ) {
-                    SoftCloseIcon(size = 14.dp, color = Color(0xFF374151))
+                    GroupCloseIcon(size = 14.dp, color = Color(0xFF374151))
                 }
             }
 
@@ -183,7 +183,7 @@ fun CreateGroupBottomSheet(
                                     .border(1.dp, Color.White, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
-                                SoftCheckIcon(size = 10.dp, color = Color.Black)
+                                GroupCheckIcon(size = 10.dp, color = Color.Black)
                             }
                         }
                     }
@@ -314,7 +314,7 @@ fun CreateGroupBottomSheet(
                                         .clickable { selectedMembers.remove(member) },
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    SoftCloseIcon(size = 10.dp, color = Color(0xFF92400E))
+                                    GroupCloseIcon(size = 10.dp, color = Color(0xFF92400E))
                                 }
                             }
                         }
@@ -382,25 +382,33 @@ fun CreateGroupBottomSheet(
                 ) {
                     items(suggestedFriends) { (_, name) ->
                         val isAdded = selectedMembers.contains(name)
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50.dp))
-                                .background(if (isAdded) Color(0xFFE5E7EB) else Color(0xFFF3F4F6))
-                                .clickable {
-                                    if (isAdded) {
-                                        selectedMembers.remove(name)
-                                    } else {
-                                        selectedMembers.add(name)
-                                    }
+                        Surface(
+                            shape = RoundedCornerShape(50.dp),
+                            color = if (isAdded) Color(0xFFFEF3C7) else Color(0xFFF1F5F9),
+                            border = BorderStroke(1.dp, if (isAdded) Color(0xFFFDE68A) else Color(0xFFE2E8F0)),
+                            modifier = Modifier.clickable {
+                                if (isAdded) {
+                                    selectedMembers.remove(name)
+                                } else {
+                                    selectedMembers.add(name)
                                 }
-                                .padding(horizontal = 10.dp, vertical = 5.dp)
+                            }
                         ) {
-                            Text(
-                                text = if (isAdded) "✓ $name" else "+ $name",
-                                fontSize = 12.sp,
-                                color = if (isAdded) Color(0xFF4B5563) else Color(0xFF1F2937),
-                                fontWeight = if (isAdded) FontWeight.Bold else FontWeight.Medium
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (isAdded) {
+                                    GroupCheckIcon(size = 11.dp, color = Color(0xFFB45309))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                }
+                                Text(
+                                    text = name,
+                                    fontSize = 12.sp,
+                                    color = if (isAdded) Color(0xFF92400E) else Color(0xFF334155),
+                                    fontWeight = if (isAdded) FontWeight.Bold else FontWeight.Medium
+                                )
+                            }
                         }
                     }
                 }
@@ -427,15 +435,18 @@ fun CreateGroupBottomSheet(
                         )
                         isCreating = false
 
+                        val realId = serverRes.getOrNull()
                         val created = ChatPreferencesManager.createGroup(
                             context = context,
                             name = groupName.trim(),
                             description = groupDescription.trim(),
                             memberNames = selectedMembers.toList(),
-                            avatarUrl = selectedAvatar
+                            avatarUrl = selectedAvatar,
+                            groupId = realId
                         )
 
                         if (serverRes.isSuccess) {
+                            com.example.repository.GroupChatRepository.syncUserGroups(context)
                             Toast.makeText(context, "Group \"${groupName.trim()}\" created & invitations sent!", Toast.LENGTH_SHORT).show()
                         } else {
                             Toast.makeText(context, "Group created: ${serverRes.exceptionOrNull()?.message ?: ""}", Toast.LENGTH_SHORT).show()
@@ -456,7 +467,7 @@ fun CreateGroupBottomSheet(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Creating Group...", color = Color.Black, fontWeight = FontWeight.Bold)
                 } else {
-                    SoftGroupIcon(size = 20.dp, color = Color.Black)
+                    GroupUsersIcon(size = 20.dp, color = Color.Black)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "Create Group Chat",

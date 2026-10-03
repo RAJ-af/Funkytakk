@@ -325,6 +325,7 @@ fun VaultSetupDialog(
                         scope.launch {
                             val setupResult = VaultSecurityManager.setupVaultWithPassword(context, password)
                             setupResult.onSuccess {
+                                com.example.util.ChatBackupPreferencesManager.setCachedVaultPassword(context, password)
                                 if (enableBiometrics && canAuthenticateBiometric && activity != null) {
                                     val cryptoResult = VaultSecurityManager.createBiometricEncryptCryptoObject()
                                     cryptoResult.onSuccess { cryptoObject ->
@@ -497,6 +498,9 @@ fun VaultUnlockDialog(
                             scope.launch {
                                 val res = VaultSecurityManager.unlockWithPassword(context, password)
                                 isLoading = false
+                                res.onSuccess {
+                                    com.example.util.ChatBackupPreferencesManager.setCachedVaultPassword(context, password)
+                                }
                                 res.onFailure { ex ->
                                     errorMessage = ex.message ?: "Incorrect password. Please try again."
                                 }
@@ -541,6 +545,9 @@ fun VaultUnlockDialog(
                         scope.launch {
                             val res = VaultSecurityManager.unlockWithPassword(context, password)
                             isLoading = false
+                            res.onSuccess {
+                                com.example.util.ChatBackupPreferencesManager.setCachedVaultPassword(context, password)
+                            }
                             res.onFailure { ex ->
                                 errorMessage = ex.message ?: "Incorrect password. Please try again."
                             }

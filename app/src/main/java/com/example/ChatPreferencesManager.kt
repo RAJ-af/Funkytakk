@@ -190,9 +190,11 @@ object ChatPreferencesManager {
         name: String,
         description: String = "",
         memberNames: List<String> = emptyList(),
-        avatarUrl: String = ""
+        avatarUrl: String = "",
+        groupId: String? = null
     ): LocalGroupChat {
         val newGroup = LocalGroupChat(
+            id = groupId?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString(),
             name = name,
             description = description,
             memberCount = (memberNames.size + 1).coerceAtLeast(2),

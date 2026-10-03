@@ -28,6 +28,7 @@ object GroupChatRepository {
 
     @Volatile
     private var database: EncryptedChatDatabase? = null
+    private val _databaseState = MutableStateFlow<EncryptedChatDatabase?>(null)
 
     private val _joinedGroups = MutableStateFlow<List<LocalGroupConversation>>(emptyList())
     val joinedGroups: StateFlow<List<LocalGroupConversation>> = _joinedGroups.asStateFlow()
@@ -69,20 +70,20 @@ object GroupChatRepository {
 
     private fun openDatabase(context: Context, vaultKey: ByteArray) {
         try {
-            if (database == null) {
-                database = EncryptedChatDatabase.buildDatabase(context, vaultKey)
-            }
+            val db = EncryptedChatDatabase.getInstance(context, vaultKey)
+            database = db
+            _databaseState.value = db
 
             groupCollectJob?.cancel()
             groupCollectJob = scope.launch {
-                database?.groupConversationDao()?.getAllJoinedGroups()?.collect { list ->
+                db.groupConversationDao().getAllJoinedGroups().collect { list ->
                     _joinedGroups.value = list
                 }
             }
 
             inviteCollectJob?.cancel()
             inviteCollectJob = scope.launch {
-                database?.groupConversationDao()?.getPendingInvites()?.collect { list ->
+                db.groupConversationDao().getPendingInvites().collect { list ->
                     _pendingInvites.value = list
                 }
             }
@@ -106,6 +107,7 @@ object GroupChatRepository {
         groupCollectJob = null
         inviteCollectJob = null
         database = null
+        _databaseState.value = null
         _joinedGroups.value = emptyList()
         _pendingInvites.value = emptyList()
     }
@@ -185,7 +187,7 @@ object GroupChatRepository {
                         myStatus = membership.status, // "joined", "invited", "left"
                         memberCount = memberCount,
                         lastMessageText = existing?.lastMessageText.orEmpty().ifBlank {
-                            if (membership.status == "invited") "Invited to join group" else "🔒 End-to-end encrypted group chat"
+                            if (membership.status == "invited") "Invited to join group" else "End-to-end encrypted group chat"
                         },
                         lastMessageSenderName = existing?.lastMessageSenderName.orEmpty(),
                         lastMessageTime = existing?.lastMessageTime ?: System.currentTimeMillis(),
@@ -474,25 +476,53 @@ object GroupChatRepository {
         storagePath: String? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val myUserId = SupabaseSessionManager.getUserId(context)
+            val activeUid = SupabaseSessionManager.ensureActiveSession(context)
+            val myUserId = activeUid ?: SupabaseSessionManager.getUserId(context)
                 ?: return@withContext Result.failure(Exception("Not logged in"))
             val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
                 ?: return@withContext Result.failure(Exception("Not authenticated"))
 
-            // 1. Fetch joined group members
+            val cleanGroupId = groupId.trim().replace("\"", "")
+
+            Log.i(TAG, "=== [SEND GROUP MESSAGE DIAGNOSTIC] ===")
+            Log.i(TAG, "Sending group message to groupId='$cleanGroupId', senderId='$myUserId'")
+
+            // 1. Fetch group members from backend
             val membersResp = SupabaseClient.api.getGroupMembers(
                 apiKey = BuildConfig.SUPABASE_ANON_KEY,
                 auth = token,
-                groupIdFilter = "eq.$groupId",
-                statusFilter = "eq.joined"
+                groupIdFilter = "eq.$cleanGroupId"
             )
 
-            if (!membersResp.isSuccessful || membersResp.body().isNullOrEmpty()) {
-                return@withContext Result.failure(Exception("No joined members found in group"))
+            Log.i(TAG, "getGroupMembers response code=${membersResp.code()}, isSuccessful=${membersResp.isSuccessful}")
+            if (!membersResp.isSuccessful) {
+                val errBody = membersResp.errorBody()?.string()
+                Log.e(TAG, "getGroupMembers query failed: code=${membersResp.code()}, body=$errBody")
+                return@withContext Result.failure(Exception("Failed to load group members (HTTP ${membersResp.code()}): $errBody"))
             }
 
-            val joinedMembers = membersResp.body()!!
-            val memberUserIds = joinedMembers.map { it.user_id }.toSet() + myUserId
+            val allMembers = membersResp.body().orEmpty()
+            Log.i(TAG, "Raw query group_id: '$cleanGroupId', Total group_members returned: ${allMembers.size}")
+            for (m in allMembers) {
+                Log.i(TAG, " - raw member: user_id='${m.user_id}', role='${m.role}', status='${m.status}'")
+            }
+
+            // Filter for members with status 'joined'
+            var joinedMembers = allMembers.filter { it.status.trim().equals("joined", ignoreCase = true) }
+            Log.i(TAG, "Joined members count: ${joinedMembers.size}")
+
+            if (joinedMembers.isEmpty() && allMembers.isNotEmpty()) {
+                Log.w(TAG, "No members have status='joined'. Statuses present: ${allMembers.map { "${it.user_id}:${it.status}" }}")
+                val onlySenderPresent = allMembers.all { it.user_id == myUserId }
+                if (onlySenderPresent) {
+                    joinedMembers = allMembers
+                } else {
+                    return@withContext Result.failure(Exception("No joined members found in group '$cleanGroupId' (statuses: ${allMembers.map { it.status }.distinct()})"))
+                }
+            }
+
+            val memberUserIds = (joinedMembers.map { it.user_id }.toSet() + myUserId).filter { it.isNotBlank() }
+            Log.i(TAG, "Target recipient member user IDs for fan-out E2EE (${memberUserIds.size}): $memberUserIds")
 
             // 2. Fetch public keys for each member
             val recipientsPayload = mutableListOf<GroupRecipientPayload>()
@@ -516,19 +546,22 @@ object GroupChatRepository {
                             storage_path = storagePath
                         )
                     )
+                } else {
+                    Log.w(TAG, "Recipient user '$uid' does not have a registered identity_public_key")
                 }
             }
 
             if (recipientsPayload.isEmpty()) {
-                return@withContext Result.failure(Exception("Could not encrypt message: no member public keys registered"))
+                return@withContext Result.failure(Exception("Could not encrypt message: no member public keys registered for group $cleanGroupId"))
             }
 
             // 3. Call send_group_message RPC
+            Log.i(TAG, "Calling send_group_message RPC with ${recipientsPayload.size} recipients...")
             val sendResp = SupabaseClient.api.sendGroupMessage(
                 apiKey = BuildConfig.SUPABASE_ANON_KEY,
                 auth = token,
                 body = SendGroupMessageRequest(
-                    p_group_id = groupId,
+                    p_group_id = cleanGroupId,
                     p_message_type = messageType,
                     p_recipients = recipientsPayload
                 )
@@ -536,8 +569,11 @@ object GroupChatRepository {
 
             if (!sendResp.isSuccessful) {
                 val err = sendResp.errorBody()?.string() ?: "Failed to send group message"
+                Log.e(TAG, "send_group_message RPC failed: ${sendResp.code()} - $err")
                 return@withContext Result.failure(Exception(err))
             }
+
+            Log.i(TAG, "✅ send_group_message RPC succeeded for group $cleanGroupId")
 
             // 4. Save local copy so sender immediately sees their message
             val msgId = UUID.randomUUID().toString()
@@ -547,7 +583,7 @@ object GroupChatRepository {
 
             val localMsg = LocalGroupMessage(
                 id = msgId,
-                groupId = groupId,
+                groupId = cleanGroupId,
                 senderId = myUserId,
                 senderName = myName,
                 senderAvatar = myAvatar,
@@ -559,7 +595,7 @@ object GroupChatRepository {
             )
             database?.groupMessageDao()?.insertMessage(localMsg)
             database?.groupConversationDao()?.updateLastMessage(
-                groupId = groupId,
+                groupId = cleanGroupId,
                 text = text,
                 senderName = "You",
                 time = System.currentTimeMillis(),
@@ -697,7 +733,7 @@ object GroupChatRepository {
                 senderId = myUserId,
                 senderName = myName,
                 senderAvatar = myAvatar,
-                text = "📷 Photo",
+                text = "Photo",
                 messageType = "image",
                 storagePath = fullStoragePath,
                 localMediaPath = localFile.absolutePath,
@@ -707,7 +743,7 @@ object GroupChatRepository {
             database?.groupMessageDao()?.insertMessage(localMsg)
             database?.groupConversationDao()?.updateLastMessage(
                 groupId = groupId,
-                text = "📷 Photo",
+                text = "Photo",
                 senderName = "You",
                 time = System.currentTimeMillis(),
                 unreadDelta = 0
@@ -804,13 +840,13 @@ object GroupChatRepository {
                                     val localFile = File(localDir, "group_${row.message_id}.jpg")
                                     localFile.writeBytes(rawBytes)
                                     localMediaPath = localFile.absolutePath
-                                    displayText = "📷 Photo"
+                                    displayText = "Photo"
                                     resolvedType = "image"
                                 }
                             }
                         } catch (mediaErr: Exception) {
                             Log.w(TAG, "Failed decrypting group media blob for ${row.message_id}: ${mediaErr.message}")
-                            displayText = "📷 Photo"
+                            displayText = "Photo"
                             resolvedType = "image"
                         }
                     }
@@ -892,23 +928,39 @@ object GroupChatRepository {
         return userProfileCache[senderId]?.second
     }
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun getGroupMessagesFlow(groupId: String): Flow<List<LocalGroupMessage>> {
-        return database?.groupMessageDao()?.getGroupMessages(groupId) ?: flowOf(emptyList())
+        val cleanGroupId = groupId.trim().replace("\"", "")
+        return _databaseState.flatMapLatest { db ->
+            db?.groupMessageDao()?.getGroupMessages(cleanGroupId) ?: flowOf(emptyList())
+        }
     }
 
     suspend fun markGroupRead(groupId: String) {
-        database?.groupConversationDao()?.markRead(groupId)
+        val cleanGroupId = groupId.trim().replace("\"", "")
+        database?.groupConversationDao()?.markRead(cleanGroupId)
     }
 
     suspend fun getGroupMembers(context: Context, groupId: String): List<SupabaseGroupMember> = withContext(Dispatchers.IO) {
         try {
+            val activeUid = SupabaseSessionManager.ensureActiveSession(context)
             val token = SupabaseSessionManager.getAuthenticatedBearerToken(context) ?: return@withContext emptyList()
+            val cleanGroupId = groupId.trim().replace("\"", "")
+            Log.i(TAG, "getGroupMembers: querying group_members for groupId='$cleanGroupId' (auth.uid: '$activeUid')")
             val resp = SupabaseClient.api.getGroupMembers(
                 apiKey = BuildConfig.SUPABASE_ANON_KEY,
                 auth = token,
-                groupIdFilter = "eq.$groupId"
+                groupIdFilter = "eq.$cleanGroupId"
             )
-            return@withContext resp.body().orEmpty()
+            Log.i(TAG, "getGroupMembers: response code=${resp.code()}, count=${resp.body()?.size}")
+            if (!resp.isSuccessful) {
+                Log.e(TAG, "getGroupMembers query failed (${resp.code()}): ${resp.errorBody()?.string()}")
+            }
+            val list = resp.body().orEmpty()
+            for (m in list) {
+                Log.i(TAG, " - roster member: user_id='${m.user_id}', role='${m.role}', status='${m.status}'")
+            }
+            return@withContext list
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching group members", e)
         }

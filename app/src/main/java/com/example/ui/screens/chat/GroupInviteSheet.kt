@@ -21,8 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.repository.GroupChatRepository
-import com.example.ui.components.SoftCloseIcon
-import com.example.ui.components.SoftGroupIcon
+import com.example.ui.components.*
 import com.example.ui.theme.GoldAccent
 import kotlinx.coroutines.launch
 
@@ -119,12 +118,16 @@ fun GroupInviteSheet(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
-                    Text(
-                        text = "🔒 End-to-End Encrypted Group",
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1E293B)
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        GroupTinyLockIcon(size = 14.dp, color = Color(0xFF1E293B))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "End-to-End Encrypted Group",
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF1E293B)
+                        )
+                    }
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "Only joined group members can read messages. FunkyTalk servers and admins cannot access group conversations.",
@@ -167,6 +170,8 @@ fun GroupInviteSheet(
                         .weight(1f)
                         .height(48.dp)
                 ) {
+                    GroupCloseIcon(size = 14.dp, color = Color(0xFFEF4444))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text("Decline", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 }
 
@@ -196,6 +201,8 @@ fun GroupInviteSheet(
                     if (isSubmitting) {
                         CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.Black)
                     } else {
+                        GroupCheckIcon(size = 16.dp, color = Color.Black)
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text("Accept Invite", color = Color.Black, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
                     }
                 }

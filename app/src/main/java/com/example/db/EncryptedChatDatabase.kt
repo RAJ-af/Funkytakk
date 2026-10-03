@@ -26,6 +26,24 @@ abstract class EncryptedChatDatabase : RoomDatabase() {
     companion object {
         const val DB_NAME = "encrypted_dm_chat_vault.db"
 
+        @Volatile
+        private var INSTANCE: EncryptedChatDatabase? = null
+
+        fun getInstance(context: Context, vaultKey: ByteArray): EncryptedChatDatabase {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: buildDatabase(context, vaultKey).also { INSTANCE = it }
+            }
+        }
+
+        fun closeInstance() {
+            synchronized(this) {
+                try {
+                    INSTANCE?.close()
+                } catch (_: Exception) {}
+                INSTANCE = null
+            }
+        }
+
         fun buildDatabase(context: Context, vaultKey: ByteArray): EncryptedChatDatabase {
             SQLiteDatabase.loadLibs(context)
             val openHelperFactory = SupportFactory(vaultKey)
@@ -40,6 +58,7 @@ abstract class EncryptedChatDatabase : RoomDatabase() {
         }
 
         fun deleteDatabase(context: Context): Boolean {
+            closeInstance()
             return context.deleteDatabase(DB_NAME)
         }
     }

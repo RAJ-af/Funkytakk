@@ -17,27 +17,23 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import coil.request.ImageRequest
-import com.example.SupabaseClient
-import com.example.SupabaseGroupMember
 import com.example.SupabaseSessionManager
 import com.example.db.LocalGroupConversation
 import com.example.db.LocalGroupMessage
@@ -49,26 +45,27 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GroupChatScreen(
     group: LocalGroupConversation,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onNavigateToInfo: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val myUserId = remember { SupabaseSessionManager.getUserId(context) ?: "" }
-    val isAdmin = remember(group.myRole) { group.myRole == "admin" }
+    val isAdmin = remember(group.myRole) { group.myRole.equals("admin", ignoreCase = true) }
 
     val messages by GroupChatRepository.getGroupMessagesFlow(group.id).collectAsState(initial = emptyList())
     val listState = rememberLazyListState()
 
     var inputText by remember { mutableStateOf("") }
     var isSending by remember { mutableStateOf(false) }
-
-    var showRosterSheet by remember { mutableStateOf(false) }
-    var showAddMemberDialog by remember { mutableStateOf(false) }
+    var showOptionsMenu by remember { mutableStateOf(false) }
+    var showLeaveDialog by remember { mutableStateOf(false) }
+    var showE2eeNotice by remember { mutableStateOf(true) }
     var previewImageUrl by remember { mutableStateOf<String?>(null) }
+    var memberCount by remember { mutableStateOf(group.memberCount.coerceAtLeast(2)) }
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -109,6 +106,12 @@ fun GroupChatScreen(
 
     LaunchedEffect(group.id) {
         GroupChatRepository.markGroupRead(group.id)
+        GroupChatRepository.syncUserGroups(context)
+        GroupChatRepository.fetchAndProcessPendingGroupMessages(context)
+        val members = GroupChatRepository.getGroupMembers(context, group.id)
+        if (members.isNotEmpty()) {
+            memberCount = members.size
+        }
     }
 
     LaunchedEffect(messages.size) {
@@ -118,18 +121,43 @@ fun GroupChatScreen(
     }
 
     Scaffold(
+        containerColor = Color(0xFFFAFAF7),
         topBar = {
-            TopAppBar(
-                title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.clickable { showRosterSheet = true }
-                    ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                // Back button
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFF1F5F9))
+                        .clickable { onBack() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    GroupBackIcon(size = 20.dp, color = Color(0xFF0F172A))
+                }
+
+                // Center Header: Avatar + Title + Status -> Clickable to navigate to Info
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onNavigateToInfo() }
+                        .padding(horizontal = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Avatar with online status dot
+                    Box(modifier = Modifier.size(42.dp)) {
                         Box(
                             modifier = Modifier
-                                .size(38.dp)
+                                .size(42.dp)
                                 .clip(CircleShape)
-                                .border(1.dp, GoldAccent, CircleShape),
+                                .background(Color(0xFFFEF3C7)),
                             contentAlignment = Alignment.Center
                         ) {
                             if (group.avatarUrl.isNotBlank()) {
@@ -137,63 +165,142 @@ fun GroupChatScreen(
                                     model = group.avatarUrl,
                                     contentDescription = "Avatar",
                                     contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
+                                    modifier = Modifier.fillMaxSize().clip(CircleShape)
                                 )
                             } else {
-                                SoftGroupIcon(size = 20.dp, color = Color(0xFFB45309))
+                                GroupUsersIcon(size = 20.dp, color = Color(0xFFB45309))
                             }
                         }
+                        Box(
+                            modifier = Modifier
+                                .size(11.dp)
+                                .align(Alignment.BottomEnd)
+                                .clip(CircleShape)
+                                .background(Color(0xFF22C55E))
+                                .border(2.dp, Color.White, CircleShape)
+                        )
+                    }
 
-                        Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
 
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = group.name,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF0F172A),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                if (isAdmin) {
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Surface(
-                                        shape = RoundedCornerShape(4.dp),
-                                        color = Color(0xFFFEF3C7)
-                                    ) {
-                                        Text(
-                                            text = "ADMIN",
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = Color(0xFFB45309),
-                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                        )
-                                    }
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = group.name,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF0F172A),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (isAdmin) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = Color(0xFFFEF3C7)
+                                ) {
+                                    Text(
+                                        text = "ADMIN",
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = Color(0xFFB45309)
+                                    )
                                 }
                             }
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "🔒 End-to-end encrypted · Tap for info",
-                                fontSize = 11.sp,
-                                color = Color(0xFF64748B)
+                                text = "$memberCount members  |",
+                                fontSize = 11.5.sp,
+                                color = Color(0xFF94A3B8)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            GroupTinyLockIcon(size = 10.dp, color = Color(0xFFD97706))
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = "End-to-end encrypted",
+                                fontSize = 11.5.sp,
+                                color = Color(0xFF94A3B8)
                             )
                         }
                     }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        androidx.compose.material3.Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color(0xFF0F172A), modifier = Modifier.size(20.dp))
+                }
+
+                // 3-dots button with popup menu matching user's design image
+                Box {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFF1F5F9))
+                            .clickable { showOptionsMenu = true },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        GroupThreeDotsIcon(size = 20.dp, color = Color(0xFF0F172A))
                     }
-                },
-                actions = {
-                    IconButton(onClick = { showRosterSheet = true }) {
-                        FunkyMoreIcon(color = Color(0xFF0F172A), modifier = Modifier.size(20.dp))
+
+                    DropdownMenu(
+                        expanded = showOptionsMenu,
+                        onDismissRequest = { showOptionsMenu = false },
+                        modifier = Modifier
+                            .width(230.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(Color.White)
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Search in conversation", fontSize = 13.5.sp, color = Color(0xFF0F172A)) },
+                            leadingIcon = { GroupSearchIcon(size = 18.dp, color = Color(0xFF0F172A)) },
+                            onClick = {
+                                showOptionsMenu = false
+                                Toast.makeText(context, "Search in conversation", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Media, links & files", fontSize = 13.5.sp, color = Color(0xFF0F172A)) },
+                            leadingIcon = { GroupMediaIcon(size = 18.dp, color = Color(0xFF0F172A)) },
+                            onClick = {
+                                showOptionsMenu = false
+                                onNavigateToInfo()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Mute notifications", fontSize = 13.5.sp, color = Color(0xFF0F172A)) },
+                            leadingIcon = { GroupBellIcon(size = 18.dp, color = Color(0xFF0F172A)) },
+                            onClick = {
+                                showOptionsMenu = false
+                                Toast.makeText(context, "Notifications muted", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Clear chat", fontSize = 13.5.sp, color = Color(0xFF0F172A)) },
+                            leadingIcon = { GroupTrashIcon(size = 18.dp, color = Color(0xFF0F172A)) },
+                            onClick = {
+                                showOptionsMenu = false
+                                Toast.makeText(context, "Chat cleared", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                        HorizontalDivider(color = Color(0xFFF1F5F9))
+                        DropdownMenuItem(
+                            text = { Text("Report group", fontSize = 13.5.sp, color = Color(0xFF0F172A)) },
+                            leadingIcon = { GroupShieldIcon(size = 18.dp, color = Color(0xFF0F172A)) },
+                            onClick = {
+                                showOptionsMenu = false
+                                Toast.makeText(context, "Group reported", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Leave group", fontSize = 13.5.sp, color = Color(0xFFEF4444), fontWeight = FontWeight.SemiBold) },
+                            leadingIcon = { GroupLeaveDoorIcon(size = 18.dp, color = Color(0xFFEF4444)) },
+                            onClick = {
+                                showOptionsMenu = false
+                                showLeaveDialog = true
+                            }
+                        )
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
-            )
-        },
-        containerColor = Color(0xFFF8FAFC)
+                }
+            }
+        }
     ) { paddingValues ->
         Column(
             modifier = Modifier
@@ -201,91 +308,153 @@ fun GroupChatScreen(
                 .padding(paddingValues)
                 .imePadding()
         ) {
-            // E2EE Notice banner
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFFFEF3C7))
-                    .padding(horizontal = 14.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    text = "🔒 Group messages are end-to-end encrypted for joined members only.",
-                    fontSize = 11.5.sp,
-                    color = Color(0xFF92400E),
-                    fontWeight = FontWeight.Medium
-                )
-            }
-
-            // Message List
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(messages, key = { it.id }) { msg ->
-                    GroupMessageItem(
-                        message = msg,
-                        isMe = msg.isOutgoing || msg.senderId == myUserId,
-                        onImageClick = { previewImageUrl = it }
-                    )
+            // E2EE Notice banner: exactly as in user's image (rounded card with yellow lock badge)
+            if (showE2eeNotice) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    color = Color(0xFFFEF3C7),
+                    border = BorderStroke(1.dp, Color(0xFFFDE68A))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFFDE047)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            GroupTinyLockIcon(size = 16.dp, color = Color(0xFF92400E))
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Group messages are end-to-end encrypted for joined members only.",
+                            fontSize = 12.5.sp,
+                            color = Color(0xFF92400E),
+                            fontWeight = FontWeight.Medium,
+                            lineHeight = 16.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clip(CircleShape)
+                                .clickable { showE2eeNotice = false },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            GroupCloseIcon(size = 13.dp, color = Color(0xFF92400E))
+                        }
+                    }
                 }
             }
 
-            // Bottom Input Bar
+            // Message List or Empty State Illustration
+            if (messages.isEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    GroupCuteEmptyChatIllustration(modifier = Modifier.size(140.dp))
+                    Spacer(modifier = Modifier.height(18.dp))
+                    Text(
+                        text = "No messages yet",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF0F172A)
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Be the first to start the conversation in this group.",
+                        fontSize = 13.5.sp,
+                        color = Color(0xFF64748B),
+                        textAlign = TextAlign.Center
+                    )
+                }
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(messages.distinctBy { it.id }, key = { it.id }) { msg ->
+                        GroupMessageItem(
+                            message = msg,
+                            isMe = msg.isOutgoing || msg.senderId == myUserId,
+                            onImageClick = { previewImageUrl = it }
+                        )
+                    }
+                }
+            }
+
+            // Bottom Input Bar: floating rounded pill card matching user's image
             Surface(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                shape = RoundedCornerShape(32.dp),
                 color = Color.White,
-                shadowElevation = 8.dp
+                border = BorderStroke(1.dp, Color(0xFFF1F5F9)),
+                shadowElevation = 3.dp
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                        .padding(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     // Photo Attachment Button
-                    IconButton(
-                        onClick = {
-                            photoPickerLauncher.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                            )
-                        },
+                    Box(
                         modifier = Modifier
-                            .size(42.dp)
+                            .size(46.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFFFEF3C7))
+                            .background(Color(0xFFFFDF7D))
+                            .clickable {
+                                photoPickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            },
+                        contentAlignment = Alignment.Center
                     ) {
-                        SoftImageIcon(size = 20.dp, color = Color(0xFFB45309))
+                        GroupMediaIcon(size = 20.dp, color = Color.Black)
                     }
 
                     Spacer(modifier = Modifier.width(8.dp))
 
+                    // Center Input Field
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .heightIn(min = 44.dp, max = 120.dp)
+                            .height(44.dp)
                             .clip(RoundedCornerShape(22.dp))
                             .background(Color(0xFFF1F5F9))
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                            .padding(horizontal = 16.dp),
                         contentAlignment = Alignment.CenterStart
                     ) {
                         if (inputText.isEmpty()) {
                             Text(
                                 text = "Message group...",
                                 color = Color(0xFF94A3B8),
-                                fontSize = 14.sp
+                                fontSize = 13.5.sp
                             )
                         }
                         BasicTextField(
                             value = inputText,
                             onValueChange = { inputText = it },
-                            textStyle = TextStyle(color = Color.Black, fontSize = 14.sp),
+                            textStyle = TextStyle(color = Color(0xFF0F172A), fontSize = 13.5.sp),
                             cursorBrush = SolidColor(Color.Black),
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -297,9 +466,9 @@ fun GroupChatScreen(
                     val canSend = inputText.isNotBlank() && !isSending
                     Box(
                         modifier = Modifier
-                            .size(44.dp)
+                            .size(46.dp)
                             .clip(CircleShape)
-                            .background(if (canSend) GoldAccent else Color(0xFFE2E8F0))
+                            .background(Color(0xFFFFDF7D))
                             .clickable(enabled = canSend) {
                                 val text = inputText.trim()
                                 inputText = ""
@@ -322,7 +491,7 @@ fun GroupChatScreen(
                         if (isSending) {
                             CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.Black, strokeWidth = 2.dp)
                         } else {
-                            androidx.compose.material3.Icon(Icons.Default.Send, contentDescription = "Send", tint = if (canSend) Color.Black else Color(0xFF94A3B8), modifier = Modifier.size(18.dp))
+                            GroupSendPlaneIcon(size = 18.dp, color = Color.Black)
                         }
                     }
                 }
@@ -338,35 +507,32 @@ fun GroupChatScreen(
         )
     }
 
-    if (showRosterSheet) {
-        GroupRosterSheet(
-            group = group,
-            isAdmin = isAdmin,
-            myUserId = myUserId,
-            onDismiss = { showRosterSheet = false },
-            onAddMemberClick = {
-                showRosterSheet = false
-                showAddMemberDialog = true
-            },
-            onLeaveGroup = {
-                scope.launch {
-                    GroupChatRepository.removeGroupMember(context, group.id, myUserId)
-                    Toast.makeText(context, "Left group", Toast.LENGTH_SHORT).show()
-                    showRosterSheet = false
-                    onBack()
+    if (showLeaveDialog) {
+        AlertDialog(
+            onDismissRequest = { showLeaveDialog = false },
+            title = { Text("Leave Group?", fontWeight = FontWeight.Bold) },
+            text = { Text("Are you sure you want to leave ${group.name}? You will no longer receive encrypted messages from this group.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showLeaveDialog = false
+                        scope.launch {
+                            GroupChatRepository.removeGroupMember(context, group.id, myUserId)
+                            Toast.makeText(context, "Left group", Toast.LENGTH_SHORT).show()
+                            onBack()
+                        }
+                    }
+                ) {
+                    Text("Leave", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
                 }
-            }
-        )
-    }
-
-    if (showAddMemberDialog) {
-        AddMemberDialog(
-            groupId = group.id,
-            onDismiss = { showAddMemberDialog = false },
-            onMemberAdded = {
-                Toast.makeText(context, "Invitation sent to partner!", Toast.LENGTH_SHORT).show()
-                showAddMemberDialog = false
-            }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLeaveDialog = false }) {
+                    Text("Cancel", color = Color(0xFF64748B))
+                }
+            },
+            containerColor = Color.White,
+            shape = RoundedCornerShape(20.dp)
         )
     }
 }
@@ -396,10 +562,10 @@ private fun GroupMessageItem(
                 contentDescription = "Sender Avatar",
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
-                    .size(28.dp)
+                    .size(30.dp)
                     .clip(CircleShape)
             )
-            Spacer(modifier = Modifier.width(6.dp))
+            Spacer(modifier = Modifier.width(8.dp))
         }
 
         Column(
@@ -418,16 +584,16 @@ private fun GroupMessageItem(
 
             Surface(
                 shape = RoundedCornerShape(
-                    topStart = 16.dp,
-                    topEnd = 16.dp,
-                    bottomStart = if (isMe) 16.dp else 4.dp,
-                    bottomEnd = if (isMe) 4.dp else 16.dp
+                    topStart = 18.dp,
+                    topEnd = 18.dp,
+                    bottomStart = if (isMe) 18.dp else 4.dp,
+                    bottomEnd = if (isMe) 4.dp else 18.dp
                 ),
-                color = if (isMe) Color(0xFFFCD34D) else Color.White,
-                border = BorderStroke(1.dp, if (isMe) Color(0xFFFBBF24) else Color(0xFFE2E8F0)),
+                color = if (isMe) Color(0xFFFDE68A) else Color.White,
+                border = BorderStroke(1.dp, if (isMe) Color(0xFFFCD34D) else Color(0xFFF1F5F9)),
                 shadowElevation = 0.5.dp
             ) {
-                Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                     if (isImage && !mediaModel.isNullOrBlank()) {
                         Box(
                             modifier = Modifier
@@ -453,253 +619,23 @@ private fun GroupMessageItem(
                         Spacer(modifier = Modifier.height(2.dp))
                     }
 
-                    Text(
-                        text = timeStr,
-                        fontSize = 10.sp,
-                        color = Color(0xFF64748B),
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.End,
                         modifier = Modifier.align(Alignment.End)
-                    )
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun GroupRosterSheet(
-    group: LocalGroupConversation,
-    isAdmin: Boolean,
-    myUserId: String,
-    onDismiss: () -> Unit,
-    onAddMemberClick: () -> Unit,
-    onLeaveGroup: () -> Unit
-) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var membersList by remember { mutableStateOf<List<SupabaseGroupMember>>(emptyList()) }
-    var isLoadingMembers by remember { mutableStateOf(true) }
-
-    LaunchedEffect(group.id) {
-        membersList = GroupChatRepository.getGroupMembers(context, group.id)
-        isLoadingMembers = false
-    }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = Color.White,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 8.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "Group Details & Members",
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0F172A)
-                )
-                IconButton(onClick = onDismiss) {
-                    SoftCloseIcon(size = 14.dp, color = Color(0xFF475569))
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Action: Add Member (Admin only)
-            if (isAdmin) {
-                Button(
-                    onClick = onAddMemberClick,
-                    colors = ButtonDefaults.buttonColors(containerColor = GoldAccent),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    FunkyPlusIcon(color = Color.Black, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Add Member (Admin Only)", color = Color.Black, fontWeight = FontWeight.Bold)
-                }
-                Spacer(modifier = Modifier.height(14.dp))
-            }
-
-            Text(
-                text = "Members (${membersList.size})",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF64748B)
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            if (isLoadingMembers) {
-                Box(modifier = Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = GoldAccent)
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(membersList) { member ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0xFFF8FAFC))
-                                .padding(10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(34.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFFFEF3C7)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    SoftGroupIcon(size = 16.dp, color = Color(0xFFB45309))
-                                }
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Column {
-                                    Text(
-                                        text = if (member.user_id == myUserId) "You" else "Member (${member.user_id.take(6)}...)",
-                                        fontSize = 13.5.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF0F172A)
-                                    )
-                                    Text(
-                                        text = "${member.role.uppercase()} · ${member.status}",
-                                        fontSize = 11.sp,
-                                        color = Color(0xFF64748B)
-                                    )
-                                }
-                            }
-
-                            // Admin can remove other members
-                            if (isAdmin && member.user_id != myUserId) {
-                                TextButton(
-                                    onClick = {
-                                        scope.launch {
-                                            GroupChatRepository.removeGroupMember(context, group.id, member.user_id)
-                                            membersList = membersList.filterNot { it.user_id == member.user_id }
-                                            Toast.makeText(context, "Removed member", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                ) {
-                                    Text("Remove", color = Color(0xFFEF4444), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
+                    ) {
+                        Text(
+                            text = timeStr,
+                            fontSize = 10.sp,
+                            color = if (isMe) Color(0xFF78350F) else Color(0xFF94A3B8)
+                        )
+                        if (isMe) {
+                            Spacer(modifier = Modifier.width(4.dp))
+                            GroupCheckIcon(size = 11.dp, color = Color(0xFF78350F))
                         }
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Leave Group Button
-            OutlinedButton(
-                onClick = onLeaveGroup,
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444)),
-                border = BorderStroke(1.dp, Color(0xFFFCA5A5)),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Leave Group", fontWeight = FontWeight.Bold)
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
         }
     }
-}
-
-@Composable
-private fun AddMemberDialog(
-    groupId: String,
-    onDismiss: () -> Unit,
-    onMemberAdded: () -> Unit
-) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var candidates by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
-    var selectedUserId by remember { mutableStateOf<String?>(null) }
-    var isSubmitting by remember { mutableStateOf(false) }
-
-    LaunchedEffect(Unit) {
-        try {
-            val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
-            if (!token.isNullOrBlank()) {
-                val profilesRes = SupabaseClient.api.getAllProfiles(
-                    apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
-                    auth = token
-                )
-                if (profilesRes.isSuccessful && profilesRes.body() != null) {
-                    val myId = SupabaseSessionManager.getUserId(context)
-                    candidates = profilesRes.body()!!
-                        .filterNot { it.auth_user_id == myId }
-                        .map { (it.auth_user_id ?: it.id.toString()) to (it.profile_name ?: it.username ?: "Partner") }
-                }
-            }
-        } catch (_: Exception) {}
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add Group Member", fontWeight = FontWeight.Bold) },
-        text = {
-            Column {
-                Text("Select a partner to invite (they must accept the invitation before joining):", fontSize = 13.sp, color = Color(0xFF64748B))
-                Spacer(modifier = Modifier.height(10.dp))
-                LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
-                    items(candidates) { (uid, name) ->
-                        val isSelected = selectedUserId == uid
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) Color(0xFFFEF3C7) else Color.Transparent)
-                                .clickable { selectedUserId = uid }
-                                .padding(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(text = name, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    val uid = selectedUserId ?: return@Button
-                    isSubmitting = true
-                    scope.launch {
-                        val res = GroupChatRepository.addGroupMember(context, groupId, uid)
-                        isSubmitting = false
-                        if (res.isSuccess) {
-                            onMemberAdded()
-                        } else {
-                            Toast.makeText(context, "Failed: ${res.exceptionOrNull()?.message}", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                },
-                enabled = selectedUserId != null && !isSubmitting,
-                colors = ButtonDefaults.buttonColors(containerColor = GoldAccent)
-            ) {
-                Text("Invite", color = Color.Black, fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel", color = Color.Black)
-            }
-        }
-    )
 }

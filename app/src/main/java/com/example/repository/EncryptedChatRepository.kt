@@ -83,10 +83,8 @@ object EncryptedChatRepository {
 
     private fun openDatabase(context: Context, vaultKey: ByteArray) {
         try {
-            if (database == null) {
-                database = EncryptedChatDatabase.buildDatabase(context, vaultKey)
-                Log.d(TAG, "SQLCipher EncryptedChatDatabase opened successfully.")
-            }
+            database = EncryptedChatDatabase.getInstance(context, vaultKey)
+            Log.d(TAG, "SQLCipher EncryptedChatDatabase opened successfully.")
 
             conversationCollectJob?.cancel()
             conversationCollectJob = scope.launch {
@@ -113,14 +111,10 @@ object EncryptedChatRepository {
     fun closeDatabase() {
         conversationCollectJob?.cancel()
         conversationCollectJob = null
-        try {
-            database?.close()
-        } catch (e: Exception) {
-            Log.w(TAG, "Error closing database", e)
-        }
         database = null
         _conversations.value = emptyList()
         _totalUnreadCount.value = 0
+        EncryptedChatDatabase.closeInstance()
     }
 
     private fun startRealtimeListener(context: Context) {
