@@ -1070,13 +1070,31 @@ class AuthViewModel : ViewModel() {
 
     fun processDeepLinkUri(uri: Uri?, context: Context, onNavigateToRoom: (() -> Unit)? = null) {
         if (uri == null) return
-        if (uri.scheme?.lowercase() != "funkytalk") return
+        val scheme = uri.scheme?.lowercase() ?: ""
+        if (scheme != "funkytalk" && scheme != "https" && scheme != "http") return
 
         val host = uri.host?.lowercase() ?: ""
         val path = uri.path ?: ""
         val pathSegments = uri.pathSegments
 
         Log.d("DeepLink", "Processing deep link: $uri, host=$host, path=$path, segments=$pathSegments")
+
+        // Handle funkytalk://group/{code} or https://funkytalk.app/group/{code}
+        if (host == "group" || pathSegments.contains("group")) {
+            val groupCode = when {
+                host == "group" -> pathSegments.firstOrNull() ?: uri.getQueryParameter("code")
+                else -> {
+                    val idx = pathSegments.indexOf("group")
+                    if (idx >= 0 && idx + 1 < pathSegments.size) pathSegments[idx + 1] else uri.getQueryParameter("code")
+                }
+            }?.trim()?.removePrefix("/")
+            if (!groupCode.isNullOrBlank()) {
+                com.example.repository.GroupChatRepository.setPendingInviteCode(groupCode)
+            }
+            return
+        }
+
+        if (scheme != "funkytalk") return
 
         // Handle funkytalk://open
         if (host == "open") {

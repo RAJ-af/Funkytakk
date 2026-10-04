@@ -58,7 +58,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Custom Scheme Deep Link Filter for funkytalk:// (e.g. funkytalk://room/{code} and funkytalk://open) -->
+            <!-- Custom Scheme Deep Link Filter for funkytalk:// (e.g. funkytalk://room/{code}, funkytalk://group/{code} and funkytalk://open) -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
 
@@ -66,6 +66,19 @@
                 <category android:name="android.intent.category.BROWSABLE" />
 
                 <data android:scheme="funkytalk" />
+            </intent-filter>
+
+            <!-- HTTPS App Link Filter for Group Invites (https://funkytalk.app/group/{code}) -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:scheme="https"
+                    android:host="funkytalk.app"
+                    android:pathPrefix="/group" />
             </intent-filter>
         </activity>
 

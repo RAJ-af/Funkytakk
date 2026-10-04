@@ -81,8 +81,37 @@ sealed class RealtimeTableEvent {
     data class GroupMessageReceived(
         val eventType: String,
         val record: JSONObject?,
+        val rowId: String? = null,
         val recipientId: String?,
-        val messageId: String?
+        val messageId: String?,
+        val groupId: String? = null,
+        val senderId: String? = null,
+        val messageType: String? = null,
+        val ciphertext: String? = null,
+        val nonce: String? = null,
+        val storagePath: String? = null
+    ) : RealtimeTableEvent()
+    data class GroupEventInserted(
+        val eventType: String,
+        val record: JSONObject?,
+        val groupId: String?,
+        val groupEventType: String?,
+        val actorId: String?,
+        val targetUserId: String?,
+        val meta: JSONObject?
+    ) : RealtimeTableEvent()
+    data class GroupMemberChanged(
+        val eventType: String,
+        val record: JSONObject?,
+        val groupId: String?,
+        val userId: String?,
+        val role: String?,
+        val status: String?
+    ) : RealtimeTableEvent()
+    data class GroupConversationChanged(
+        val eventType: String,
+        val record: JSONObject?,
+        val groupId: String?
     ) : RealtimeTableEvent()
     data class Reconnected(val timestamp: Long = System.currentTimeMillis()) : RealtimeTableEvent()
 }
@@ -100,6 +129,9 @@ object VoiceRoomRealtimeManager {
     private var reconnectJob: Job? = null
 
     private val subscribedRoomChannels = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val subscribedGroupIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    @Volatile
+    private var subscribedGroupRecipientId: String? = null
 
     private val userSnippets = java.util.concurrent.ConcurrentHashMap<String, UserSnippet>()
 
@@ -401,6 +433,42 @@ object VoiceRoomRealtimeManager {
         }
         ws.send(joinDmMessages.toString())
 
+        // Subscribe to group_events, group_members, and group_conversations changes
+        listOf("group_events", "group_members", "group_conversations").forEach { tbl ->
+            val joinGroupTbl = JSONObject().apply {
+                put("topic", "realtime:public:$tbl")
+                put("event", "phx_join")
+                put("payload", JSONObject().apply {
+                    if (!token.isNullOrBlank()) {
+                        put("access_token", token)
+                    }
+                    put("config", JSONObject().apply {
+                        put("postgres_changes", org.json.JSONArray().apply {
+                            put(JSONObject().apply {
+                                put("event", "*")
+                                put("schema", "public")
+                                put("table", tbl)
+                            })
+                        })
+                    })
+                })
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(joinGroupTbl.toString())
+        }
+
+        // Resubscribe to group inbox if registered
+        subscribedGroupRecipientId?.let { rid ->
+            if (rid.isNotBlank()) {
+                subscribeGroupInbox(rid)
+            }
+        }
+
+        // Resubscribe to per-group channels
+        subscribedGroupIds.forEach { gid ->
+            subscribeGroupRealtime(gid)
+        }
+
         // Resubscribe to any active room broadcast channels
         subscribedRoomChannels.forEach { roomId ->
             sendJoinRoomChannel(ws, roomId)
@@ -641,15 +709,73 @@ object VoiceRoomRealtimeManager {
                         )
                     )
                 } else if (table == "group_message_recipients" || topic.contains("group_message_recipients")) {
+                    val rowId = record?.optString("id")
                     val recipientId = record?.optString("recipient_id")
                     val messageId = record?.optString("message_id")
-                    Log.d(TAG, "[Realtime] Received group_message_recipients event ($eventType) for recipient $recipientId, messageId $messageId")
+                    val groupId = record?.optString("group_id")
+                    val senderId = record?.optString("sender_id")
+                    val messageType = record?.optString("message_type")
+                    val ciphertext = record?.optString("ciphertext")
+                    val nonce = record?.optString("nonce")
+                    val storagePath = record?.optString("storage_path")
+                    Log.d(TAG, "[Realtime] Received group_message_recipients event ($eventType) for recipient $recipientId, messageId $messageId, groupId $groupId")
                     _events.tryEmit(
                         RealtimeTableEvent.GroupMessageReceived(
                             eventType = eventType,
                             record = record,
+                            rowId = rowId,
                             recipientId = recipientId,
-                            messageId = messageId
+                            messageId = messageId,
+                            groupId = groupId,
+                            senderId = senderId,
+                            messageType = messageType,
+                            ciphertext = ciphertext,
+                            nonce = nonce,
+                            storagePath = storagePath
+                        )
+                    )
+                } else if (table == "group_events" || topic.contains("group_events")) {
+                    val groupId = record?.optString("group_id")
+                    val groupEventType = record?.optString("event_type")?.ifBlank { record.optString("type") }
+                    val actorId = record?.optString("actor_id")?.ifBlank { record.optString("user_id") }
+                    val targetUserId = record?.optString("target_user_id")
+                    val meta = record?.optJSONObject("meta") ?: record?.optJSONObject("payload") ?: record?.optJSONObject("data")
+                    Log.d(TAG, "[Realtime] Received group_events ($eventType): group=$groupId, type=$groupEventType")
+                    _events.tryEmit(
+                        RealtimeTableEvent.GroupEventInserted(
+                            eventType = eventType,
+                            record = record,
+                            groupId = groupId,
+                            groupEventType = groupEventType,
+                            actorId = actorId,
+                            targetUserId = targetUserId,
+                            meta = meta
+                        )
+                    )
+                } else if (table == "group_members" || topic.contains("group_members")) {
+                    val groupId = record?.optString("group_id")
+                    val userId = record?.optString("user_id")
+                    val role = record?.optString("role")
+                    val status = record?.optString("status")
+                    Log.d(TAG, "[Realtime] Received group_members ($eventType): group=$groupId, user=$userId, role=$role, status=$status")
+                    _events.tryEmit(
+                        RealtimeTableEvent.GroupMemberChanged(
+                            eventType = eventType,
+                            record = record,
+                            groupId = groupId,
+                            userId = userId,
+                            role = role,
+                            status = status
+                        )
+                    )
+                } else if (table == "group_conversations" || topic.contains("group_conversations")) {
+                    val groupId = record?.optString("id")?.ifBlank { record.optString("group_id") }
+                    Log.d(TAG, "[Realtime] Received group_conversations ($eventType): group=$groupId")
+                    _events.tryEmit(
+                        RealtimeTableEvent.GroupConversationChanged(
+                            eventType = eventType,
+                            record = record,
+                            groupId = groupId
                         )
                     )
                 }
@@ -661,6 +787,7 @@ object VoiceRoomRealtimeManager {
 
     fun subscribeGroupInbox(recipientId: String) {
         if (recipientId.isBlank()) return
+        subscribedGroupRecipientId = recipientId
         val ws = webSocket ?: return
         try {
             val token = currentAuthToken
@@ -688,6 +815,79 @@ object VoiceRoomRealtimeManager {
             Log.d(TAG, "Subscribed to postgres_changes group_message_recipients for recipient:$recipientId")
         } catch (e: Exception) {
             Log.w(TAG, "Error sending join for group_message_recipients recipient channel $recipientId: ${e.message}")
+        }
+    }
+
+    fun subscribeGroupRealtime(groupId: String) {
+        if (groupId.isBlank()) return
+        subscribedGroupIds.add(groupId)
+        val ws = webSocket ?: return
+        try {
+            val token = currentAuthToken
+            // 1. group_events for groupId
+            val joinEvents = JSONObject().apply {
+                put("topic", "realtime:public:group_events:group_id=eq.$groupId")
+                put("event", "phx_join")
+                put("payload", JSONObject().apply {
+                    if (!token.isNullOrBlank()) put("access_token", token)
+                    put("config", JSONObject().apply {
+                        put("postgres_changes", org.json.JSONArray().apply {
+                            put(JSONObject().apply {
+                                put("event", "INSERT")
+                                put("schema", "public")
+                                put("table", "group_events")
+                                put("filter", "group_id=eq.$groupId")
+                            })
+                        })
+                    })
+                })
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(joinEvents.toString())
+
+            // 2. group_members for groupId
+            val joinMembers = JSONObject().apply {
+                put("topic", "realtime:public:group_members:group_id=eq.$groupId")
+                put("event", "phx_join")
+                put("payload", JSONObject().apply {
+                    if (!token.isNullOrBlank()) put("access_token", token)
+                    put("config", JSONObject().apply {
+                        put("postgres_changes", org.json.JSONArray().apply {
+                            put(JSONObject().apply {
+                                put("event", "*")
+                                put("schema", "public")
+                                put("table", "group_members")
+                                put("filter", "group_id=eq.$groupId")
+                            })
+                        })
+                    })
+                })
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(joinMembers.toString())
+
+            // 3. group_conversations for groupId
+            val joinConv = JSONObject().apply {
+                put("topic", "realtime:public:group_conversations:id=eq.$groupId")
+                put("event", "phx_join")
+                put("payload", JSONObject().apply {
+                    if (!token.isNullOrBlank()) put("access_token", token)
+                    put("config", JSONObject().apply {
+                        put("postgres_changes", org.json.JSONArray().apply {
+                            put(JSONObject().apply {
+                                put("event", "*")
+                                put("schema", "public")
+                                put("table", "group_conversations")
+                                put("filter", "id=eq.$groupId")
+                            })
+                        })
+                    })
+                })
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(joinConv.toString())
+        } catch (e: Exception) {
+            Log.w(TAG, "Error subscribing to group realtime for $groupId: ${e.message}")
         }
     }
 

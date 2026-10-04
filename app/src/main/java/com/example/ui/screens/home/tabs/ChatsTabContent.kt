@@ -62,6 +62,7 @@ import com.example.ui.screens.chat.VaultManagementDialogs
 import com.example.ui.screens.home.dialogs.BlockedUsersBottomSheet
 import com.example.ui.screens.home.dialogs.ChatLongPressBottomSheet
 import com.example.ui.screens.home.dialogs.CreateGroupBottomSheet
+import com.example.ui.screens.home.dialogs.PendingGroupInvitesBottomSheet
 import com.example.ui.screens.home.models.DirectChat
 import com.example.ui.theme.GoldAccent
 import kotlinx.coroutines.launch
@@ -81,9 +82,12 @@ fun ChatsTabContent(
     var selectedFilter by remember { mutableStateOf("All") } // "All", "Unread", "Language", "Groups"
     var showOptionsMenu by remember { mutableStateOf(false) }
     var showCreateGroupSheet by remember { mutableStateOf(false) }
+    var showPendingInvitesSheet by remember { mutableStateOf(false) }
     var showBlockedUsersSheet by remember { mutableStateOf(false) }
     var selectedChatForMenu by remember { mutableStateOf<DirectChat?>(null) }
     var showClearAllConfirmDialog by remember { mutableStateOf(false) }
+
+    val isMinimalistMode by ChatPreferencesManager.isMinimalistMode.collectAsState()
 
     val supportPreview by SupportChatManager.latestMessagePreview.collectAsState()
     val supportTime by SupportChatManager.latestMessageTime.collectAsState()
@@ -94,6 +98,7 @@ fun ChatsTabContent(
     val customGroups by ChatPreferencesManager.groups.collectAsState()
     val joinedGroups by com.example.repository.GroupChatRepository.joinedGroups.collectAsState()
     val pendingInvites by com.example.repository.GroupChatRepository.pendingInvites.collectAsState()
+    val allMyGroups by com.example.repository.GroupChatRepository.allMyGroups.collectAsState()
     var selectedPendingInvite by remember { mutableStateOf<com.example.db.LocalGroupConversation?>(null) }
     val mutedChats by ChatPreferencesManager.mutedChats.collectAsState()
     val pinnedChats by ChatPreferencesManager.pinnedChats.collectAsState()
@@ -108,8 +113,8 @@ fun ChatsTabContent(
         com.example.repository.GroupChatRepository.init(context)
     }
 
-    // Merge real encrypted conversations from Room DB, joined groups, and active partner chats
-    val mergedConversations = remember(conversationsList, dbConversations, joinedGroups, customGroups, pinnedChats, mutedChats, blockedUsers, deletedChats, unreadOverrides) {
+    // Merge real encrypted conversations from Room DB, all groups (joined/invited/requested), and active partner chats
+    val mergedConversations = remember(conversationsList, dbConversations, joinedGroups, allMyGroups, customGroups, pinnedChats, mutedChats, blockedUsers, deletedChats, unreadOverrides) {
         val dbMapped = dbConversations.map { conv ->
             val isUnreadOverridden = unreadOverrides.contains(conv.otherUserId)
             DirectChat(
@@ -124,18 +129,29 @@ fun ChatsTabContent(
             )
         }
 
-        // Map joined groups (invited-but-not-accepted groups are excluded)
-        val groupsMapped = joinedGroups.map { grp ->
+        val groupsSource = if (allMyGroups.isNotEmpty()) allMyGroups else joinedGroups
+        val groupsMapped = groupsSource.map { grp ->
             val isUnreadOverridden = unreadOverrides.contains(grp.id)
+            val statusLower = grp.myStatus.lowercase()
+            val statusPreview = when (statusLower) {
+                "invited" -> "Invited to join · Tap to Accept or Decline"
+                "requested" -> "Waiting for admin approval"
+                else -> grp.lastMessageText.ifBlank { "End-to-end encrypted group" }
+            }
+            val memberTag = when (statusLower) {
+                "invited" -> "Group · Invited (${grp.memberCount} members)"
+                "requested" -> "Group · Waiting for admin approval"
+                else -> "Group (${grp.memberCount} members)"
+            }
             DirectChat(
                 id = grp.id,
                 name = grp.name,
-                avatar = grp.avatarUrl.ifBlank { "https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=200" },
-                lastMsg = grp.lastMessageText.ifBlank { "End-to-end encrypted group" },
+                avatar = grp.avatarUrl,
+                lastMsg = statusPreview,
                 time = formatTimeAgo(grp.lastMessageTime),
-                unreadCount = if (isUnreadOverridden) 1 else grp.unreadCount,
+                unreadCount = if (statusLower == "invited") 1 else if (isUnreadOverridden) 1 else grp.unreadCount,
                 onlineStatus = "online",
-                isNativeLanguage = "Group (${grp.memberCount} members)"
+                isNativeLanguage = memberTag
             )
         }
 
@@ -245,7 +261,7 @@ fun ChatsTabContent(
                             expanded = showOptionsMenu,
                             onDismissRequest = { showOptionsMenu = false },
                             modifier = Modifier
-                                .width(240.dp)
+                                .width(250.dp)
                                 .background(Color.White)
                         ) {
                             // 1. Create Group Option
@@ -259,7 +275,7 @@ fun ChatsTabContent(
                                                 .background(Color(0xFFFEF3C7)),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            SoftGroupIcon(size = 16.dp, color = Color(0xFFD97706))
+                                            GroupUsersIcon(size = 16.dp, color = Color(0xFFD97706))
                                         }
                                         Spacer(modifier = Modifier.width(10.dp))
                                         Text(
@@ -276,7 +292,103 @@ fun ChatsTabContent(
                                 }
                             )
 
-                            // 2. Blocked Users Option
+                            // 2. Review Group Invites & Requests
+                            DropdownMenuItem(
+                                text = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(30.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFFFFFBEB))
+                                                .border(1.dp, Color(0xFFFEF08A), CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            GroupRequestReviewIcon(size = 15.dp, color = Color(0xFFB45309))
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = "Review Requests",
+                                            color = Color.Black,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        if (pendingInvites.isNotEmpty()) {
+                                            Surface(
+                                                color = Color(0xFFFFC529),
+                                                shape = CircleShape
+                                            ) {
+                                                Text(
+                                                    text = "${pendingInvites.size}",
+                                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                                    fontSize = 10.5.sp,
+                                                    fontWeight = FontWeight.Black,
+                                                    color = Color.Black
+                                                )
+                                            }
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    showOptionsMenu = false
+                                    showPendingInvitesSheet = true
+                                }
+                            )
+
+                            // 3. Minimalist Mode Toggle
+                            DropdownMenuItem(
+                                text = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(30.dp)
+                                                .clip(CircleShape)
+                                                .background(if (isMinimalistMode) Color(0xFFFEF3C7) else Color(0xFFF3F4F6)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            GroupMinimalistModeIcon(
+                                                size = 16.dp,
+                                                color = if (isMinimalistMode) Color(0xFFD97706) else Color(0xFF4B5563)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = "Minimalist Mode",
+                                            color = Color.Black,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        Surface(
+                                            color = if (isMinimalistMode) Color(0xFFFFC529) else Color(0xFFE5E7EB),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Text(
+                                                text = if (isMinimalistMode) "ON" else "OFF",
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Black,
+                                                color = if (isMinimalistMode) Color.Black else Color(0xFF6B7280)
+                                            )
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    showOptionsMenu = false
+                                    ChatPreferencesManager.toggleMinimalistMode(context)
+                                }
+                            )
+
+                            HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
+
+                            // 4. Blocked Users Option
                             DropdownMenuItem(
                                 text = {
                                     Row(
@@ -297,7 +409,7 @@ fun ChatsTabContent(
                                             text = "Blocked Users",
                                             color = Color.Black,
                                             fontSize = 14.sp,
-                                            fontWeight = FontWeight.Bold,
+                                            fontWeight = FontWeight.Medium,
                                             modifier = Modifier.weight(1f)
                                         )
                                         if (blockedUsers.isNotEmpty()) {
@@ -323,7 +435,7 @@ fun ChatsTabContent(
                                 }
                             )
 
-                            // 3. Mark all as read
+                            // 5. Mark all as read
                             DropdownMenuItem(
                                 text = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -357,7 +469,7 @@ fun ChatsTabContent(
                                 }
                             )
 
-                            // 4. Contact Support
+                            // 6. Contact Support
                             DropdownMenuItem(
                                 text = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -386,7 +498,7 @@ fun ChatsTabContent(
                                 }
                             )
 
-                            // 5. Vault Lock option
+                            // 7. Vault Lock option
                             if (isVaultUnlocked) {
                                 DropdownMenuItem(
                                     text = {
@@ -419,7 +531,7 @@ fun ChatsTabContent(
 
                             HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
 
-                            // 6. Clear All Chats
+                            // 8. Clear All Chats
                             DropdownMenuItem(
                                 text = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -570,31 +682,31 @@ fun ChatsTabContent(
             // PINNED OFFICIAL FUNKYTALK SUPPORT ENTRY (ALWAYS AT TOP)
             if (showSupportInSearch) {
                 item {
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(if (isMinimalistMode) 8.dp else 16.dp))
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 20.dp)
-                            .clip(RoundedCornerShape(22.dp))
+                            .padding(horizontal = if (isMinimalistMode) 16.dp else 20.dp)
+                            .clip(RoundedCornerShape(if (isMinimalistMode) 16.dp else 22.dp))
                             .clickable {
                                 SupportChatManager.markSupportConversationRead(context)
                                 onOpenSupportChat(null)
                             }
                             .testTag("pinned_support_chat_item"),
-                        shape = RoundedCornerShape(22.dp),
+                        shape = RoundedCornerShape(if (isMinimalistMode) 16.dp else 22.dp),
                         color = Color.White,
-                        border = BorderStroke(1.5.dp, Color(0xFFFDE68A)),
-                        shadowElevation = 1.dp
+                        border = BorderStroke(1.2.dp, Color(0xFFFDE68A)),
+                        shadowElevation = if (isMinimalistMode) 0.dp else 1.dp
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(16.dp),
+                                .padding(if (isMinimalistMode) PaddingValues(horizontal = 12.dp, vertical = 10.dp) else PaddingValues(16.dp)),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Left Avatar: FunkyTalk Official Avatar with Custom Soft Verified Badge
+                            // Left Avatar: FunkyTalk Official Avatar
                             Box(
-                                modifier = Modifier.size(56.dp)
+                                modifier = Modifier.size(if (isMinimalistMode) 40.dp else 56.dp)
                             ) {
                                 Box(
                                     modifier = Modifier
@@ -606,15 +718,14 @@ fun ChatsTabContent(
                                     Text(
                                         text = "FT",
                                         fontWeight = FontWeight.Black,
-                                        fontSize = 20.sp,
+                                        fontSize = if (isMinimalistMode) 15.sp else 20.sp,
                                         color = Color.Black
                                     )
                                 }
 
-                                // Soft Verified check badge
                                 SoftCheckBadge(
                                     modifier = Modifier
-                                        .size(18.dp)
+                                        .size(if (isMinimalistMode) 14.dp else 18.dp)
                                         .align(Alignment.BottomEnd)
                                         .clip(CircleShape)
                                         .border(1.5.dp, Color.White, CircleShape),
@@ -623,7 +734,7 @@ fun ChatsTabContent(
                                 )
                             }
 
-                            Spacer(modifier = Modifier.width(14.dp))
+                            Spacer(modifier = Modifier.width(if (isMinimalistMode) 10.dp else 14.dp))
 
                             // Center Details
                             Column(
@@ -638,7 +749,7 @@ fun ChatsTabContent(
                                         Text(
                                             text = "FunkyTalk",
                                             fontWeight = FontWeight.ExtraBold,
-                                            fontSize = 16.sp,
+                                            fontSize = if (isMinimalistMode) 14.5.sp else 16.sp,
                                             color = Color.Black
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
@@ -647,12 +758,12 @@ fun ChatsTabContent(
                                                 .clip(RoundedCornerShape(6.dp))
                                                 .background(Color(0xFFFFFBEB))
                                                 .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(6.dp))
-                                                .padding(horizontal = 6.dp, vertical = 1.dp)
+                                                .padding(horizontal = 5.dp, vertical = 1.dp)
                                         ) {
                                             Text(
                                                 text = "SUPPORT",
                                                 color = Color(0xFFB45309),
-                                                fontSize = 9.sp,
+                                                fontSize = 8.5.sp,
                                                 fontWeight = FontWeight.Black
                                             )
                                         }
@@ -660,30 +771,31 @@ fun ChatsTabContent(
 
                                     Text(
                                         text = supportTime ?: "",
-                                        fontSize = 12.sp,
+                                        fontSize = 11.5.sp,
                                         color = Color(0xFF9CA3AF),
                                         fontWeight = FontWeight.Normal
                                     )
                                 }
 
-                                Spacer(modifier = Modifier.height(2.dp))
-
-                                // Middle line: Soft Support Headset icon
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    SoftHeadsetIcon(
-                                        size = 14.dp,
-                                        color = Color(0xFF10B981)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = "Official Support Channel",
-                                        color = Color(0xFF047857),
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
+                                if (!isMinimalistMode) {
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        SoftHeadsetIcon(
+                                            size = 14.dp,
+                                            color = Color(0xFF10B981)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "Official Support Channel",
+                                            color = Color(0xFF047857),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                } else {
+                                    Spacer(modifier = Modifier.height(2.dp))
                                 }
-
-                                Spacer(modifier = Modifier.height(4.dp))
 
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -694,7 +806,7 @@ fun ChatsTabContent(
                                         text = supportPreview ?: "How can we help you today? Tap to chat.",
                                         color = if (supportUnreadCount > 0) Color(0xFF1F2937) else Color(0xFF6B7280),
                                         fontWeight = if (supportUnreadCount > 0) FontWeight.Bold else FontWeight.Normal,
-                                        fontSize = 13.sp,
+                                        fontSize = if (isMinimalistMode) 12.sp else 13.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier.weight(1f)
@@ -704,7 +816,7 @@ fun ChatsTabContent(
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Box(
                                             modifier = Modifier
-                                                .size(20.dp)
+                                                .size(if (isMinimalistMode) 18.dp else 20.dp)
                                                 .clip(CircleShape)
                                                 .background(GoldAccent),
                                             contentAlignment = Alignment.Center
@@ -712,7 +824,7 @@ fun ChatsTabContent(
                                             Text(
                                                 text = "$supportUnreadCount",
                                                 color = Color.Black,
-                                                fontSize = 11.sp,
+                                                fontSize = 10.5.sp,
                                                 fontWeight = FontWeight.Black
                                             )
                                         }
@@ -724,137 +836,8 @@ fun ChatsTabContent(
                 }
             }
 
-            // NEW GROUP ENTRY POINT (ALONGSIDE PINNED FUNKYTALK SUPPORT ENTRY)
             item {
-                Spacer(modifier = Modifier.height(10.dp))
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp)
-                        .clip(RoundedCornerShape(22.dp))
-                        .clickable {
-                            if (isVaultUnlocked) {
-                                showCreateGroupSheet = true
-                            } else {
-                                Toast.makeText(context, "Unlock vault to access encrypted groups", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                        .testTag("new_group_action_entry"),
-                    shape = RoundedCornerShape(22.dp),
-                    color = Color.White,
-                    border = BorderStroke(1.dp, Color(0xFFF0F0EE)),
-                    shadowElevation = 0.5.dp
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFFFEF3C7)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            SoftGroupIcon(size = 24.dp, color = Color(0xFFB45309))
-                        }
-
-                        Spacer(modifier = Modifier.width(14.dp))
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "New Group Chat",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 15.sp,
-                                color = Color.Black
-                            )
-                            Text(
-                                text = "Start an end-to-end encrypted group",
-                                fontSize = 12.sp,
-                                color = Color(0xFF6B7280)
-                            )
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(GoldAccent),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("+", color = Color.Black, fontSize = 20.sp, fontWeight = FontWeight.Black)
-                        }
-                    }
-                }
-            }
-
-            // PENDING GROUP INVITATIONS AREA
-            if (pendingInvites.isNotEmpty()) {
-                item {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp)
-                            .clip(RoundedCornerShape(18.dp))
-                            .clickable {
-                                selectedPendingInvite = pendingInvites.firstOrNull()
-                            }
-                            .testTag("pending_invites_banner"),
-                        shape = RoundedCornerShape(18.dp),
-                        color = Color(0xFFFFFBEB),
-                        border = BorderStroke(1.5.dp, Color(0xFFFDE68A))
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFFFDE68A)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                SoftGroupIcon(size = 18.dp, color = Color(0xFF92400E))
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Pending Group Invites (${pendingInvites.size})",
-                                    fontSize = 13.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF92400E)
-                                )
-                                Text(
-                                    text = "${pendingInvites.first().name} · Tap to accept or decline",
-                                    fontSize = 11.5.sp,
-                                    color = Color(0xFFB45309)
-                                )
-                            }
-                            Surface(
-                                shape = RoundedCornerShape(50.dp),
-                                color = GoldAccent
-                            ) {
-                                Text(
-                                    text = "Review",
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.Black,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            item {
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(if (isMinimalistMode) 4.dp else 8.dp))
             }
 
             // Real Conversations List or Beautiful Clean Empty State (NO MOCK CHATS)
@@ -916,11 +899,9 @@ fun ChatsTabContent(
                                     border = BorderStroke(1.5.dp, Color(0xFFD97706)),
                                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.GroupAdd,
-                                        contentDescription = null,
-                                        tint = Color(0xFF92400E),
-                                        modifier = Modifier.size(16.dp)
+                                    GroupUsersIcon(
+                                        color = Color(0xFF92400E),
+                                        size = 16.dp
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
@@ -957,21 +938,29 @@ fun ChatsTabContent(
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 5.dp)
-                            .clip(RoundedCornerShape(22.dp))
+                            .padding(
+                                horizontal = if (isMinimalistMode) 16.dp else 20.dp,
+                                vertical = if (isMinimalistMode) 2.5.dp else 5.dp
+                            )
+                            .clip(RoundedCornerShape(if (isMinimalistMode) 16.dp else 22.dp))
                             .combinedClickable(
                                 onClick = {
                                     if (isVaultUnlocked) {
-                                        val isGroupChat = chat.isNativeLanguage.startsWith("Group") || joinedGroups.any { it.id == chat.id }
+                                        val matchedGroup = allMyGroups.find { it.id == chat.id } ?: joinedGroups.find { it.id == chat.id }
+                                        val isGroupChat = chat.isNativeLanguage.startsWith("Group") || matchedGroup != null
                                         if (isGroupChat) {
-                                            val grp = joinedGroups.find { it.id == chat.id } ?: com.example.db.LocalGroupConversation(
+                                            val grp = matchedGroup ?: com.example.db.LocalGroupConversation(
                                                 id = chat.id,
                                                 name = chat.name,
                                                 avatarUrl = chat.avatar,
                                                 myRole = "member",
                                                 myStatus = "joined"
                                             )
-                                            onOpenGroupChat(grp)
+                                            when (grp.myStatus.lowercase()) {
+                                                "invited" -> selectedPendingInvite = grp
+                                                "requested" -> Toast.makeText(context, "Waiting for admin approval", Toast.LENGTH_SHORT).show()
+                                                else -> onOpenGroupChat(grp)
+                                            }
                                         } else {
                                             onSelectChat(chat)
                                         }
@@ -983,7 +972,7 @@ fun ChatsTabContent(
                                     }
                                 }
                             ),
-                        shape = RoundedCornerShape(22.dp),
+                        shape = RoundedCornerShape(if (isMinimalistMode) 16.dp else 22.dp),
                         color = if (isPinned) Color(0xFFFFFDF5) else Color.White,
                         border = BorderStroke(1.dp, if (isPinned) Color(0xFFFDE68A) else Color(0xFFF0F0EE)),
                         shadowElevation = 0.dp
@@ -991,10 +980,10 @@ fun ChatsTabContent(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(16.dp),
+                                .padding(if (isMinimalistMode) PaddingValues(horizontal = 12.dp, vertical = 10.dp) else PaddingValues(16.dp)),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Box(modifier = Modifier.size(56.dp)) {
+                            Box(modifier = Modifier.size(if (isMinimalistMode) 40.dp else 56.dp)) {
                                 UserAvatarImage(
                                     avatarUrl = chat.avatar,
                                     contentDescription = chat.name,
@@ -1007,33 +996,31 @@ fun ChatsTabContent(
                                 if (isGroup) {
                                     Box(
                                         modifier = Modifier
-                                            .size(20.dp)
+                                            .size(if (isMinimalistMode) 15.dp else 20.dp)
                                             .align(Alignment.BottomEnd)
                                             .clip(CircleShape)
                                             .background(GoldAccent)
-                                            .border(1.5.dp, Color.White, CircleShape),
+                                            .border(1.2.dp, Color.White, CircleShape),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Group,
-                                            contentDescription = "Group",
-                                            tint = Color.Black,
-                                            modifier = Modifier.size(12.dp)
+                                        GroupUsersIcon(
+                                            size = if (isMinimalistMode) 9.dp else 12.dp,
+                                            color = Color.Black
                                         )
                                     }
                                 } else {
                                     CircleFlag(
                                         countryCode = flagCode,
                                         modifier = Modifier
-                                            .size(18.dp)
+                                            .size(if (isMinimalistMode) 14.dp else 18.dp)
                                             .align(Alignment.BottomEnd)
                                             .clip(CircleShape)
-                                            .border(1.5.dp, Color.White, CircleShape)
+                                            .border(1.2.dp, Color.White, CircleShape)
                                     )
                                 }
                             }
 
-                            Spacer(modifier = Modifier.width(14.dp))
+                            Spacer(modifier = Modifier.width(if (isMinimalistMode) 10.dp else 14.dp))
 
                             Column(modifier = Modifier.weight(1f)) {
                                 Row(
@@ -1048,7 +1035,7 @@ fun ChatsTabContent(
                                         Text(
                                             text = chat.name,
                                             fontWeight = FontWeight.Bold,
-                                            fontSize = 16.sp,
+                                            fontSize = if (isMinimalistMode) 14.5.sp else 16.sp,
                                             color = Color.Black,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
@@ -1056,21 +1043,17 @@ fun ChatsTabContent(
 
                                         if (isPinned) {
                                             Spacer(modifier = Modifier.width(4.dp))
-                                            Icon(
-                                                imageVector = Icons.Default.PushPin,
-                                                contentDescription = "Pinned",
-                                                tint = Color(0xFFD97706),
-                                                modifier = Modifier.size(14.dp)
+                                            GroupPinIcon(
+                                                size = if (isMinimalistMode) 12.dp else 14.dp,
+                                                color = Color(0xFFD97706)
                                             )
                                         }
 
                                         if (isMuted) {
                                             Spacer(modifier = Modifier.width(4.dp))
-                                            Icon(
-                                                imageVector = Icons.AutoMirrored.Filled.VolumeOff,
-                                                contentDescription = "Muted",
-                                                tint = Color(0xFF9CA3AF),
-                                                modifier = Modifier.size(14.dp)
+                                            GroupMuteIcon(
+                                                size = if (isMinimalistMode) 12.dp else 14.dp,
+                                                color = Color(0xFF9CA3AF)
                                             )
                                         }
 
@@ -1080,25 +1063,25 @@ fun ChatsTabContent(
                                             modifier = Modifier
                                                 .clip(RoundedCornerShape(4.dp))
                                                 .background(if (isGroup) Color(0xFFFEF3C7) else Color(0xFFDCFCE7))
-                                                .padding(horizontal = 5.dp, vertical = 1.dp)
+                                                .padding(horizontal = 4.dp, vertical = 1.dp)
                                         ) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
                                                 if (isGroup) {
                                                     Text(
                                                         text = "GROUP",
-                                                        fontSize = 9.sp,
+                                                        fontSize = 8.5.sp,
                                                         fontWeight = FontWeight.Bold,
                                                         color = Color(0xFF92400E)
                                                     )
                                                 } else {
                                                     SoftTinyLockIcon(
-                                                        size = 10.dp,
+                                                        size = 9.dp,
                                                         tint = Color(0xFF15803D)
                                                     )
-                                                    Spacer(modifier = Modifier.width(3.dp))
+                                                    Spacer(modifier = Modifier.width(2.dp))
                                                     Text(
                                                         text = "E2EE",
-                                                        fontSize = 9.sp,
+                                                        fontSize = 8.5.sp,
                                                         fontWeight = FontWeight.Bold,
                                                         color = Color(0xFF15803D)
                                                     )
@@ -1111,35 +1094,37 @@ fun ChatsTabContent(
 
                                     Text(
                                         text = chat.time,
-                                        fontSize = 12.sp,
+                                        fontSize = if (isMinimalistMode) 11.5.sp else 12.sp,
                                         color = Color(0xFF9CA3AF),
                                         fontWeight = FontWeight.Normal
                                     )
                                 }
 
-                                Spacer(modifier = Modifier.height(2.dp))
-
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    if (!isGroup) {
-                                        CircleFlag(
-                                            countryCode = flagCode,
-                                            modifier = Modifier
-                                                .size(13.dp)
-                                                .clip(CircleShape)
+                                if (!isMinimalistMode) {
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        if (!isGroup) {
+                                            CircleFlag(
+                                                countryCode = flagCode,
+                                                modifier = Modifier
+                                                    .size(13.dp)
+                                                    .clip(CircleShape)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                        }
+                                        Text(
+                                            text = chat.isNativeLanguage,
+                                            color = Color(0xFF6B7280),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Normal,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
-                                        Spacer(modifier = Modifier.width(6.dp))
                                     }
-                                    Text(
-                                        text = chat.isNativeLanguage,
-                                        color = Color(0xFF6B7280),
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Normal,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                } else {
+                                    Spacer(modifier = Modifier.height(2.dp))
                                 }
-
-                                Spacer(modifier = Modifier.height(4.dp))
 
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -1150,7 +1135,7 @@ fun ChatsTabContent(
                                         text = chat.lastMsg,
                                         color = if (chat.unreadCount > 0) Color(0xFF1F2937) else Color(0xFF6B7280),
                                         fontWeight = if (chat.unreadCount > 0) FontWeight.SemiBold else FontWeight.Normal,
-                                        fontSize = 13.sp,
+                                        fontSize = if (isMinimalistMode) 12.sp else 13.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier.weight(1f)
@@ -1160,7 +1145,7 @@ fun ChatsTabContent(
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Box(
                                             modifier = Modifier
-                                                .size(20.dp)
+                                                .size(if (isMinimalistMode) 17.dp else 20.dp)
                                                 .clip(CircleShape)
                                                 .background(Color(0xFFFFC529)),
                                             contentAlignment = Alignment.Center
@@ -1168,7 +1153,7 @@ fun ChatsTabContent(
                                             Text(
                                                 text = "${chat.unreadCount}",
                                                 color = Color.Black,
-                                                fontSize = 11.sp,
+                                                fontSize = if (isMinimalistMode) 10.sp else 11.sp,
                                                 fontWeight = FontWeight.Black
                                             )
                                         }
@@ -1198,6 +1183,17 @@ fun ChatsTabContent(
                 onGroupCreated = { newGrp ->
                     showCreateGroupSheet = false
                     selectedFilter = "Groups"
+                }
+            )
+        }
+
+        // Pending Group Invites & Requests Sheet
+        if (showPendingInvitesSheet) {
+            PendingGroupInvitesBottomSheet(
+                onDismiss = { showPendingInvitesSheet = false },
+                onOpenGroupChat = { joinedGroup ->
+                    showPendingInvitesSheet = false
+                    onOpenGroupChat(joinedGroup)
                 }
             )
         }

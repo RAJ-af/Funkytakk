@@ -4,7 +4,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import com.example.db.LocalGroupConversation
+import com.example.repository.GroupChatRepository
+import com.example.realtime.VoiceRoomRealtimeManager
 
 enum class GroupScreenRoute {
     CHAT,
@@ -17,7 +20,7 @@ enum class GroupScreenRoute {
  * Full-screen container that manages seamless navigation between:
  * 1. GroupChatScreen (chat & 3-dots actions)
  * 2. GroupInfoScreen (group header, about, quick settings, member preview, media)
- * 3. ManageMembersScreen (filter pills, search, member actions)
+ * 3. ManageMembersScreen (filter pills, search, member actions, add member)
  * 4. GroupSettingsScreen (permissions, notifications, danger zone)
  *
  * Rendered at the root level so NO bottom navigation bar appears!
@@ -27,8 +30,29 @@ fun GroupFlowContainer(
     initialGroup: LocalGroupConversation,
     onCloseGroup: () -> Unit
 ) {
+    val context = LocalContext.current
     var currentRoute by remember { mutableStateOf(GroupScreenRoute.CHAT) }
-    var currentGroup by remember { mutableStateOf(initialGroup) }
+    var openAddMemberOnEnter by remember { mutableStateOf(false) }
+
+    val liveGroupFlow = remember(initialGroup.id) {
+        GroupChatRepository.getGroupConversationFlow(initialGroup.id)
+    }
+    val observedGroup by liveGroupFlow.collectAsState(initial = initialGroup)
+    val currentGroup = observedGroup ?: initialGroup
+
+    LaunchedEffect(initialGroup.id) {
+        VoiceRoomRealtimeManager.subscribeGroupRealtime(initialGroup.id)
+        GroupChatRepository.getGroupOverview(context, initialGroup.id)
+    }
+
+    LaunchedEffect(initialGroup.id) {
+        GroupChatRepository.liveGroupUpdates.collect { updatedId ->
+            if (updatedId == initialGroup.id) {
+                GroupChatRepository.getGroupOverview(context, initialGroup.id)
+            }
+        }
+    }
+
     val isAdmin = currentGroup.myRole.equals("admin", ignoreCase = true)
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -37,7 +61,12 @@ fun GroupFlowContainer(
                 GroupChatScreen(
                     group = currentGroup,
                     onBack = onCloseGroup,
-                    onNavigateToInfo = { currentRoute = GroupScreenRoute.INFO }
+                    onNavigateToInfo = { currentRoute = GroupScreenRoute.INFO },
+                    onNavigateToManageMembers = { openAdd ->
+                        openAddMemberOnEnter = openAdd
+                        currentRoute = GroupScreenRoute.MANAGE_MEMBERS
+                    },
+                    onNavigateToSettings = { currentRoute = GroupScreenRoute.SETTINGS }
                 )
             }
             GroupScreenRoute.INFO -> {
@@ -45,9 +74,15 @@ fun GroupFlowContainer(
                     group = currentGroup,
                     isAdmin = isAdmin,
                     onBack = { currentRoute = GroupScreenRoute.CHAT },
-                    onNavigateToManageMembers = { currentRoute = GroupScreenRoute.MANAGE_MEMBERS },
+                    onNavigateToManageMembers = {
+                        openAddMemberOnEnter = false
+                        currentRoute = GroupScreenRoute.MANAGE_MEMBERS
+                    },
                     onNavigateToGroupSettings = { currentRoute = GroupScreenRoute.SETTINGS },
-                    onAddMemberClick = { currentRoute = GroupScreenRoute.MANAGE_MEMBERS },
+                    onAddMemberClick = {
+                        openAddMemberOnEnter = true
+                        currentRoute = GroupScreenRoute.MANAGE_MEMBERS
+                    },
                     onLeaveGroupClick = { onCloseGroup() }
                 )
             }
@@ -55,8 +90,9 @@ fun GroupFlowContainer(
                 ManageMembersScreen(
                     group = currentGroup,
                     isAdmin = isAdmin,
-                    onBack = { currentRoute = GroupScreenRoute.INFO },
-                    onAddMemberClick = { currentRoute = GroupScreenRoute.INFO }
+                    initialShowAddSheet = openAddMemberOnEnter,
+                    onConsumeInitialShowAddSheet = { openAddMemberOnEnter = false },
+                    onBack = { currentRoute = GroupScreenRoute.INFO }
                 )
             }
             GroupScreenRoute.SETTINGS -> {

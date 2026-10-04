@@ -586,6 +586,27 @@ fun HomeScreen(
                 onCloseGroup = { activeGroupChat = null }
             )
         }
+
+        val pendingInviteCode by com.example.repository.GroupChatRepository.pendingInviteCode.collectAsState()
+        val joinedGroupsList by com.example.repository.GroupChatRepository.joinedGroups.collectAsState()
+        pendingInviteCode?.let { code ->
+            com.example.ui.screens.chat.GroupInviteCodePreviewSheet(
+                inviteCode = code,
+                onDismiss = { com.example.repository.GroupChatRepository.setPendingInviteCode(null) },
+                onJoinedGroup = { joinedGroupId ->
+                    com.example.repository.GroupChatRepository.setPendingInviteCode(null)
+                    activeTab = "chats"
+                    val found = joinedGroupsList.find { it.id == joinedGroupId }
+                        ?: com.example.db.LocalGroupConversation(
+                            id = joinedGroupId,
+                            name = "Group Chat",
+                            myRole = "member",
+                            myStatus = "joined"
+                        )
+                    activeGroupChat = found
+                }
+            )
+        }
     }
 
     // Modal Sheet to Create Language / Private Rooms

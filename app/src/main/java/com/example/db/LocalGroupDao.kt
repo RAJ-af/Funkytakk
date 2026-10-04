@@ -11,11 +11,17 @@ interface GroupConversationDao {
     @Query("SELECT * FROM group_conversations WHERE myStatus = 'joined' ORDER BY lastMessageTime DESC")
     suspend fun getAllJoinedGroupsList(): List<LocalGroupConversation>
 
-    @Query("SELECT * FROM group_conversations WHERE myStatus = 'invited' ORDER BY createdAt DESC")
+    @Query("SELECT * FROM group_conversations WHERE myStatus IN ('invited', 'requested') ORDER BY createdAt DESC")
     fun getPendingInvites(): Flow<List<LocalGroupConversation>>
 
-    @Query("SELECT * FROM group_conversations WHERE myStatus = 'invited' ORDER BY createdAt DESC")
+    @Query("SELECT * FROM group_conversations WHERE myStatus IN ('invited', 'requested') ORDER BY createdAt DESC")
     suspend fun getPendingInvitesList(): List<LocalGroupConversation>
+
+    @Query("SELECT * FROM group_conversations WHERE myStatus IN ('joined', 'invited', 'requested') ORDER BY CASE WHEN myStatus = 'invited' THEN 0 WHEN myStatus = 'requested' THEN 1 ELSE 2 END, lastMessageTime DESC")
+    fun getAllMyGroups(): Flow<List<LocalGroupConversation>>
+
+    @Query("SELECT * FROM group_conversations WHERE id = :id LIMIT 1")
+    fun getGroupFlow(id: String): Flow<LocalGroupConversation?>
 
     @Query("SELECT * FROM group_conversations WHERE id = :id LIMIT 1")
     suspend fun getGroup(id: String): LocalGroupConversation?
@@ -38,17 +44,35 @@ interface GroupConversationDao {
     @Query("DELETE FROM group_conversations WHERE id = :groupId")
     suspend fun deleteGroup(groupId: String)
 
+    @Query("DELETE FROM group_conversations WHERE id NOT IN (:ids)")
+    suspend fun deleteGroupsNotIn(ids: List<String>)
+
     @Query("DELETE FROM group_conversations")
     suspend fun deleteAllGroups()
 }
 
 @Dao
 interface GroupMessageDao {
-    @Query("SELECT * FROM group_messages WHERE groupId = :groupId ORDER BY timestamp ASC")
-    fun getGroupMessages(groupId: String): Flow<List<LocalGroupMessage>>
+    @Query("SELECT * FROM group_messages WHERE groupId = :groupId AND (expiresAt IS NULL OR expiresAt = 0 OR expiresAt > :now) ORDER BY timestamp ASC")
+    fun getGroupMessages(groupId: String, now: Long = System.currentTimeMillis()): Flow<List<LocalGroupMessage>>
 
-    @Query("SELECT * FROM group_messages WHERE groupId = :groupId ORDER BY timestamp ASC")
-    suspend fun getGroupMessagesList(groupId: String): List<LocalGroupMessage>
+    @Query("SELECT * FROM group_messages WHERE groupId = :groupId AND (expiresAt IS NULL OR expiresAt = 0 OR expiresAt > :now) ORDER BY timestamp ASC")
+    suspend fun getGroupMessagesList(groupId: String, now: Long = System.currentTimeMillis()): List<LocalGroupMessage>
+
+    @Query("SELECT * FROM group_messages WHERE groupId = :groupId AND messageType IN ('image', 'voice', 'audio') AND (expiresAt IS NULL OR expiresAt = 0 OR expiresAt > :now) ORDER BY timestamp DESC")
+    fun getSharedMediaMessages(groupId: String, now: Long = System.currentTimeMillis()): Flow<List<LocalGroupMessage>>
+
+    @Query("SELECT * FROM group_messages WHERE groupId = :groupId AND messageType != 'system' AND (expiresAt IS NULL OR expiresAt = 0 OR expiresAt > :now) ORDER BY timestamp DESC")
+    fun getAllGroupMessagesForLinksAndMedia(groupId: String, now: Long = System.currentTimeMillis()): Flow<List<LocalGroupMessage>>
+
+    @Query("SELECT * FROM group_messages WHERE groupId = :groupId AND messageType = 'text' AND text LIKE '%' || :query || '%' AND (expiresAt IS NULL OR expiresAt = 0 OR expiresAt > :now) ORDER BY timestamp DESC")
+    suspend fun searchGroupMessages(groupId: String, query: String, now: Long = System.currentTimeMillis()): List<LocalGroupMessage>
+
+    @Query("DELETE FROM group_messages WHERE expiresAt IS NOT NULL AND expiresAt > 0 AND expiresAt <= :now")
+    suspend fun deleteExpiredMessages(now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE group_messages SET localMediaPath = :localPath WHERE id = :id")
+    suspend fun updateLocalMediaPath(id: String, localPath: String)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessage(message: LocalGroupMessage)

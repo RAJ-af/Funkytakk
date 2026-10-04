@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.sp
 import com.example.NotificationsManager
 import com.example.SupabaseNotification
 import com.example.ui.screens.chat.GroupInviteSheet
+import com.example.ui.screens.chat.GroupJoinRequestsSheet
 import com.example.ui.components.*
 import com.example.ui.theme.GoldAccent
 
@@ -42,6 +43,7 @@ fun NotificationsScreen(
 
     var selectedFilter by remember { mutableStateOf("All") }
     var activeGroupInvite by remember { mutableStateOf<SupabaseNotification?>(null) }
+    var activeJoinRequestNotif by remember { mutableStateOf<SupabaseNotification?>(null) }
 
     LaunchedEffect(Unit) {
         NotificationsManager.init(context)
@@ -270,10 +272,17 @@ fun NotificationsScreen(
                                 notification = item,
                                 onClick = {
                                     NotificationsManager.markAsRead(context, item.id)
-                                    if (item.type?.lowercase() == "group_invite" || !item.group_id.isNullOrBlank()) {
-                                        activeGroupInvite = item
-                                    } else if (!item.report_id.isNullOrBlank()) {
-                                        onOpenSupportChat(item.report_id)
+                                    val notifType = item.type?.lowercase().orEmpty()
+                                    when {
+                                        notifType == "group_join_request" && !item.group_id.isNullOrBlank() -> {
+                                            activeJoinRequestNotif = item
+                                        }
+                                        notifType == "group_invite" || !item.group_id.isNullOrBlank() -> {
+                                            activeGroupInvite = item
+                                        }
+                                        !item.report_id.isNullOrBlank() -> {
+                                            onOpenSupportChat(item.report_id)
+                                        }
                                     }
                                 }
                             )
@@ -314,6 +323,19 @@ fun NotificationsScreen(
                 LaunchedEffect(invite.id) {
                     com.example.repository.GroupChatRepository.syncUserGroups(context)
                 }
+            }
+        }
+
+        // Group Join Request Bottom Sheet (Admin approves / rejects)
+        activeJoinRequestNotif?.let { reqNotif ->
+            val targetGid = reqNotif.group_id.orEmpty()
+            val groupTitle = reqNotif.title?.ifBlank { "Group" } ?: "Group"
+            if (targetGid.isNotBlank()) {
+                GroupJoinRequestsSheet(
+                    groupId = targetGid,
+                    groupName = groupTitle,
+                    onDismiss = { activeJoinRequestNotif = null }
+                )
             }
         }
     }
@@ -365,7 +387,7 @@ private fun NotificationItemCard(
                 when (notification.type?.lowercase()) {
                     "support", "support_message", "support_reply" -> SoftHeadsetIcon(size = 20.dp, color = Color(0xFF10B981))
                     "moderation", "warning", "suspend", "mute" -> SoftShieldIcon(size = 20.dp, color = Color(0xFFEF4444))
-                    "room", "room_invite" -> SoftGroupIcon(size = 20.dp, color = Color(0xFF3B82F6))
+                    "room", "room_invite", "group_invite", "group_join_request" -> SoftGroupIcon(size = 20.dp, color = Color(0xFF3B82F6))
                     else -> Soft3DBellNotificationIcon(modifier = Modifier.size(24.dp))
                 }
             }

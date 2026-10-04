@@ -29,6 +29,7 @@ object ChatPreferencesManager {
     private const val KEY_DELETED_CHATS = "deleted_chat_ids"
     private const val KEY_UNREAD_OVERRIDE_CHATS = "unread_override_chat_ids"
     private const val KEY_GROUPS_JSON = "custom_groups_json"
+    private const val KEY_MINIMALIST_MODE = "is_minimalist_mode_enabled"
 
     private val _mutedChats = MutableStateFlow<Set<String>>(emptySet())
     val mutedChats: StateFlow<Set<String>> = _mutedChats.asStateFlow()
@@ -44,6 +45,9 @@ object ChatPreferencesManager {
 
     private val _unreadOverrideChats = MutableStateFlow<Set<String>>(emptySet())
     val unreadOverrideChats: StateFlow<Set<String>> = _unreadOverrideChats.asStateFlow()
+
+    private val _isMinimalistMode = MutableStateFlow<Boolean>(false)
+    val isMinimalistMode: StateFlow<Boolean> = _isMinimalistMode.asStateFlow()
 
     private val _groups = MutableStateFlow<List<LocalGroupChat>>(emptyList())
     val groups: StateFlow<List<LocalGroupChat>> = _groups.asStateFlow()
@@ -61,6 +65,7 @@ object ChatPreferencesManager {
         _blockedUsers.value = prefs.getStringSet(KEY_BLOCKED_USERS, emptySet()) ?: emptySet()
         _deletedChats.value = prefs.getStringSet(KEY_DELETED_CHATS, emptySet()) ?: emptySet()
         _unreadOverrideChats.value = prefs.getStringSet(KEY_UNREAD_OVERRIDE_CHATS, emptySet()) ?: emptySet()
+        _isMinimalistMode.value = prefs.getBoolean(KEY_MINIMALIST_MODE, false)
 
         val groupsJson = prefs.getString(KEY_GROUPS_JSON, null)
         if (!groupsJson.isNullOrBlank()) {
@@ -183,6 +188,20 @@ object ChatPreferencesManager {
             _unreadOverrideChats.value = current
             saveStringSet(context, KEY_UNREAD_OVERRIDE_CHATS, current)
         }
+    }
+
+    fun toggleMinimalistMode(context: Context): Boolean {
+        val newState = !_isMinimalistMode.value
+        _isMinimalistMode.value = newState
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(KEY_MINIMALIST_MODE, newState).apply()
+        return newState
+    }
+
+    fun setMinimalistMode(context: Context, enabled: Boolean) {
+        _isMinimalistMode.value = enabled
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(KEY_MINIMALIST_MODE, enabled).apply()
     }
 
     fun createGroup(

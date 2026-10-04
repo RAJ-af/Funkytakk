@@ -1161,8 +1161,15 @@ interface SupabaseApi {
     ): Response<List<GiftTransactionItem>>
 
     // ----------------------------------------------------
-    // GROUP CHAT (E2EE FAN-OUT)
+    // GROUP CHAT (E2EE FAN-OUT & RPCs)
     // ----------------------------------------------------
+    @POST("rest/v1/rpc/get_my_groups")
+    suspend fun getMyGroups(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> = emptyMap()
+    ): Response<List<MyGroupRow>>
+
     @POST("rest/v1/rpc/create_group")
     suspend fun createGroup(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
@@ -1184,6 +1191,34 @@ interface SupabaseApi {
         @Body body: DeclineGroupInviteRequest
     ): Response<ResponseBody>
 
+    @POST("rest/v1/rpc/get_group_overview")
+    suspend fun getGroupOverview(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: GroupIdRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/update_group_settings")
+    suspend fun updateGroupSettings(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: UpdateGroupSettingsRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/update_my_group_prefs")
+    suspend fun updateMyGroupPrefs(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: UpdateMyGroupPrefsRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/get_group_members")
+    suspend fun getGroupMembersRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: GroupIdRequest
+    ): Response<List<SupabaseGroupMember>>
+
     @POST("rest/v1/rpc/add_group_member")
     suspend fun addGroupMember(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
@@ -1198,6 +1233,97 @@ interface SupabaseApi {
         @Body body: RemoveGroupMemberRequest
     ): Response<ResponseBody>
 
+    @POST("rest/v1/rpc/set_member_role")
+    suspend fun setMemberRole(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: SetMemberRoleRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/approve_join_request")
+    suspend fun approveJoinRequest(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: GroupUserActionRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/reject_join_request")
+    suspend fun rejectJoinRequest(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: GroupUserActionRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/leave_group")
+    suspend fun leaveGroup(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: GroupIdRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/block_group")
+    suspend fun blockGroup(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: GroupIdRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/unblock_group")
+    suspend fun unblockGroup(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: GroupIdRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/delete_group")
+    suspend fun deleteGroup(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: GroupIdRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/report_group")
+    suspend fun reportGroup(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: ReportGroupRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/get_group_invite")
+    suspend fun getGroupInvite(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: GroupIdRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/reset_group_invite")
+    suspend fun resetGroupInvite(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: GroupIdRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/set_group_invite_enabled")
+    suspend fun setGroupInviteEnabled(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: SetGroupInviteEnabledRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/preview_group_by_invite")
+    suspend fun previewGroupByInvite(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: InviteCodeRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/join_group_by_invite")
+    suspend fun joinGroupByInvite(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: InviteCodeRequest
+    ): Response<ResponseBody>
+
     @POST("rest/v1/rpc/send_group_message")
     suspend fun sendGroupMessage(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
@@ -1205,35 +1331,12 @@ interface SupabaseApi {
         @Body body: SendGroupMessageRequest
     ): Response<ResponseBody>
 
-    @GET("rest/v1/group_conversations?select=*")
-    suspend fun getGroupConversations(
-        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String,
-        @Query("id") idFilter: String? = null
-    ): Response<List<SupabaseGroupConversation>>
-
-    @GET("rest/v1/group_members?select=*")
-    suspend fun getGroupMembers(
-        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String,
-        @Query("group_id") groupIdFilter: String? = null,
-        @Query("user_id") userIdFilter: String? = null,
-        @Query("status") statusFilter: String? = null
-    ): Response<List<SupabaseGroupMember>>
-
     @GET("rest/v1/group_message_recipients?select=*&order=created_at.asc")
     suspend fun getPendingGroupMessageRecipients(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String,
         @Query("recipient_id") recipientIdFilter: String
     ): Response<List<SupabaseGroupRecipientRow>>
-
-    @GET("rest/v1/group_messages?select=*")
-    suspend fun getGroupMessagesByIds(
-        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String,
-        @Query("id") idFilter: String
-    ): Response<List<SupabaseGroupMessageMeta>>
 
     @DELETE("rest/v1/group_message_recipients")
     suspend fun deleteGroupMessageRecipient(
@@ -1548,9 +1651,31 @@ data class GiftTransactionItem(
 // GROUP CHAT MODELS
 // ----------------------------------------------------
 @JsonClass(generateAdapter = true)
+data class MyGroupRow(
+    val group_id: String = "",
+    val name: String = "",
+    val avatar_url: String? = null,
+    val my_role: String? = "member",
+    val my_status: String? = "joined", // joined | invited | requested
+    val joined_count: Int? = 1,
+    val muted_until: String? = null,
+    val notify_level: String? = "all",
+    val who_can_send: String? = "everyone",
+    val disappearing_seconds: Int? = 0,
+    val created_at: String? = null
+)
+
+@JsonClass(generateAdapter = true)
 data class CreateGroupRequest(
     val p_name: String,
-    val p_member_ids: List<String>
+    val p_member_ids: List<String>,
+    val p_description: String? = null,
+    val p_avatar_url: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class GroupIdRequest(
+    val p_group_id: String
 )
 
 @JsonClass(generateAdapter = true)
@@ -1564,6 +1689,12 @@ data class DeclineGroupInviteRequest(
 )
 
 @JsonClass(generateAdapter = true)
+data class GroupUserActionRequest(
+    val p_group_id: String,
+    val p_user_id: String
+)
+
+@JsonClass(generateAdapter = true)
 data class AddGroupMemberRequest(
     val p_group_id: String,
     val p_user_id: String
@@ -1573,6 +1704,46 @@ data class AddGroupMemberRequest(
 data class RemoveGroupMemberRequest(
     val p_group_id: String,
     val p_user_id: String
+)
+
+@JsonClass(generateAdapter = true)
+data class SetMemberRoleRequest(
+    val p_group_id: String,
+    val p_user_id: String,
+    val p_role: String // "admin" | "member"
+)
+
+@JsonClass(generateAdapter = true)
+data class UpdateGroupSettingsRequest(
+    val p_group_id: String,
+    val p_patch: Map<String, @JvmSuppressWildcards Any?>
+)
+
+@JsonClass(generateAdapter = true)
+data class UpdateMyGroupPrefsRequest(
+    val p_group_id: String,
+    val p_muted_until: String? = null,
+    val p_clear_mute: Boolean? = null,
+    val p_notify_level: String? = null, // "all" | "mentions" | "none"
+    val p_media_auto_download: Boolean? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class ReportGroupRequest(
+    val p_group_id: String,
+    val p_category: String,
+    val p_reason: String
+)
+
+@JsonClass(generateAdapter = true)
+data class SetGroupInviteEnabledRequest(
+    val p_group_id: String,
+    val p_enabled: Boolean
+)
+
+@JsonClass(generateAdapter = true)
+data class InviteCodeRequest(
+    val p_code: String
 )
 
 @JsonClass(generateAdapter = true)
@@ -1602,11 +1773,15 @@ data class SupabaseGroupConversation(
 @JsonClass(generateAdapter = true)
 data class SupabaseGroupMember(
     val id: String? = null,
-    val group_id: String = "",
+    val group_id: String? = "",
     val user_id: String = "",
     val role: String = "member", // "admin" or "member"
-    val status: String = "invited", // "invited", "joined", "left"
-    val joined_at: String? = null
+    val status: String = "joined", // "invited", "joined", "requested"
+    val joined_at: String? = null,
+    val username: String? = null,
+    val profile_name: String? = null,
+    val avatar_url: String? = null,
+    val presence_status: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -1614,6 +1789,9 @@ data class SupabaseGroupRecipientRow(
     val id: String = "",
     val message_id: String = "",
     val recipient_id: String = "",
+    val group_id: String? = null,
+    val sender_id: String? = null,
+    val message_type: String? = "text",
     val ciphertext: String = "",
     val nonce: String = "",
     val storage_path: String? = null,

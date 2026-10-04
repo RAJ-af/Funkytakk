@@ -946,3 +946,364 @@ fun GroupCuteEmptyChatIllustration(
         )
     }
 }
+
+@Composable
+fun GroupE2EEShieldIcon(
+    size: Dp = 20.dp,
+    color: Color = Color(0xFF10B981),
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val stroke = 1.8f * density
+
+        val shieldPath = Path().apply {
+            moveTo(w * 0.5f, h * 0.12f)
+            cubicTo(w * 0.75f, h * 0.12f, w * 0.88f, h * 0.22f, w * 0.88f, h * 0.45f)
+            cubicTo(w * 0.88f, h * 0.72f, w * 0.5f, h * 0.90f, w * 0.5f, h * 0.90f)
+            cubicTo(w * 0.5f, h * 0.90f, w * 0.12f, h * 0.72f, w * 0.12f, h * 0.45f)
+            cubicTo(w * 0.12f, h * 0.22f, w * 0.25f, h * 0.12f, w * 0.5f, h * 0.12f)
+            close()
+        }
+
+        drawPath(
+            path = shieldPath,
+            color = color,
+            style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+
+        // Lock / Check inside
+        val checkPath = Path().apply {
+            moveTo(w * 0.35f, h * 0.48f)
+            lineTo(w * 0.46f, h * 0.60f)
+            lineTo(w * 0.65f, h * 0.38f)
+        }
+        drawPath(
+            path = checkPath,
+            color = color,
+            style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+    }
+}
+
+@Composable
+fun GroupPinIcon(
+    size: Dp = 16.dp,
+    color: Color = Color(0xFFEAB308),
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val stroke = 1.8f * density
+
+        // Pin Head
+        drawCircle(
+            color = color,
+            radius = w * 0.20f,
+            center = Offset(w * 0.5f, h * 0.30f)
+        )
+        // Pin Stem
+        drawLine(
+            color = color,
+            start = Offset(w * 0.5f, h * 0.50f),
+            end = Offset(w * 0.5f, h * 0.85f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+@Composable
+fun GroupMuteIcon(
+    size: Dp = 16.dp,
+    color: Color = Color(0xFF9CA3AF),
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val stroke = 1.8f * density
+
+        val speakerPath = Path().apply {
+            moveTo(w * 0.15f, h * 0.40f)
+            lineTo(w * 0.35f, h * 0.40f)
+            lineTo(w * 0.55f, h * 0.22f)
+            lineTo(w * 0.55f, h * 0.78f)
+            lineTo(w * 0.35f, h * 0.60f)
+            lineTo(w * 0.15f, h * 0.60f)
+            close()
+        }
+        drawPath(
+            path = speakerPath,
+            color = color,
+            style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+
+        // Diagonal strike-through line
+        drawLine(
+            color = color,
+            start = Offset(w * 0.20f, h * 0.80f),
+            end = Offset(w * 0.80f, h * 0.20f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+@Composable
+fun GroupMinimalistModeIcon(
+    size: Dp = 20.dp,
+    color: Color = Color(0xFF374151),
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val stroke = 1.8f * density
+
+        // Two clean horizontal toggle lines representing minimalist compactness
+        drawLine(
+            color = color,
+            start = Offset(w * 0.18f, h * 0.36f),
+            end = Offset(w * 0.82f, h * 0.36f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = color,
+            start = Offset(w * 0.18f, h * 0.64f),
+            end = Offset(w * 0.82f, h * 0.64f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+        // Indicator points
+        drawCircle(
+            color = color,
+            radius = w * 0.08f,
+            center = Offset(w * 0.34f, h * 0.36f)
+        )
+        drawCircle(
+            color = color,
+            radius = w * 0.08f,
+            center = Offset(w * 0.66f, h * 0.64f)
+        )
+    }
+}
+
+@Composable
+fun GroupRequestReviewIcon(
+    size: Dp = 20.dp,
+    color: Color = Color(0xFF374151),
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val stroke = 1.8f * density
+
+        // Badge / Document Outline
+        val docPath = Path().apply {
+            moveTo(w * 0.22f, h * 0.15f)
+            lineTo(w * 0.62f, h * 0.15f)
+            lineTo(w * 0.78f, h * 0.32f)
+            lineTo(w * 0.78f, h * 0.85f)
+            lineTo(w * 0.22f, h * 0.85f)
+            close()
+        }
+        drawPath(
+            path = docPath,
+            color = color,
+            style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+
+        // Lines inside document
+        drawLine(
+            color = color,
+            start = Offset(w * 0.34f, h * 0.44f),
+            end = Offset(w * 0.66f, h * 0.44f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = color,
+            start = Offset(w * 0.34f, h * 0.58f),
+            end = Offset(w * 0.56f, h * 0.58f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+@Composable
+fun GroupInfoCircleIcon(
+    size: Dp = 20.dp,
+    color: Color = Color(0xFF0F172A),
+    modifier: Modifier = Modifier,
+    strokeWidth: Float = 2.0f
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = strokeWidth * density
+        drawCircle(
+            color = color,
+            radius = w * 0.38f,
+            center = Offset(w * 0.5f, h * 0.5f),
+            style = Stroke(width = sw)
+        )
+        drawCircle(
+            color = color,
+            radius = sw * 0.65f,
+            center = Offset(w * 0.5f, h * 0.33f)
+        )
+        drawLine(
+            color = color,
+            start = Offset(w * 0.5f, h * 0.46f),
+            end = Offset(w * 0.5f, h * 0.68f),
+            strokeWidth = sw,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+@Composable
+fun GroupBroomIcon(
+    size: Dp = 20.dp,
+    color: Color = Color(0xFF0F172A),
+    modifier: Modifier = Modifier,
+    strokeWidth: Float = 2.0f
+) {
+    GroupTrashIcon(size = size, color = color, modifier = modifier, strokeWidth = strokeWidth)
+}
+
+@Composable
+fun GroupSendPaperPlaneIcon(
+    size: Dp = 20.dp,
+    color: Color = Color.Black,
+    modifier: Modifier = Modifier
+) {
+    GroupSendPlaneIcon(size = size, color = color, modifier = modifier)
+}
+
+@Composable
+fun GroupImagePlaceholderIcon(
+    size: Dp = 20.dp,
+    color: Color = Color(0xFF0F172A),
+    modifier: Modifier = Modifier
+) {
+    GroupMediaIcon(size = size, color = color, modifier = modifier)
+}
+
+@Composable
+fun GroupPlusIcon(
+    size: Dp = 20.dp,
+    color: Color = Color(0xFF0F172A),
+    modifier: Modifier = Modifier,
+    strokeWidth: Float = 2.2f
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = strokeWidth * density
+        drawLine(
+            color = color,
+            start = Offset(w * 0.5f, h * 0.2f),
+            end = Offset(w * 0.5f, h * 0.8f),
+            strokeWidth = sw,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = color,
+            start = Offset(w * 0.2f, h * 0.5f),
+            end = Offset(w * 0.8f, h * 0.5f),
+            strokeWidth = sw,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+@Composable
+fun GroupMicIcon(
+    size: Dp = 20.dp,
+    color: Color = Color(0xFF0F172A),
+    modifier: Modifier = Modifier,
+    strokeWidth: Float = 2.0f
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = strokeWidth * density
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(w * 0.34f, h * 0.14f),
+            size = Size(w * 0.32f, h * 0.44f),
+            cornerRadius = CornerRadius(w * 0.16f, w * 0.16f),
+            style = Stroke(width = sw)
+        )
+        drawArc(
+            color = color,
+            startAngle = 0f,
+            sweepAngle = 180f,
+            useCenter = false,
+            topLeft = Offset(w * 0.22f, h * 0.26f),
+            size = Size(w * 0.56f, h * 0.46f),
+            style = Stroke(width = sw, cap = StrokeCap.Round)
+        )
+        drawLine(
+            color = color,
+            start = Offset(w * 0.5f, h * 0.72f),
+            end = Offset(w * 0.5f, h * 0.88f),
+            strokeWidth = sw,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = color,
+            start = Offset(w * 0.34f, h * 0.88f),
+            end = Offset(w * 0.66f, h * 0.88f),
+            strokeWidth = sw,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+@Composable
+fun GroupShareIcon(
+    size: Dp = 20.dp,
+    color: Color = Color(0xFF0F172A),
+    modifier: Modifier = Modifier,
+    strokeWidth: Float = 2.0f
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = strokeWidth * density
+        val r = w * 0.11f
+
+        val cLeft = Offset(w * 0.24f, h * 0.50f)
+        val cTop = Offset(w * 0.74f, h * 0.22f)
+        val cBot = Offset(w * 0.74f, h * 0.78f)
+
+        drawLine(
+            color = color,
+            start = Offset(cLeft.x + r * 0.8f, cLeft.y - r * 0.5f),
+            end = Offset(cTop.x - r * 0.8f, cTop.y + r * 0.5f),
+            strokeWidth = sw,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = color,
+            start = Offset(cLeft.x + r * 0.8f, cLeft.y + r * 0.5f),
+            end = Offset(cBot.x - r * 0.8f, cBot.y - r * 0.5f),
+            strokeWidth = sw,
+            cap = StrokeCap.Round
+        )
+
+        drawCircle(color = color, radius = r, center = cLeft, style = Stroke(width = sw))
+        drawCircle(color = color, radius = r, center = cTop, style = Stroke(width = sw))
+        drawCircle(color = color, radius = r, center = cBot, style = Stroke(width = sw))
+    }
+}
+
+
