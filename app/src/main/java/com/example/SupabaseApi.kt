@@ -1275,6 +1275,23 @@ interface SupabaseApi {
         @Body body: GroupIdRequest
     ): Response<ResponseBody>
 
+    @POST("rest/v1/rpc/get_my_blocked_groups")
+    suspend fun getMyBlockedGroups(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> = emptyMap()
+    ): Response<List<BlockedGroupRow>>
+
+    @GET("rest/v1/group_events?select=*")
+    suspend fun getGroupEventsRaw(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("group_id") groupIdFilter: String,
+        @Query("created_at") createdAtFilter: String? = null,
+        @Query("order") order: String = "created_at.asc",
+        @Query("limit") limit: Int = 200
+    ): Response<ResponseBody>
+
     @POST("rest/v1/rpc/delete_group")
     suspend fun deleteGroup(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
@@ -1806,6 +1823,14 @@ data class SupabaseGroupMessageMeta(
     val sender_id: String = "",
     val message_type: String = "text",
     val created_at: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class BlockedGroupRow(
+    val group_id: String = "",
+    val name: String = "",
+    val avatar_url: String? = null,
+    val blocked_at: String? = null
 )
 
 // ----------------------------------------------------

@@ -291,7 +291,7 @@ fun ManageMembersScreen(
                 add("All" to "All ($allCount)")
                 add("Admins" to "Admins ($adminCount)")
                 add("Members" to "Members ($regularCount)")
-                if (isAdmin || requestCount > 0) {
+                if (isAdmin) {
                     add("Requests" to "Requests ($requestCount)")
                 }
             }

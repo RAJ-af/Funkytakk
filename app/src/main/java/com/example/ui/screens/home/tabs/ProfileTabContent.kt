@@ -89,6 +89,7 @@ fun ProfileTabContent(
     var showEditProfileDialog by remember { mutableStateOf(false) }
     var showModerationDialog by remember { mutableStateOf(false) }
     var showBlockedUsersSheet by remember { mutableStateOf(false) }
+    var showBlockedGroupsSheet by remember { mutableStateOf(false) }
     var showChatBackupScreen by remember { mutableStateOf(false) }
     var showOptionsMenuSheet by remember { mutableStateOf(false) }
     var isAdmin by remember { mutableStateOf(false) }
@@ -1469,6 +1470,29 @@ fun ProfileTabContent(
                     }
                 }
 
+                // 4b. Privacy > Blocked groups
+                Surface(
+                    onClick = {
+                        showOptionsMenuSheet = false
+                        showBlockedGroupsSheet = true
+                    },
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0xFFF1F5F9),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        SoftBlockIcon(size = 18.dp, color = Color(0xFF475569))
+                        Column {
+                            Text("Blocked groups", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+                            Text("Privacy · View and unblock groups", fontSize = 11.sp, color = Color(0xFF64748B))
+                        }
+                    }
+                }
+
                 // 5. Encrypted Chat Backup & Recovery
                 Surface(
                     onClick = {
@@ -1519,6 +1543,12 @@ fun ProfileTabContent(
     if (showBlockedUsersSheet) {
         BlockedUsersBottomSheet(
             onDismiss = { showBlockedUsersSheet = false }
+        )
+    }
+
+    if (showBlockedGroupsSheet) {
+        com.example.ui.screens.home.dialogs.BlockedGroupsBottomSheet(
+            onDismiss = { showBlockedGroupsSheet = false }
         )
     }
 

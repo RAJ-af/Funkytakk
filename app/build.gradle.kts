@@ -18,6 +18,8 @@ android {
     versionCode = 11
     versionName = "2.0"
 
+    buildConfigField("String", "GROUP_INVITE_HOST", "\"funkytalk-f1aae.web.app\"")
+
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 

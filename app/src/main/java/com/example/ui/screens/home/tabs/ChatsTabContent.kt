@@ -84,6 +84,7 @@ fun ChatsTabContent(
     var showCreateGroupSheet by remember { mutableStateOf(false) }
     var showPendingInvitesSheet by remember { mutableStateOf(false) }
     var showBlockedUsersSheet by remember { mutableStateOf(false) }
+    var showBlockedGroupsSheet by remember { mutableStateOf(false) }
     var selectedChatForMenu by remember { mutableStateOf<DirectChat?>(null) }
     var showClearAllConfirmDialog by remember { mutableStateOf(false) }
 
@@ -432,6 +433,38 @@ fun ChatsTabContent(
                                 onClick = {
                                     showOptionsMenu = false
                                     showBlockedUsersSheet = true
+                                }
+                            )
+
+                            // 4b. Blocked Groups Option
+                            DropdownMenuItem(
+                                text = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(30.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFFFEE2E2)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            SoftBlockIcon(size = 16.dp, color = Color(0xFFDC2626))
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = "Blocked Groups",
+                                            color = Color.Black,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    showOptionsMenu = false
+                                    showBlockedGroupsSheet = true
                                 }
                             )
 
@@ -919,7 +952,9 @@ fun ChatsTabContent(
                 items(filteredList.distinctBy { it.id }, key = { it.id }) { chat ->
                     val isPinned = pinnedChats.contains(chat.id)
                     val isMuted = mutedChats.contains(chat.id)
-                    val isGroup = chat.isNativeLanguage.startsWith("Group")
+                    val matchedGroupRow = allMyGroups.find { it.id == chat.id } ?: joinedGroups.find { it.id == chat.id }
+                    val isGroup = chat.isNativeLanguage.startsWith("Group") || matchedGroupRow != null
+                    val hasUnreadMention = matchedGroupRow?.hasUnreadMention == true
 
                     val flagCode = when (chat.isNativeLanguage.lowercase()) {
                         "english" -> "us"
@@ -1141,21 +1176,45 @@ fun ChatsTabContent(
                                         modifier = Modifier.weight(1f)
                                     )
 
-                                    if (chat.unreadCount > 0) {
+                                    if ((isGroup && hasUnreadMention) || chat.unreadCount > 0) {
                                         Spacer(modifier = Modifier.width(8.dp))
-                                        Box(
-                                            modifier = Modifier
-                                                .size(if (isMinimalistMode) 17.dp else 20.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFFFFC529)),
-                                            contentAlignment = Alignment.Center
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                                         ) {
-                                            Text(
-                                                text = "${chat.unreadCount}",
-                                                color = Color.Black,
-                                                fontSize = if (isMinimalistMode) 10.sp else 11.sp,
-                                                fontWeight = FontWeight.Black
-                                            )
+                                            if (isGroup && hasUnreadMention) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(if (isMinimalistMode) 17.dp else 20.dp)
+                                                        .clip(CircleShape)
+                                                        .background(Color(0xFFFEF3C7))
+                                                        .border(1.dp, Color(0xFFF59E0B), CircleShape),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text(
+                                                        text = "@",
+                                                        color = Color(0xFFB45309),
+                                                        fontSize = if (isMinimalistMode) 10.sp else 11.5.sp,
+                                                        fontWeight = FontWeight.ExtraBold
+                                                    )
+                                                }
+                                            }
+                                            if (chat.unreadCount > 0) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(if (isMinimalistMode) 17.dp else 20.dp)
+                                                        .clip(CircleShape)
+                                                        .background(Color(0xFFFFC529)),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text(
+                                                        text = "${chat.unreadCount}",
+                                                        color = Color.Black,
+                                                        fontSize = if (isMinimalistMode) 10.sp else 11.sp,
+                                                        fontWeight = FontWeight.Black
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1202,6 +1261,13 @@ fun ChatsTabContent(
         if (showBlockedUsersSheet) {
             BlockedUsersBottomSheet(
                 onDismiss = { showBlockedUsersSheet = false }
+            )
+        }
+
+        // Blocked Groups Bottom Sheet
+        if (showBlockedGroupsSheet) {
+            com.example.ui.screens.home.dialogs.BlockedGroupsBottomSheet(
+                onDismiss = { showBlockedGroupsSheet = false }
             )
         }
 

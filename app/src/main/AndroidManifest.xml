@@ -68,7 +68,7 @@
                 <data android:scheme="funkytalk" />
             </intent-filter>
 
-            <!-- HTTPS App Link Filter for Group Invites (https://funkytalk.app/group/{code}) -->
+            <!-- HTTPS App Link Filter for Group Invites (https://funkytalk-f1aae.web.app/g/{code}) -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
 
@@ -77,8 +77,8 @@
 
                 <data
                     android:scheme="https"
-                    android:host="funkytalk.app"
-                    android:pathPrefix="/group" />
+                    android:host="funkytalk-f1aae.web.app"
+                    android:pathPrefix="/g/" />
             </intent-filter>
         </activity>
 

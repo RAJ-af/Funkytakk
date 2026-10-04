@@ -29,6 +29,7 @@ data class GroupOverviewData(
     val description: String = "",
     val avatarUrl: String = "",
     val createdBy: String = "",
+    val isCreator: Boolean = false,
     val joinedCount: Int = 1,
     val pendingRequests: Int = 0,
     val myRole: String = "member",
@@ -49,7 +50,7 @@ data class GroupInviteInfo(
     val code: String,
     val enabled: Boolean = true,
     val deepLink: String = "funkytalk://group/$code",
-    val httpsLink: String = "https://funkytalk.app/group/$code"
+    val httpsLink: String = "https://${BuildConfig.GROUP_INVITE_HOST}/g/$code"
 )
 
 data class GroupInvitePreview(
@@ -90,13 +91,43 @@ object GroupChatRepository {
     private val _allMyGroups = MutableStateFlow<List<LocalGroupConversation>>(emptyList())
     val allMyGroups: StateFlow<List<LocalGroupConversation>> = _allMyGroups.asStateFlow()
 
-    // Deep-link invite code state (funkytalk://group/<code>)
+    // Deep-link invite code state (funkytalk://group/<code> or https://<host>/g/<code>)
     private val _pendingInviteCode = MutableStateFlow<String?>(null)
     val pendingInviteCode: StateFlow<String?> = _pendingInviteCode.asStateFlow()
 
-    fun setPendingInviteCode(code: String?) {
-        _pendingInviteCode.value = code?.trim()?.takeIf { it.isNotBlank() }
+    @Volatile
+    var activeOpenGroupId: String? = null
+
+    fun setActiveOpenGroup(groupId: String?) {
+        activeOpenGroupId = groupId
     }
+
+    fun setPendingInviteCode(code: String?) {
+        val cleaned = code?.let { extractCleanInviteCode(it) }?.takeIf { it.isNotBlank() }
+        _pendingInviteCode.value = cleaned
+    }
+
+    fun parseInviteCode(rawInput: String): String = extractCleanInviteCode(rawInput)
+
+    fun parseMentionsJson(jsonStr: String?): List<String> {
+        if (jsonStr.isNullOrBlank()) return emptyList()
+        return try {
+            val arr = JSONArray(jsonStr)
+            (0 until arr.length()).mapNotNull { arr.optString(it) }.filter { it.isNotBlank() }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    fun onAppResumed(context: Context) {
+        scope.launch {
+            syncUserGroups(context)
+            fetchAndProcessPendingGroupMessages(context)
+            activeOpenGroupId?.let { syncMissedGroupEvents(context, it) }
+        }
+    }
+
+    suspend fun syncGroupEvents(context: Context, groupId: String) = syncMissedGroupEvents(context, groupId)
 
     // Emits groupId whenever group_members, group_conversations, or group_events update for live UI refresh
     private val _liveGroupUpdates = MutableSharedFlow<String>(extraBufferCapacity = 32)
@@ -127,10 +158,10 @@ object GroupChatRepository {
             lower.contains("not_allowed_to_edit_info") -> "Only admins are allowed to edit group info."
             lower.contains("only_admins_can_send") -> "Only admins can send messages in this group."
             lower.contains("group_full") -> "This group has reached the maximum limit of 100 members."
-            lower.contains("user_blocked_group") -> "This user cannot be invited because they blocked this group."
+            lower.contains("user_blocked_group") -> "You blocked this group"
             lower.contains("already_member") -> "This user is already a member or has a pending invite."
-            lower.contains("invalid_invite") -> "This invite link is invalid or has expired."
-            lower.contains("invite_disabled") -> "Invite links are currently disabled for this group."
+            lower.contains("invalid_invite") -> "This invite link is no longer valid"
+            lower.contains("invite_disabled") -> "This invite link is no longer valid"
             lower.contains("cannot_remove_creator") -> "The group creator cannot be removed or demoted."
             lower.contains("last_admin") -> "Cannot complete action as you are the last admin."
             lower.contains("invalid_group_name") -> "Please enter a valid group name (1–60 characters)."
@@ -314,6 +345,10 @@ object GroupChatRepository {
                     is RealtimeTableEvent.Reconnected -> {
                         syncUserGroups(context)
                         fetchAndProcessPendingGroupMessages(context)
+                        activeOpenGroupId?.let { openGid ->
+                            syncMissedGroupEvents(context, openGid)
+                            getGroupOverview(context, openGid)
+                        }
                     }
                     else -> {}
                 }
@@ -323,41 +358,147 @@ object GroupChatRepository {
 
     private suspend fun handleRealtimeGroupEvent(context: Context, event: RealtimeTableEvent.GroupEventInserted) {
         val groupId = event.groupId?.takeIf { it.isNotBlank() } ?: return
-        val eventId = event.record?.optString("id") ?: "${groupId}_${event.groupEventType}_${System.currentTimeMillis()}"
-        if (!processedEventIds.add(eventId)) return
-
-        val db = database ?: return
-        val localGroup = db.groupConversationDao().getGroup(groupId)
-        val showJoinNotifs = localGroup?.showJoinNotifications ?: true
-        val evType = event.groupEventType?.lowercase().orEmpty()
+        val record = event.record
+        if (record != null) {
+            val token = SupabaseSessionManager.getAuthenticatedBearerToken(context).orEmpty()
+            processAndPersistGroupEventJson(context, token, groupId, record)
+        } else {
+            val eventId = "${groupId}_${event.groupEventType}_${System.currentTimeMillis()}"
+            val token = SupabaseSessionManager.getAuthenticatedBearerToken(context).orEmpty()
+            val synthetic = JSONObject().apply {
+                put("id", eventId)
+                put("group_id", groupId)
+                put("event_type", event.groupEventType.orEmpty())
+                put("actor_id", event.actorId.orEmpty())
+                put("target_id", event.targetUserId.orEmpty())
+                if (event.meta != null) put("metadata", event.meta)
+            }
+            processAndPersistGroupEventJson(context, token, groupId, synthetic)
+        }
 
         // Sync overview & group list
         getGroupOverview(context, groupId)
         syncUserGroups(context)
         _liveGroupUpdates.tryEmit(groupId)
+    }
 
-        if ((evType == "joined" || evType == "left") && !showJoinNotifs) {
-            return
+    /**
+     * Fetches missed events from group_events where group_id = X and created_at > last_synced_event_at
+     * ordered by created_at ASC, persists every row into the local DB as a system message (deduped by event id),
+     * and merges into the timeline by created_at.
+     */
+    suspend fun syncMissedGroupEvents(context: Context, groupId: String) = withContext(Dispatchers.IO) {
+        try {
+            val cleanGroupId = groupId.trim().replace("\"", "")
+            if (cleanGroupId.isBlank()) return@withContext
+            val db = database ?: return@withContext
+            SupabaseSessionManager.ensureActiveSession(context)
+            val token = SupabaseSessionManager.getAuthenticatedBearerToken(context) ?: return@withContext
+
+            // Warm member cache so actor_id / target_id resolve to names
+            getGroupMembersResult(context, cleanGroupId)
+
+            val localGroup = db.groupConversationDao().getGroup(cleanGroupId)
+            val lastSynced = localGroup?.lastSyncedEventAt?.takeIf { it.isNotBlank() }
+
+            val resp = SupabaseClient.api.getGroupEventsRaw(
+                apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                auth = token,
+                groupIdFilter = "eq.$cleanGroupId",
+                createdAtFilter = lastSynced?.let { "gt.$it" },
+                order = "created_at.asc",
+                limit = 200
+            )
+
+            if (!resp.isSuccessful) {
+                Log.w(TAG, "getGroupEventsRaw failed (${resp.code()}): ${resp.errorBody()?.string()}")
+                return@withContext
+            }
+
+            val rawBody = resp.body()?.string()?.trim().orEmpty()
+            if (!rawBody.startsWith("[")) return@withContext
+            val arr = JSONArray(rawBody)
+            var maxCreatedAt = lastSynced.orEmpty()
+
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                processAndPersistGroupEventJson(context, token, cleanGroupId, obj)
+                val createdAtIso = obj.optString("created_at")
+                if (createdAtIso.isNotBlank() && createdAtIso != "null" && createdAtIso > maxCreatedAt) {
+                    maxCreatedAt = createdAtIso
+                }
+            }
+
+            if (maxCreatedAt.isNotBlank() && maxCreatedAt != lastSynced) {
+                db.groupConversationDao().updateLastSyncedEventAt(cleanGroupId, maxCreatedAt)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error syncing missed group events for $groupId: ${e.message}")
         }
+    }
 
-        val token = SupabaseSessionManager.getAuthenticatedBearerToken(context).orEmpty()
-        val actorName = if (!event.actorId.isNullOrBlank() && token.isNotBlank()) {
-            resolveSenderName(context, token, event.actorId)
+    private suspend fun processAndPersistGroupEventJson(
+        context: Context,
+        token: String,
+        groupId: String,
+        obj: JSONObject
+    ) {
+        val db = database ?: return
+        val cleanGroupId = groupId.trim().replace("\"", "")
+        val rawEventId = obj.optString("id").takeIf { it.isNotBlank() && it != "null" }
+            ?: "${cleanGroupId}_${obj.optString("event_type")}_${obj.optString("created_at")}"
+        val msgId = if (rawEventId.startsWith("evt_")) rawEventId else "evt_$rawEventId"
+
+        if (!processedEventIds.add(msgId)) return
+        if (db.groupMessageDao().messageExists(msgId)) return
+
+        val evType = obj.optString("event_type").ifBlank { obj.optString("type") }.lowercase().trim()
+        if (evType.isBlank()) return
+
+        val actorId = obj.optString("actor_id").takeIf { it.isNotBlank() && it != "null" }
+        val targetId = obj.optString("target_id").ifBlank { obj.optString("target_user_id") }
+            .takeIf { it.isNotBlank() && it != "null" }
+        val meta = obj.optJSONObject("metadata") ?: obj.optJSONObject("payload")
+        val createdAtIso = obj.optString("created_at").takeIf { it.isNotBlank() && it != "null" }
+        val eventTimestamp = parseIsoTimestampToMillis(createdAtIso) ?: System.currentTimeMillis()
+
+        val actorName = if (!actorId.isNullOrBlank()) {
+            resolveSenderName(context, token, actorId, cleanGroupId)
         } else "A member"
-        val targetName = if (!event.targetUserId.isNullOrBlank() && token.isNotBlank()) {
-            resolveSenderName(context, token, event.targetUserId)
+        val targetName = if (!targetId.isNullOrBlank()) {
+            resolveSenderName(context, token, targetId, cleanGroupId)
         } else null
 
-        val systemText = when (evType) {
+        val normalizedType = when (evType) {
+            "group_created" -> "created"
+            "member_joined", "invite_accepted", "request_approved" -> "joined"
+            "member_left", "blocked", "member_blocked" -> "left"
+            "member_removed" -> "removed"
+            "role_promoted", "admin_promoted" -> "promoted"
+            "role_demoted", "admin_demoted" -> "demoted"
+            "group_info_updated" -> "info_updated"
+            "group_settings_updated" -> "settings_updated"
+            "invite_link_reset" -> "invite_reset"
+            else -> evType
+        }
+
+        val systemText = when (normalizedType) {
             "created" -> "$actorName created this group"
-            "joined" -> "${targetName ?: actorName} joined the group"
+            "joined" -> {
+                if (targetName != null && targetId != actorId) {
+                    if (evType == "request_approved") "$actorName approved $targetName to join"
+                    else "$targetName joined the group"
+                } else {
+                    "${targetName ?: actorName} joined the group"
+                }
+            }
             "left" -> "${targetName ?: actorName} left the group"
-            "removed" -> if (targetName != null) "$actorName removed $targetName" else "A member was removed"
-            "promoted" -> if (targetName != null) "$targetName is now an admin" else "$actorName promoted a member to admin"
-            "demoted" -> if (targetName != null) "$targetName is no longer an admin" else "Admin privileges were updated"
+            "removed" -> if (targetName != null && targetId != actorId) "$actorName removed $targetName" else "${targetName ?: "A member"} was removed"
+            "promoted" -> if (targetName != null && targetId != actorId) "$actorName promoted $targetName to admin" else "${targetName ?: actorName} is now an admin"
+            "demoted" -> if (targetName != null && targetId != actorId) "$actorName dismissed $targetName as admin" else "${targetName ?: actorName} is no longer an admin"
             "info_updated" -> "$actorName updated the group info"
             "settings_updated" -> {
-                val disSec = event.meta?.optInt("disappearing_seconds", -1) ?: -1
+                val disSec = meta?.optInt("disappearing_seconds", -1) ?: -1
                 if (disSec >= 0) {
                     val label = formatDisappearingLabel(disSec)
                     if (disSec == 0) "$actorName turned off disappearing messages"
@@ -370,18 +511,59 @@ object GroupChatRepository {
             else -> return
         }
 
-        insertSystemMessage(groupId, systemText, eventId)
+        val localGroup = db.groupConversationDao().getGroup(cleanGroupId)
+        val showJoinNotifs = localGroup?.showJoinNotifications ?: true
+        val disSec = localGroup?.disappearingSeconds ?: 0
+        val expiresAt = if (disSec > 0) eventTimestamp + disSec * 1000L else null
+
+        val sysMsg = LocalGroupMessage(
+            id = msgId,
+            groupId = cleanGroupId,
+            senderId = "system",
+            senderName = "System",
+            senderAvatar = null,
+            text = systemText,
+            messageType = "system",
+            eventType = normalizedType,
+            timestamp = eventTimestamp,
+            expiresAt = expiresAt,
+            isOutgoing = false
+        )
+        db.groupMessageDao().insertMessage(sysMsg)
+
+        if (!createdAtIso.isNullOrBlank()) {
+            val currentSynced = localGroup?.lastSyncedEventAt.orEmpty()
+            if (createdAtIso > currentSynced) {
+                db.groupConversationDao().updateLastSyncedEventAt(cleanGroupId, createdAtIso)
+            }
+        }
+
+        val shouldShowInPreview = (normalizedType != "joined" && normalizedType != "left") || showJoinNotifs
+        if (shouldShowInPreview && eventTimestamp >= (localGroup?.lastMessageTime ?: 0L)) {
+            db.groupConversationDao().updateLastMessage(
+                groupId = cleanGroupId,
+                text = systemText,
+                senderName = "",
+                time = eventTimestamp,
+                unreadDelta = 0
+            )
+        }
     }
 
-    suspend fun insertSystemMessage(groupId: String, text: String, customId: String? = null) {
+    suspend fun insertSystemMessage(
+        groupId: String,
+        text: String,
+        customId: String? = null,
+        eventType: String? = null,
+        timestamp: Long = System.currentTimeMillis()
+    ) {
         val db = database ?: return
         val cleanGroupId = groupId.trim().replace("\"", "")
         val msgId = customId ?: "sys_${UUID.randomUUID()}"
         if (db.groupMessageDao().messageExists(msgId)) return
         val group = db.groupConversationDao().getGroup(cleanGroupId)
         val disSec = group?.disappearingSeconds ?: 0
-        val now = System.currentTimeMillis()
-        val expiresAt = if (disSec > 0) now + disSec * 1000L else null
+        val expiresAt = if (disSec > 0) timestamp + disSec * 1000L else null
 
         val sysMsg = LocalGroupMessage(
             id = msgId,
@@ -391,7 +573,8 @@ object GroupChatRepository {
             senderAvatar = null,
             text = text,
             messageType = "system",
-            timestamp = now,
+            eventType = eventType,
+            timestamp = timestamp,
             expiresAt = expiresAt,
             isOutgoing = false
         )
@@ -400,7 +583,7 @@ object GroupChatRepository {
             groupId = cleanGroupId,
             text = text,
             senderName = "",
-            time = now,
+            time = timestamp,
             unreadDelta = 0
         )
     }
@@ -457,6 +640,7 @@ object GroupChatRepository {
                     description = existing?.description.orEmpty(),
                     avatarUrl = row.avatar_url.orEmpty().ifBlank { existing?.avatarUrl.orEmpty() },
                     createdBy = existing?.createdBy.orEmpty(),
+                    isCreator = existing?.isCreator ?: false,
                     myRole = row.my_role ?: existing?.myRole ?: "member",
                     myStatus = status,
                     memberCount = joinedCount,
@@ -478,6 +662,8 @@ object GroupChatRepository {
                     lastMessageSenderName = existing?.lastMessageSenderName.orEmpty(),
                     lastMessageTime = existing?.lastMessageTime ?: createdMillis,
                     unreadCount = existing?.unreadCount ?: 0,
+                    hasUnreadMention = existing?.hasUnreadMention ?: false,
+                    lastSyncedEventAt = existing?.lastSyncedEventAt.orEmpty(),
                     createdAt = createdMillis
                 )
                 db.groupConversationDao().insertOrUpdate(localConv)
@@ -569,6 +755,7 @@ object GroupChatRepository {
                 description = description?.trim().orEmpty(),
                 avatarUrl = finalAvatarUrl,
                 createdBy = myUserId,
+                isCreator = true,
                 myRole = "admin",
                 myStatus = "joined",
                 memberCount = 1,
@@ -578,11 +765,11 @@ object GroupChatRepository {
                 createdAt = now
             )
             database?.groupConversationDao()?.insertOrUpdate(localGroup)
-            insertSystemMessage(groupId, "You created the group \"$cleanName\"")
 
             VoiceRoomRealtimeManager.subscribeGroupRealtime(groupId)
             syncUserGroups(context)
             getGroupOverview(context, groupId)
+            syncMissedGroupEvents(context, groupId)
 
             Result.success(groupId)
         } catch (e: Exception) {
@@ -702,10 +889,16 @@ object GroupChatRepository {
             }
 
             val existing = database?.groupConversationDao()?.getGroup(cleanGroupId)
+            val myUserId = SupabaseSessionManager.getUserId(context).orEmpty()
             val name = json.optString("name", existing?.name ?: "Group Chat")
             val description = if (json.isNull("description")) "" else json.optString("description", existing?.description.orEmpty())
             val avatarUrl = if (json.isNull("avatar_url")) "" else json.optString("avatar_url", existing?.avatarUrl.orEmpty())
             val createdBy = if (json.isNull("created_by")) existing?.createdBy.orEmpty() else json.optString("created_by", existing?.createdBy.orEmpty())
+            val isCreator = if (json.has("is_creator") && !json.isNull("is_creator")) {
+                json.optBoolean("is_creator", false)
+            } else {
+                existing?.isCreator ?: (createdBy.isNotBlank() && createdBy == myUserId)
+            }
             val joinedCount = json.optInt("joined_count", existing?.memberCount ?: 1).coerceAtLeast(1)
 
             val pendingRequests = when (val pr = json.opt("pending_requests")) {
@@ -733,23 +926,13 @@ object GroupChatRepository {
             val disappearingSeconds = json.optInt("disappearing_seconds", existing?.disappearingSeconds ?: 0)
             val memberListVisibility = json.optString("member_list_visibility", existing?.memberListVisibility ?: "members")
 
-            // If disappearing_seconds changed from existing local value, insert a system message
-            if (existing != null && existing.disappearingSeconds != disappearingSeconds) {
-                val label = formatDisappearingLabel(disappearingSeconds)
-                val sysText = if (disappearingSeconds == 0) {
-                    "Disappearing messages were turned off"
-                } else {
-                    "Disappearing messages were set to $label"
-                }
-                insertSystemMessage(cleanGroupId, sysText)
-            }
-
             val overview = GroupOverviewData(
                 groupId = cleanGroupId,
                 name = name,
                 description = description,
                 avatarUrl = avatarUrl,
                 createdBy = createdBy,
+                isCreator = isCreator,
                 joinedCount = joinedCount,
                 pendingRequests = pendingRequests,
                 myRole = myRole,
@@ -772,6 +955,7 @@ object GroupChatRepository {
                 description = description,
                 avatarUrl = avatarUrl,
                 createdBy = createdBy,
+                isCreator = isCreator,
                 myRole = myRole,
                 myStatus = myStatus,
                 memberCount = joinedCount,
@@ -790,6 +974,8 @@ object GroupChatRepository {
                 lastMessageSenderName = existing?.lastMessageSenderName.orEmpty(),
                 lastMessageTime = existing?.lastMessageTime ?: System.currentTimeMillis(),
                 unreadCount = existing?.unreadCount ?: 0,
+                hasUnreadMention = existing?.hasUnreadMention ?: false,
+                lastSyncedEventAt = existing?.lastSyncedEventAt.orEmpty(),
                 createdAt = existing?.createdAt ?: System.currentTimeMillis()
             )
             database?.groupConversationDao()?.insertOrUpdate(updatedLocal)
@@ -826,14 +1012,8 @@ object GroupChatRepository {
             )
 
             if (resp.isSuccessful) {
-                if (patch.containsKey("disappearing_seconds")) {
-                    val newSec = (patch["disappearing_seconds"] as? Number)?.toInt() ?: 0
-                    val label = formatDisappearingLabel(newSec)
-                    val sysText = if (newSec == 0) "You turned off disappearing messages"
-                    else "You set disappearing messages to $label"
-                    insertSystemMessage(cleanGroupId, sysText)
-                }
                 getGroupOverview(context, cleanGroupId)
+                syncMissedGroupEvents(context, cleanGroupId)
                 syncUserGroups(context)
                 _liveGroupUpdates.tryEmit(cleanGroupId)
                 Result.success(Unit)
@@ -1187,6 +1367,7 @@ object GroupChatRepository {
             )
 
             if (resp.isSuccessful) {
+                syncUserGroups(context)
                 Result.success(Unit)
             } else {
                 val err = resp.errorBody()?.string()
@@ -1194,6 +1375,27 @@ object GroupChatRepository {
             }
         } catch (e: Exception) {
             Result.failure(Exception(mapGroupError(e.message, "Failed to unblock group")))
+        }
+    }
+
+    suspend fun getMyBlockedGroups(context: Context): Result<List<BlockedGroupRow>> = withContext(Dispatchers.IO) {
+        try {
+            SupabaseSessionManager.ensureActiveSession(context)
+            val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                ?: return@withContext Result.failure(Exception("Not authenticated"))
+
+            val resp = SupabaseClient.api.getMyBlockedGroups(
+                apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                auth = token
+            )
+            if (resp.isSuccessful) {
+                Result.success(resp.body().orEmpty())
+            } else {
+                val err = resp.errorBody()?.string()
+                Result.failure(Exception(mapGroupError(err, "Failed to load blocked groups")))
+            }
+        } catch (e: Exception) {
+            Result.failure(Exception(mapGroupError(e.message, "Failed to load blocked groups")))
         }
     }
 
@@ -1290,7 +1492,7 @@ object GroupChatRepository {
                     code = code,
                     enabled = enabled,
                     deepLink = "funkytalk://group/$code",
-                    httpsLink = "https://funkytalk.app/group/$code"
+                    httpsLink = "https://${BuildConfig.GROUP_INVITE_HOST}/g/$code"
                 )
             )
         } catch (e: Exception) {
@@ -1318,12 +1520,13 @@ object GroupChatRepository {
 
             val raw = resp.body()?.string()?.trim().orEmpty()
             val (code, enabled) = parseInviteResponse(raw)
+            syncMissedGroupEvents(context, cleanGroupId)
             Result.success(
                 GroupInviteInfo(
                     code = code,
                     enabled = enabled,
                     deepLink = "funkytalk://group/$code",
-                    httpsLink = "https://funkytalk.app/group/$code"
+                    httpsLink = "https://${BuildConfig.GROUP_INVITE_HOST}/g/$code"
                 )
             )
         } catch (e: Exception) {
@@ -1467,11 +1670,19 @@ object GroupChatRepository {
 
     fun extractCleanInviteCode(rawInput: String): String {
         val trimmed = rawInput.trim()
+        if (trimmed.contains("/g/")) {
+            return trimmed.substringAfterLast("/g/").substringBefore("?").substringBefore("#").substringBefore("/").trim()
+        }
         if (trimmed.contains("/group/")) {
-            return trimmed.substringAfterLast("/group/").substringBefore("?").substringBefore("/").trim()
+            return trimmed.substringAfterLast("/group/").substringBefore("?").substringBefore("#").substringBefore("/").trim()
         }
         if (trimmed.startsWith("funkytalk://")) {
-            return trimmed.removePrefix("funkytalk://").removePrefix("group/").substringBefore("?").trim('/')
+            return trimmed.removePrefix("funkytalk://")
+                .removePrefix("group/")
+                .removePrefix("g/")
+                .substringBefore("?")
+                .substringBefore("#")
+                .trim('/')
         }
         return trimmed
     }
@@ -1484,7 +1695,7 @@ object GroupChatRepository {
      * Sending a group message:
      * 1. Call get_group_members, take status='joined' members.
      * 2. Fetch each one's public key from user_public_keys (including self).
-     * 3. Encrypt per recipient (same scheme as DMs).
+     * 3. Encrypt per recipient (same scheme as DMs). Mentions & reply metadata go INSIDE the encrypted payload!
      * 4. Skip members without a public key and warn the sender.
      * 5. Call send_group_message(p_group_id, p_message_type ['text'|'image'|'voice'], p_recipients).
      */
@@ -1493,7 +1704,9 @@ object GroupChatRepository {
         groupId: String,
         text: String,
         messageType: String = "text",
-        storagePath: String? = null
+        storagePath: String? = null,
+        mentionedUserIds: List<String> = emptyList(),
+        replyToMessage: LocalGroupMessage? = null
     ): Result<SendGroupMessageOutcome> = withContext(Dispatchers.IO) {
         try {
             val activeUid = SupabaseSessionManager.ensureActiveSession(context)
@@ -1517,6 +1730,23 @@ object GroupChatRepository {
             val joinedMembers = allMembers.filter { it.status.trim().equals("joined", ignoreCase = true) }
             val memberUserIds = (joinedMembers.map { it.user_id }.toSet() + myUserId).filter { it.isNotBlank() }
 
+            val cleanMentions = mentionedUserIds.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+            val payloadToEncrypt = if (cleanMentions.isNotEmpty() || replyToMessage != null) {
+                JSONObject().apply {
+                    put("__e2ee_v2", true)
+                    put("text", text)
+                    put("mentions", JSONArray(cleanMentions))
+                    if (replyToMessage != null) {
+                        put("reply_to_id", replyToMessage.id)
+                        put("reply_to_sender_id", replyToMessage.senderId)
+                        put("reply_to_sender_name", replyToMessage.senderName)
+                        put("reply_to_text", replyToMessage.text.take(120))
+                    }
+                }.toString()
+            } else {
+                text
+            }
+
             // 2. Fetch public keys for each joined member and encrypt per recipient
             val recipientsPayload = mutableListOf<GroupRecipientPayload>()
             var skippedNoKeyCount = 0
@@ -1530,7 +1760,7 @@ object GroupChatRepository {
                 val pubKey = keyResp.body()?.firstOrNull()?.identity_public_key
 
                 if (!pubKey.isNullOrBlank()) {
-                    val ciphertext = E2EEManager.encryptMessage(pubKey, text)
+                    val ciphertext = E2EEManager.encryptMessage(pubKey, payloadToEncrypt)
                     recipientsPayload.add(
                         GroupRecipientPayload(
                             recipient_id = uid,
@@ -1590,7 +1820,13 @@ object GroupChatRepository {
                 storagePath = storagePath,
                 timestamp = now,
                 expiresAt = expiresAt,
-                isOutgoing = true
+                isOutgoing = true,
+                mentionsJson = JSONArray(cleanMentions).toString(),
+                isMentioned = false,
+                replyToMessageId = replyToMessage?.id,
+                replyToSenderId = replyToMessage?.senderId,
+                replyToSenderName = replyToMessage?.senderName,
+                replyToPreview = replyToMessage?.text?.take(120)
             )
             database?.groupMessageDao()?.insertMessage(localMsg)
             database?.groupConversationDao()?.updateLastMessage(
@@ -1842,23 +2078,33 @@ object GroupChatRepository {
             var savedNonce: String? = null
             var savedMime: String? = null
             var savedStoragePath: String? = row.storage_path
+            val mentionsList = mutableListOf<String>()
+            var replyToId: String? = null
+            var replyToSenderId: String? = null
+            var replyToSenderName: String? = null
+            var replyToPreview: String? = null
 
             val trimmed = plaintext.trim()
-            val mediaDescriptor = if (trimmed.startsWith("{") && trimmed.endsWith("}") && trimmed.contains("media_key")) {
+            val jsonEnvelope = if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
                 try { JSONObject(trimmed) } catch (_: Exception) { null }
             } else null
 
-            if (mediaDescriptor != null) {
-                savedKey = mediaDescriptor.optString("media_key")
-                savedNonce = mediaDescriptor.optString("media_nonce")
-                savedMime = mediaDescriptor.optString("mime_type", "image/jpeg")
-                savedStoragePath = mediaDescriptor.optString("storage_path").ifBlank { row.storage_path.orEmpty() }
-                val descType = mediaDescriptor.optString("message_type")
+            if (jsonEnvelope != null && jsonEnvelope.has("media_key")) {
+                savedKey = jsonEnvelope.optString("media_key")
+                savedNonce = jsonEnvelope.optString("media_nonce")
+                savedMime = jsonEnvelope.optString("mime_type", "image/jpeg")
+                savedStoragePath = jsonEnvelope.optString("storage_path").ifBlank { row.storage_path.orEmpty() }
+                val descType = jsonEnvelope.optString("message_type")
                 resolvedType = when {
                     descType == "voice" || rowMessageType == "voice" || savedMime.contains("audio") -> "voice"
                     else -> "image"
                 }
                 displayText = if (resolvedType == "voice") "Voice message" else "Photo"
+                jsonEnvelope.optJSONArray("mentions")?.let { arr ->
+                    for (i in 0 until arr.length()) {
+                        arr.optString(i)?.takeIf { it.isNotBlank() }?.let { mentionsList.add(it) }
+                    }
+                }
 
                 if (autoDownload && !savedKey.isNullOrBlank() && !savedNonce.isNullOrBlank() && !savedStoragePath.isNullOrBlank()) {
                     localMediaPath = downloadAndDecryptGroupMediaBlob(
@@ -1871,10 +2117,27 @@ object GroupChatRepository {
                         isVoice = resolvedType == "voice"
                     )
                 }
+            } else if (jsonEnvelope != null && (jsonEnvelope.optBoolean("__e2ee_v2", false) || jsonEnvelope.has("mentions"))) {
+                displayText = jsonEnvelope.optString("text", plaintext)
+                jsonEnvelope.optJSONArray("mentions")?.let { arr ->
+                    for (i in 0 until arr.length()) {
+                        arr.optString(i)?.takeIf { it.isNotBlank() }?.let { mentionsList.add(it) }
+                    }
+                }
+                replyToId = jsonEnvelope.optString("reply_to_id").takeIf { it.isNotBlank() && it != "null" }
+                replyToSenderId = jsonEnvelope.optString("reply_to_sender_id").takeIf { it.isNotBlank() && it != "null" }
+                replyToSenderName = jsonEnvelope.optString("reply_to_sender_name").takeIf { it.isNotBlank() && it != "null" }
+                replyToPreview = jsonEnvelope.optString("reply_to_text").takeIf { it.isNotBlank() && it != "null" }
             }
 
-            val senderName = if (isFromMe) "You" else resolveSenderName(context, token, senderId)
+            val senderName = if (isFromMe) "You" else resolveSenderName(context, token, senderId, groupId)
             val senderAvatar = if (isFromMe) null else resolveSenderAvatar(context, token, senderId)
+
+            val isReplyToMe = !isFromMe && (
+                replyToSenderId == myUserId ||
+                    (!replyToId.isNullOrBlank() && db.groupMessageDao().getMessageById(replyToId)?.senderId == myUserId)
+                )
+            val isMentioned = !isFromMe && (mentionsList.contains(myUserId) || isReplyToMe)
 
             val localMsg = LocalGroupMessage(
                 id = msgId,
@@ -1891,16 +2154,51 @@ object GroupChatRepository {
                 mimeType = savedMime,
                 timestamp = now,
                 expiresAt = expiresAt,
-                isOutgoing = isFromMe
+                isOutgoing = isFromMe,
+                mentionsJson = JSONArray(mentionsList).toString(),
+                isMentioned = isMentioned,
+                replyToMessageId = replyToId,
+                replyToSenderId = replyToSenderId,
+                replyToSenderName = replyToSenderName,
+                replyToPreview = replyToPreview
             )
             db.groupMessageDao().insertMessage(localMsg)
+            val isGroupOpen = activeOpenGroupId == groupId
             db.groupConversationDao().updateLastMessage(
                 groupId = groupId,
                 text = displayText,
                 senderName = senderName,
                 time = now,
-                unreadDelta = if (isFromMe) 0 else 1
+                unreadDelta = if (isFromMe || isGroupOpen) 0 else 1
             )
+            if (isMentioned && !isGroupOpen) {
+                db.groupConversationDao().setHasUnreadMention(groupId, true)
+            }
+
+            // Notification rules from my group prefs:
+            // notify_level 'all' = every message; 'mentions' = only if isMentioned; 'none' = never. Respect muted_until.
+            if (!isFromMe && !isGroupOpen) {
+                val freshGroup = db.groupConversationDao().getGroup(groupId) ?: localGroup
+                val mutedUntil = freshGroup?.mutedUntil ?: 0L
+                val isMuted = mutedUntil > System.currentTimeMillis()
+                val notifyLevel = (freshGroup?.notifyLevel ?: "all").lowercase()
+                val shouldNotify = !isMuted && when (notifyLevel) {
+                    "none" -> false
+                    "mentions" -> isMentioned
+                    else -> true
+                }
+                if (shouldNotify) {
+                    val groupTitle = freshGroup?.name ?: "Group Chat"
+                    val notifTitle = if (isMentioned) "$groupTitle · Mentioned you" else groupTitle
+                    val notifBody = "$senderName: $displayText"
+                    com.example.util.SystemNotificationHelper.showSystemNotification(
+                        context = context,
+                        title = notifTitle,
+                        message = notifBody,
+                        notificationId = groupId.hashCode()
+                    )
+                }
+            }
 
             processedRecipientIds.add(row.id)
             deleteRecipientRow(token, row.id)
@@ -2002,24 +2300,51 @@ object GroupChatRepository {
 
     private val userProfileCache = java.util.concurrent.ConcurrentHashMap<String, Pair<String, String?>>()
 
-    private suspend fun resolveSenderName(context: Context, token: String, senderId: String): String {
-        if (senderId.isBlank()) return "Member"
-        userProfileCache[senderId]?.first?.let { return it }
+    private suspend fun resolveSenderName(
+        context: Context,
+        token: String,
+        senderId: String,
+        groupId: String? = null
+    ): String {
+        if (senderId.isBlank()) return "A member"
+        val myUserId = SupabaseSessionManager.getUserId(context)
+        if (!myUserId.isNullOrBlank() && senderId == myUserId) return "You"
+        userProfileCache[senderId]?.first?.takeIf { it.isNotBlank() }?.let { return it }
+
+        // Check local contact cache (1:1 DM conversations & past group messages)
         try {
-            val profResp = SupabaseClient.api.getDiscoverableProfiles(
-                apiKey = BuildConfig.SUPABASE_ANON_KEY,
-                auth = token,
-                options = mapOf("auth_user_id" to "eq.$senderId")
-            )
-            val p = profResp.body()?.firstOrNull()
-            val name = p?.profile_name?.takeIf { it.isNotBlank() }
-                ?: p?.username?.takeIf { it.isNotBlank() }
-                ?: "Member"
-            val avatar = p?.avatar_url
-            userProfileCache[senderId] = name to avatar
-            return name
+            val dmConv = database?.conversationDao()?.getConversation(senderId)
+            if (dmConv != null && dmConv.otherUserName.isNotBlank()) {
+                userProfileCache[senderId] = dmConv.otherUserName to dmConv.otherUserAvatar
+                return dmConv.otherUserName
+            }
+            if (!groupId.isNullOrBlank()) {
+                val pastMsg = database?.groupMessageDao()?.getGroupMessagesList(groupId)
+                    ?.lastOrNull { it.senderId == senderId && it.senderName.isNotBlank() && it.senderName != "A member" && it.senderName != "Member" }
+                if (pastMsg != null) {
+                    userProfileCache[senderId] = pastMsg.senderName to pastMsg.senderAvatar
+                    return pastMsg.senderName
+                }
+            }
         } catch (_: Exception) {}
-        return "Member"
+
+        if (token.isNotBlank()) {
+            try {
+                val profResp = SupabaseClient.api.getDiscoverableProfiles(
+                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                    auth = token,
+                    options = mapOf("auth_user_id" to "eq.$senderId")
+                )
+                val p = profResp.body()?.firstOrNull()
+                val name = p?.profile_name?.takeIf { it.isNotBlank() }
+                    ?: p?.username?.takeIf { it.isNotBlank() }
+                if (!name.isNullOrBlank()) {
+                    userProfileCache[senderId] = name to p?.avatar_url
+                    return name
+                }
+            } catch (_: Exception) {}
+        }
+        return "A member"
     }
 
     private suspend fun resolveSenderAvatar(context: Context, token: String, senderId: String): String? {

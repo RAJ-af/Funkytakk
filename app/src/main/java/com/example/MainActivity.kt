@@ -80,12 +80,15 @@ class MainActivity : FragmentActivity() {
                     val authState by authViewModel.authState.collectAsState()
                     val myModerationStatus by authViewModel.myModerationStatus.collectAsState()
 
-                    // Lifecycle observer: refresh moderation status when app enters foreground / resumes
+                    // Lifecycle observer: refresh moderation status and sync group events when app enters foreground / resumes
                     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
                     DisposableEffect(lifecycleOwner) {
                         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
                             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
                                 authViewModel.refreshModerationStatus(applicationContext)
+                                if (SupabaseSessionManager.getUserId(applicationContext) != null) {
+                                    com.example.repository.GroupChatRepository.onAppResumed(applicationContext)
+                                }
                             }
                         }
                         lifecycleOwner.lifecycle.addObserver(observer)
@@ -492,8 +495,29 @@ class MainActivity : FragmentActivity() {
 
     private fun handleDeepLinkIntent(intent: Intent?) {
         val data: Uri? = intent?.data
-        if (data != null && data.scheme?.lowercase() == "funkytalk") {
-            pendingDeepLinkUri = data
+        if (data != null) {
+            val scheme = data.scheme?.lowercase() ?: ""
+            val host = data.host?.lowercase() ?: ""
+            val path = data.path ?: ""
+            val isGroupDeepLink = (scheme == "funkytalk" && host == "group") ||
+                ((scheme == "https" || scheme == "http") && (
+                    path.startsWith("/g/") ||
+                    path.startsWith("/group/") ||
+                    host.equals(BuildConfig.GROUP_INVITE_HOST, ignoreCase = true)
+                ))
+            if (isGroupDeepLink) {
+                val code = com.example.repository.GroupChatRepository.parseInviteCode(data.toString())
+                if (code.isNotBlank()) {
+                    com.example.repository.GroupChatRepository.setPendingInviteCode(code)
+                    getSharedPreferences("funky_talk_prefs", MODE_PRIVATE)
+                        .edit()
+                        .putString("pending_group_invite_code", code)
+                        .apply()
+                }
+            }
+            if (scheme == "funkytalk" || scheme == "https" || scheme == "http") {
+                pendingDeepLinkUri = data
+            }
         }
     }
 }

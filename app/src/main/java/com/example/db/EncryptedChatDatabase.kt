@@ -14,7 +14,7 @@ import net.sqlcipher.database.SupportFactory
         LocalGroupConversation::class,
         LocalGroupMessage::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class EncryptedChatDatabase : RoomDatabase() {

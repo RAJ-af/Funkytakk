@@ -67,6 +67,12 @@ fun HomeScreen(
         viewModel.fetchSupabaseProfiles(context)
         com.example.NotificationsManager.init(context)
         com.example.SupportChatManager.init(context)
+        com.example.repository.GroupChatRepository.init(context)
+        val prefs = context.getSharedPreferences("funky_talk_prefs", android.content.Context.MODE_PRIVATE)
+        val savedCode = prefs.getString("pending_group_invite_code", null)
+        if (!savedCode.isNullOrBlank() && com.example.repository.GroupChatRepository.pendingInviteCode.value.isNullOrBlank()) {
+            com.example.repository.GroupChatRepository.setPendingInviteCode(savedCode)
+        }
     }
 
     var showCreateRoomBottomSheet by remember { mutableStateOf(false) }
@@ -592,9 +598,19 @@ fun HomeScreen(
         pendingInviteCode?.let { code ->
             com.example.ui.screens.chat.GroupInviteCodePreviewSheet(
                 inviteCode = code,
-                onDismiss = { com.example.repository.GroupChatRepository.setPendingInviteCode(null) },
+                onDismiss = {
+                    com.example.repository.GroupChatRepository.setPendingInviteCode(null)
+                    context.getSharedPreferences("funky_talk_prefs", android.content.Context.MODE_PRIVATE)
+                        .edit()
+                        .remove("pending_group_invite_code")
+                        .apply()
+                },
                 onJoinedGroup = { joinedGroupId ->
                     com.example.repository.GroupChatRepository.setPendingInviteCode(null)
+                    context.getSharedPreferences("funky_talk_prefs", android.content.Context.MODE_PRIVATE)
+                        .edit()
+                        .remove("pending_group_invite_code")
+                        .apply()
                     activeTab = "chats"
                     val found = joinedGroupsList.find { it.id == joinedGroupId }
                         ?: com.example.db.LocalGroupConversation(

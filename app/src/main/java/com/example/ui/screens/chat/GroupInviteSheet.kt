@@ -58,11 +58,11 @@ fun GroupInviteBottomSheet(
     var inviteEnabled by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
+    val httpsLink = remember(inviteCode) {
+        if (inviteCode.isNotBlank()) "https://${com.example.BuildConfig.GROUP_INVITE_HOST}/g/$inviteCode" else ""
+    }
     val deepLink = remember(inviteCode) {
         if (inviteCode.isNotBlank()) "funkytalk://group/$inviteCode" else ""
-    }
-    val httpsLink = remember(inviteCode) {
-        if (inviteCode.isNotBlank()) "https://funkytalk.app/group/$inviteCode" else ""
     }
 
     fun loadInvite() {
@@ -276,7 +276,7 @@ fun GroupInviteBottomSheet(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = deepLink,
+                                text = httpsLink,
                                 fontSize = 13.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF0F172A),
@@ -285,7 +285,7 @@ fun GroupInviteBottomSheet(
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = httpsLink,
+                                text = deepLink,
                                 fontSize = 11.5.sp,
                                 color = Color(0xFF64748B),
                                 maxLines = 1,
@@ -299,7 +299,7 @@ fun GroupInviteBottomSheet(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(10.dp))
                                 .clickable {
-                                    clipboardManager.setText(AnnotatedString(deepLink))
+                                    clipboardManager.setText(AnnotatedString(httpsLink))
                                     Toast.makeText(context, "Invite link copied!", Toast.LENGTH_SHORT).show()
                                 },
                             shape = RoundedCornerShape(10.dp),
@@ -322,10 +322,10 @@ fun GroupInviteBottomSheet(
                     onClick = {
                         val shareBody = buildString {
                             append("Join \"${group.name}\" on FunkyTalk!\n")
-                            append(deepLink)
-                            if (httpsLink.isNotBlank()) {
+                            append(httpsLink)
+                            if (deepLink.isNotBlank()) {
                                 append("\n")
-                                append(httpsLink)
+                                append(deepLink)
                             }
                         }
                         val sendIntent = Intent(Intent.ACTION_SEND).apply {
@@ -693,7 +693,7 @@ fun GroupInviteCodePreviewSheet(
                         border = BorderStroke(1.dp, Color(0xFFFDE68A))
                     ) {
                         Text(
-                            text = "Request sent, waiting for admin",
+                            text = "Request sent, waiting for admin approval",
                             modifier = Modifier.padding(14.dp),
                             fontSize = 13.5.sp,
                             fontWeight = FontWeight.Bold,
@@ -726,7 +726,7 @@ fun GroupInviteCodePreviewSheet(
                                 res.onSuccess { outcome ->
                                     if (outcome.status.equals("requested", ignoreCase = true)) {
                                         joinStatusResult = "requested"
-                                        Toast.makeText(context, "Request sent, waiting for admin", Toast.LENGTH_LONG).show()
+                                        Toast.makeText(context, "Request sent, waiting for admin approval", Toast.LENGTH_LONG).show()
                                     } else {
                                         Toast.makeText(context, "Joined ${p.name}!", Toast.LENGTH_SHORT).show()
                                         onJoinedGroup(outcome.groupId.ifBlank { p.groupId })

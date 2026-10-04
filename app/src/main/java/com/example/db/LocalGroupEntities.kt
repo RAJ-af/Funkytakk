@@ -14,6 +14,7 @@ data class LocalGroupConversation(
     val description: String = "",
     val avatarUrl: String = "",
     val createdBy: String = "",
+    val isCreator: Boolean = false,
     val myRole: String = "member", // "admin" or "member"
     val myStatus: String = "joined", // "joined", "invited", "requested"
     val memberCount: Int = 1, // joined_count from server
@@ -32,6 +33,8 @@ data class LocalGroupConversation(
     val lastMessageSenderName: String = "",
     val lastMessageTime: Long = System.currentTimeMillis(),
     val unreadCount: Int = 0,
+    val hasUnreadMention: Boolean = false,
+    val lastSyncedEventAt: String = "",
     val createdAt: Long = System.currentTimeMillis()
 )
 
@@ -52,6 +55,7 @@ data class LocalGroupMessage(
     val senderAvatar: String? = null,
     val text: String, // Plaintext, decrypted locally!
     val messageType: String = "text", // "text", "image", "voice", "system"
+    val eventType: String? = null, // for system events: "created", "joined", "left", "removed", "promoted", "demoted", "info_updated", "settings_updated", "invite_reset"
     val storagePath: String? = null,
     val localMediaPath: String? = null,
     val mediaKey: String? = null,
@@ -59,5 +63,11 @@ data class LocalGroupMessage(
     val mimeType: String? = null,
     val timestamp: Long = System.currentTimeMillis(),
     val expiresAt: Long? = null, // receive/send time + disappearing_seconds * 1000L
-    val isOutgoing: Boolean
+    val isOutgoing: Boolean,
+    val mentionsJson: String = "[]",
+    val isMentioned: Boolean = false,
+    val replyToMessageId: String? = null,
+    val replyToSenderId: String? = null,
+    val replyToSenderName: String? = null,
+    val replyToPreview: String? = null
 )

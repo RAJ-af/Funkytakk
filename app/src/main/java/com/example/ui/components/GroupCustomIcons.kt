@@ -1306,4 +1306,32 @@ fun GroupShareIcon(
     }
 }
 
+@Composable
+fun GroupBlockBanIcon(
+    size: Dp = 20.dp,
+    color: Color = Color(0xFFEF4444),
+    modifier: Modifier = Modifier,
+    strokeWidth: Float = 2.0f
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = strokeWidth * density
+        val radius = w * 0.38f
+        drawCircle(
+            color = color,
+            radius = radius,
+            center = Offset(w * 0.5f, h * 0.5f),
+            style = Stroke(width = sw)
+        )
+        drawLine(
+            color = color,
+            start = Offset(w * 0.24f, h * 0.24f),
+            end = Offset(w * 0.76f, h * 0.76f),
+            strokeWidth = sw,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
 

@@ -32,8 +32,14 @@ interface GroupConversationDao {
     @Query("UPDATE group_conversations SET myStatus = :status WHERE id = :groupId")
     suspend fun updateStatus(groupId: String, status: String)
 
-    @Query("UPDATE group_conversations SET unreadCount = 0 WHERE id = :groupId")
+    @Query("UPDATE group_conversations SET unreadCount = 0, hasUnreadMention = 0 WHERE id = :groupId")
     suspend fun markRead(groupId: String)
+
+    @Query("UPDATE group_conversations SET hasUnreadMention = :hasMention WHERE id = :groupId")
+    suspend fun setHasUnreadMention(groupId: String, hasMention: Boolean)
+
+    @Query("UPDATE group_conversations SET lastSyncedEventAt = :isoTimestamp WHERE id = :groupId")
+    suspend fun updateLastSyncedEventAt(groupId: String, isoTimestamp: String)
 
     @Query("UPDATE group_conversations SET lastMessageText = :text, lastMessageSenderName = :senderName, lastMessageTime = :time, unreadCount = unreadCount + :unreadDelta WHERE id = :groupId")
     suspend fun updateLastMessage(groupId: String, text: String, senderName: String, time: Long, unreadDelta: Int)
@@ -79,6 +85,9 @@ interface GroupMessageDao {
 
     @Query("SELECT EXISTS(SELECT 1 FROM group_messages WHERE id = :id)")
     suspend fun messageExists(id: String): Boolean
+
+    @Query("SELECT * FROM group_messages WHERE id = :id LIMIT 1")
+    suspend fun getMessageById(id: String): LocalGroupMessage?
 
     @Query("DELETE FROM group_messages WHERE id = :id")
     suspend fun deleteMessage(id: String)

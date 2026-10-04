@@ -1079,17 +1079,20 @@ class AuthViewModel : ViewModel() {
 
         Log.d("DeepLink", "Processing deep link: $uri, host=$host, path=$path, segments=$pathSegments")
 
-        // Handle funkytalk://group/{code} or https://funkytalk.app/group/{code}
-        if (host == "group" || pathSegments.contains("group")) {
-            val groupCode = when {
-                host == "group" -> pathSegments.firstOrNull() ?: uri.getQueryParameter("code")
-                else -> {
-                    val idx = pathSegments.indexOf("group")
-                    if (idx >= 0 && idx + 1 < pathSegments.size) pathSegments[idx + 1] else uri.getQueryParameter("code")
-                }
-            }?.trim()?.removePrefix("/")
-            if (!groupCode.isNullOrBlank()) {
+        // Handle funkytalk://group/{code} or https://<GROUP_INVITE_HOST>/g/{code} or https://funkytalk.app/group/{code}
+        if (
+            host == "group" ||
+            pathSegments.contains("group") ||
+            pathSegments.contains("g") ||
+            host.equals(BuildConfig.GROUP_INVITE_HOST, ignoreCase = true)
+        ) {
+            val groupCode = com.example.repository.GroupChatRepository.parseInviteCode(uri.toString())
+            if (groupCode.isNotBlank()) {
                 com.example.repository.GroupChatRepository.setPendingInviteCode(groupCode)
+                context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
+                    .edit()
+                    .putString("pending_group_invite_code", groupCode)
+                    .apply()
             }
             return
         }

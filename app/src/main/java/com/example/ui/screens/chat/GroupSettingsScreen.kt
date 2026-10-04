@@ -51,7 +51,7 @@ fun GroupSettingsScreen(
     val myUserId = remember { SupabaseSessionManager.getUserId(context).orEmpty() }
 
     val canEditInfo = isAdmin || group.whoCanEditInfo.equals("members", ignoreCase = true)
-    val isCreator = group.createdBy.isNotBlank() && group.createdBy == myUserId
+    val isCreator = group.isCreator || (group.createdBy.isNotBlank() && group.createdBy == myUserId)
 
     var isUploadingAvatar by remember { mutableStateOf(false) }
     var showEditNameDialog by remember { mutableStateOf(false) }
@@ -61,6 +61,7 @@ fun GroupSettingsScreen(
     var showNotifyLevelDialog by remember { mutableStateOf(false) }
     var showReportDialog by remember { mutableStateOf(false) }
     var showBlockConfirmDialog by remember { mutableStateOf(false) }
+    var showBlockedGroupsSheet by remember { mutableStateOf(false) }
     var showLeaveConfirmDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var isActionInProgress by remember { mutableStateOf(false) }
@@ -273,20 +274,19 @@ fun GroupSettingsScreen(
                 }
             }
 
-            // 2. Permissions Card (Admin-editable, read-only for members)
-            SettingsSectionCard(indicatorColor = Color(0xFFF59E0B), title = "Permissions") {
-                Column(
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp, vertical = 6.dp)
-                        .alpha(if (isAdmin) 1f else 0.75f)
-                ) {
-                    SettingsRowItem(
-                        icon = { GroupChatBubbleIcon(size = 18.dp, color = Color(0xFF0F172A)) },
-                        title = "Who can send messages",
-                        value = whoCanSendLabel,
-                        enabled = isAdmin,
-                        onClick = {
-                            if (isAdmin) {
+            // 2. Permissions Card (Admin-only)
+            if (isAdmin) {
+                SettingsSectionCard(indicatorColor = Color(0xFFF59E0B), title = "Permissions") {
+                    Column(
+                        modifier = Modifier
+                            .padding(horizontal = 16.dp, vertical = 6.dp)
+                    ) {
+                        SettingsRowItem(
+                            icon = { GroupChatBubbleIcon(size = 18.dp, color = Color(0xFF0F172A)) },
+                            title = "Who can send messages",
+                            value = whoCanSendLabel,
+                            enabled = true,
+                            onClick = {
                                 val nextVal = if (group.whoCanSend.equals("admins", ignoreCase = true)) "everyone" else "admins"
                                 scope.launch {
                                     val res = GroupChatRepository.updateGroupSettings(
@@ -299,16 +299,14 @@ fun GroupSettingsScreen(
                                     }
                                 }
                             }
-                        }
-                    )
-                    HorizontalDivider(color = Color(0xFFF8FAFC))
-                    SettingsRowItem(
-                        icon = { GroupEditPencilIcon(size = 18.dp, color = Color(0xFF0F172A)) },
-                        title = "Who can edit group info",
-                        value = whoCanEditLabel,
-                        enabled = isAdmin,
-                        onClick = {
-                            if (isAdmin) {
+                        )
+                        HorizontalDivider(color = Color(0xFFF8FAFC))
+                        SettingsRowItem(
+                            icon = { GroupEditPencilIcon(size = 18.dp, color = Color(0xFF0F172A)) },
+                            title = "Who can edit group info",
+                            value = whoCanEditLabel,
+                            enabled = true,
+                            onClick = {
                                 val nextVal = if (group.whoCanEditInfo.equals("members", ignoreCase = true)) "admins" else "members"
                                 scope.launch {
                                     val res = GroupChatRepository.updateGroupSettings(
@@ -321,16 +319,14 @@ fun GroupSettingsScreen(
                                     }
                                 }
                             }
-                        }
-                    )
-                    HorizontalDivider(color = Color(0xFFF8FAFC))
-                    SettingsRowItem(
-                        icon = { GroupPersonAddIcon(size = 18.dp, color = Color(0xFF0F172A)) },
-                        title = "Who can add members",
-                        value = whoCanAddLabel,
-                        enabled = isAdmin,
-                        onClick = {
-                            if (isAdmin) {
+                        )
+                        HorizontalDivider(color = Color(0xFFF8FAFC))
+                        SettingsRowItem(
+                            icon = { GroupPersonAddIcon(size = 18.dp, color = Color(0xFF0F172A)) },
+                            title = "Who can add members",
+                            value = whoCanAddLabel,
+                            enabled = true,
+                            onClick = {
                                 val nextVal = if (group.whoCanAddMembers.equals("members", ignoreCase = true)) "admins" else "members"
                                 scope.launch {
                                     val res = GroupChatRepository.updateGroupSettings(
@@ -343,26 +339,23 @@ fun GroupSettingsScreen(
                                     }
                                 }
                             }
-                        }
-                    )
+                        )
+                    }
                 }
-            }
 
-            // 3. New members Card (Admin-editable, read-only for members)
-            SettingsSectionCard(indicatorColor = Color(0xFFF59E0B), title = "New members") {
-                Column(
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp, vertical = 6.dp)
-                        .alpha(if (isAdmin) 1f else 0.75f)
-                ) {
-                    SettingsToggleItem(
-                        icon = { GroupUsersIcon(size = 18.dp, color = Color(0xFF0F172A)) },
-                        title = "Approve new members",
-                        subtitle = "Admins must approve anyone joining via invite link",
-                        checked = group.approveNewMembers,
-                        enabled = isAdmin,
-                        onCheckedChange = { newValue ->
-                            if (isAdmin) {
+                // 3. New members Card (Admin-only)
+                SettingsSectionCard(indicatorColor = Color(0xFFF59E0B), title = "New members") {
+                    Column(
+                        modifier = Modifier
+                            .padding(horizontal = 16.dp, vertical = 6.dp)
+                    ) {
+                        SettingsToggleItem(
+                            icon = { GroupUsersIcon(size = 18.dp, color = Color(0xFF0F172A)) },
+                            title = "Approve new members",
+                            subtitle = "Admins must approve anyone joining via invite link",
+                            checked = group.approveNewMembers,
+                            enabled = true,
+                            onCheckedChange = { newValue ->
                                 scope.launch {
                                     val res = GroupChatRepository.updateGroupSettings(
                                         context,
@@ -374,17 +367,15 @@ fun GroupSettingsScreen(
                                     }
                                 }
                             }
-                        }
-                    )
-                    HorizontalDivider(color = Color(0xFFF8FAFC))
-                    SettingsToggleItem(
-                        icon = { GroupBellIcon(size = 18.dp, color = Color(0xFF0F172A)) },
-                        title = "Show join notifications",
-                        subtitle = "Show system messages when members join or leave",
-                        checked = group.showJoinNotifications,
-                        enabled = isAdmin,
-                        onCheckedChange = { newValue ->
-                            if (isAdmin) {
+                        )
+                        HorizontalDivider(color = Color(0xFFF8FAFC))
+                        SettingsToggleItem(
+                            icon = { GroupBellIcon(size = 18.dp, color = Color(0xFF0F172A)) },
+                            title = "Show join notifications",
+                            subtitle = "Show system messages when members join or leave",
+                            checked = group.showJoinNotifications,
+                            enabled = true,
+                            onCheckedChange = { newValue ->
                                 scope.launch {
                                     val res = GroupChatRepository.updateGroupSettings(
                                         context,
@@ -396,8 +387,8 @@ fun GroupSettingsScreen(
                                     }
                                 }
                             }
-                        }
-                    )
+                        )
+                    }
                 }
             }
 
@@ -457,13 +448,13 @@ fun GroupSettingsScreen(
             // 5. Privacy & safety Card
             SettingsSectionCard(indicatorColor = Color(0xFFF59E0B), title = "Privacy & safety") {
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
-                    SettingsRowItem(
-                        icon = { GroupUsersIcon(size = 18.dp, color = Color(0xFF0F172A)) },
-                        title = "Who can see member list",
-                        value = memberVisibilityLabel,
-                        enabled = isAdmin,
-                        onClick = {
-                            if (isAdmin) {
+                    if (isAdmin) {
+                        SettingsRowItem(
+                            icon = { GroupUsersIcon(size = 18.dp, color = Color(0xFF0F172A)) },
+                            title = "Who can see member list",
+                            value = memberVisibilityLabel,
+                            enabled = true,
+                            onClick = {
                                 val nextVal = if (group.memberListVisibility.equals("admins", ignoreCase = true)) "members" else "admins"
                                 scope.launch {
                                     val res = GroupChatRepository.updateGroupSettings(
@@ -476,9 +467,9 @@ fun GroupSettingsScreen(
                                     }
                                 }
                             }
-                        }
-                    )
-                    HorizontalDivider(color = Color(0xFFF8FAFC))
+                        )
+                        HorizontalDivider(color = Color(0xFFF8FAFC))
+                    }
                     SettingsRowItem(
                         icon = { GroupShieldIcon(size = 18.dp, color = Color(0xFF0F172A)) },
                         title = "Report group",
@@ -493,6 +484,14 @@ fun GroupSettingsScreen(
                         value = null,
                         enabled = true,
                         onClick = { showBlockConfirmDialog = true }
+                    )
+                    HorizontalDivider(color = Color(0xFFF8FAFC))
+                    SettingsRowItem(
+                        icon = { GroupBlockBanIcon(size = 18.dp, color = Color(0xFF0F172A)) },
+                        title = "Blocked groups",
+                        value = null,
+                        enabled = true,
+                        onClick = { showBlockedGroupsSheet = true }
                     )
                 }
             }
@@ -521,7 +520,7 @@ fun GroupSettingsScreen(
                         GroupChevronRightIcon(size = 14.dp, color = Color(0xFFDC2626))
                     }
 
-                    if (isCreator || isAdmin) {
+                    if (isCreator) {
                         HorizontalDivider(color = Color(0xFFFEE2E2))
                         Row(
                             modifier = Modifier
@@ -556,6 +555,12 @@ fun GroupSettingsScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
         }
+    }
+
+    if (showBlockedGroupsSheet) {
+        com.example.ui.screens.home.dialogs.BlockedGroupsBottomSheet(
+            onDismiss = { showBlockedGroupsSheet = false }
+        )
     }
 
     // Edit Group Name Dialog

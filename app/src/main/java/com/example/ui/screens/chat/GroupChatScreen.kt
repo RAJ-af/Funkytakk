@@ -30,14 +30,24 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.compose.AsyncImage
+import com.example.SupabaseGroupMember
 import com.example.SupabaseSessionManager
 import com.example.db.LocalGroupConversation
 import com.example.db.LocalGroupMessage
@@ -73,6 +83,27 @@ fun GroupChatScreen(
 
     val messagesFlow = remember(group.id) { GroupChatRepository.getGroupMessagesFlow(group.id) }
     val messages by messagesFlow.collectAsState(initial = emptyList())
+
+    val visibleMessages = remember(messages, group.showJoinNotifications) {
+        messages.filter { msg ->
+            if (msg.messageType == "system" || msg.senderId == "system") {
+                val evType = msg.eventType?.lowercase().orEmpty()
+                val isJoinOrLeave = evType == "joined" || evType == "left" ||
+                    (evType.isBlank() && (msg.text.endsWith("joined the group") || msg.text.endsWith("left the group")))
+                if (isJoinOrLeave) {
+                    group.showJoinNotifications
+                } else {
+                    true
+                }
+            } else {
+                true
+            }
+        }
+    }
+
+    var groupMembers by remember { mutableStateOf<List<SupabaseGroupMember>>(emptyList()) }
+    val selectedMentions = remember { mutableStateMapOf<String, String>() }
+    var replyingToMessage by remember { mutableStateOf<LocalGroupMessage?>(null) }
 
     var inputText by remember { mutableStateOf("") }
     var isSending by remember { mutableStateOf(false) }
@@ -228,8 +259,23 @@ fun GroupChatScreen(
         }
     }
 
-    DisposableEffect(Unit) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(group.id, lifecycleOwner) {
+        GroupChatRepository.setActiveOpenGroup(group.id)
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                scope.launch {
+                    GroupChatRepository.markGroupRead(group.id)
+                    GroupChatRepository.getGroupOverview(context, group.id)
+                    GroupChatRepository.syncGroupEvents(context, group.id)
+                    GroupChatRepository.fetchAndProcessPendingGroupMessages(context)
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            GroupChatRepository.setActiveOpenGroup(null)
             try {
                 mediaRecorder?.stop()
                 mediaRecorder?.release()
@@ -245,14 +291,34 @@ fun GroupChatScreen(
         }
     }
 
-    LaunchedEffect(group.id) {
+    suspend fun refreshOverviewMembersAndEvents() {
         GroupChatRepository.markGroupRead(group.id)
         GroupChatRepository.getGroupOverview(context, group.id)
+        val memRes = GroupChatRepository.getGroupMembersResult(context, group.id)
+        memRes.onSuccess { list ->
+            groupMembers = list.filter { it.status.equals("joined", ignoreCase = true) }
+        }
+        GroupChatRepository.syncGroupEvents(context, group.id)
         GroupChatRepository.fetchAndProcessPendingGroupMessages(context)
     }
 
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
+    LaunchedEffect(group.id) {
+        refreshOverviewMembersAndEvents()
+    }
+
+    LaunchedEffect(group.id) {
+        GroupChatRepository.liveGroupUpdates.collect { updatedId ->
+            if (updatedId == group.id) {
+                GroupChatRepository.getGroupOverview(context, group.id)
+                GroupChatRepository.getGroupMembersResult(context, group.id).onSuccess { list ->
+                    groupMembers = list.filter { it.status.equals("joined", ignoreCase = true) }
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(visibleMessages.size) {
+        if (visibleMessages.isNotEmpty()) {
             listState.animateScrollToItem(0)
             GroupChatRepository.markGroupRead(group.id)
         }
@@ -669,135 +735,376 @@ fun GroupChatScreen(
                         }
                     }
                 } else {
-                    Row(
+                    // Determine if typing "@" should show the member picker
+                    val activeMentionQuery: String? = remember(inputText, selectedMentions.values.toList()) {
+                        val lastAt = inputText.lastIndexOf('@')
+                        if (lastAt >= 0 && (lastAt == 0 || inputText[lastAt - 1].isWhitespace())) {
+                            val afterAt = inputText.substring(lastAt + 1)
+                            val alreadyCompleted = selectedMentions.values.any { name ->
+                                afterAt.startsWith("$name ", ignoreCase = true)
+                            }
+                            if (!alreadyCompleted && !afterAt.contains('\n') && afterAt.length <= 32) {
+                                afterAt
+                            } else null
+                        } else null
+                    }
+
+                    val mentionCandidates = remember(activeMentionQuery, groupMembers, myUserId) {
+                        if (activeMentionQuery == null) {
+                            emptyList()
+                        } else {
+                            val q = activeMentionQuery.trim()
+                            groupMembers.filter { m ->
+                                m.user_id != myUserId && (
+                                    q.isEmpty() ||
+                                        (m.profile_name?.contains(q, ignoreCase = true) == true) ||
+                                        (m.username?.contains(q, ignoreCase = true) == true)
+                                )
+                            }.take(6)
+                        }
+                    }
+
+                    val knownMentionNames = remember(groupMembers, selectedMentions.values.toList()) {
+                        buildSet {
+                            addAll(selectedMentions.values)
+                            groupMembers.forEach { m ->
+                                m.profile_name?.takeIf { it.isNotBlank() }?.let { add(it) }
+                                m.username?.takeIf { it.isNotBlank() }?.let { add(it) }
+                            }
+                        }
+                    }
+
+                    val mentionVisualTransformation = remember(knownMentionNames) {
+                        VisualTransformation { text ->
+                            val raw = text.text
+                            val annotated = buildAnnotatedString {
+                                append(raw)
+                                knownMentionNames.forEach { handle ->
+                                    val token = "@$handle"
+                                    var startIdx = raw.indexOf(token, ignoreCase = true)
+                                    while (startIdx >= 0) {
+                                        val endIdx = startIdx + token.length
+                                        addStyle(
+                                            SpanStyle(
+                                                color = Color(0xFFB45309),
+                                                fontWeight = FontWeight.ExtraBold,
+                                                background = Color(0xFFFEF3C7)
+                                            ),
+                                            startIdx,
+                                            endIdx
+                                        )
+                                        startIdx = raw.indexOf(token, startIdx + 1, ignoreCase = true)
+                                    }
+                                }
+                            }
+                            TransformedText(annotated, OffsetMapping.Identity)
+                        }
+                    }
+
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .navigationBarsPadding()
                             .imePadding()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // Photo Picker Button
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFFF1F5F9))
-                                .clickable(enabled = !isUploadingMedia) {
-                                    mediaPickerLauncher.launch(
-                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        // @Mention Member Picker Popup above composer
+                        if (mentionCandidates.isNotEmpty()) {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 4.dp),
+                                shape = RoundedCornerShape(16.dp),
+                                color = Color.White,
+                                border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+                                shadowElevation = 6.dp
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 210.dp)
+                                        .padding(vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = "Mention a member",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFB45309),
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
                                     )
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (isUploadingMedia) {
-                                CircularProgressIndicator(
-                                    color = Color(0xFFD97706),
-                                    strokeWidth = 2.dp,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            } else {
-                                GroupPlusIcon(size = 20.dp, color = Color(0xFF475569))
-                            }
-                        }
-
-                        // Voice Note Button
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFFF1F5F9))
-                                .clickable(enabled = !isUploadingMedia) {
-                                    val hasPerm = ContextCompat.checkSelfPermission(
-                                        context,
-                                        Manifest.permission.RECORD_AUDIO
-                                    ) == PackageManager.PERMISSION_GRANTED
-                                    if (hasPerm) {
-                                        startVoiceRecording()
-                                    } else {
-                                        micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                    }
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            GroupMicIcon(size = 19.dp, color = Color(0xFF475569))
-                        }
-
-                        // Message Input Pill
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = 46.dp, max = 110.dp)
-                                .clip(RoundedCornerShape(24.dp))
-                                .background(Color(0xFFF1F5F9))
-                                .padding(horizontal = 16.dp, vertical = 11.dp),
-                            contentAlignment = Alignment.CenterStart
-                        ) {
-                            if (inputText.isEmpty()) {
-                                Text(
-                                    text = "Message...",
-                                    color = Color(0xFF94A3B8),
-                                    fontSize = 14.5.sp
-                                )
-                            }
-                            BasicTextField(
-                                value = inputText,
-                                onValueChange = { inputText = it },
-                                textStyle = TextStyle(
-                                    color = Color(0xFF0F172A),
-                                    fontSize = 14.5.sp
-                                ),
-                                cursorBrush = SolidColor(Color(0xFF0F172A)),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-
-                        // Yellow Send Circle
-                        val canSend = inputText.trim().isNotEmpty() && !isSending
-                        Box(
-                            modifier = Modifier
-                                .size(46.dp)
-                                .clip(CircleShape)
-                                .background(if (canSend) Color(0xFFFFC529) else Color(0xFFFDE68A))
-                                .clickable(enabled = canSend) {
-                                    val textToSend = inputText.trim()
-                                    inputText = ""
-                                    isSending = true
-                                    scope.launch {
-                                        val res = GroupChatRepository.sendGroupMessage(
-                                            context = context,
-                                            groupId = group.id,
-                                            text = textToSend
-                                        )
-                                        isSending = false
-                                        res.onSuccess { outcome ->
-                                            if (outcome.skippedCount > 0) {
-                                                Toast.makeText(
-                                                    context,
-                                                    "Sent (${outcome.skippedCount} member(s) skipped: no E2EE key)",
-                                                    Toast.LENGTH_LONG
-                                                ).show()
+                                    LazyColumn(modifier = Modifier.fillMaxWidth()) {
+                                        items(mentionCandidates, key = { it.user_id }) { member ->
+                                            val displayName = member.profile_name?.takeIf { it.isNotBlank() }
+                                                ?: member.username?.takeIf { it.isNotBlank() }
+                                                ?: "Member"
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        val lastAt = inputText.lastIndexOf('@')
+                                                        if (lastAt >= 0) {
+                                                            inputText = inputText.substring(0, lastAt) + "@$displayName "
+                                                            selectedMentions[member.user_id] = displayName
+                                                        }
+                                                    }
+                                                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(30.dp)
+                                                        .clip(CircleShape)
+                                                        .background(Color(0xFFFEF3C7)),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    if (!member.avatar_url.isNullOrBlank()) {
+                                                        AsyncImage(
+                                                            model = member.avatar_url,
+                                                            contentDescription = displayName,
+                                                            contentScale = ContentScale.Crop,
+                                                            modifier = Modifier
+                                                                .fillMaxSize()
+                                                                .clip(CircleShape)
+                                                        )
+                                                    } else {
+                                                        Text(
+                                                            text = displayName.take(1).uppercase(),
+                                                            fontSize = 12.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = Color(0xFFB45309)
+                                                        )
+                                                    }
+                                                }
+                                                Spacer(modifier = Modifier.width(10.dp))
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = displayName,
+                                                        fontSize = 13.5.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = Color(0xFF0F172A),
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                    if (!member.username.isNullOrBlank()) {
+                                                        Text(
+                                                            text = "@${member.username}",
+                                                            fontSize = 11.5.sp,
+                                                            color = Color(0xFF64748B),
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                    }
+                                                }
                                             }
-                                        }.onFailure { err ->
-                                            Toast.makeText(
-                                                context,
-                                                err.message ?: "Failed to send message",
-                                                Toast.LENGTH_SHORT
-                                            ).show()
                                         }
                                     }
-                                },
-                            contentAlignment = Alignment.Center
+                                }
+                            }
+                        }
+
+                        // Reply Banner above composer
+                        replyingToMessage?.let { replyTarget ->
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 2.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                color = Color(0xFFFFFBEB),
+                                border = BorderStroke(1.dp, Color(0xFFFDE68A))
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Replying to ${replyTarget.senderName}",
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Color(0xFFB45309)
+                                        )
+                                        Text(
+                                            text = replyTarget.text,
+                                            fontSize = 12.sp,
+                                            color = Color(0xFF475569),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .size(26.dp)
+                                            .clip(CircleShape)
+                                            .clickable { replyingToMessage = null },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        GroupCloseIcon(size = 13.dp, color = Color(0xFF64748B))
+                                    }
+                                }
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            if (isSending) {
-                                CircularProgressIndicator(
-                                    color = Color.Black,
-                                    strokeWidth = 2.dp,
-                                    modifier = Modifier.size(18.dp)
+                            // Photo Picker Button
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFF1F5F9))
+                                    .clickable(enabled = !isUploadingMedia) {
+                                        mediaPickerLauncher.launch(
+                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                        )
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (isUploadingMedia) {
+                                    CircularProgressIndicator(
+                                        color = Color(0xFFD97706),
+                                        strokeWidth = 2.dp,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                } else {
+                                    GroupPlusIcon(size = 20.dp, color = Color(0xFF475569))
+                                }
+                            }
+
+                            // Voice Note Button
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFF1F5F9))
+                                    .clickable(enabled = !isUploadingMedia) {
+                                        val hasPerm = ContextCompat.checkSelfPermission(
+                                            context,
+                                            Manifest.permission.RECORD_AUDIO
+                                        ) == PackageManager.PERMISSION_GRANTED
+                                        if (hasPerm) {
+                                            startVoiceRecording()
+                                        } else {
+                                            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                GroupMicIcon(size = 19.dp, color = Color(0xFF475569))
+                            }
+
+                            // Message Input Pill
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 46.dp, max = 110.dp)
+                                    .clip(RoundedCornerShape(24.dp))
+                                    .background(Color(0xFFF1F5F9))
+                                    .padding(horizontal = 16.dp, vertical = 11.dp),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                if (inputText.isEmpty()) {
+                                    Text(
+                                        text = "Message (type @ to mention)...",
+                                        color = Color(0xFF94A3B8),
+                                        fontSize = 14.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                BasicTextField(
+                                    value = inputText,
+                                    onValueChange = { inputText = it },
+                                    textStyle = TextStyle(
+                                        color = Color(0xFF0F172A),
+                                        fontSize = 14.5.sp
+                                    ),
+                                    visualTransformation = mentionVisualTransformation,
+                                    cursorBrush = SolidColor(Color(0xFF0F172A)),
+                                    modifier = Modifier.fillMaxWidth()
                                 )
-                            } else {
-                                GroupSendPaperPlaneIcon(size = 20.dp, color = Color.Black)
+                            }
+
+                            // Yellow Send Circle
+                            val canSend = inputText.trim().isNotEmpty() && !isSending
+                            Box(
+                                modifier = Modifier
+                                    .size(46.dp)
+                                    .clip(CircleShape)
+                                    .background(if (canSend) Color(0xFFFFC529) else Color(0xFFFDE68A))
+                                    .clickable(enabled = canSend) {
+                                        val textToSend = inputText.trim()
+                                        val replyTarget = replyingToMessage
+                                        val resolvedMentions = buildSet {
+                                            selectedMentions.forEach { (uid, name) ->
+                                                if (textToSend.contains("@$name", ignoreCase = true)) {
+                                                    add(uid)
+                                                }
+                                            }
+                                            groupMembers.forEach { m ->
+                                                val pName = m.profile_name?.trim().orEmpty()
+                                                val uName = m.username?.trim().orEmpty()
+                                                if (pName.isNotEmpty() && textToSend.contains("@$pName", ignoreCase = true)) {
+                                                    add(m.user_id)
+                                                }
+                                                if (uName.isNotEmpty() && textToSend.contains("@$uName", ignoreCase = true)) {
+                                                    add(m.user_id)
+                                                }
+                                            }
+                                            if (replyTarget != null && replyTarget.senderId.isNotBlank() && replyTarget.senderId != myUserId) {
+                                                add(replyTarget.senderId)
+                                            }
+                                        }.toList()
+
+                                        inputText = ""
+                                        selectedMentions.clear()
+                                        replyingToMessage = null
+                                        isSending = true
+                                        scope.launch {
+                                            val res = GroupChatRepository.sendGroupMessage(
+                                                context = context,
+                                                groupId = group.id,
+                                                text = textToSend,
+                                                messageType = "text",
+                                                storagePath = null,
+                                                mentionedUserIds = resolvedMentions,
+                                                replyToMessage = replyTarget
+                                            )
+                                            isSending = false
+                                            res.onSuccess { outcome ->
+                                                if (outcome.skippedCount > 0) {
+                                                    Toast.makeText(
+                                                        context,
+                                                        "Sent (${outcome.skippedCount} member(s) skipped: no E2EE key)",
+                                                        Toast.LENGTH_LONG
+                                                    ).show()
+                                                }
+                                            }.onFailure { err ->
+                                                Toast.makeText(
+                                                    context,
+                                                    err.message ?: "Failed to send message",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (isSending) {
+                                    CircularProgressIndicator(
+                                        color = Color.Black,
+                                        strokeWidth = 2.dp,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                } else {
+                                    GroupSendPaperPlaneIcon(size = 20.dp, color = Color.Black)
+                                }
                             }
                         }
                     }
@@ -805,7 +1112,7 @@ fun GroupChatScreen(
             }
         }
     ) { paddingValues ->
-        if (messages.isEmpty()) {
+        if (visibleMessages.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -842,14 +1149,25 @@ fun GroupChatScreen(
                 contentPadding = PaddingValues(vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(messages, key = { it.id }) { msg ->
+                items(visibleMessages, key = { it.id }) { msg ->
                     if (msg.messageType == "system" || msg.senderId == "system") {
                         GroupSystemEventRow(text = msg.text)
                     } else {
                         val isMe = msg.isOutgoing || msg.senderId == myUserId
+                        val mentionIds = remember(msg.mentionsJson) {
+                            GroupChatRepository.parseMentionsJson(msg.mentionsJson)
+                        }
+                        val replyToId = msg.replyToMessageId.orEmpty()
+                        val isReplyToMe = remember(replyToId, myUserId, messages) {
+                            replyToId.isNotBlank() && messages.any { it.id == replyToId && (it.senderId == myUserId || it.isOutgoing) }
+                        }
+                        val isMentionedMe = (myUserId.isNotBlank() && mentionIds.contains(myUserId)) || isReplyToMe
+
                         GroupMessageItem(
                             message = msg,
                             isMe = isMe,
+                            isMentioned = isMentionedMe,
+                            onReplyClick = { replyingToMessage = msg },
                             onImageClick = { url -> previewImageUrl = url },
                             onRequestDownloadMedia = { targetMsg ->
                                 scope.launch {
@@ -1141,6 +1459,8 @@ private fun GroupSystemEventRow(text: String) {
 private fun GroupMessageItem(
     message: LocalGroupMessage,
     isMe: Boolean,
+    isMentioned: Boolean = false,
+    onReplyClick: () -> Unit = {},
     onImageClick: (String) -> Unit,
     onRequestDownloadMedia: (LocalGroupMessage) -> Unit
 ) {
@@ -1151,6 +1471,24 @@ private fun GroupMessageItem(
     val isImage = message.messageType == "image" || (!isVoice && !message.localMediaPath.isNullOrBlank())
     val localFile = remember(message.localMediaPath) {
         message.localMediaPath?.let { File(it) }?.takeIf { it.exists() }
+    }
+
+    val styledMessageText = remember(message.text) {
+        buildAnnotatedString {
+            val raw = message.text
+            append(raw)
+            val mentionRegex = Regex("@[\\w.\\- ]+")
+            mentionRegex.findAll(raw).forEach { match ->
+                addStyle(
+                    SpanStyle(
+                        color = Color(0xFFB45309),
+                        fontWeight = FontWeight.ExtraBold
+                    ),
+                    match.range.first,
+                    match.range.last + 1
+                )
+            }
+        }
     }
 
     var isPlayingVoice by remember { mutableStateOf(false) }
@@ -1204,27 +1542,91 @@ private fun GroupMessageItem(
             modifier = Modifier.widthIn(max = 280.dp)
         ) {
             if (!isMe) {
-                Text(
-                    text = message.senderName,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF64748B),
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
-                )
+                ) {
+                    Text(
+                        text = message.senderName,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF64748B)
+                    )
+                    if (isMentioned) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFFFEF3C7),
+                            border = BorderStroke(1.dp, Color(0xFFF59E0B))
+                        ) {
+                            Text(
+                                text = "@ Mentioned you",
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFFB45309),
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                            )
+                        }
+                    }
+                }
             }
 
             Surface(
+                modifier = Modifier.clickable { onReplyClick() },
                 shape = RoundedCornerShape(
                     topStart = 18.dp,
                     topEnd = 18.dp,
                     bottomStart = if (isMe) 18.dp else 4.dp,
                     bottomEnd = if (isMe) 4.dp else 18.dp
                 ),
-                color = if (isMe) Color(0xFFFDE68A) else Color.White,
-                border = BorderStroke(1.dp, if (isMe) Color(0xFFFCD34D) else Color(0xFFF1F5F9)),
-                shadowElevation = 0.5.dp
+                color = when {
+                    isMe -> Color(0xFFFDE68A)
+                    isMentioned -> Color(0xFFFFFBEB)
+                    else -> Color.White
+                },
+                border = BorderStroke(
+                    width = if (isMentioned && !isMe) 1.5.dp else 1.dp,
+                    color = when {
+                        isMentioned && !isMe -> Color(0xFFF59E0B)
+                        isMe -> Color(0xFFFCD34D)
+                        else -> Color(0xFFF1F5F9)
+                    }
+                ),
+                shadowElevation = if (isMentioned && !isMe) 2.dp else 0.5.dp
             ) {
                 Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    val hasReply = !message.replyToPreview.isNullOrBlank() || !message.replyToSenderName.isNullOrBlank()
+                    if (hasReply) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isMe) Color(0xFFFEF3C7) else Color(0xFFF8FAFC),
+                            border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 6.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+                                if (!message.replyToSenderName.isNullOrBlank()) {
+                                    Text(
+                                        text = message.replyToSenderName,
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = Color(0xFFB45309)
+                                    )
+                                }
+                                if (!message.replyToPreview.isNullOrBlank()) {
+                                    Text(
+                                        text = message.replyToPreview,
+                                        fontSize = 11.sp,
+                                        color = Color(0xFF475569),
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     when {
                         isImage -> {
                             if (localFile != null) {
@@ -1329,7 +1731,7 @@ private fun GroupMessageItem(
                         }
                         else -> {
                             Text(
-                                text = message.text,
+                                text = styledMessageText,
                                 fontSize = 14.sp,
                                 color = Color(0xFF0F172A)
                             )
