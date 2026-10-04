@@ -1359,37 +1359,12 @@ fun GroupChatScreen(
     }
 
     previewImageUrl?.let { url ->
-        androidx.compose.ui.window.Dialog(onDismissRequest = { previewImageUrl = null }) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(Color.Black)
-                    .clickable { previewImageUrl = null },
-                contentAlignment = Alignment.Center
-            ) {
-                AsyncImage(
-                    model = url,
-                    contentDescription = "Preview image",
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 220.dp, max = 520.dp)
-                )
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(12.dp)
-                        .size(34.dp)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.6f))
-                        .clickable { previewImageUrl = null },
-                    contentAlignment = Alignment.Center
-                ) {
-                    GroupCloseIcon(size = 16.dp, color = Color.White)
-                }
-            }
-        }
+        com.example.ui.screens.chat.components.ChatImagePreviewDialog(
+            imageUrl = url,
+            senderName = group.name,
+            timestampText = "Encrypted Media",
+            onDismiss = { previewImageUrl = null }
+        )
     }
 
     if (showLeaveDialog) {
@@ -1435,21 +1410,22 @@ private fun GroupSystemEventRow(text: String) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
+            .padding(vertical = 2.5.dp),
         contentAlignment = Alignment.Center
     ) {
         Surface(
-            shape = RoundedCornerShape(50.dp),
-            color = Color(0xFFF1F5F9),
-            border = BorderStroke(1.dp, Color(0xFFE2E8F0))
+            shape = RoundedCornerShape(12.dp),
+            color = Color(0xFF0F172A).copy(alpha = 0.055f),
+            shadowElevation = 0.dp
         ) {
             Text(
                 text = text,
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
-                fontSize = 11.5.sp,
-                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(horizontal = 11.dp, vertical = 3.5.dp),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
                 color = Color(0xFF64748B),
-                textAlign = TextAlign.Center
+                textAlign = TextAlign.Center,
+                lineHeight = 15.sp
             )
         }
     }
@@ -1481,8 +1457,8 @@ private fun GroupMessageItem(
             mentionRegex.findAll(raw).forEach { match ->
                 addStyle(
                     SpanStyle(
-                        color = Color(0xFFB45309),
-                        fontWeight = FontWeight.ExtraBold
+                        color = Color(0xFFD97706),
+                        fontWeight = FontWeight.Bold
                     ),
                     match.range.first,
                     match.range.last + 1
@@ -1511,7 +1487,7 @@ private fun GroupMessageItem(
         if (!isMe) {
             Box(
                 modifier = Modifier
-                    .size(30.dp)
+                    .size(32.dp)
                     .clip(CircleShape)
                     .background(Color(0xFFFEF3C7)),
                 contentAlignment = Alignment.Center
@@ -1528,7 +1504,7 @@ private fun GroupMessageItem(
                 } else {
                     Text(
                         text = message.senderName.take(1).uppercase(),
-                        fontSize = 12.sp,
+                        fontSize = 12.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFFB45309)
                     )
@@ -1539,7 +1515,7 @@ private fun GroupMessageItem(
 
         Column(
             horizontalAlignment = if (isMe) Alignment.End else Alignment.Start,
-            modifier = Modifier.widthIn(max = 280.dp)
+            modifier = Modifier.widthIn(max = 285.dp)
         ) {
             if (!isMe) {
                 Row(
@@ -1548,21 +1524,21 @@ private fun GroupMessageItem(
                 ) {
                     Text(
                         text = message.senderName,
-                        fontSize = 11.sp,
+                        fontSize = 11.5.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF64748B)
+                        color = Color(0xFF475569)
                     )
                     if (isMentioned) {
                         Spacer(modifier = Modifier.width(6.dp))
                         Surface(
                             shape = RoundedCornerShape(6.dp),
                             color = Color(0xFFFEF3C7),
-                            border = BorderStroke(1.dp, Color(0xFFF59E0B))
+                            border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.5f))
                         ) {
                             Text(
                                 text = "@ Mentioned you",
                                 fontSize = 9.5.sp,
-                                fontWeight = FontWeight.ExtraBold,
+                                fontWeight = FontWeight.Bold,
                                 color = Color(0xFFB45309),
                                 modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
                             )
@@ -1580,48 +1556,57 @@ private fun GroupMessageItem(
                     bottomEnd = if (isMe) 4.dp else 18.dp
                 ),
                 color = when {
-                    isMe -> Color(0xFFFDE68A)
+                    isMe -> Color(0xFFFEF3C7)
                     isMentioned -> Color(0xFFFFFBEB)
                     else -> Color.White
                 },
                 border = BorderStroke(
-                    width = if (isMentioned && !isMe) 1.5.dp else 1.dp,
+                    width = 1.dp,
                     color = when {
                         isMentioned && !isMe -> Color(0xFFF59E0B)
-                        isMe -> Color(0xFFFCD34D)
-                        else -> Color(0xFFF1F5F9)
+                        isMe -> Color(0xFFFDE68A)
+                        else -> Color(0xFFE2E8F0)
                     }
                 ),
-                shadowElevation = if (isMentioned && !isMe) 2.dp else 0.5.dp
+                shadowElevation = if (isMe) 0.5.dp else 1.dp
             ) {
                 Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                     val hasReply = !message.replyToPreview.isNullOrBlank() || !message.replyToSenderName.isNullOrBlank()
                     if (hasReply) {
                         Surface(
                             shape = RoundedCornerShape(8.dp),
-                            color = if (isMe) Color(0xFFFEF3C7) else Color(0xFFF8FAFC),
-                            border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+                            color = if (isMe) Color(0xFFFEF9C3).copy(alpha = 0.6f) else Color(0xFFF8FAFC),
+                            border = BorderStroke(1.dp, Color(0xFFFDE68A).copy(alpha = 0.6f)),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(bottom = 6.dp)
                         ) {
-                            Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
-                                if (!message.replyToSenderName.isNullOrBlank()) {
-                                    Text(
-                                        text = message.replyToSenderName,
-                                        fontSize = 10.5.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = Color(0xFFB45309)
-                                    )
-                                }
-                                if (!message.replyToPreview.isNullOrBlank()) {
-                                    Text(
-                                        text = message.replyToPreview,
-                                        fontSize = 11.sp,
-                                        color = Color(0xFF475569),
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
+                            Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(3.dp)
+                                        .height(26.dp)
+                                        .background(Color(0xFFD97706), RoundedCornerShape(2.dp))
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Column {
+                                    if (!message.replyToSenderName.isNullOrBlank()) {
+                                        Text(
+                                            text = message.replyToSenderName,
+                                            fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFFB45309)
+                                        )
+                                    }
+                                    if (!message.replyToPreview.isNullOrBlank()) {
+                                        Text(
+                                            text = message.replyToPreview,
+                                            fontSize = 11.sp,
+                                            color = Color(0xFF475569),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1633,7 +1618,7 @@ private fun GroupMessageItem(
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .heightIn(min = 120.dp, max = 220.dp)
+                                        .heightIn(min = 140.dp, max = 240.dp)
                                         .clip(RoundedCornerShape(12.dp))
                                         .clickable { onImageClick(localFile.absolutePath) }
                                 ) {
@@ -1668,7 +1653,7 @@ private fun GroupMessageItem(
                                     }
                                 }
                             }
-                            Spacer(modifier = Modifier.height(6.dp))
+                            Spacer(modifier = Modifier.height(4.dp))
                         }
                         isVoice -> {
                             Row(
@@ -1703,37 +1688,45 @@ private fun GroupMessageItem(
                                             }
                                         }
                                     }
-                                    .padding(vertical = 4.dp, horizontal = 4.dp),
+                                    .padding(vertical = 4.dp, horizontal = 2.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(34.dp)
+                                        .size(36.dp)
                                         .clip(CircleShape)
                                         .background(Color(0xFFFFC529)),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    GroupMicIcon(size = 16.dp, color = Color.Black)
+                                    GroupMicIcon(size = 17.dp, color = Color.Black)
                                 }
                                 Spacer(modifier = Modifier.width(10.dp))
-                                Text(
-                                    text = when {
-                                        localFile == null -> "Tap to download voice note"
-                                        isPlayingVoice -> "Playing voice note..."
-                                        else -> "Play encrypted voice note"
-                                    },
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color(0xFF0F172A)
-                                )
+                                Column {
+                                    Text(
+                                        text = when {
+                                            localFile == null -> "Tap to download voice note"
+                                            isPlayingVoice -> "Playing voice note..."
+                                            else -> "Play encrypted voice note"
+                                        },
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color(0xFF0F172A)
+                                    )
+                                    Text(
+                                        text = if (isPlayingVoice) "Audio playback active" else "Voice Message",
+                                        fontSize = 10.5.sp,
+                                        color = Color(0xFF64748B)
+                                    )
+                                }
                             }
                             Spacer(modifier = Modifier.height(4.dp))
                         }
                         else -> {
                             Text(
                                 text = styledMessageText,
-                                fontSize = 14.sp,
-                                color = Color(0xFF0F172A)
+                                fontSize = 14.5.sp,
+                                color = Color(0xFF0F172A),
+                                lineHeight = 20.sp
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                         }
@@ -1747,18 +1740,18 @@ private fun GroupMessageItem(
                         if (message.expiresAt != null && message.expiresAt > 0L) {
                             GroupClockIcon(
                                 size = 10.dp,
-                                color = if (isMe) Color(0xFF78350F) else Color(0xFF94A3B8)
+                                color = if (isMe) Color(0xFF92400E) else Color(0xFF94A3B8)
                             )
                             Spacer(modifier = Modifier.width(3.dp))
                         }
                         Text(
                             text = timeStr,
                             fontSize = 10.sp,
-                            color = if (isMe) Color(0xFF78350F) else Color(0xFF94A3B8)
+                            color = if (isMe) Color(0xFF92400E) else Color(0xFF94A3B8)
                         )
                         if (isMe) {
                             Spacer(modifier = Modifier.width(4.dp))
-                            GroupCheckIcon(size = 11.dp, color = Color(0xFF78350F))
+                            GroupCheckIcon(size = 11.dp, color = Color(0xFF92400E))
                         }
                     }
                 }

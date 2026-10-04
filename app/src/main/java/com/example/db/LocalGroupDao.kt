@@ -59,10 +59,10 @@ interface GroupConversationDao {
 
 @Dao
 interface GroupMessageDao {
-    @Query("SELECT * FROM group_messages WHERE groupId = :groupId AND (expiresAt IS NULL OR expiresAt = 0 OR expiresAt > :now) ORDER BY timestamp ASC")
+    @Query("SELECT * FROM group_messages WHERE groupId = :groupId AND (expiresAt IS NULL OR expiresAt = 0 OR expiresAt > :now) ORDER BY timestamp DESC")
     fun getGroupMessages(groupId: String, now: Long = System.currentTimeMillis()): Flow<List<LocalGroupMessage>>
 
-    @Query("SELECT * FROM group_messages WHERE groupId = :groupId AND (expiresAt IS NULL OR expiresAt = 0 OR expiresAt > :now) ORDER BY timestamp ASC")
+    @Query("SELECT * FROM group_messages WHERE groupId = :groupId AND (expiresAt IS NULL OR expiresAt = 0 OR expiresAt > :now) ORDER BY timestamp DESC")
     suspend fun getGroupMessagesList(groupId: String, now: Long = System.currentTimeMillis()): List<LocalGroupMessage>
 
     @Query("SELECT * FROM group_messages WHERE groupId = :groupId AND messageType IN ('image', 'voice', 'audio') AND (expiresAt IS NULL OR expiresAt = 0 OR expiresAt > :now) ORDER BY timestamp DESC")
