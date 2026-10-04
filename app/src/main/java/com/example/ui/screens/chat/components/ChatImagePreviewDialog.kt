@@ -1,9 +1,9 @@
 package com.example.ui.screens.chat.components
 
+import android.content.Intent
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -16,6 +16,15 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Report
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -26,16 +35,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
-import com.example.ui.components.*
 import com.example.util.ImageSaveUtils
 import kotlinx.coroutines.launch
 
@@ -45,11 +51,14 @@ fun ChatImagePreviewDialog(
     imageUrl: String? = null,
     imageUrls: List<String> = emptyList(),
     initialIndex: Int = 0,
-    senderName: String = "Partner",
+    isMyImage: Boolean = false,
+    captionText: String = "",
+    senderName: String = "",
     timestampText: String = "",
+    onDeleteImage: (() -> Unit)? = null,
+    onSetAsProfilePhoto: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
-    // Resolve all image URLs
     val resolvedList = remember(imageUrl, imageUrls) {
         if (imageUrls.isNotEmpty()) imageUrls.filter { it.isNotBlank() }
         else if (!imageUrl.isNullOrBlank()) listOf(imageUrl)
@@ -59,14 +68,43 @@ fun ChatImagePreviewDialog(
     if (resolvedList.isEmpty()) return
 
     val context = LocalContext.current
-    val clipboardManager = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
-
     val safeInitialIndex = initialIndex.coerceIn(0, resolvedList.size - 1)
     val pagerState = rememberPagerState(initialPage = safeInitialIndex) { resolvedList.size }
 
     var areControlsVisible by remember { mutableStateOf(true) }
+    var showOptionsMenu by remember { mutableStateOf(false) }
     var isSaving by remember { mutableStateOf(false) }
+
+    fun saveCurrent() {
+        val activeUrl = resolvedList.getOrNull(pagerState.currentPage) ?: return
+        if (!isSaving) {
+            isSaving = true
+            scope.launch {
+                val res = ImageSaveUtils.saveImageToGallery(context, activeUrl)
+                isSaving = false
+                res.onSuccess { msg ->
+                    Toast.makeText(context, "Saved to device", Toast.LENGTH_SHORT).show()
+                }.onFailure { ex ->
+                    Toast.makeText(context, "Could not save: ${ex.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    fun shareCurrent() {
+        val activeUrl = resolvedList.getOrNull(pagerState.currentPage) ?: return
+        try {
+            ImageSaveUtils.shareImage(context, activeUrl)
+        } catch (_: Exception) {
+            val sendIntent = Intent().apply {
+                action = Intent.ACTION_SEND
+                putExtra(Intent.EXTRA_TEXT, activeUrl)
+                type = "text/plain"
+            }
+            context.startActivity(Intent.createChooser(sendIntent, "Share Image"))
+        }
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -79,9 +117,9 @@ fun ChatImagePreviewDialog(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.98f))
+                .background(Color(0xFF000000))
         ) {
-            // Main Pager View with Pinch-to-Zoom & Double Tap
+            // Main Pager View with Double-Tap & Pinch Zoom
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
@@ -97,9 +135,7 @@ fun ChatImagePreviewDialog(
                         .fillMaxSize()
                         .pointerInput(Unit) {
                             detectTapGestures(
-                                onTap = {
-                                    areControlsVisible = !areControlsVisible
-                                },
+                                onTap = { areControlsVisible = !areControlsVisible },
                                 onDoubleTap = {
                                     if (scale > 1f) {
                                         scale = 1f
@@ -114,7 +150,7 @@ fun ChatImagePreviewDialog(
                             detectTransformGestures { _, pan, zoom, _ ->
                                 scale = (scale * zoom).coerceIn(1f, 5f)
                                 if (scale > 1f) {
-                                    val maxOffset = 500f * (scale - 1f)
+                                    val maxOffset = 600f * (scale - 1f)
                                     offset = Offset(
                                         x = (offset.x + pan.x).coerceIn(-maxOffset, maxOffset),
                                         y = (offset.y + pan.y).coerceIn(-maxOffset, maxOffset)
@@ -128,10 +164,11 @@ fun ChatImagePreviewDialog(
                 ) {
                     AsyncImage(
                         model = currentUrl,
-                        contentDescription = "Fullscreen photo",
+                        contentDescription = "Full-screen photo",
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(horizontal = 8.dp, vertical = 24.dp)
+                            .padding(horizontal = 4.dp, vertical = 32.dp)
+                            .clip(RoundedCornerShape(12.dp))
                             .graphicsLayer(
                                 scaleX = scale,
                                 scaleY = scale,
@@ -140,103 +177,190 @@ fun ChatImagePreviewDialog(
                             ),
                         contentScale = ContentScale.Fit
                     )
-
-                    // Zoom Level Pill & Quick Reset Button
-                    if (scale > 1.05f) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(end = 20.dp, bottom = 120.dp)
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(Color.Black.copy(alpha = 0.75f))
-                                .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(20.dp))
-                                .clickable {
-                                    scale = 1f
-                                    offset = Offset.Zero
-                                }
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                        ) {
-                            Text(
-                                text = "${(scale * 100).toInt()}% • Reset",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                        }
-                    }
                 }
             }
 
-            // Top Header Overlay (Title, Index counter, Close button)
+            // Minimal Cinematic Top Bar
             AnimatedVisibility(
                 visible = areControlsVisible,
                 enter = fadeIn() + slideInVertically { -it },
                 exit = fadeOut() + slideOutVertically { -it },
                 modifier = Modifier.align(Alignment.TopCenter)
             ) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = Color.Black.copy(alpha = 0.65f)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .statusBarsPadding()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Close Button
+                    // Top-Left: Back Arrow Button
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
-                                .size(40.dp)
+                                .size(38.dp)
                                 .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.2f))
+                                .background(Color.White.copy(alpha = 0.15f))
                                 .clickable { onDismiss() },
                             contentAlignment = Alignment.Center
                         ) {
-                            SoftCloseIcon(
-                                size = 18.dp,
-                                color = Color.White
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
                             )
                         }
 
-                        // Title & Sender Info
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = senderName,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                            if (timestampText.isNotBlank()) {
-                                Text(
-                                    text = timestampText,
-                                    fontSize = 11.5.sp,
-                                    color = Color(0xFFD1D5DB)
-                                )
-                            }
-                        }
-
-                        // Counter Badge (e.g. "1 / 4")
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color.White.copy(alpha = 0.2f))
-                                .padding(horizontal = 10.dp, vertical = 5.dp)
-                        ) {
+                        // Center-Left Counter: "3 / 12"
+                        if (resolvedList.size > 1) {
+                            Spacer(modifier = Modifier.width(12.dp))
                             Text(
                                 text = "${pagerState.currentPage + 1} / ${resolvedList.size}",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.White
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White.copy(alpha = 0.9f)
                             )
+                        }
+                    }
+
+                    // Top-Right: Download Icon & Three-Dot Menu
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Direct Download Button
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.15f))
+                                .clickable { saveCurrent() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Download,
+                                contentDescription = "Save to device",
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        // Three-Dot Menu Button & Menu
+                        Box {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.15f))
+                                    .clickable { showOptionsMenu = true },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.MoreVert,
+                                    contentDescription = "More actions",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            DropdownMenu(
+                                expanded = showOptionsMenu,
+                                onDismissRequest = { showOptionsMenu = false },
+                                shape = RoundedCornerShape(16.dp),
+                                containerColor = Color(0xFF18181B),
+                                shadowElevation = 12.dp,
+                                modifier = Modifier
+                                    .width(200.dp)
+                                    .background(Color(0xFF18181B), RoundedCornerShape(16.dp))
+                                    .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
+                            ) {
+                                // Action: Share
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(Icons.Default.Share, contentDescription = null, tint = Color.White, modifier = Modifier.size(17.dp))
+                                            Spacer(modifier = Modifier.width(10.dp))
+                                            Text("Share", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
+                                        }
+                                    },
+                                    onClick = {
+                                        showOptionsMenu = false
+                                        shareCurrent()
+                                    }
+                                )
+
+                                // Action: Save to device
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(Icons.Default.Save, contentDescription = null, tint = Color.White, modifier = Modifier.size(17.dp))
+                                            Spacer(modifier = Modifier.width(10.dp))
+                                            Text("Save to device", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
+                                        }
+                                    },
+                                    onClick = {
+                                        showOptionsMenu = false
+                                        saveCurrent()
+                                    }
+                                )
+
+                                if (isMyImage) {
+                                    // Action: Set as profile photo
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(Icons.Default.Person, contentDescription = null, tint = Color(0xFFF6C945), modifier = Modifier.size(17.dp))
+                                                Spacer(modifier = Modifier.width(10.dp))
+                                                Text("Set as profile photo", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
+                                            }
+                                        },
+                                        onClick = {
+                                            showOptionsMenu = false
+                                            onSetAsProfilePhoto?.invoke()
+                                            Toast.makeText(context, "Profile photo updated", Toast.LENGTH_SHORT).show()
+                                        }
+                                    )
+
+                                    // Action: Delete
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(Icons.Default.Delete, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(17.dp))
+                                                Spacer(modifier = Modifier.width(10.dp))
+                                                Text("Delete", color = Color(0xFFEF4444), fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
+                                            }
+                                        },
+                                        onClick = {
+                                            showOptionsMenu = false
+                                            onDeleteImage?.invoke()
+                                            onDismiss()
+                                        }
+                                    )
+                                } else {
+                                    // Action: Report
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(Icons.Default.Report, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(17.dp))
+                                                Spacer(modifier = Modifier.width(10.dp))
+                                                Text("Report", color = Color(0xFFEF4444), fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
+                                            }
+                                        },
+                                        onClick = {
+                                            showOptionsMenu = false
+                                            Toast.makeText(context, "Report submitted for review", Toast.LENGTH_SHORT).show()
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
 
-            // Bottom Action Bar (Save to Gallery, Share, Copy Link)
+            // Bottom Minimal Thumbnail Strip (only if multiple images) & Optional Caption
             AnimatedVisibility(
                 visible = areControlsVisible,
                 enter = fadeIn() + slideInVertically { it },
@@ -244,29 +368,48 @@ fun ChatImagePreviewDialog(
                 modifier = Modifier.align(Alignment.BottomCenter)
             ) {
                 Column(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(bottom = 18.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Multi-photo Thumbnail Strip if more than 1 image
+                    // Optional Caption if present
+                    if (captionText.isNotBlank()) {
+                        Box(
+                            modifier = Modifier
+                                .padding(horizontal = 24.dp, vertical = 8.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Color.Black.copy(alpha = 0.6f))
+                                .padding(horizontal = 14.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = captionText,
+                                fontSize = 13.sp,
+                                color = Color.White,
+                                maxLines = 2
+                            )
+                        }
+                    }
+
+                    // Compact Thumbnail Strip (4-5 thumbnails max visible)
                     if (resolvedList.size > 1) {
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 12.dp),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 16.dp)
                         ) {
-                            resolvedList.forEachIndexed { idx, url ->
+                            val visibleSlice = resolvedList.take(5)
+                            visibleSlice.forEachIndexed { idx, url ->
                                 val isSelected = idx == pagerState.currentPage
                                 Box(
                                     modifier = Modifier
-                                        .padding(horizontal = 4.dp)
-                                        .size(if (isSelected) 46.dp else 36.dp)
-                                        .clip(RoundedCornerShape(10.dp))
+                                        .size(if (isSelected) 44.dp else 36.dp)
+                                        .clip(RoundedCornerShape(8.dp))
                                         .border(
-                                            width = if (isSelected) 2.5.dp else 1.dp,
-                                            color = if (isSelected) Color(0xFFFFC529) else Color.White.copy(alpha = 0.4f),
-                                            shape = RoundedCornerShape(10.dp)
+                                            width = if (isSelected) 2.dp else 0.dp,
+                                            color = if (isSelected) Color(0xFFF6C945) else Color.Transparent,
+                                            shape = RoundedCornerShape(8.dp)
                                         )
                                         .clickable {
                                             scope.launch { pagerState.animateScrollToPage(idx) }
@@ -274,103 +417,11 @@ fun ChatImagePreviewDialog(
                                 ) {
                                     AsyncImage(
                                         model = url,
-                                        contentDescription = "Thumbnail ${idx + 1}",
+                                        contentDescription = "Thumbnail",
                                         modifier = Modifier.fillMaxSize(),
                                         contentScale = ContentScale.Crop
                                     )
                                 }
-                            }
-                        }
-                    }
-
-                    // Bottom Floating Actions Dock
-                    Surface(
-                        modifier = Modifier
-                            .navigationBarsPadding()
-                            .padding(bottom = 20.dp, start = 16.dp, end = 16.dp)
-                            .fillMaxWidth(),
-                        shape = RoundedCornerShape(26.dp),
-                        color = Color(0xFF18181B).copy(alpha = 0.90f),
-                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f))
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            val activeUrl = resolvedList.getOrNull(pagerState.currentPage) ?: ""
-
-                            // 1. SAVE TO GALLERY BUTTON (REAL MEDIASTORE SAVE)
-                            Button(
-                                onClick = {
-                                    if (activeUrl.isNotBlank() && !isSaving) {
-                                        isSaving = true
-                                        scope.launch {
-                                            val result = ImageSaveUtils.saveImageToGallery(context, activeUrl)
-                                            isSaving = false
-                                            result.onSuccess { msg ->
-                                                Toast.makeText(context, "✅ $msg", Toast.LENGTH_LONG).show()
-                                            }.onFailure { ex ->
-                                                Toast.makeText(context, "Failed to save: ${ex.message}", Toast.LENGTH_LONG).show()
-                                            }
-                                        }
-                                    }
-                                },
-                                shape = RoundedCornerShape(18.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFFFFC529),
-                                    contentColor = Color.Black
-                                ),
-                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp)
-                            ) {
-                                if (isSaving) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(18.dp),
-                                        color = Color.Black,
-                                        strokeWidth = 2.5.dp
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Saving...", fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
-                                } else {
-                                    SoftDownloadIcon(size = 18.dp, color = Color.Black)
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Save to Gallery", fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold)
-                                }
-                            }
-
-                            // 2. SHARE LINK BUTTON
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.White.copy(alpha = 0.15f))
-                                    .clickable {
-                                        if (activeUrl.isNotBlank()) {
-                                            ImageSaveUtils.shareImage(context, activeUrl)
-                                        }
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                SoftShareIcon(size = 20.dp, color = Color.White)
-                            }
-
-                            // 3. COPY LINK BUTTON
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.White.copy(alpha = 0.15f))
-                                    .clickable {
-                                        if (activeUrl.isNotBlank()) {
-                                            clipboardManager.setText(AnnotatedString(activeUrl))
-                                            Toast.makeText(context, "Image link copied to clipboard", Toast.LENGTH_SHORT).show()
-                                        }
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                SoftBookmarkIcon(size = 20.dp, color = Color.White)
                             }
                         }
                     }

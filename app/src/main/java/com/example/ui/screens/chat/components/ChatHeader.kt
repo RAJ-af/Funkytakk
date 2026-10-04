@@ -13,14 +13,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.example.ui.components.CircleFlag
 
 @Composable
 fun ChatHeader(
-    partnerName: String = "Yuki Tanaka",
+    partnerName: String = "Hacker",
     partnerAvatarUrl: String = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200",
     partnerCountry: String = "Japan",
     partnerCountryCode: String = "jp",
@@ -30,32 +30,17 @@ fun ChatHeader(
     modifier: Modifier = Modifier,
     menuContent: @Composable () -> Unit = {}
 ) {
-    val cleanFlagCode = when {
-        partnerCountryCode.isNotBlank() -> partnerCountryCode.trim().lowercase()
-        partnerCountry.contains("japan", ignoreCase = true) -> "jp"
-        partnerCountry.contains("korea", ignoreCase = true) -> "kr"
-        partnerCountry.contains("china", ignoreCase = true) -> "cn"
-        partnerCountry.contains("spain", ignoreCase = true) -> "es"
-        partnerCountry.contains("germany", ignoreCase = true) -> "de"
-        partnerCountry.contains("france", ignoreCase = true) -> "fr"
-        partnerCountry.contains("india", ignoreCase = true) -> "in"
-        partnerCountry.contains("russia", ignoreCase = true) -> "ru"
-        partnerCountry.contains("emirates", ignoreCase = true) || partnerCountry.contains("arab", ignoreCase = true) -> "ae"
-        partnerCountry.contains("united states", ignoreCase = true) || partnerCountry.contains("usa", ignoreCase = true) || partnerCountry.contains("english", ignoreCase = true) -> "us"
-        else -> "jp"
-    }
-
     Row(
         modifier = modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Back Button
         Box(
             modifier = Modifier
-                .size(40.dp)
+                .size(38.dp)
                 .clip(CircleShape)
                 .clickable { onBackClick() },
             contentAlignment = Alignment.Center
@@ -69,61 +54,50 @@ fun ChatHeader(
 
         Spacer(modifier = Modifier.width(6.dp))
 
-        // Partner Avatar with Circular Country Flag Icon (Replacing green dot)
-        Box(modifier = Modifier.size(42.dp)) {
+        // Partner Circular Avatar
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .border(1.dp, Color(0xFFE5E7EB), CircleShape)
+        ) {
             AsyncImage(
                 model = partnerAvatarUrl,
                 contentDescription = partnerName,
-                modifier = Modifier
-                    .size(42.dp)
-                    .clip(CircleShape)
-                    .border(1.dp, Color(0xFFE5E7EB), CircleShape),
+                modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop
-            )
-
-            // Circular Flag positioned at bottom-end replacing the green dot
-            CircleFlag(
-                countryCode = cleanFlagCode,
-                modifier = Modifier
-                    .size(16.dp)
-                    .align(Alignment.BottomEnd)
-                    .clip(CircleShape)
-                    .border(1.5.dp, Color.White, CircleShape)
             )
         }
 
-        Spacer(modifier = Modifier.width(12.dp))
+        Spacer(modifier = Modifier.width(10.dp))
 
         // Partner Details
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = partnerName,
-                fontSize = 17.sp,
+                fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color(0xFF111827),
-                letterSpacing = (-0.2).sp
+                letterSpacing = (-0.2).sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
 
-            Spacer(modifier = Modifier.height(2.dp))
+            Spacer(modifier = Modifier.height(1.dp))
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "$partnerCountry • ",
-                    fontSize = 12.sp,
-                    color = Color(0xFF6B7280),
-                    fontWeight = FontWeight.Medium
+                // Small Green Online Dot
+                Box(
+                    modifier = Modifier
+                        .size(7.dp)
+                        .clip(CircleShape)
+                        .background(if (isOnline) Color(0xFF22C55E) else Color(0xFF9CA3AF))
                 )
-                // Green Online Status Indicator
-                AppSvgIcon(
-                    icon = ChatIconAsset.OnlineStatus,
-                    tint = Color(0xFF22C55E),
-                    modifier = Modifier.size(8.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(4.5.dp))
                 Text(
-                    text = "Online",
+                    text = if (isOnline) "Online" else "Offline",
                     fontSize = 12.sp,
-                    color = Color(0xFF6B7280),
+                    color = if (isOnline) Color(0xFF16A34A) else Color(0xFF6B7280),
                     fontWeight = FontWeight.Medium
                 )
             }
@@ -135,7 +109,7 @@ fun ChatHeader(
         ) {
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(38.dp)
                     .clip(CircleShape)
                     .clickable { onMenuClick() },
                 contentAlignment = Alignment.Center

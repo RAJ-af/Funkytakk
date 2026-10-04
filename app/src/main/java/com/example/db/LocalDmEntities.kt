@@ -40,3 +40,22 @@ data class LocalDmMessage(
     val replyToText: String? = null,
     val replyToSender: String? = null
 )
+
+@Entity(
+    tableName = "dm_message_reactions",
+    primaryKeys = ["target_message_id", "sender_id"],
+    indices = [
+        Index(value = ["conversation_id"]),
+        Index(value = ["target_message_id"])
+    ]
+)
+data class LocalDmMessageReaction(
+    @androidx.room.ColumnInfo(name = "conversation_id")
+    val conversationId: String,
+    @androidx.room.ColumnInfo(name = "target_message_id")
+    val targetMessageId: String,
+    @androidx.room.ColumnInfo(name = "sender_id")
+    val senderId: String,
+    val emoji: String,
+    val ts: Long = System.currentTimeMillis()
+)

@@ -1,5 +1,9 @@
 package com.example.ui.screens.chat.components
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -36,6 +40,8 @@ fun MessageComposer(
     onCancelReply: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val isTyping = messageText.trim().isNotEmpty()
+
     Column(
         modifier = modifier.fillMaxWidth()
     ) {
@@ -91,45 +97,45 @@ fun MessageComposer(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 14.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Left Circular Add (+) Button
+            // Small Circular Add (+) Button
             Box(
                 modifier = Modifier
-                    .size(46.dp)
+                    .size(42.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFFF3F4F6))
+                    .background(Color(0xFFF4F4F0))
                     .clickable { onAddClick() },
                 contentAlignment = Alignment.Center
             ) {
                 AppSvgIcon(
                     icon = ChatIconAsset.Add,
                     tint = Color(0xFF111827),
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(18.dp)
                 )
             }
 
-            Spacer(modifier = Modifier.width(10.dp))
+            Spacer(modifier = Modifier.width(8.dp))
 
-            // Middle Input Pill
+            // Large Rounded Message Field
             Row(
                 modifier = Modifier
                     .weight(1f)
-                    .height(46.dp)
+                    .heightIn(min = 44.dp, max = 110.dp)
                     .clip(RoundedCornerShape(24.dp))
-                    .background(Color(0xFFF3F4F6))
-                    .padding(horizontal = 14.dp),
+                    .background(Color(0xFFF4F4F0))
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Text Input
+                // Text Input Field
                 Box(
                     modifier = Modifier.weight(1f),
                     contentAlignment = Alignment.CenterStart
                 ) {
                     if (messageText.isEmpty()) {
                         Text(
-                            text = "Type a message...",
+                            text = "Message…",
                             fontSize = 14.5.sp,
                             color = Color(0xFF9CA3AF)
                         )
@@ -142,7 +148,7 @@ fun MessageComposer(
                             fontSize = 14.5.sp,
                             color = Color(0xFF111827)
                         ),
-                        cursorBrush = SolidColor(Color(0xFFF59E0B)),
+                        cursorBrush = SolidColor(Color(0xFFF6C945)),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                         keyboardActions = KeyboardActions(onSend = {
                             if (messageText.isNotBlank()) {
@@ -155,59 +161,58 @@ fun MessageComposer(
 
                 Spacer(modifier = Modifier.width(6.dp))
 
-                // Smiley Icon Button
+                // Emoji Button inside input field
                 Box(
                     modifier = Modifier
-                        .size(32.dp)
+                        .size(30.dp)
                         .clip(CircleShape)
                         .clickable { onSmileyClick() },
                     contentAlignment = Alignment.Center
                 ) {
                     AppSvgIcon(
                         icon = ChatIconAsset.Smiley,
-                        tint = Color(0xFF374151),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(4.dp))
-
-                // Microphone Icon Button
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .clickable { onMicClick() },
-                    contentAlignment = Alignment.Center
-                ) {
-                    AppSvgIcon(
-                        icon = ChatIconAsset.Microphone,
-                        tint = Color(0xFF374151),
-                        modifier = Modifier.size(20.dp)
+                        tint = Color(0xFF4B5563),
+                        modifier = Modifier.size(19.dp)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.width(10.dp))
+            Spacer(modifier = Modifier.width(8.dp))
 
-            // Right Circular Send Button (Brand Yellow)
+            // Right Circular Button (FunkyTalk Yellow #F6C945): Mic when empty, Send arrow when typing
             Box(
                 modifier = Modifier
-                    .size(46.dp)
+                    .size(42.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFFFBBF24))
+                    .background(Color(0xFFF6C945))
                     .clickable {
-                        if (messageText.isNotBlank()) {
+                        if (isTyping) {
                             onSendMessage()
+                        } else {
+                            onMicClick()
                         }
                     },
                 contentAlignment = Alignment.Center
             ) {
-                AppSvgIcon(
-                    icon = ChatIconAsset.Send,
-                    tint = Color(0xFF111827),
-                    modifier = Modifier.size(18.dp)
-                )
+                AnimatedContent(
+                    targetState = isTyping,
+                    transitionSpec = { fadeIn() togetherWith fadeOut() },
+                    label = "mic_to_send"
+                ) { typing ->
+                    if (typing) {
+                        AppSvgIcon(
+                            icon = ChatIconAsset.Send,
+                            tint = Color(0xFF111827),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    } else {
+                        AppSvgIcon(
+                            icon = ChatIconAsset.Microphone,
+                            tint = Color(0xFF111827),
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                }
             }
         }
     }

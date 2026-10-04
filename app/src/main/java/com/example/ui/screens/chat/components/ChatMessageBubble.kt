@@ -27,7 +27,6 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.ui.components.FluentEmojiIcon
 import com.example.ui.components.FunkyDoubleCheckIcon
-import com.example.ui.components.FunkyDownloadIcon
 import com.example.ui.components.FunkyPauseIcon
 import com.example.ui.components.FunkyPlayIcon
 import com.example.ui.screens.chat.model.ChatMessage
@@ -41,18 +40,18 @@ fun DateSeparatorPill(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 12.dp),
+            .padding(vertical = 10.dp),
         contentAlignment = Alignment.Center
     ) {
         Box(
             modifier = Modifier
                 .clip(RoundedCornerShape(12.dp))
-                .background(Color(0xFFF3F4F6))
-                .padding(horizontal = 14.dp, vertical = 5.dp)
+                .background(Color(0xFF0F172A).copy(alpha = 0.05f))
+                .padding(horizontal = 12.dp, vertical = 4.dp)
         ) {
             Text(
                 text = dateText,
-                fontSize = 12.sp,
+                fontSize = 11.5.sp,
                 fontWeight = FontWeight.Medium,
                 color = Color(0xFF6B7280)
             )
@@ -68,6 +67,7 @@ fun ChatMessageItem(
     isPlayingAudio: Boolean = false,
     isHighlighted: Boolean = false,
     onLongClick: () -> Unit,
+    onImageClick: (String) -> Unit = {},
     onToggleAudioPlay: () -> Unit = {},
     onReactionClick: () -> Unit = {},
     onDownloadImageClick: () -> Unit = {},
@@ -81,208 +81,231 @@ fun ChatMessageItem(
 
     if (message.isMe) {
         // ==========================================
-        // SENT MESSAGE (Right Aligned, Warm Yellow)
+        // SENT MESSAGE (Right Aligned, FunkyTalk Yellow #F6C945)
         // ==========================================
         Row(
             modifier = modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
+                .padding(horizontal = 16.dp, vertical = 3.dp),
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.Bottom
         ) {
-            Surface(
-                shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp),
-                color = Color(0xFFFCD34D),
-                border = if (isHighlighted) BorderStroke(2.dp, Color.White) else null,
-                shadowElevation = if (isHighlighted) 6.dp else 0.dp,
-                modifier = Modifier
-                    .scale(scaleAnim)
-                    .widthIn(max = 290.dp)
-                    .combinedClickable(
-                        onClick = {},
-                        onLongClick = onLongClick
-                    )
-            ) {
-                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                    Text(
-                        text = message.text,
-                        fontSize = 14.5.sp,
-                        color = Color(0xFF111827),
-                        lineHeight = 20.sp,
-                        fontWeight = FontWeight.Normal
-                    )
+            Column(horizontalAlignment = Alignment.End) {
+                Surface(
+                    shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp),
+                    color = Color(0xFFF6C945),
+                    shadowElevation = if (isHighlighted) 4.dp else 0.dp,
+                    modifier = Modifier
+                        .scale(scaleAnim)
+                        .widthIn(max = 285.dp)
+                        .combinedClickable(
+                            onClick = {
+                                if (message.type == ChatMessageType.IMAGE && message.getAllImages().isNotEmpty()) {
+                                    onImageClick(message.getAllImages().first())
+                                }
+                            },
+                            onLongClick = onLongClick
+                        )
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 13.dp, vertical = 8.dp)) {
+                        when (message.type) {
+                            ChatMessageType.IMAGE -> {
+                                val img = message.imageUrl ?: message.getAllImages().firstOrNull() ?: ""
+                                AsyncImage(
+                                    model = img,
+                                    contentDescription = "Photo message",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 140.dp, max = 220.dp)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .clickable { onImageClick(img) }
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                            }
+                            ChatMessageType.AUDIO -> {
+                                Row(
+                                    modifier = Modifier.padding(vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(34.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF18181B))
+                                            .clickable { onToggleAudioPlay() },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (isPlayingAudio) {
+                                            FunkyPauseIcon(color = Color.White, modifier = Modifier.size(13.dp))
+                                        } else {
+                                            FunkyPlayIcon(color = Color.White, modifier = Modifier.size(13.dp))
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = message.audioDuration.ifBlank { "0:15" },
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF18181B)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(2.dp))
+                            }
+                            else -> {
+                                Text(
+                                    text = message.text,
+                                    fontSize = 14.5.sp,
+                                    color = Color(0xFF111827),
+                                    lineHeight = 20.sp,
+                                    fontWeight = FontWeight.Normal
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                            }
+                        }
 
+                        Row(
+                            modifier = Modifier.align(Alignment.End),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = message.time,
+                                fontSize = 10.5.sp,
+                                color = Color(0xFF78350F).copy(alpha = 0.85f),
+                                fontWeight = FontWeight.Medium
+                            )
+                            Spacer(modifier = Modifier.width(3.5.dp))
+                            FunkyDoubleCheckIcon(
+                                color = Color(0xFF78350F),
+                                modifier = Modifier.size(12.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Tiny Floating Reaction Pill underneath message
+                if (message.reactions.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(2.dp))
-
-                    Row(
-                        modifier = Modifier.align(Alignment.End),
-                        verticalAlignment = Alignment.CenterVertically
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.White)
+                            .border(BorderStroke(1.dp, Color(0xFFE5E7EB)), RoundedCornerShape(12.dp))
+                            .clickable { onReactionClick() }
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
                     ) {
-                        Text(
-                            text = message.time,
-                            fontSize = 11.sp,
-                            color = Color(0xFF78350F).copy(alpha = 0.85f),
-                            fontWeight = FontWeight.Medium
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        FunkyDoubleCheckIcon(
-                            color = Color(0xFF78350F),
-                            modifier = Modifier.size(13.dp)
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            FluentEmojiIcon(
+                                emoji = message.reactions.first(),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(3.5.dp))
+                            Text(
+                                text = "${message.reactions.size}",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF1F2937)
+                            )
+                        }
                     }
                 }
             }
         }
     } else {
         // ==========================================
-        // RECEIVED MESSAGE (Left Aligned, Light Grey)
+        // RECEIVED MESSAGE (Left Aligned, Soft Light Gray)
         // ==========================================
         Row(
             modifier = modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
+                .padding(horizontal = 16.dp, vertical = 3.dp),
             horizontalArrangement = Arrangement.Start,
-            verticalAlignment = Alignment.Top
+            verticalAlignment = Alignment.Bottom
         ) {
-            // Partner Avatar or Empty Spacer
+            // Partner Avatar (shown beside message)
             if (message.showAvatar) {
                 AsyncImage(
                     model = partnerAvatarUrl,
                     contentDescription = null,
                     modifier = Modifier
-                        .size(34.dp)
+                        .size(32.dp)
                         .clip(CircleShape)
                         .border(1.dp, Color(0xFFE5E7EB), CircleShape),
                     contentScale = ContentScale.Crop
                 )
+                Spacer(modifier = Modifier.width(8.dp))
             } else {
-                Spacer(modifier = Modifier.width(34.dp))
+                Spacer(modifier = Modifier.width(40.dp))
             }
 
-            Spacer(modifier = Modifier.width(8.dp))
-
-            Column {
-                when (message.type) {
-                    ChatMessageType.TEXT -> {
-                        Row(verticalAlignment = Alignment.Bottom) {
-                            Column {
-                                Surface(
-                                    shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 4.dp, bottomEnd = 18.dp),
-                                    color = Color(0xFFF3F4F6),
-                                    border = if (isHighlighted) BorderStroke(2.dp, Color(0xFFFFC529)) else null,
-                                    shadowElevation = if (isHighlighted) 6.dp else 0.dp,
+            Column(horizontalAlignment = Alignment.Start) {
+                Surface(
+                    shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 4.dp, bottomEnd = 18.dp),
+                    color = Color(0xFFF3F4F6),
+                    shadowElevation = if (isHighlighted) 4.dp else 0.dp,
+                    modifier = Modifier
+                        .scale(scaleAnim)
+                        .widthIn(max = 280.dp)
+                        .combinedClickable(
+                            onClick = {
+                                if (message.type == ChatMessageType.IMAGE && message.getAllImages().isNotEmpty()) {
+                                    onImageClick(message.getAllImages().first())
+                                }
+                            },
+                            onLongClick = onLongClick
+                        )
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 13.dp, vertical = 8.dp)) {
+                        when (message.type) {
+                            ChatMessageType.IMAGE -> {
+                                val img = message.imageUrl ?: message.getAllImages().firstOrNull() ?: ""
+                                AsyncImage(
+                                    model = img,
+                                    contentDescription = "Shared photo",
+                                    contentScale = ContentScale.Crop,
                                     modifier = Modifier
-                                        .scale(scaleAnim)
-                                        .widthIn(max = 260.dp)
-                                        .combinedClickable(
-                                            onClick = {},
-                                            onLongClick = onLongClick
-                                        )
-                                ) {
-                                    Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                                        Text(
-                                            text = if (message.isTranslated && message.translation != null) message.translation else message.text,
-                                            fontSize = 14.5.sp,
-                                            color = Color.Black,
-                                            lineHeight = 20.sp
-                                        )
-                                    }
-                                }
-
-                                // Reaction Pill (e.g. ❤️ 1)
-                                if (message.reactions.isNotEmpty()) {
-                                    Spacer(modifier = Modifier.height(3.dp))
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .background(Color.White)
-                                            .border(BorderStroke(1.dp, Color(0xFFE5E7EB)), RoundedCornerShape(12.dp))
-                                            .clickable { onReactionClick() }
-                                            .padding(horizontal = 8.dp, vertical = 3.dp)
-                                    ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            FluentEmojiIcon(
-                                                emoji = message.reactions.first(),
-                                                modifier = Modifier.size(15.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = "${message.reactions.size}",
-                                                fontSize = 11.5.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = Color(0xFF1F2937)
-                                            )
-                                        }
-                                    }
-                                }
+                                        .fillMaxWidth()
+                                        .heightIn(min = 140.dp, max = 220.dp)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .clickable { onImageClick(img) }
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
                             }
-
-                            Spacer(modifier = Modifier.width(8.dp))
-
-                            Text(
-                                text = message.time,
-                                fontSize = 11.sp,
-                                color = Color(0xFF9CA3AF),
-                                modifier = Modifier.padding(bottom = 2.dp)
-                            )
-                        }
-                    }
-
-                    ChatMessageType.AUDIO -> {
-                        Row(verticalAlignment = Alignment.Bottom) {
-                            Surface(
-                                shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 4.dp, bottomEnd = 18.dp),
-                                color = Color(0xFFF3F4F6),
-                                border = if (isHighlighted) BorderStroke(2.dp, Color(0xFFFFC529)) else null,
-                                shadowElevation = if (isHighlighted) 6.dp else 0.dp,
-                                modifier = Modifier
-                                    .scale(scaleAnim)
-                                    .widthIn(min = 210.dp, max = 260.dp)
-                                    .combinedClickable(
-                                        onClick = {},
-                                        onLongClick = onLongClick
-                                    )
-                            ) {
+                            ChatMessageType.AUDIO -> {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                    modifier = Modifier.padding(vertical = 2.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    // Circular Yellow Play Button
                                     Box(
                                         modifier = Modifier
-                                            .size(36.dp)
+                                            .size(34.dp)
                                             .clip(CircleShape)
-                                            .background(Color(0xFFFBBF24))
+                                            .background(Color(0xFFF6C945))
                                             .clickable { onToggleAudioPlay() },
                                         contentAlignment = Alignment.Center
                                     ) {
                                         if (isPlayingAudio) {
-                                            FunkyPauseIcon(color = Color.Black, modifier = Modifier.size(13.dp))
+                                            FunkyPauseIcon(color = Color(0xFF18181B), modifier = Modifier.size(13.dp))
                                         } else {
-                                            FunkyPlayIcon(color = Color.Black, modifier = Modifier.size(13.dp))
+                                            FunkyPlayIcon(color = Color(0xFF18181B), modifier = Modifier.size(13.dp))
                                         }
                                     }
 
-                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
 
-                                    // Symmetrical Waveform Bars
-                                    val waveHeights = listOf(
-                                        0.2f, 0.4f, 0.7f, 0.9f, 0.6f, 0.85f, 1.0f, 0.65f,
-                                        0.9f, 0.75f, 0.45f, 0.2f
-                                    )
-
+                                    // Voice Capsule Waveform
+                                    val waveHeights = listOf(0.3f, 0.5f, 0.8f, 1.0f, 0.6f, 0.9f, 0.7f, 0.4f, 0.8f, 0.5f, 0.3f)
                                     Row(
-                                        modifier = Modifier.weight(1f),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(2.5.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
                                     ) {
                                         waveHeights.forEach { frac ->
                                             Box(
                                                 modifier = Modifier
                                                     .width(2.5.dp)
-                                                    .height((20 * frac).coerceAtLeast(3f).dp)
+                                                    .height((18 * frac).dp)
                                                     .clip(RoundedCornerShape(1.dp))
-                                                    .background(Color(0xFF4B5563))
+                                                    .background(Color(0xFF64748B))
                                             )
                                         }
                                     }
@@ -290,102 +313,56 @@ fun ChatMessageItem(
                                     Spacer(modifier = Modifier.width(8.dp))
 
                                     Text(
-                                        text = message.audioDuration,
+                                        text = message.audioDuration.ifBlank { "0:12" },
                                         fontSize = 11.5.sp,
-                                        color = Color(0xFF6B7280),
+                                        color = Color(0xFF64748B),
                                         fontWeight = FontWeight.Medium
                                     )
                                 }
+                                Spacer(modifier = Modifier.height(2.dp))
                             }
-
-                            Spacer(modifier = Modifier.width(8.dp))
-
-                            Text(
-                                text = message.time,
-                                fontSize = 11.sp,
-                                color = Color(0xFF9CA3AF),
-                                modifier = Modifier.padding(bottom = 2.dp)
-                            )
+                            else -> {
+                                Text(
+                                    text = if (message.isTranslated && message.translation != null) message.translation else message.text,
+                                    fontSize = 14.5.sp,
+                                    color = Color(0xFF111827),
+                                    lineHeight = 20.sp
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                            }
                         }
+
+                        Text(
+                            text = message.time,
+                            fontSize = 10.5.sp,
+                            color = Color(0xFF94A3B8),
+                            modifier = Modifier.align(Alignment.End)
+                        )
                     }
+                }
 
-                    ChatMessageType.IMAGE -> {
-                        Column {
-                            Box(modifier = Modifier.widthIn(max = 260.dp)) {
-                                Surface(
-                                    shape = RoundedCornerShape(18.dp),
-                                    color = Color(0xFFF3F4F6),
-                                    border = if (isHighlighted) BorderStroke(2.dp, Color(0xFFFFC529)) else null,
-                                    shadowElevation = if (isHighlighted) 6.dp else 0.dp,
-                                    modifier = Modifier
-                                        .scale(scaleAnim)
-                                        .fillMaxWidth()
-                                        .combinedClickable(
-                                            onClick = {},
-                                            onLongClick = onLongClick
-                                        )
-                                ) {
-                                    AsyncImage(
-                                        model = message.imageUrl,
-                                        contentDescription = "Shared photo",
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(160.dp)
-                                            .clip(RoundedCornerShape(18.dp))
-                                    )
-                                }
-
-                                // Floating Download Button
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.BottomEnd)
-                                        .offset(x = 12.dp, y = (-28).dp)
-                                        .size(36.dp)
-                                        .clip(CircleShape)
-                                        .background(Color.White)
-                                        .border(BorderStroke(1.dp, Color(0xFFE5E7EB)), CircleShape)
-                                        .clickable { onDownloadImageClick() },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    FunkyDownloadIcon(color = Color.Black, modifier = Modifier.size(18.dp))
-                                }
-
-                                // Floating Reaction Pill (e.g. ❤️ 2)
-                                if (message.reactions.isNotEmpty()) {
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.BottomEnd)
-                                            .offset(x = 12.dp, y = 14.dp)
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .background(Color.White)
-                                            .border(BorderStroke(1.dp, Color(0xFFE5E7EB)), RoundedCornerShape(12.dp))
-                                            .clickable { onReactionClick() }
-                                            .padding(horizontal = 8.dp, vertical = 3.dp)
-                                    ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            FluentEmojiIcon(
-                                                emoji = message.reactions.first(),
-                                                modifier = Modifier.size(15.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = "${message.reactions.size}",
-                                                fontSize = 11.5.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = Color(0xFF1F2937)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(4.dp))
-
+                // Tiny Floating Reaction Pill underneath message
+                if (message.reactions.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.White)
+                            .border(BorderStroke(1.dp, Color(0xFFE5E7EB)), RoundedCornerShape(12.dp))
+                            .clickable { onReactionClick() }
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            FluentEmojiIcon(
+                                emoji = message.reactions.first(),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(3.5.dp))
                             Text(
-                                text = message.time,
+                                text = "${message.reactions.size}",
                                 fontSize = 11.sp,
-                                color = Color(0xFF9CA3AF)
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF1F2937)
                             )
                         }
                     }

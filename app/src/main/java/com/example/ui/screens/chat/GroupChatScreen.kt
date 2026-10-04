@@ -11,9 +11,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -29,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -51,8 +54,13 @@ import com.example.SupabaseGroupMember
 import com.example.SupabaseSessionManager
 import com.example.db.LocalGroupConversation
 import com.example.db.LocalGroupMessage
+import com.example.db.LocalMessageReaction
 import com.example.repository.GroupChatRepository
 import com.example.ui.components.*
+import com.example.ui.screens.chat.components.FullEmojiPickerBottomSheet
+import com.example.ui.screens.chat.components.GroupMessageReactionOverlay
+import com.example.ui.screens.chat.components.GroupReactionChipsRow
+import com.example.ui.screens.chat.components.GroupReactionDetailsBottomSheet
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -83,6 +91,17 @@ fun GroupChatScreen(
 
     val messagesFlow = remember(group.id) { GroupChatRepository.getGroupMessagesFlow(group.id) }
     val messages by messagesFlow.collectAsState(initial = emptyList())
+
+    val reactionsFlow = remember(group.id) { GroupChatRepository.getGroupReactionsFlow(group.id) }
+    val reactions by reactionsFlow.collectAsState(initial = emptyList())
+    val reactionsByMessage = remember(reactions) {
+        reactions.groupBy { it.targetMessageId }
+    }
+
+    var selectedMessageForReactions by remember { mutableStateOf<LocalGroupMessage?>(null) }
+    var selectedMessageForReactionDetails by remember { mutableStateOf<LocalGroupMessage?>(null) }
+    var showFullEmojiPickerForMessage by remember { mutableStateOf<LocalGroupMessage?>(null) }
+    val clipboardManager = LocalClipboardManager.current
 
     val visibleMessages = remember(messages, group.showJoinNotifications) {
         messages.filter { msg ->
@@ -284,10 +303,14 @@ fun GroupChatScreen(
     }
 
     BackHandler {
-        if (isRecordingVoice) {
-            stopAndSendVoiceRecording(cancel = true)
-        } else {
-            onBack()
+        when {
+            previewImageUrl != null -> previewImageUrl = null
+            selectedMessageForReactions != null -> selectedMessageForReactions = null
+            selectedMessageForReactionDetails != null -> selectedMessageForReactionDetails = null
+            showFullEmojiPickerForMessage != null -> showFullEmojiPickerForMessage = null
+            replyingToMessage != null -> replyingToMessage = null
+            isRecordingVoice -> stopAndSendVoiceRecording(cancel = true)
+            else -> onBack()
         }
     }
 
@@ -325,10 +348,10 @@ fun GroupChatScreen(
     }
 
     Scaffold(
-        containerColor = Color(0xFFFAFAF9),
+        containerColor = Color(0xFFFFFDF8),
         topBar = {
             Surface(
-                color = Color(0xFFFAFAF9),
+                color = Color(0xFFFFFDF8),
                 shadowElevation = 0.dp
             ) {
                 Row(
@@ -1167,7 +1190,11 @@ fun GroupChatScreen(
                             message = msg,
                             isMe = isMe,
                             isMentioned = isMentionedMe,
+                            reactions = reactionsByMessage[msg.id].orEmpty(),
+                            currentUserId = myUserId,
                             onReplyClick = { replyingToMessage = msg },
+                            onLongClick = { selectedMessageForReactions = msg },
+                            onReactionChipClick = { selectedMessageForReactionDetails = msg },
                             onImageClick = { url -> previewImageUrl = url },
                             onRequestDownloadMedia = { targetMsg ->
                                 scope.launch {
@@ -1367,6 +1394,98 @@ fun GroupChatScreen(
         )
     }
 
+    // PART A: Reactions Bottom Sheet & Long-Press Overlays
+    selectedMessageForReactions?.let { targetMsg ->
+        val msgReactions = reactionsByMessage[targetMsg.id].orEmpty()
+        val myCurrentEmoji = msgReactions.find { it.senderId == myUserId }?.emoji
+        GroupMessageReactionOverlay(
+            message = targetMsg,
+            myReaction = myCurrentEmoji,
+            onDismiss = { selectedMessageForReactions = null },
+            onSelectEmoji = { emoji, isRemove ->
+                scope.launch {
+                    val op = if (isRemove) "remove" else "set"
+                    val res = GroupChatRepository.sendGroupReaction(
+                        context = context,
+                        groupId = group.id,
+                        targetMessageId = targetMsg.id,
+                        emoji = emoji,
+                        op = op
+                    )
+                    res.onFailure { ex ->
+                        Toast.makeText(context, ex.message ?: "Failed to send reaction", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            },
+            onOpenFullPicker = {
+                val msg = targetMsg
+                selectedMessageForReactions = null
+                showFullEmojiPickerForMessage = msg
+            },
+            onReply = {
+                replyingToMessage = targetMsg
+            },
+            onCopy = {
+                if (targetMsg.text.isNotBlank()) {
+                    clipboardManager.setText(AnnotatedString(targetMsg.text))
+                    Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onReport = {
+                showReportDialog = true
+            }
+        )
+    }
+
+    selectedMessageForReactionDetails?.let { targetMsg ->
+        val msgReactions = reactionsByMessage[targetMsg.id].orEmpty()
+        GroupReactionDetailsBottomSheet(
+            message = targetMsg,
+            reactions = msgReactions,
+            groupMembers = groupMembers,
+            currentUserId = myUserId,
+            onRemoveMyReaction = { emoji ->
+                scope.launch {
+                    val res = GroupChatRepository.sendGroupReaction(
+                        context = context,
+                        groupId = group.id,
+                        targetMessageId = targetMsg.id,
+                        emoji = emoji,
+                        op = "remove"
+                    )
+                    res.onFailure { ex ->
+                        Toast.makeText(context, ex.message ?: "Failed to remove reaction", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            },
+            onDismiss = { selectedMessageForReactionDetails = null }
+        )
+    }
+
+    showFullEmojiPickerForMessage?.let { targetMsg ->
+        val msgReactions = reactionsByMessage[targetMsg.id].orEmpty()
+        val myCurrentEmoji = msgReactions.find { it.senderId == myUserId }?.emoji
+        FullEmojiPickerBottomSheet(
+            myCurrentReaction = myCurrentEmoji,
+            onEmojiSelected = { emoji, isRemove ->
+                scope.launch {
+                    val op = if (isRemove) "remove" else "set"
+                    val res = GroupChatRepository.sendGroupReaction(
+                        context = context,
+                        groupId = group.id,
+                        targetMessageId = targetMsg.id,
+                        emoji = emoji,
+                        op = op
+                    )
+                    res.onFailure { ex ->
+                        Toast.makeText(context, ex.message ?: "Failed to send reaction", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            },
+            onDismiss = { showFullEmojiPickerForMessage = null }
+        )
+    }
+
     if (showLeaveDialog) {
         var isLeaving by remember { mutableStateOf(false) }
         AlertDialog(
@@ -1431,12 +1550,17 @@ private fun GroupSystemEventRow(text: String) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun GroupMessageItem(
     message: LocalGroupMessage,
     isMe: Boolean,
     isMentioned: Boolean = false,
+    reactions: List<LocalMessageReaction> = emptyList(),
+    currentUserId: String = "",
     onReplyClick: () -> Unit = {},
+    onLongClick: () -> Unit = {},
+    onReactionChipClick: () -> Unit = {},
     onImageClick: (String) -> Unit,
     onRequestDownloadMedia: (LocalGroupMessage) -> Unit
 ) {
@@ -1548,7 +1672,11 @@ private fun GroupMessageItem(
             }
 
             Surface(
-                modifier = Modifier.clickable { onReplyClick() },
+                modifier = Modifier
+                    .combinedClickable(
+                        onClick = { onReplyClick() },
+                        onLongClick = { onLongClick() }
+                    ),
                 shape = RoundedCornerShape(
                     topStart = 18.dp,
                     topEnd = 18.dp,
@@ -1756,6 +1884,13 @@ private fun GroupMessageItem(
                     }
                 }
             }
+
+            // PART A: Reactions Chips Row
+            GroupReactionChipsRow(
+                reactions = reactions,
+                currentUserId = currentUserId,
+                onChipClick = onReactionChipClick
+            )
         }
     }
 }

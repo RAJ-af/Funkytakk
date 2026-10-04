@@ -71,3 +71,45 @@ data class LocalGroupMessage(
     val replyToSenderName: String? = null,
     val replyToPreview: String? = null
 )
+
+@Entity(
+    tableName = "message_reactions",
+    primaryKeys = ["target_message_id", "sender_id"],
+    indices = [
+        Index(value = ["target_message_id"]),
+        Index(value = ["group_id"])
+    ]
+)
+data class LocalMessageReaction(
+    @androidx.room.ColumnInfo(name = "group_id")
+    val groupId: String,
+    @androidx.room.ColumnInfo(name = "target_message_id")
+    val targetMessageId: String,
+    @androidx.room.ColumnInfo(name = "sender_id")
+    val senderId: String,
+    @androidx.room.ColumnInfo(name = "emoji")
+    val emoji: String,
+    @androidx.room.ColumnInfo(name = "ts")
+    val ts: Long = System.currentTimeMillis()
+)
+
+@Entity(
+    tableName = "message_translations",
+    indices = [
+        Index(value = ["message_id"])
+    ]
+)
+data class LocalMessageTranslation(
+    @PrimaryKey
+    @androidx.room.ColumnInfo(name = "message_id")
+    val messageId: String,
+    @androidx.room.ColumnInfo(name = "translated_text")
+    val translatedText: String,
+    @androidx.room.ColumnInfo(name = "target_language")
+    val targetLanguage: String = "English",
+    @androidx.room.ColumnInfo(name = "provider")
+    val provider: String = "sarvam", // "sarvam", "cerebras", "gemini", "on_device"
+    @androidx.room.ColumnInfo(name = "created_at")
+    val createdAt: Long = System.currentTimeMillis()
+)
+

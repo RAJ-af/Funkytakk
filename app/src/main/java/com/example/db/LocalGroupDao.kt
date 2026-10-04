@@ -75,7 +75,12 @@ interface GroupMessageDao {
     suspend fun searchGroupMessages(groupId: String, query: String, now: Long = System.currentTimeMillis()): List<LocalGroupMessage>
 
     @Query("DELETE FROM group_messages WHERE expiresAt IS NOT NULL AND expiresAt > 0 AND expiresAt <= :now")
-    suspend fun deleteExpiredMessages(now: Long = System.currentTimeMillis())
+    suspend fun deleteExpiredMessagesOnly(now: Long = System.currentTimeMillis())
+
+    @Transaction
+    suspend fun deleteExpiredMessages(now: Long = System.currentTimeMillis()) {
+        deleteExpiredMessagesOnly(now)
+    }
 
     @Query("UPDATE group_messages SET localMediaPath = :localPath WHERE id = :id")
     suspend fun updateLocalMediaPath(id: String, localPath: String)
@@ -98,3 +103,58 @@ interface GroupMessageDao {
     @Query("DELETE FROM group_messages")
     suspend fun deleteAllMessages()
 }
+
+@Dao
+interface MessageReactionDao {
+    @Query("SELECT * FROM message_reactions WHERE group_id = :groupId")
+    fun getReactionsForGroup(groupId: String): Flow<List<LocalMessageReaction>>
+
+    @Query("SELECT * FROM message_reactions WHERE target_message_id = :targetMessageId")
+    fun getReactionsForMessage(targetMessageId: String): Flow<List<LocalMessageReaction>>
+
+    @Query("SELECT * FROM message_reactions WHERE target_message_id = :targetMessageId")
+    suspend fun getReactionsForMessageList(targetMessageId: String): List<LocalMessageReaction>
+
+    @Query("SELECT * FROM message_reactions WHERE target_message_id = :targetMessageId AND sender_id = :senderId LIMIT 1")
+    suspend fun getReaction(targetMessageId: String, senderId: String): LocalMessageReaction?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdateReaction(reaction: LocalMessageReaction)
+
+    @Query("DELETE FROM message_reactions WHERE target_message_id = :targetMessageId AND sender_id = :senderId")
+    suspend fun deleteReaction(targetMessageId: String, senderId: String)
+
+    @Query("DELETE FROM message_reactions WHERE target_message_id = :targetMessageId")
+    suspend fun deleteReactionsForMessage(targetMessageId: String)
+
+    @Query("DELETE FROM message_reactions WHERE group_id = :groupId")
+    suspend fun deleteReactionsForGroup(groupId: String)
+
+    @Query("DELETE FROM message_reactions WHERE target_message_id NOT IN (SELECT id FROM group_messages)")
+    suspend fun deleteOrphanReactions()
+
+    @Query("DELETE FROM message_reactions")
+    suspend fun deleteAllReactions()
+}
+
+@Dao
+interface MessageTranslationDao {
+    @Query("SELECT * FROM message_translations WHERE message_id = :messageId LIMIT 1")
+    fun getTranslationFlow(messageId: String): Flow<LocalMessageTranslation?>
+
+    @Query("SELECT * FROM message_translations WHERE message_id = :messageId LIMIT 1")
+    suspend fun getTranslation(messageId: String): LocalMessageTranslation?
+
+    @Query("SELECT * FROM message_translations")
+    fun getAllTranslationsFlow(): Flow<List<LocalMessageTranslation>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertOrUpdateTranslation(translation: LocalMessageTranslation)
+
+    @Query("DELETE FROM message_translations WHERE message_id = :messageId")
+    suspend fun deleteTranslation(messageId: String)
+
+    @Query("DELETE FROM message_translations")
+    suspend fun deleteAllTranslations()
+}
+

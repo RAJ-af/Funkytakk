@@ -259,8 +259,60 @@ object EncryptedChatRepository {
             return
         }
 
-        // 2. Safely check if decryptedText is a 2-layer E2EE media descriptor JSON
+        // 2. Safely check if decryptedText is a reaction or 2-layer E2EE media descriptor JSON
         val trimmed = decryptedText.trim()
+        val isReaction = messageType == "reaction" || (trimmed.startsWith("{") && trimmed.endsWith("}") && (trimmed.contains("\"t\":\"reaction\"") || trimmed.contains("\"reaction\"")))
+        val reactionJson = if (isReaction) {
+            try {
+                val j = JSONObject(trimmed)
+                if (j.optString("t") == "reaction" || j.has("target")) j else null
+            } catch (_: Exception) {
+                null
+            }
+        } else null
+
+        if (reactionJson != null) {
+            val targetId = reactionJson.optString("target").ifBlank { reactionJson.optString("target_message_id") }
+            val emoji = reactionJson.optString("emoji")
+            val op = reactionJson.optString("op", "set")
+            val rxTs = reactionJson.optLong("ts", timestamp)
+
+            if (targetId.isNotBlank() && db != null) {
+                // Ignore reactions whose target message isn't in the local DB
+                if (db.messageDao().messageExists(targetId)) {
+                    if (op == "remove") {
+                        db.dmMessageReactionDao().deleteReaction(targetId, senderId)
+                    } else if (emoji.isNotBlank()) {
+                        db.dmMessageReactionDao().insertReaction(
+                            com.example.db.LocalDmMessageReaction(
+                                conversationId = convId,
+                                targetMessageId = targetId,
+                                senderId = senderId,
+                                emoji = emoji,
+                                ts = rxTs
+                            )
+                        )
+                        // Reaction messages never create a chat bubble, never count as unread, make no sound.
+                        // Notify only when someone reacts to MY message!
+                        val targetMsg = db.messageDao().getMessage(targetId)
+                        val myUserId = SupabaseSessionManager.getUserId(context)
+                        if (targetMsg?.isOutgoing == true && senderId != myUserId) {
+                            val senderName = fetchSenderDisplayName(context, senderId)
+                            com.example.util.SystemNotificationHelper.showSystemNotification(
+                                context = context,
+                                title = "FunkyTalk Reaction",
+                                message = "$senderName reacted $emoji to your message",
+                                partnerUserId = senderId,
+                                channelId = com.example.util.SystemNotificationHelper.CHANNEL_MESSAGES_ID
+                            )
+                        }
+                    }
+                }
+            }
+            deleteMessageFromServer(context, token, msgId)
+            return
+        }
+
         val mediaDescriptorJson = if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
             try {
                 val json = JSONObject(trimmed)
@@ -1289,6 +1341,103 @@ object EncryptedChatRepository {
         } catch (e: Exception) {
             "FunkyTalk User"
         }
+    }
+
+    suspend fun sendDmReaction(
+        context: Context,
+        conversationId: String,
+        recipientUserId: String,
+        targetMessageId: String,
+        emoji: String,
+        op: String = "set" // "set" or "remove"
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val db = database ?: return@withContext Result.failure(IllegalStateException("Chat vault is locked"))
+            val myUserId = SupabaseSessionManager.ensureActiveSession(context)
+                ?: SupabaseSessionManager.getUserId(context)
+                ?: return@withContext Result.failure(IllegalStateException("User not authenticated"))
+            val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                ?: (SupabaseSessionManager.getAccessToken(context)?.let { "Bearer $it" })
+                ?: SupabaseSessionManager.getBearerToken(context)
+
+            val resolvedUserId = resolveRecipientAuthUserId(context, recipientUserId) ?: recipientUserId
+            val ts = System.currentTimeMillis()
+
+            // Update local DB reaction immediately
+            if (op == "remove") {
+                db.dmMessageReactionDao().deleteReaction(targetMessageId, myUserId)
+            } else {
+                db.dmMessageReactionDao().insertReaction(
+                    com.example.db.LocalDmMessageReaction(
+                        conversationId = conversationId,
+                        targetMessageId = targetMessageId,
+                        senderId = myUserId,
+                        emoji = emoji,
+                        ts = ts
+                    )
+                )
+            }
+
+            // If partner is dummy or invalid, stop after local save
+            if (resolvedUserId.isBlank() || resolvedUserId.startsWith("partner_mock")) {
+                return@withContext Result.success(Unit)
+            }
+
+            // Fetch recipient public key
+            val keyResp = SupabaseClient.api.getUserPublicKey(
+                apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
+                auth = token,
+                userIdFilter = "eq.$resolvedUserId"
+            )
+            if (!keyResp.isSuccessful || keyResp.body().isNullOrEmpty()) {
+                Log.w(TAG, "Recipient $recipientUserId has no public key registered for reaction.")
+                return@withContext Result.success(Unit)
+            }
+            val keyItem = keyResp.body()!!.first()
+            val recipientPublicKey = keyItem.identity_public_key ?: return@withContext Result.success(Unit)
+
+            // Construct reaction payload JSON
+            val payloadObj = JSONObject().apply {
+                put("t", "reaction")
+                put("target", targetMessageId)
+                put("emoji", emoji)
+                put("op", op)
+                put("ts", ts)
+            }
+            val ciphertext = E2EEManager.encryptMessage(recipientPublicKey, payloadObj.toString())
+
+            val sendResp = SupabaseClient.api.sendDmMessage(
+                apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
+                auth = token,
+                body = SendDmMessageRequest(
+                    conversation_id = conversationId,
+                    sender_id = myUserId,
+                    recipient_id = resolvedUserId,
+                    ciphertext = ciphertext,
+                    nonce = "",
+                    key_version = keyItem.key_version
+                )
+            )
+
+            if (!sendResp.isSuccessful) {
+                if (sendResp.code() == 429) {
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(context, "Slow down", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+                Log.w(TAG, "sendDmReaction: failed with code ${sendResp.code()}")
+            }
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "sendDmReaction error", e)
+            Result.failure(e)
+        }
+    }
+
+    fun getDmReactionsFlow(conversationId: String): Flow<List<com.example.db.LocalDmMessageReaction>> {
+        val db = database ?: return emptyFlow()
+        return db.dmMessageReactionDao().getReactionsForConversation(conversationId)
     }
 
     private fun parseTimestampToEpoch(isoStr: String?): Long {

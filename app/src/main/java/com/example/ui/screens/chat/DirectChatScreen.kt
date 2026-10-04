@@ -96,12 +96,15 @@ fun DirectChatScreen(
     var showNotReadyDialog by remember { mutableStateOf(false) }
 
     // UI Interactive States
+    val myUserId = remember { com.example.SupabaseSessionManager.getUserId(context) ?: "" }
     var inputText by remember { mutableStateOf("") }
     var selectedMessageForMenu by remember { mutableStateOf<ChatMessage?>(null) }
     var replyingToMessage by remember { mutableStateOf<ChatMessage?>(null) }
     var showEmojiPicker by remember { mutableStateOf(false) }
     var showAttachmentSheet by remember { mutableStateOf(false) }
     var previewImageUrl by remember { mutableStateOf<String?>(null) }
+    var showFullEmojiPickerForMsgId by remember { mutableStateOf<String?>(null) }
+    var showReactionDetailsForMsgId by remember { mutableStateOf<String?>(null) }
     val attachmentSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     // Voice Note States & Audio Player
@@ -258,11 +261,20 @@ fun DirectChatScreen(
         }
     }
 
-    // Collect messages from encrypted Room database
+    // Collect messages and reactions from encrypted Room database
     val localDbMessages by if (conversationId.isNotBlank()) {
         EncryptedChatRepository.getMessagesFlow(conversationId).collectAsState(initial = emptyList())
     } else {
         remember { mutableStateOf(emptyList()) }
+    }
+
+    val dmReactionsFlow = remember(conversationId) {
+        if (conversationId.isNotBlank()) EncryptedChatRepository.getDmReactionsFlow(conversationId)
+        else kotlinx.coroutines.flow.emptyFlow()
+    }
+    val dmReactions by dmReactionsFlow.collectAsState(initial = emptyList())
+    val dmReactionsByMessage = remember(dmReactions) {
+        dmReactions.groupBy { it.targetMessageId }
     }
 
     val timeFormatter = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
@@ -373,9 +385,9 @@ fun DirectChatScreen(
         }
     }
 
-    Box(modifier = modifier.fillMaxSize().background(Color(0xFFFAFAEE))) {
+    Box(modifier = modifier.fillMaxSize().background(Color(0xFFFFFDF8))) {
         Scaffold(
-            containerColor = Color(0xFFFAFAEE),
+            containerColor = Color(0xFFFFFDF8),
             topBar = {
                 ChatHeader(
                     partnerName = partnerName,
@@ -598,7 +610,7 @@ fun DirectChatScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color(0xFFFAFAEE))
+                        .background(Color(0xFFFFFDF8))
                         .navigationBarsPadding()
                         .imePadding()
                 ) {
@@ -946,52 +958,72 @@ fun DirectChatScreen(
 
                 // Dynamic message bubbles (Text, Voice Notes, & Single/Stacked Images)
                 items(uiMessages.distinctBy { it.id }, key = { it.id }) { msg ->
-                    if (msg.type == ChatMessageType.AUDIO) {
-                        VoiceMessageBubble(
-                            message = msg,
-                            partnerAvatarUrl = partnerAvatarUrl,
-                            isPlaying = playingAudioMsgId == msg.id,
-                            isHighlighted = selectedMessageForMenu?.id == msg.id,
-                            onPlayPauseClick = { togglePlayAudio(msg) },
-                            onLongClick = { selectedMessageForMenu = msg }
-                        )
-                    } else if (msg.type == ChatMessageType.IMAGE || msg.getAllImages().isNotEmpty()) {
-                        ImageMessageBubble(
-                            message = msg,
-                            partnerAvatarUrl = partnerAvatarUrl,
-                            isHighlighted = selectedMessageForMenu?.id == msg.id,
-                            onImageClick = { url ->
-                                previewImageUrl = url
-                            },
-                            onDownloadClick = { imgUrl ->
-                                coroutineScope.launch {
-                                    Toast.makeText(context, "Saving image...", Toast.LENGTH_SHORT).show()
-                                    val res = com.example.util.ImageSaveUtils.saveImageToGallery(context, imgUrl)
-                                    res.onSuccess { msgStr ->
-                                        Toast.makeText(context, "✅ $msgStr", Toast.LENGTH_SHORT).show()
-                                    }.onFailure { ex ->
-                                        Toast.makeText(context, "Failed to save: ${ex.message}", Toast.LENGTH_SHORT).show()
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = if (msg.isMe) Alignment.End else Alignment.Start
+                    ) {
+                        if (msg.type == ChatMessageType.AUDIO) {
+                            VoiceMessageBubble(
+                                message = msg,
+                                partnerAvatarUrl = partnerAvatarUrl,
+                                isPlaying = playingAudioMsgId == msg.id,
+                                isHighlighted = selectedMessageForMenu?.id == msg.id,
+                                onPlayPauseClick = { togglePlayAudio(msg) },
+                                onLongClick = { selectedMessageForMenu = msg }
+                            )
+                        } else if (msg.type == ChatMessageType.IMAGE || msg.getAllImages().isNotEmpty()) {
+                            ImageMessageBubble(
+                                message = msg,
+                                partnerAvatarUrl = partnerAvatarUrl,
+                                isHighlighted = selectedMessageForMenu?.id == msg.id,
+                                onImageClick = { url ->
+                                    previewImageUrl = url
+                                },
+                                onDownloadClick = { imgUrl ->
+                                    coroutineScope.launch {
+                                        Toast.makeText(context, "Saving image...", Toast.LENGTH_SHORT).show()
+                                        val res = com.example.util.ImageSaveUtils.saveImageToGallery(context, imgUrl)
+                                        res.onSuccess { msgStr ->
+                                            Toast.makeText(context, "✅ $msgStr", Toast.LENGTH_SHORT).show()
+                                        }.onFailure { ex ->
+                                            Toast.makeText(context, "Failed to save: ${ex.message}", Toast.LENGTH_SHORT).show()
+                                        }
                                     }
-                                }
-                            },
-                            onReactionClick = { selectedMessageForMenu = msg },
-                            onLongClick = { selectedMessageForMenu = msg }
-                        )
-                    } else if (msg.isMe) {
-                        OutgoingMessageBubble(
-                            message = msg,
-                            isHighlighted = selectedMessageForMenu?.id == msg.id,
-                            onLongClick = { selectedMessageForMenu = msg },
-                            onReactionClick = { selectedMessageForMenu = msg }
-                        )
-                    } else {
-                        IncomingMessageBubble(
-                            message = msg,
-                            partnerAvatarUrl = partnerAvatarUrl,
-                            isHighlighted = selectedMessageForMenu?.id == msg.id,
-                            onLongClick = { selectedMessageForMenu = msg },
-                            onReactionClick = { selectedMessageForMenu = msg }
-                        )
+                                },
+                                onReactionClick = { selectedMessageForMenu = msg },
+                                onLongClick = { selectedMessageForMenu = msg }
+                            )
+                        } else if (msg.isMe) {
+                            OutgoingMessageBubble(
+                                message = msg,
+                                isHighlighted = selectedMessageForMenu?.id == msg.id,
+                                onLongClick = { selectedMessageForMenu = msg },
+                                onReactionClick = { selectedMessageForMenu = msg }
+                            )
+                        } else {
+                            IncomingMessageBubble(
+                                message = msg,
+                                partnerAvatarUrl = partnerAvatarUrl,
+                                isHighlighted = selectedMessageForMenu?.id == msg.id,
+                                onLongClick = { selectedMessageForMenu = msg },
+                                onReactionClick = { selectedMessageForMenu = msg }
+                            )
+                        }
+
+                        // Reaction chips row under message bubble
+                        val msgReactions = dmReactionsByMessage[msg.id] ?: emptyList()
+                        if (msgReactions.isNotEmpty()) {
+                            DmReactionChipsRow(
+                                reactions = msgReactions,
+                                currentUserId = myUserId,
+                                onChipClick = { showReactionDetailsForMsgId = msg.id },
+                                onAddReactionClick = { selectedMessageForMenu = msg },
+                                modifier = Modifier.padding(
+                                    start = if (msg.isMe) 0.dp else 40.dp,
+                                    end = if (msg.isMe) 16.dp else 0.dp
+                                )
+                            )
+                        }
                     }
                 }
             }
@@ -1161,18 +1193,41 @@ fun DirectChatScreen(
             }
         }
 
-        // Contextual Long-press Overlay
+        // Contextual Long-press Reaction Overlay for 1:1 Chat
         if (selectedMessageForMenu != null) {
             val target = selectedMessageForMenu!!
-            MessageContextMenu(
-                targetMessage = target,
+            val targetLocalMsg = localDbMessages.find { it.id == target.id }
+                ?: com.example.db.LocalDmMessage(
+                    id = target.id,
+                    conversationId = conversationId,
+                    senderId = if (target.isMe) myUserId else partnerUserId,
+                    recipientId = if (target.isMe) partnerUserId else myUserId,
+                    text = target.text,
+                    timestamp = System.currentTimeMillis(),
+                    isOutgoing = target.isMe
+                )
+            val msgReactions = dmReactionsByMessage[target.id] ?: emptyList()
+            val myReaction = msgReactions.find { it.senderId == myUserId }?.emoji
+
+            DmMessageReactionOverlay(
+                message = targetLocalMsg,
+                myReaction = myReaction,
                 onDismiss = { selectedMessageForMenu = null },
-                onSelectReaction = { reaction ->
+                onSelectEmoji = { emoji, isRemove ->
                     selectedMessageForMenu = null
-                    Toast.makeText(context, "Reacted $reaction", Toast.LENGTH_SHORT).show()
+                    coroutineScope.launch {
+                        EncryptedChatRepository.sendDmReaction(
+                            context = context,
+                            conversationId = conversationId,
+                            recipientUserId = partnerUserId,
+                            targetMessageId = target.id,
+                            emoji = emoji,
+                            op = if (isRemove) "remove" else "set"
+                        )
+                    }
                 },
-                onTranslate = {
-                    Toast.makeText(context, "Translation shown", Toast.LENGTH_SHORT).show()
+                onOpenFullPicker = {
+                    showFullEmojiPickerForMsgId = target.id
                     selectedMessageForMenu = null
                 },
                 onReply = {
@@ -1184,17 +1239,61 @@ fun DirectChatScreen(
                     Toast.makeText(context, "Message copied", Toast.LENGTH_SHORT).show()
                     selectedMessageForMenu = null
                 },
-                onReactMore = {
-                    selectedMessageForMenu = null
-                    showEmojiPicker = true
-                },
-                onMoreActions = {
+                onTranslate = {
+                    Toast.makeText(context, "Translating message...", Toast.LENGTH_SHORT).show()
                     selectedMessageForMenu = null
                 },
-                onReportMessage = {
+                onReport = {
                     reportingMessage = target
                     selectedMessageForMenu = null
                 }
+            )
+        }
+
+        // Full Emoji Picker Bottom Sheet for 1:1 Message
+        if (showFullEmojiPickerForMsgId != null) {
+            val targetId = showFullEmojiPickerForMsgId!!
+            val myReaction = dmReactionsByMessage[targetId]?.find { it.senderId == myUserId }?.emoji
+            FullEmojiPickerBottomSheet(
+                myCurrentReaction = myReaction,
+                onEmojiSelected = { emoji, isRemove ->
+                    coroutineScope.launch {
+                        EncryptedChatRepository.sendDmReaction(
+                            context = context,
+                            conversationId = conversationId,
+                            recipientUserId = partnerUserId,
+                            targetMessageId = targetId,
+                            emoji = emoji,
+                            op = if (isRemove) "remove" else "set"
+                        )
+                    }
+                },
+                onDismiss = { showFullEmojiPickerForMsgId = null }
+            )
+        }
+
+        // Reactions Details Bottom Sheet for 1:1 Message
+        if (showReactionDetailsForMsgId != null) {
+            val targetId = showReactionDetailsForMsgId!!
+            val targetReactions = dmReactionsByMessage[targetId] ?: emptyList()
+            DmReactionDetailsBottomSheet(
+                reactions = targetReactions,
+                currentUserId = myUserId,
+                partnerName = partnerName,
+                partnerAvatarUrl = partnerAvatarUrl,
+                onRemoveMyReaction = { emoji ->
+                    coroutineScope.launch {
+                        EncryptedChatRepository.sendDmReaction(
+                            context = context,
+                            conversationId = conversationId,
+                            recipientUserId = partnerUserId,
+                            targetMessageId = targetId,
+                            emoji = emoji,
+                            op = "remove"
+                        )
+                    }
+                },
+                onDismiss = { showReactionDetailsForMsgId = null }
             )
         }
 

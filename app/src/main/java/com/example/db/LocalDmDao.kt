@@ -50,6 +50,9 @@ interface DmMessageDao {
     @Query("DELETE FROM dm_messages WHERE id = :id")
     suspend fun deleteMessage(id: String)
 
+    @Query("SELECT * FROM dm_messages WHERE id = :id LIMIT 1")
+    suspend fun getMessage(id: String): LocalDmMessage?
+
     @Query("SELECT EXISTS(SELECT 1 FROM dm_messages WHERE id = :id)")
     suspend fun messageExists(id: String): Boolean
 
@@ -58,4 +61,31 @@ interface DmMessageDao {
 
     @Query("DELETE FROM dm_messages")
     suspend fun deleteAllMessages()
+}
+
+@Dao
+interface DmMessageReactionDao {
+    @Query("SELECT * FROM dm_message_reactions WHERE conversation_id = :conversationId ORDER BY ts ASC")
+    fun getReactionsForConversation(conversationId: String): Flow<List<LocalDmMessageReaction>>
+
+    @Query("SELECT * FROM dm_message_reactions WHERE target_message_id = :messageId ORDER BY ts ASC")
+    fun getReactionsForMessage(messageId: String): Flow<List<LocalDmMessageReaction>>
+
+    @Query("SELECT * FROM dm_message_reactions WHERE target_message_id = :messageId AND sender_id = :senderId LIMIT 1")
+    suspend fun getReaction(messageId: String, senderId: String): LocalDmMessageReaction?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertReaction(reaction: LocalDmMessageReaction)
+
+    @Query("DELETE FROM dm_message_reactions WHERE target_message_id = :messageId AND sender_id = :senderId")
+    suspend fun deleteReaction(messageId: String, senderId: String)
+
+    @Query("DELETE FROM dm_message_reactions WHERE target_message_id = :messageId")
+    suspend fun deleteReactionsForMessage(messageId: String)
+
+    @Query("DELETE FROM dm_message_reactions WHERE conversation_id = :conversationId")
+    suspend fun deleteReactionsForConversation(conversationId: String)
+
+    @Query("DELETE FROM dm_message_reactions WHERE target_message_id NOT IN (SELECT id FROM dm_messages)")
+    suspend fun deleteOrphanReactions()
 }

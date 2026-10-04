@@ -1411,6 +1411,37 @@ interface SupabaseApi {
         @Header("Authorization") auth: String,
         @Body body: Map<String, String> = emptyMap()
     ): Response<ResponseBody>
+
+    // ----------------------------------------------------
+    // CLOUD AI ASSIST & CONSENT
+    // ----------------------------------------------------
+    @POST("rest/v1/rpc/get_ai_consent")
+    suspend fun getAiConsent(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> = emptyMap()
+    ): Response<AiConsentResponse>
+
+    @POST("rest/v1/rpc/accept_ai_consent")
+    suspend fun acceptAiConsent(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: AcceptAiConsentRequest = AcceptAiConsentRequest(p_version = 1)
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/revoke_ai_consent")
+    suspend fun revokeAiConsent(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> = emptyMap()
+    ): Response<ResponseBody>
+
+    @POST("functions/v1/ai-assist")
+    suspend fun callAiAssist(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: AiAssistRequest
+    ): Response<AiAssistResponse>
 }
 
 @JsonClass(generateAdapter = true)
@@ -1866,6 +1897,37 @@ data class ChatBackupStatusResponse(
     val includes_media: Boolean = false,
     val backup_key_version: Int = 1,
     val current_key_version: Int = 1
+)
+
+// ----------------------------------------------------
+// CLOUD AI DATA MODELS
+// ----------------------------------------------------
+@JsonClass(generateAdapter = true)
+data class AiConsentResponse(
+    val accepted: Boolean? = false,
+    val consent_version: Int? = 0
+)
+
+@JsonClass(generateAdapter = true)
+data class AcceptAiConsentRequest(
+    val p_version: Int = 1
+)
+
+@JsonClass(generateAdapter = true)
+data class AiAssistRequest(
+    val feature: String, // "translate" | "improve"
+    val text: String,
+    val target_language: String? = null,
+    val style: String? = null, // "fix" | "friendly" | "formal" | "short"
+    val language_hint: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class AiAssistResponse(
+    val text: String? = null,
+    val provider: String? = null, // "sarvam" | "cerebras" | "gemini"
+    val error: String? = null,
+    val code: String? = null
 )
 
 

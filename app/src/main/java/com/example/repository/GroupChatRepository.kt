@@ -3,6 +3,7 @@ package com.example.repository
 import android.content.Context
 import android.util.Base64
 import android.util.Log
+import android.widget.Toast
 import com.example.*
 import com.example.crypto.E2EEManager
 import com.example.crypto.E2EEMediaManager
@@ -11,6 +12,7 @@ import com.example.crypto.VaultStatus
 import com.example.db.EncryptedChatDatabase
 import com.example.db.LocalGroupConversation
 import com.example.db.LocalGroupMessage
+import com.example.db.LocalMessageReaction
 import com.example.realtime.RealtimeTableEvent
 import com.example.realtime.VoiceRoomRealtimeManager
 import kotlinx.coroutines.*
@@ -2089,6 +2091,64 @@ object GroupChatRepository {
                 try { JSONObject(trimmed) } catch (_: Exception) { null }
             } else null
 
+            // ====================================================================
+            // Handle PART A: Reaction Messages (never creates a bubble, no unread, no sound)
+            // Payload: {"t":"reaction","target":"<server msg id>","emoji":"👍","op":"set"|"remove","ts":<epoch ms>}
+            // ====================================================================
+            val isReactionType = rowMessageType.equals("reaction", ignoreCase = true) ||
+                    (jsonEnvelope != null && jsonEnvelope.optString("t").equals("reaction", ignoreCase = true))
+
+            if (isReactionType && jsonEnvelope != null) {
+                val targetMessageId = jsonEnvelope.optString("target").trim()
+                val reactionEmoji = jsonEnvelope.optString("emoji").trim()
+                val op = jsonEnvelope.optString("op", "set").trim().lowercase()
+                val reactionTs = jsonEnvelope.optLong("ts", now)
+
+                if (targetMessageId.isNotBlank()) {
+                    val targetMsg = db.groupMessageDao().getMessageById(targetMessageId)
+                    if (targetMsg != null) {
+                        val existingReaction = db.messageReactionDao().getReaction(targetMessageId, senderId)
+                        if (existingReaction == null || existingReaction.ts <= reactionTs) {
+                            if (op == "remove") {
+                                db.messageReactionDao().deleteReaction(targetMessageId, senderId)
+                            } else if (reactionEmoji.isNotBlank()) {
+                                db.messageReactionDao().insertOrUpdateReaction(
+                                    LocalMessageReaction(
+                                        groupId = groupId,
+                                        targetMessageId = targetMessageId,
+                                        senderId = senderId,
+                                        emoji = reactionEmoji,
+                                        ts = reactionTs
+                                    )
+                                )
+
+                                // Notify only when someone reacts to MY message, respecting mute and notify_level (only 'all')
+                                if (!isFromMe && targetMsg.senderId == myUserId && activeOpenGroupId != groupId) {
+                                    val freshGroup = db.groupConversationDao().getGroup(groupId) ?: localGroup
+                                    val mutedUntil = freshGroup?.mutedUntil ?: 0L
+                                    val isMuted = mutedUntil > System.currentTimeMillis()
+                                    val notifyLevel = (freshGroup?.notifyLevel ?: "all").lowercase()
+                                    if (!isMuted && notifyLevel == "all") {
+                                        val senderName = resolveSenderName(context, token, senderId, groupId)
+                                        val notifTitle = freshGroup?.name ?: "Group Chat"
+                                        val notifBody = "$senderName reacted $reactionEmoji to your message"
+                                        com.example.util.SystemNotificationHelper.showSystemNotification(
+                                            context = context,
+                                            title = notifTitle,
+                                            message = notifBody,
+                                            notificationId = (groupId + "_reaction").hashCode()
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                processedRecipientIds.add(row.id)
+                deleteRecipientRow(token, row.id)
+                return
+            }
+
             if (jsonEnvelope != null && jsonEnvelope.has("media_key")) {
                 savedKey = jsonEnvelope.optString("media_key")
                 savedNonce = jsonEnvelope.optString("media_nonce")
@@ -2395,12 +2455,151 @@ object GroupChatRepository {
         database?.groupMessageDao()?.searchGroupMessages(cleanGroupId, cleanQuery, System.currentTimeMillis()).orEmpty()
     }
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    fun getGroupReactionsFlow(groupId: String): Flow<List<LocalMessageReaction>> {
+        val cleanGroupId = groupId.trim().replace("\"", "")
+        return _databaseState.flatMapLatest { db ->
+            db?.messageReactionDao()?.getReactionsForGroup(cleanGroupId) ?: flowOf(emptyList())
+        }
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    fun getMessageReactionsFlow(messageId: String): Flow<List<LocalMessageReaction>> {
+        val cleanMessageId = messageId.trim().replace("\"", "")
+        return _databaseState.flatMapLatest { db ->
+            db?.messageReactionDao()?.getReactionsForMessage(cleanMessageId) ?: flowOf(emptyList())
+        }
+    }
+
+    /**
+     * Sends an encrypted reaction with rpc send_group_message(p_group_id, 'reaction', p_recipients).
+     * Encrypted JSON payload: {"t":"reaction","target":"<server message id>","emoji":"👍","op":"set"|"remove","ts":<epoch ms>}
+     * Allowed even when who_can_send='admins'.
+     * Handles rate_limited silently with toast "Slow down".
+     */
+    suspend fun sendGroupReaction(
+        context: Context,
+        groupId: String,
+        targetMessageId: String,
+        emoji: String,
+        op: String = "set"
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val activeUid = SupabaseSessionManager.ensureActiveSession(context)
+            val myUserId = activeUid ?: SupabaseSessionManager.getUserId(context)
+                ?: return@withContext Result.failure(Exception("Not logged in"))
+            val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                ?: return@withContext Result.failure(Exception("Not authenticated"))
+
+            val cleanGroupId = groupId.trim().replace("\"", "")
+            val cleanTargetId = targetMessageId.trim().replace("\"", "")
+            val db = database
+            val now = System.currentTimeMillis()
+
+            // Verify target message exists in local DB
+            if (db != null && !db.groupMessageDao().messageExists(cleanTargetId)) {
+                return@withContext Result.failure(Exception("Target message not found in local DB"))
+            }
+
+            // 1. Immediate optimistic local update
+            if (db != null) {
+                val existing = db.messageReactionDao().getReaction(cleanTargetId, myUserId)
+                if (existing == null || existing.ts <= now) {
+                    if (op.equals("remove", ignoreCase = true)) {
+                        db.messageReactionDao().deleteReaction(cleanTargetId, myUserId)
+                    } else if (emoji.isNotBlank()) {
+                        db.messageReactionDao().insertOrUpdateReaction(
+                            LocalMessageReaction(
+                                groupId = cleanGroupId,
+                                targetMessageId = cleanTargetId,
+                                senderId = myUserId,
+                                emoji = emoji,
+                                ts = now
+                            )
+                        )
+                    }
+                }
+            }
+
+            // 2. Build encrypted payload
+            val payloadObj = JSONObject().apply {
+                put("t", "reaction")
+                put("target", cleanTargetId)
+                put("emoji", emoji)
+                put("op", if (op.equals("remove", ignoreCase = true)) "remove" else "set")
+                put("ts", now)
+            }
+            val payloadStr = payloadObj.toString()
+
+            // 3. E2EE Fan-out to joined group members
+            val membersRes = getGroupMembersResult(context, cleanGroupId)
+            val allMembers = membersRes.getOrNull().orEmpty()
+            val joinedMembers = allMembers.filter { it.status.trim().equals("joined", ignoreCase = true) }
+            val memberUserIds = (joinedMembers.map { it.user_id }.toSet() + myUserId).filter { it.isNotBlank() }
+
+            val recipientsPayload = mutableListOf<GroupRecipientPayload>()
+            for (uid in memberUserIds) {
+                val keyResp = SupabaseClient.api.getUserPublicKey(
+                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                    auth = token,
+                    userIdFilter = "eq.$uid"
+                )
+                val pubKey = keyResp.body()?.firstOrNull()?.identity_public_key
+                if (!pubKey.isNullOrBlank()) {
+                    val ciphertext = E2EEManager.encryptMessage(pubKey, payloadStr)
+                    recipientsPayload.add(
+                        GroupRecipientPayload(
+                            recipient_id = uid,
+                            ciphertext = ciphertext,
+                            nonce = UUID.randomUUID().toString()
+                        )
+                    )
+                }
+            }
+
+            if (recipientsPayload.isNotEmpty()) {
+                val sendResp = SupabaseClient.api.sendGroupMessage(
+                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                    auth = token,
+                    body = SendGroupMessageRequest(
+                        p_group_id = cleanGroupId,
+                        p_message_type = "reaction",
+                        p_recipients = recipientsPayload
+                    )
+                )
+
+                if (!sendResp.isSuccessful) {
+                    val err = sendResp.errorBody()?.string()?.lowercase().orEmpty()
+                    if (err.contains("rate_limited") || err.contains("too_many_requests")) {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, "Slow down", Toast.LENGTH_SHORT).show()
+                        }
+                        return@withContext Result.success(Unit)
+                    }
+                    return@withContext Result.failure(Exception(mapGroupError(err, "Failed to send reaction")))
+                }
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            val msg = e.message?.lowercase().orEmpty()
+            if (msg.contains("rate_limited") || msg.contains("too_many_requests")) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "Slow down", Toast.LENGTH_SHORT).show()
+                }
+                Result.success(Unit)
+            } else {
+                Result.failure(e)
+            }
+        }
+    }
+
     /**
      * Local-only clear chat (E2EE). Never calls the server.
      */
     suspend fun clearGroupChatLocally(groupId: String) = withContext(Dispatchers.IO) {
         val cleanGroupId = groupId.trim().replace("\"", "")
         database?.groupMessageDao()?.clearGroupMessages(cleanGroupId)
+        database?.messageReactionDao()?.deleteReactionsForGroup(cleanGroupId)
         database?.groupConversationDao()?.updateLastMessage(
             groupId = cleanGroupId,
             text = "Chat cleared locally",
