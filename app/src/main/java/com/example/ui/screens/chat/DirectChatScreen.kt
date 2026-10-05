@@ -1,1807 +1,989 @@
 package com.example.ui.screens.chat
 
+import android.content.Context
+import android.content.Intent
 import android.net.Uri
+import android.speech.tts.TextToSpeech
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.Forward
+import androidx.compose.material.icons.automirrored.rounded.Reply
+import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.example.ChatPreferencesManager
-import com.example.crypto.VaultSecurityManager
-import com.example.crypto.VaultStatus
+import com.example.CloudAiManager
+import com.example.SupabaseSessionManager
+import com.example.db.LocalDmConversation
+import com.example.db.LocalDmMessage
+import com.example.db.LocalDmMessageReaction
 import com.example.repository.EncryptedChatRepository
-import com.example.repository.RecipientNotReadyException
-import com.example.ui.components.*
-import com.example.ui.screens.chat.components.*
-import com.example.ui.screens.chat.model.ChatMessage
-import com.example.ui.screens.chat.model.ChatMessageType
-import com.example.ui.screens.home.dialogs.BlockedUsersBottomSheet
-import com.example.gifting.SendGiftBottomSheet
-import com.example.moderation.ReportUserDialog
+import com.example.ui.chat.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.util.*
+
+sealed class DmTimelineItem {
+    abstract val id: String
+    data class DateHeader(val label: String) : DmTimelineItem() {
+        override val id: String = "date_$label"
+    }
+    data class SecurityHeader(val text: String) : DmTimelineItem() {
+        override val id: String = "security_header"
+    }
+    data class MessageItem(
+        val message: LocalDmMessage,
+        val position: GroupPosition,
+        val reactions: List<ReactionUi>,
+        val isFirstInGroup: Boolean,
+        val isLastInGroup: Boolean
+    ) : DmTimelineItem() {
+        override val id: String = message.id
+    }
+}
+
+data class WordLookupState(
+    val word: String,
+    val fullSentence: String,
+    val translation: String? = null,
+    val isLoading: Boolean = false
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DirectChatScreen(
-    partnerUserId: String = "",
-    partnerName: String = "Yuki Tanaka",
-    partnerAvatarUrl: String = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200",
-    partnerCountry: String = "Japan",
-    partnerCountryCode: String = "jp",
-    onBack: () -> Unit,
-    modifier: Modifier = Modifier
+    partnerUserId: String,
+    partnerName: String,
+    partnerAvatarUrl: String? = null,
+    partnerCountry: String? = null,
+    partnerCountryCode: String? = null,
+    onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val clipboardManager = LocalClipboardManager.current
     val coroutineScope = rememberCoroutineScope()
+    val clipboardManager = LocalClipboardManager.current
     val listState = rememberLazyListState()
 
-    val vaultStatus by VaultSecurityManager.vaultStatus.collectAsState()
+    LaunchedEffect(context) {
+        ChatPreferencesManager.init(context)
+        CloudAiManager.init(context)
+    }
+
+    val darkTheme = rememberEffectiveChatDarkTheme()
+    val chatPreset by ChatPreferencesManager.chatPreset.collectAsState()
+    val chatTextScale by ChatPreferencesManager.chatTextScale.collectAsState()
+    val isAiConsentGranted by CloudAiManager.isCloudAiEnabled.collectAsState()
+
+    val currentUserId = remember(context) { SupabaseSessionManager.getUserId(context) ?: "" }
+    val voicePlayer = rememberVoicePlaybackController()
+    val voiceRecorder = remember { LiveVoiceRecorder(context.applicationContext, coroutineScope) }
+
+    var resolvedConversation by remember { mutableStateOf<LocalDmConversation?>(null) }
     var conversationId by remember { mutableStateOf("") }
-    var isSending by remember { mutableStateOf(false) }
+    var rawMessages by remember { mutableStateOf<List<LocalDmMessage>>(emptyList()) }
+    var rawReactions by remember { mutableStateOf<List<LocalDmMessageReaction>>(emptyList()) }
 
-    // Chat Preferences & Blocking State
-    val mutedChats by ChatPreferencesManager.mutedChats.collectAsState()
-    val blockedUsers by ChatPreferencesManager.blockedUsers.collectAsState()
-    val isBlocked = blockedUsers.contains(partnerUserId)
-    val isMuted = mutedChats.contains(conversationId.ifBlank { partnerUserId })
-
-    var showOptionsMenu by remember { mutableStateOf(false) }
-    var showBlockConfirmDialog by remember { mutableStateOf(false) }
-    var showClearConfirmDialog by remember { mutableStateOf(false) }
-    var showBlockedUsersSheet by remember { mutableStateOf(false) }
-    var reportingMessage by remember { mutableStateOf<ChatMessage?>(null) }
-    var showSendGiftSheet by remember { mutableStateOf(false) }
-    var showReportUserDialog by remember { mutableStateOf(false) }
-
-    // Edge case check state: does recipient have public encryption key?
-    var recipientKeyReady by remember { mutableStateOf<Boolean?>(null) }
-    var isCheckingKey by remember { mutableStateOf(false) }
-    var showNotReadyDialog by remember { mutableStateOf(false) }
-
-    // UI Interactive States
-    val myUserId = remember { com.example.SupabaseSessionManager.getUserId(context) ?: "" }
     var inputText by remember { mutableStateOf("") }
-    var selectedMessageForMenu by remember { mutableStateOf<ChatMessage?>(null) }
-    var replyingToMessage by remember { mutableStateOf<ChatMessage?>(null) }
-    var showEmojiPicker by remember { mutableStateOf(false) }
+    var replyingToMessage by remember { mutableStateOf<LocalDmMessage?>(null) }
+    var selectedMessageForMenu by remember { mutableStateOf<LocalDmMessage?>(null) }
+    var isSelectionMode by remember { mutableStateOf(false) }
+    val selectedMessageIds = remember { mutableStateListOf<String>() }
+
+    var activeMediaViewerIndex by remember { mutableStateOf<Int?>(null) }
+    var activeWordLookup by remember { mutableStateOf<WordLookupState?>(null) }
+    var showAiAssistSheet by remember { mutableStateOf(false) }
     var showAttachmentSheet by remember { mutableStateOf(false) }
-    var previewImageUrl by remember { mutableStateOf<String?>(null) }
-    var showFullEmojiPickerForMsgId by remember { mutableStateOf<String?>(null) }
-    var showReactionDetailsForMsgId by remember { mutableStateOf<String?>(null) }
-    val attachmentSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var translatedMessages = remember { mutableStateMapOf<String, String>() }
 
-    // Voice Note States & Audio Player
-    var isRecordingVoice by remember { mutableStateOf(false) }
-    var recordingSeconds by remember { mutableStateOf(0) }
-    var playingAudioMsgId by remember { mutableStateOf<String?>(null) }
-    var activeMediaPlayer by remember { mutableStateOf<android.media.MediaPlayer?>(null) }
+    val flashAnimatables = remember { mutableStateMapOf<String, Animatable<Float, *>>() }
 
-    val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        if (isGranted) {
-            val started = com.example.util.VoiceRecorderManager.startRecording(context)
-            if (started) {
-                isRecordingVoice = true
-                recordingSeconds = 0
-            } else {
-                Toast.makeText(context, "Could not start voice recorder", Toast.LENGTH_SHORT).show()
-            }
-        } else {
-            Toast.makeText(context, "Microphone permission required for voice notes", Toast.LENGTH_SHORT).show()
+    fun flashMessage(messageId: String) {
+        coroutineScope.launch {
+            val anim = flashAnimatables.getOrPut(messageId) { Animatable(0f) }
+            anim.snapTo(1f)
+            anim.animateTo(0f, animationSpec = tween(durationMillis = 1200))
         }
     }
 
-    LaunchedEffect(isRecordingVoice) {
-        if (isRecordingVoice) {
-            while (isRecordingVoice) {
-                kotlinx.coroutines.delay(1000L)
-                recordingSeconds++
+    // TTS
+    var tts: TextToSpeech? by remember { mutableStateOf(null) }
+    DisposableEffect(context) {
+        tts = TextToSpeech(context) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                tts?.language = Locale.getDefault()
             }
         }
-    }
-
-    DisposableEffect(Unit) {
         onDispose {
-            try {
-                com.example.util.VoiceRecorderManager.cancelRecording()
-                activeMediaPlayer?.stop()
-                activeMediaPlayer?.release()
-            } catch (_: Exception) {}
+            tts?.stop()
+            tts?.shutdown()
         }
     }
 
-    fun togglePlayAudio(msg: ChatMessage) {
-        if (playingAudioMsgId == msg.id) {
-            try {
-                activeMediaPlayer?.stop()
-                activeMediaPlayer?.release()
-            } catch (_: Exception) {}
-            activeMediaPlayer = null
-            playingAudioMsgId = null
-        } else {
-            try {
-                activeMediaPlayer?.stop()
-                activeMediaPlayer?.release()
-            } catch (_: Exception) {}
+    // Initialize Conversation & Observe DB
+    LaunchedEffect(partnerUserId) {
+        try {
+            val conv = EncryptedChatRepository.getOrCreateLocalConversation(
+                context = context,
+                otherUserId = partnerUserId,
+                otherUserName = partnerName,
+                otherUserAvatar = partnerAvatarUrl
+            )
+            resolvedConversation = conv
+            conversationId = conv.id
+            EncryptedChatRepository.markConversationRead(conv.id)
+        } catch (e: Exception) {
+            android.util.Log.e("DirectChatScreen", "Error resolving conversation", e)
+        }
+    }
 
-            val path = msg.text.removePrefix("file://").trim()
-            val file = java.io.File(path)
-            if (file.exists() && file.length() > 0) {
-                try {
-                    val player = android.media.MediaPlayer().apply {
-                        setDataSource(file.absolutePath)
-                        prepare()
-                        start()
-                    }
-                    activeMediaPlayer = player
-                    playingAudioMsgId = msg.id
-
-                    player.setOnCompletionListener {
-                        try { player.release() } catch (_: Exception) {}
-                        activeMediaPlayer = null
-                        playingAudioMsgId = null
-                    }
-                } catch (e: Exception) {
-                    Toast.makeText(context, "Cannot play audio: ${e.message}", Toast.LENGTH_SHORT).show()
-                    playingAudioMsgId = null
-                }
-            } else {
-                Toast.makeText(context, "Voice note file unavailable locally", Toast.LENGTH_SHORT).show()
+    LaunchedEffect(conversationId) {
+        if (conversationId.isNotBlank()) {
+            EncryptedChatRepository.getMessagesFlow(conversationId).collect { msgs ->
+                rawMessages = msgs
             }
         }
     }
 
-    // Multiple Image Photo Picker (2-layer E2EE encrypted media upload)
-    val multiplePhotoPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 6)
-    ) { uris: List<Uri> ->
+    // Pick photos
+    val photoPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(4)) { uris ->
         if (uris.isNotEmpty()) {
             coroutineScope.launch {
-                isSending = true
-                var sendSuccessCount = 0
-                for (uri in uris) {
+                uris.forEach { uri ->
                     try {
                         val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                         if (bytes != null && bytes.isNotEmpty()) {
-                            val sendResult = EncryptedChatRepository.sendMediaMessage(
+                            EncryptedChatRepository.sendMediaMessage(
                                 context = context,
-                                recipientUserId = partnerUserId.ifBlank { "partner_mock_id" },
+                                recipientUserId = partnerUserId,
                                 recipientName = partnerName,
                                 recipientAvatar = partnerAvatarUrl,
                                 rawBytes = bytes,
                                 messageType = "image",
-                                mimeType = "image/jpeg",
-                                replyToText = replyingToMessage?.text,
-                                replyToSender = replyingToMessage?.let { if (it.isMe) "You" else partnerName }
+                                mimeType = "image/jpeg"
                             )
-                            sendResult.onSuccess {
-                                sendSuccessCount++
-                                recipientKeyReady = true
-                            }.onFailure { ex ->
-                                if (ex is RecipientNotReadyException) {
-                                    recipientKeyReady = false
-                                    showNotReadyDialog = true
+                        }
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "Error sending photo: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
+
+    // Pick document
+    val docPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            coroutineScope.launch {
+                try {
+                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    if (bytes != null && bytes.isNotEmpty()) {
+                        EncryptedChatRepository.sendMediaMessage(
+                            context = context,
+                            recipientUserId = partnerUserId,
+                            recipientName = partnerName,
+                            recipientAvatar = partnerAvatarUrl,
+                            rawBytes = bytes,
+                            messageType = "image",
+                            mimeType = "application/octet-stream"
+                        )
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Error sending file: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    ProvideChatTheme(
+        preset = chatPreset,
+        darkTheme = darkTheme,
+        textScale = chatTextScale
+    ) {
+        val colors = LocalChatColors.current
+
+        val timelineItems = remember(rawMessages, rawReactions, currentUserId) {
+            val sorted = rawMessages.sortedBy { it.timestamp }
+            val items = mutableListOf<DmTimelineItem>()
+            items.add(DmTimelineItem.SecurityHeader("Messages and calls are end-to-end encrypted. No one outside of this chat can read or listen to them."))
+
+            var prevDateLabel = ""
+            for (i in sorted.indices) {
+                val msg = sorted[i]
+                val dateLabel = formatChatDateChip(msg.timestamp)
+                if (dateLabel != prevDateLabel) {
+                    items.add(DmTimelineItem.DateHeader(dateLabel))
+                    prevDateLabel = dateLabel
+                }
+
+                val isOlderSameSender = i > 0 &&
+                        sorted[i - 1].isOutgoing == msg.isOutgoing &&
+                        (msg.timestamp - sorted[i - 1].timestamp) <= 2 * 60 * 1000L
+
+                val isNewerSameSender = i < sorted.size - 1 &&
+                        sorted[i + 1].isOutgoing == msg.isOutgoing &&
+                        (sorted[i + 1].timestamp - msg.timestamp) <= 2 * 60 * 1000L
+
+                val position = computeGroupPosition(isOlderSameSender, isNewerSameSender)
+                val isFirst = !isOlderSameSender
+                val isLast = !isNewerSameSender
+
+                val msgReactions = rawReactions.filter { it.targetMessageId == msg.id }
+                val reactionUis = msgReactions.groupBy { it.emoji }.map { (emoji, list) ->
+                    ReactionUi(
+                        emoji = emoji,
+                        count = list.size,
+                        mine = list.any { it.senderId == currentUserId }
+                    )
+                }
+
+                items.add(
+                    DmTimelineItem.MessageItem(
+                        message = msg,
+                        position = position,
+                        reactions = reactionUis,
+                        isFirstInGroup = isFirst,
+                        isLastInGroup = isLast
+                    )
+                )
+            }
+            items
+        }
+
+        val allMediaItems = remember(rawMessages) {
+            rawMessages.filter { it.text.startsWith("[img]") || it.text.startsWith("[imgs]") }
+                .map { msg ->
+                    val url = msg.text.removePrefix("[img]").removePrefix("[imgs]").substringBefore("|")
+                    ChatViewerMediaItem(
+                        id = msg.id,
+                        url = url,
+                        senderName = if (msg.isOutgoing) "You" else partnerName,
+                        dateText = formatChatTime(msg.timestamp),
+                        caption = null,
+                        isVideo = false
+                    )
+                }
+        }
+
+        val unreadCount = remember(rawMessages) {
+            rawMessages.count { !it.isOutgoing }
+        }
+
+        BackHandler(enabled = isSelectionMode || selectedMessageForMenu != null) {
+            if (isSelectionMode) {
+                isSelectionMode = false
+                selectedMessageIds.clear()
+            } else {
+                selectedMessageForMenu = null
+            }
+        }
+
+        Scaffold(
+            topBar = {
+                if (isSelectionMode) {
+                    SelectionTopBar(
+                        selectedCount = selectedMessageIds.size,
+                        actions = listOf(
+                            MessageAction("copy", "Copy", Icons.Rounded.ContentCopy),
+                            MessageAction("forward", "Forward", Icons.AutoMirrored.Rounded.Forward),
+                            MessageAction("delete", "Delete", Icons.Rounded.DeleteOutline, destructive = true)
+                        ),
+                        onAction = { actionId ->
+                            when (actionId) {
+                                "copy" -> {
+                                    val joined = rawMessages.filter { it.id in selectedMessageIds }.joinToString("\n") { it.text }
+                                    clipboardManager.setText(AnnotatedString(joined))
+                                    Toast.makeText(context, "Copied ${selectedMessageIds.size} messages", Toast.LENGTH_SHORT).show()
+                                }
+                                "forward" -> {
+                                    Toast.makeText(context, "Forward ${selectedMessageIds.size} messages", Toast.LENGTH_SHORT).show()
+                                }
+                                "delete" -> {
+                                    coroutineScope.launch {
+                                        selectedMessageIds.forEach { id ->
+                                            EncryptedChatRepository.deleteConversationLocally(conversationId)
+                                        }
+                                        Toast.makeText(context, "Deleted messages", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
+                            isSelectionMode = false
+                            selectedMessageIds.clear()
+                        },
+                        onClose = {
+                            isSelectionMode = false
+                            selectedMessageIds.clear()
+                        }
+                    )
+                } else {
+                    Surface(
+                        color = colors.wallpaper,
+                        shadowElevation = 0.5.dp,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .statusBarsPadding()
+                                .padding(horizontal = 4.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(onClick = onBack) {
+                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back", tint = colors.text)
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(colors.accentIn.copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (!partnerAvatarUrl.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = partnerAvatarUrl,
+                                        contentDescription = "Avatar",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
                                 } else {
-                                    Toast.makeText(context, ex.message ?: "Failed to encrypt and send image", Toast.LENGTH_LONG).show()
+                                    Text(
+                                        text = partnerName.take(1).uppercase(),
+                                        color = colors.accentIn,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 16.sp
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(10.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = partnerName,
+                                    color = colors.text,
+                                    fontSize = 16f.chatSp(),
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(7.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF22C55E))
+                                    )
+                                    Spacer(modifier = Modifier.width(5.dp))
+                                    Text(
+                                        text = if (!partnerCountry.isNullOrBlank()) "Online · $partnerCountry" else "Online",
+                                        color = colors.textSecondary,
+                                        fontSize = 12f.chatSp()
+                                    )
                                 }
                             }
                         }
-                    } catch (e: Exception) {
-                        Toast.makeText(context, "Error reading image: ${e.message}", Toast.LENGTH_SHORT).show()
                     }
                 }
-                isSending = false
-                if (sendSuccessCount > 0) {
-                    replyingToMessage = null
-                    Toast.makeText(context, "$sendSuccessCount image(s) encrypted and sent securely", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-    }
-
-    // Initialize repo, resolve conversation, and check recipient key availability
-    LaunchedEffect(partnerUserId, vaultStatus) {
-        EncryptedChatRepository.init(context)
-        if (vaultStatus == VaultStatus.UNLOCKED && partnerUserId.isNotBlank()) {
-            try {
-                val conv = EncryptedChatRepository.getOrCreateLocalConversation(
-                    context = context,
-                    otherUserId = partnerUserId,
-                    otherUserName = partnerName,
-                    otherUserAvatar = partnerAvatarUrl
-                )
-                conversationId = conv.id
-                EncryptedChatRepository.markConversationRead(conv.id)
-
-                // Verify if recipient has registered E2EE public keys
-                isCheckingKey = true
-                recipientKeyReady = EncryptedChatRepository.checkRecipientKeyStatus(context, partnerUserId)
-                isCheckingKey = false
-            } catch (e: Exception) {
-                android.util.Log.e("DirectChatScreen", "Error resolving conversation", e)
-            }
-        }
-    }
-
-    // Collect messages and reactions from encrypted Room database
-    val localDbMessages by if (conversationId.isNotBlank()) {
-        EncryptedChatRepository.getMessagesFlow(conversationId).collectAsState(initial = emptyList())
-    } else {
-        remember { mutableStateOf(emptyList()) }
-    }
-
-    val dmReactionsFlow = remember(conversationId) {
-        if (conversationId.isNotBlank()) EncryptedChatRepository.getDmReactionsFlow(conversationId)
-        else kotlinx.coroutines.flow.emptyFlow()
-    }
-    val dmReactions by dmReactionsFlow.collectAsState(initial = emptyList())
-    val dmReactionsByMessage = remember(dmReactions) {
-        dmReactions.groupBy { it.targetMessageId }
-    }
-
-    val timeFormatter = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
-
-    // Map local DB messages to UI ChatMessage with support for Single/Stacked Images and Voice Notes
-    val uiMessages = remember(localDbMessages) {
-        localDbMessages.map { dbMsg ->
-            val rawText = dbMsg.text
-            val isImgStack = rawText.startsWith("[imgs]")
-            val isSingleImg = rawText.startsWith("[img]")
-            val isVoice = rawText.startsWith("[voice]") || rawText.startsWith("[audio]")
-            val isWebImg = (rawText.startsWith("http://") || rawText.startsWith("https://")) &&
-                    (rawText.contains(".jpg") || rawText.contains(".png") || rawText.contains(".jpeg") || rawText.contains("unsplash"))
-
-            when {
-                isVoice -> {
-                    val parts = rawText.removePrefix("[voice]").removePrefix("[audio]").split("|")
-                    val audioPath = parts.getOrNull(0)?.trim() ?: ""
-                    val durationSecs = parts.getOrNull(1)?.toIntOrNull() ?: 12
-                    val formattedDuration = String.format("%d:%02d", durationSecs / 60, durationSecs % 60)
-                    ChatMessage(
-                        id = dbMsg.id,
-                        text = audioPath,
-                        time = timeFormatter.format(Date(dbMsg.timestamp)),
-                        isMe = dbMsg.isOutgoing,
-                        type = ChatMessageType.AUDIO,
-                        audioDuration = formattedDuration,
-                        audioDurationSecs = durationSecs,
-                        replyToText = dbMsg.replyToText,
-                        replyToSender = dbMsg.replyToSender,
-                        showAvatar = !dbMsg.isOutgoing
-                    )
-                }
-                isImgStack -> {
-                    val urls = rawText.removePrefix("[imgs]").split(",").map { it.trim() }.filter { it.isNotBlank() }
-                    ChatMessage(
-                        id = dbMsg.id,
-                        text = "",
-                        time = timeFormatter.format(Date(dbMsg.timestamp)),
-                        isMe = dbMsg.isOutgoing,
-                        type = ChatMessageType.IMAGE,
-                        imageUrl = urls.firstOrNull(),
-                        imageUrls = urls,
-                        replyToText = dbMsg.replyToText,
-                        replyToSender = dbMsg.replyToSender,
-                        showAvatar = !dbMsg.isOutgoing
-                    )
-                }
-                isSingleImg -> {
-                    val url = rawText.removePrefix("[img]").trim()
-                    ChatMessage(
-                        id = dbMsg.id,
-                        text = "",
-                        time = timeFormatter.format(Date(dbMsg.timestamp)),
-                        isMe = dbMsg.isOutgoing,
-                        type = ChatMessageType.IMAGE,
-                        imageUrl = url,
-                        imageUrls = listOf(url),
-                        replyToText = dbMsg.replyToText,
-                        replyToSender = dbMsg.replyToSender,
-                        showAvatar = !dbMsg.isOutgoing
-                    )
-                }
-                isWebImg -> {
-                    ChatMessage(
-                        id = dbMsg.id,
-                        text = "",
-                        time = timeFormatter.format(Date(dbMsg.timestamp)),
-                        isMe = dbMsg.isOutgoing,
-                        type = ChatMessageType.IMAGE,
-                        imageUrl = rawText,
-                        imageUrls = listOf(rawText),
-                        replyToText = dbMsg.replyToText,
-                        replyToSender = dbMsg.replyToSender,
-                        showAvatar = !dbMsg.isOutgoing
-                    )
-                }
-                else -> {
-                    ChatMessage(
-                        id = dbMsg.id,
-                        text = dbMsg.text,
-                        time = timeFormatter.format(Date(dbMsg.timestamp)),
-                        isMe = dbMsg.isOutgoing,
-                        type = ChatMessageType.TEXT,
-                        replyToText = dbMsg.replyToText,
-                        replyToSender = dbMsg.replyToSender,
-                        showAvatar = !dbMsg.isOutgoing
-                    )
-                }
-            }
-        }
-    }
-
-    // Scroll to bottom when new messages arrive
-    LaunchedEffect(uiMessages.size) {
-        if (uiMessages.isNotEmpty()) {
-            listState.animateScrollToItem(uiMessages.size - 1)
-        }
-    }
-
-    BackHandler {
-        when {
-            previewImageUrl != null -> previewImageUrl = null
-            showEmojiPicker -> showEmojiPicker = false
-            selectedMessageForMenu != null -> selectedMessageForMenu = null
-            replyingToMessage != null -> replyingToMessage = null
-            else -> onBack()
-        }
-    }
-
-    Box(modifier = modifier.fillMaxSize().background(Color(0xFFFFFDF8))) {
-        Scaffold(
-            containerColor = Color(0xFFFFFDF8),
-            topBar = {
-                ChatHeader(
-                    partnerName = partnerName,
-                    partnerAvatarUrl = partnerAvatarUrl,
-                    partnerCountry = partnerCountry,
-                    partnerCountryCode = partnerCountryCode,
-                    isOnline = true,
-                    onBackClick = onBack,
-                    onMenuClick = {
-                        showOptionsMenu = true
-                    },
-                    menuContent = {
-                        DropdownMenu(
-                            expanded = showOptionsMenu,
-                            onDismissRequest = { showOptionsMenu = false },
-                            shape = RoundedCornerShape(20.dp),
-                            containerColor = Color.White,
-                            shadowElevation = 8.dp,
-                            modifier = Modifier
-                                .width(230.dp)
-                                .background(Color.White, RoundedCornerShape(20.dp))
-                                .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(20.dp))
-                        ) {
-                        // 1. Mute / Unmute
-                        DropdownMenuItem(
-                            text = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .clip(CircleShape)
-                                            .background(if (isMuted) Color(0xFFD1FAE5) else Color(0xFFF3F4F6)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        if (isMuted) {
-                                            SoftVolumeIcon(size = 15.dp, color = Color(0xFF10B981))
-                                        } else {
-                                            SoftMuteIcon(size = 15.dp, color = Color(0xFF4B5563))
-                                        }
-                                    }
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text(
-                                        text = if (isMuted) "Unmute notifications" else "Mute notifications",
-                                        color = Color.Black,
-                                        fontSize = 13.5.sp,
-                                        fontWeight = FontWeight.Medium
+            },
+            bottomBar = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(colors.wallpaper)
+                        .imePadding()
+                ) {
+                    ChatInputBar(
+                        text = inputText,
+                        onTextChange = { inputText = it },
+                        onSend = {
+                            if (inputText.isNotBlank()) {
+                                val reply = replyingToMessage
+                                val textToSend = inputText
+                                inputText = ""
+                                replyingToMessage = null
+                                coroutineScope.launch {
+                                    EncryptedChatRepository.sendMessage(
+                                        context = context,
+                                        recipientUserId = partnerUserId,
+                                        recipientName = partnerName,
+                                        recipientAvatar = partnerAvatarUrl,
+                                        text = textToSend,
+                                        replyToText = reply?.text,
+                                        replyToSender = if (reply != null) {
+                                            if (reply.isOutgoing) "You" else partnerName
+                                        } else null
                                     )
-                                }
-                            },
-                            onClick = {
-                                showOptionsMenu = false
-                                val targetId = conversationId.ifBlank { partnerUserId }
-                                val mutedNow = ChatPreferencesManager.toggleMuteChat(context, targetId)
-                                Toast.makeText(
-                                    context,
-                                    if (mutedNow) "Notifications muted" else "Notifications unmuted",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }
-                        )
-
-                        // 2. Clear Chat History
-                        DropdownMenuItem(
-                            text = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFFF3F4F6)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        SoftBroomIcon(size = 15.dp, color = Color(0xFF4B5563))
+                                    if (timelineItems.isNotEmpty()) {
+                                        listState.animateScrollToItem(timelineItems.size - 1)
                                     }
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text(
-                                        text = "Clear chat history",
-                                        color = Color.Black,
-                                        fontSize = 13.5.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                            },
-                            onClick = {
-                                showOptionsMenu = false
-                                showClearConfirmDialog = true
-                            }
-                        )
-
-                        HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-
-                        // 3. Block / Unblock User
-                        DropdownMenuItem(
-                            text = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .clip(CircleShape)
-                                            .background(if (isBlocked) Color(0xFFD1FAE5) else Color(0xFFFEE2E2)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        if (isBlocked) {
-                                            SoftShieldIcon(size = 15.dp, color = Color(0xFF059669))
-                                        } else {
-                                            SoftBlockIcon(size = 15.dp, color = Color(0xFFDC2626))
-                                        }
-                                    }
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text(
-                                        text = if (isBlocked) "Unblock $partnerName" else "Block $partnerName",
-                                        color = if (isBlocked) Color(0xFF059669) else Color(0xFFDC2626),
-                                        fontSize = 13.5.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            },
-                            onClick = {
-                                showOptionsMenu = false
-                                if (isBlocked) {
-                                    ChatPreferencesManager.unblockUser(context, partnerUserId)
-                                    Toast.makeText(context, "$partnerName unblocked successfully", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    showBlockConfirmDialog = true
                                 }
                             }
-                        )
-
-                        // 4. Blocked Users List
-                        DropdownMenuItem(
-                            text = {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFFFEE2E2)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        SoftShieldIcon(size = 15.dp, color = Color(0xFFDC2626))
-                                    }
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text(
-                                        text = "Blocked Users",
-                                        color = Color.Black,
-                                        fontSize = 13.5.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    if (blockedUsers.isNotEmpty()) {
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(10.dp))
-                                                .background(Color(0xFFDC2626))
-                                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                                        ) {
-                                            Text(
-                                                text = "${blockedUsers.size}",
-                                                color = Color.White,
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Bold
+                        },
+                        onAttach = { showAttachmentSheet = true },
+                        onEmoji = {
+                            inputText += " 😊"
+                        },
+                        showAiButton = isAiConsentGranted,
+                        onAi = { showAiAssistSheet = true },
+                        topSlot = if (replyingToMessage != null) {
+                            {
+                                ReplyPreviewStrip(
+                                    title = if (replyingToMessage!!.isOutgoing) "You" else partnerName,
+                                    preview = replyingToMessage!!.text.take(60),
+                                    onClose = { replyingToMessage = null }
+                                )
+                            }
+                        } else null,
+                        recording = if (voiceRecorder.isRecording) {
+                            {
+                                RecordingBar(
+                                    elapsedMs = voiceRecorder.elapsedMs,
+                                    amplitudes = voiceRecorder.liveAmplitudes.toList(),
+                                    slideProgress = 0f,
+                                    locked = false,
+                                    onCancel = { voiceRecorder.cancel() }
+                                )
+                            }
+                        } else null,
+                        micButton = {
+                            MicHoldButton(
+                                isRecording = voiceRecorder.isRecording,
+                                onStart = {
+                                    voiceRecorder.start()
+                                },
+                                onMove = { dx, dy -> },
+                                onEnd = { cancelled, locked ->
+                                    val result = voiceRecorder.stop()
+                                    if (!cancelled && result != null && result.bytes.isNotEmpty()) {
+                                        coroutineScope.launch {
+                                            EncryptedChatRepository.sendMediaMessage(
+                                                context = context,
+                                                recipientUserId = partnerUserId,
+                                                recipientName = partnerName,
+                                                recipientAvatar = partnerAvatarUrl,
+                                                rawBytes = result.bytes,
+                                                messageType = "voice",
+                                                mimeType = "audio/aac",
+                                                durationSeconds = (result.durationMs / 1000).toInt()
                                             )
                                         }
                                     }
                                 }
-                            },
-                            onClick = {
-                                showOptionsMenu = false
-                                showBlockedUsersSheet = true
-                            }
-                        )
-
-                        // 5. Send Gift
-                        DropdownMenuItem(
-                            text = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("🎁", fontSize = 16.sp)
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text(
-                                        text = "Send a Gift",
-                                        color = Color(0xFFB45309),
-                                        fontSize = 13.5.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            },
-                            onClick = {
-                                showOptionsMenu = false
-                                showSendGiftSheet = true
-                            }
-                        )
-
-                        // 6. Report User
-                        DropdownMenuItem(
-                            text = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    SoftShieldIcon(size = 15.dp, color = Color(0xFFDC2626))
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text(
-                                        text = "Report User",
-                                        color = Color(0xFFDC2626),
-                                        fontSize = 13.5.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                            },
-                            onClick = {
-                                showOptionsMenu = false
-                                showReportUserDialog = true
-                            }
-                        )
-                    }
-                }
-            )
-        },
-        bottomBar = {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xFFFFFDF8))
-                        .navigationBarsPadding()
-                        .imePadding()
-                ) {
-                    if (isBlocked) {
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
-                            shape = RoundedCornerShape(18.dp),
-                            color = Color(0xFFFEF2F2),
-                            border = BorderStroke(1.dp, Color(0xFFFCA5A5))
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(
-                                    modifier = Modifier.weight(1f),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    SoftBlockIcon(size = 22.dp, color = Color(0xFFDC2626))
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Column {
-                                        Text(
-                                            text = "User Blocked",
-                                            fontSize = 13.5.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF991B1B)
-                                        )
-                                        Text(
-                                            text = "You have blocked $partnerName. Unblock to send messages.",
-                                            fontSize = 11.5.sp,
-                                            color = Color(0xFFB91C1C)
-                                        )
-                                    }
-                                }
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Button(
-                                    onClick = {
-                                        ChatPreferencesManager.unblockUser(context, partnerUserId)
-                                        Toast.makeText(context, "$partnerName unblocked", Toast.LENGTH_SHORT).show()
-                                    },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color(0xFFDC2626),
-                                        contentColor = Color.White
-                                    ),
-                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                                    shape = RoundedCornerShape(12.dp)
-                                ) {
-                                    Text(text = "Unblock", fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
+                            )
                         }
-                    } else {
-                        // AI Quick Action Buttons Row
-                        AIActionsRow(
-                            onTranslateClick = {
-                                val lastReceived = uiMessages.findLast { !it.isMe && it.type == ChatMessageType.TEXT }
-                                if (lastReceived != null) {
-                                    Toast.makeText(context, "Original text shown", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    Toast.makeText(context, "No received message to translate", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            onImproveTextClick = {
-                                if (inputText.isNotBlank()) {
-                                    inputText = "Thank you so much! I'm genuinely trying my best every day."
-                                    Toast.makeText(context, "Polished your sentence!", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    inputText = "I would love to practice speaking together soon!"
-                                    Toast.makeText(context, "Practice suggestion added!", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            onExampleReplyClick = {
-                                inputText = "That sounds wonderful! When are you free for a conversation?"
-                                Toast.makeText(context, "Example reply ready!", Toast.LENGTH_SHORT).show()
+                    )
+                }
+            },
+            containerColor = colors.wallpaper
+        ) { paddingValues ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .background(colors.wallpaper)
+            ) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(vertical = 8.dp)
+                ) {
+                    itemsIndexed(
+                        items = timelineItems,
+                        key = { _, item -> item.id }
+                    ) { _, item ->
+                        when (item) {
+                            is DmTimelineItem.DateHeader -> {
+                                DateChip(text = item.label)
                             }
-                        )
-
-                        // 3D Fluent Emoji Picker Tray (shows when smiley icon is tapped)
-                        FluentEmojiPickerTray(
-                            visible = showEmojiPicker,
-                            onEmojiSelected = { unicode, _ ->
-                                inputText += unicode
+                            is DmTimelineItem.SecurityHeader -> {
+                                SecurityNotice(text = item.text)
                             }
-                        )
+                            is DmTimelineItem.MessageItem -> {
+                                val msg = item.message
+                                val isOutgoing = msg.isOutgoing
+                                val flashAlpha = flashAnimatables[msg.id]?.value ?: 0f
+                                val isSelected = selectedMessageIds.contains(msg.id)
 
-                        // Shared ChatInputBar
-                        ChatInputBar(
-                            messageText = inputText,
-                            onMessageChange = { inputText = it },
-                            onSend = {
-                                if (inputText.isNotBlank() && !isSending) {
-                                    val textToSend = inputText.trim()
-                                    val replyText = replyingToMessage?.text
-                                    val replySender = replyingToMessage?.let { if (it.isMe) "You" else partnerName }
-                                    isSending = true
+                                val status = when {
+                                    !isOutgoing -> null
+                                    else -> MessageStatus.Read
+                                }
 
-                                    coroutineScope.launch {
-                                        val sendResult = EncryptedChatRepository.sendMessage(
-                                            context = context,
-                                            recipientUserId = partnerUserId.ifBlank { "partner_mock_id" },
-                                            recipientName = partnerName,
-                                            recipientAvatar = partnerAvatarUrl,
-                                            text = textToSend,
-                                            replyToText = replyText,
-                                            replyToSender = replySender
-                                        )
-                                        isSending = false
-                                        sendResult.onSuccess {
-                                            inputText = ""
-                                            replyingToMessage = null
-                                            recipientKeyReady = true
-                                            showEmojiPicker = false
-                                        }.onFailure { ex ->
-                                            if (ex is RecipientNotReadyException) {
-                                                recipientKeyReady = false
-                                                showNotReadyDialog = true
-                                            } else {
-                                                Toast.makeText(context, ex.message ?: "Failed to encrypt and send message", Toast.LENGTH_LONG).show()
-                                            }
-                                        }
-                                    }
-                                }
-                            },
-                            onAttachClick = { showAttachmentSheet = true },
-                            onEmojiClick = { showEmojiPicker = !showEmojiPicker },
-                            onAiSparkleClick = {
-                                if (inputText.isNotBlank()) {
-                                    inputText = "Thank you so much! I'm genuinely trying my best every day."
-                                    Toast.makeText(context, "Polished text with AI ✨", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            onMicClick = {
-                                if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                                    val started = com.example.util.VoiceRecorderManager.startRecording(context)
-                                    if (started) {
-                                        isRecordingVoice = true
-                                        recordingSeconds = 0
-                                    } else {
-                                        Toast.makeText(context, "Could not start voice recorder", Toast.LENGTH_SHORT).show()
-                                    }
-                                } else {
-                                    recordAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-                                }
-                            },
-                            replySender = replyingToMessage?.let { if (it.isMe) "You" else partnerName },
-                            replyText = replyingToMessage?.text,
-                            onCancelReply = { replyingToMessage = null },
-                            isRecordingVoice = isRecordingVoice,
-                            recordingSeconds = recordingSeconds,
-                            onCancelRecording = {
-                                com.example.util.VoiceRecorderManager.cancelRecording()
-                                isRecordingVoice = false
-                                recordingSeconds = 0
-                            },
-                            onSendRecording = {
-                                val recRes = com.example.util.VoiceRecorderManager.stopRecording()
-                                isRecordingVoice = false
-                                recordingSeconds = 0
-                                if (recRes != null && recRes.bytes.isNotEmpty()) {
-                                    coroutineScope.launch {
-                                        isSending = true
-                                        val sendResult = EncryptedChatRepository.sendMediaMessage(
-                                            context = context,
-                                            recipientUserId = partnerUserId.ifBlank { "partner_mock_id" },
-                                            recipientName = partnerName,
-                                            recipientAvatar = partnerAvatarUrl,
-                                            rawBytes = recRes.bytes,
-                                            messageType = "voice",
-                                            mimeType = "audio/aac",
-                                            durationSeconds = recRes.durationSeconds,
-                                            replyToText = replyingToMessage?.text,
-                                            replyToSender = replyingToMessage?.let { if (it.isMe) "You" else partnerName }
-                                        )
-                                        isSending = false
-                                        sendResult.onSuccess {
-                                            replyingToMessage = null
-                                            recipientKeyReady = true
-                                            Toast.makeText(context, "Voice note sent 🎙️", Toast.LENGTH_SHORT).show()
-                                        }.onFailure { ex ->
-                                            if (ex is RecipientNotReadyException) {
-                                                recipientKeyReady = false
-                                                showNotReadyDialog = true
-                                            } else {
-                                                Toast.makeText(context, ex.message ?: "Failed to send voice note", Toast.LENGTH_LONG).show()
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        )
-                    }
+                                val isOnlyEmojis = emojiOnlyCount(msg.text.trim())
 
-                    // Active Voice Recording Bar
-                    if (isRecordingVoice) {
-                        Surface(
-                            color = Color(0xFFFEF3C7),
-                            border = BorderStroke(1.dp, Color(0xFFFDE68A)),
-                            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
-                            shadowElevation = 8.dp,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .navigationBarsPadding()
-                                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(10.dp)
-                                            .clip(CircleShape)
-                                            .background(Color.Red)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "Recording voice note: ${String.format("%d:%02d", recordingSeconds / 60, recordingSeconds % 60)}",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 14.sp,
-                                        color = Color(0xFF92400E)
-                                    )
-                                }
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    OutlinedButton(
-                                        onClick = {
-                                            com.example.util.VoiceRecorderManager.cancelRecording()
-                                            isRecordingVoice = false
-                                            recordingSeconds = 0
-                                        },
-                                        shape = RoundedCornerShape(12.dp),
-                                        border = BorderStroke(1.dp, Color(0xFFD97706)),
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                                    ) {
-                                        Text("Cancel", color = Color(0xFF92400E), fontSize = 13.sp)
-                                    }
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Button(
-                                        onClick = {
-                                            val recRes = com.example.util.VoiceRecorderManager.stopRecording()
-                                            isRecordingVoice = false
-                                            recordingSeconds = 0
-                                            if (recRes != null && recRes.bytes.isNotEmpty()) {
-                                                coroutineScope.launch {
-                                                    isSending = true
-                                                    val sendResult = EncryptedChatRepository.sendMediaMessage(
-                                                        context = context,
-                                                        recipientUserId = partnerUserId.ifBlank { "partner_mock_id" },
-                                                        recipientName = partnerName,
-                                                        recipientAvatar = partnerAvatarUrl,
-                                                        rawBytes = recRes.bytes,
-                                                        messageType = "voice",
-                                                        mimeType = "audio/aac",
-                                                        durationSeconds = recRes.durationSeconds,
-                                                        replyToText = replyingToMessage?.text,
-                                                        replyToSender = replyingToMessage?.let { if (it.isMe) "You" else partnerName }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(
+                                            start = if (isOutgoing) 48.dp else 12.dp,
+                                            end = if (isOutgoing) 12.dp else 48.dp,
+                                            top = if (item.position == GroupPosition.First || item.position == GroupPosition.Single) 6.dp else 2.dp,
+                                            bottom = 2.dp
+                                        ),
+                                    horizontalArrangement = if (isOutgoing) Arrangement.End else Arrangement.Start,
+                                    verticalAlignment = Alignment.Bottom
+                                ) {
+                                    // 28dp Avatar only beside last message of group
+                                    if (!isOutgoing) {
+                                        if (item.isLastInGroup) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(28.dp)
+                                                    .clip(CircleShape)
+                                                    .background(colors.accentIn.copy(alpha = 0.2f)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (!partnerAvatarUrl.isNullOrBlank()) {
+                                                    AsyncImage(
+                                                        model = partnerAvatarUrl,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.fillMaxSize(),
+                                                        contentScale = ContentScale.Crop
                                                     )
-                                                    isSending = false
-                                                    sendResult.onSuccess {
-                                                        replyingToMessage = null
-                                                        recipientKeyReady = true
-                                                        Toast.makeText(context, "Voice note sent securely 🎙️", Toast.LENGTH_SHORT).show()
-                                                    }.onFailure { ex ->
-                                                        if (ex is RecipientNotReadyException) {
-                                                            recipientKeyReady = false
-                                                            showNotReadyDialog = true
-                                                        } else {
-                                                            Toast.makeText(context, ex.message ?: "Failed to encrypt and send voice note", Toast.LENGTH_LONG).show()
+                                                } else {
+                                                    Text(
+                                                        text = partnerName.take(1).uppercase(),
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = colors.accentIn
+                                                    )
+                                                }
+                                            }
+                                        } else {
+                                            Spacer(modifier = Modifier.size(28.dp))
+                                        }
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                    }
+
+                                    Column(
+                                        horizontalAlignment = if (isOutgoing) Alignment.End else Alignment.Start
+                                    ) {
+                                        // Sender name on first incoming message of group
+                                        if (!isOutgoing && (item.position == GroupPosition.Single || item.position == GroupPosition.First)) {
+                                            SenderName(
+                                                name = partnerName,
+                                                userId = partnerUserId,
+                                                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
+                                            )
+                                        }
+
+                                        val bubbleModifier = Modifier
+                                            .swipeToReply {
+                                                replyingToMessage = msg
+                                            }
+                                            .pointerInput(msg.id) {
+                                                detectTapGestures(
+                                                    onLongPress = {
+                                                        if (!isSelectionMode) {
+                                                            selectedMessageForMenu = msg
+                                                        }
+                                                    },
+                                                    onTap = {
+                                                        if (isSelectionMode) {
+                                                            if (isSelected) selectedMessageIds.remove(msg.id)
+                                                            else selectedMessageIds.add(msg.id)
+                                                        }
+                                                    }
+                                                )
+                                            }
+
+                                        if (isOnlyEmojis in 1..3) {
+                                            EmojiOnlyMessage(
+                                                emoji = msg.text.trim(),
+                                                count = isOnlyEmojis,
+                                                time = formatChatTime(msg.timestamp),
+                                                outgoing = isOutgoing,
+                                                status = status,
+                                                modifier = bubbleModifier
+                                            )
+                                        } else {
+                                            MessageBubble(
+                                                outgoing = isOutgoing,
+                                                position = item.position,
+                                                highlighted = flashAlpha > 0f,
+                                                selected = isSelected,
+                                                modifier = bubbleModifier
+                                            ) {
+                                                // Reply quote
+                                                if (!msg.replyToText.isNullOrBlank()) {
+                                                    ReplyQuote(
+                                                        sender = msg.replyToSender ?: "Reply",
+                                                        preview = msg.replyToText,
+                                                        outgoing = isOutgoing,
+                                                        onClick = {
+                                                            val targetIdx = timelineItems.indexOfFirst {
+                                                                it is DmTimelineItem.MessageItem && it.message.text == msg.replyToText
+                                                            }
+                                                            if (targetIdx != -1) {
+                                                                val found = timelineItems[targetIdx] as DmTimelineItem.MessageItem
+                                                                coroutineScope.launch {
+                                                                    listState.animateScrollToItem(targetIdx)
+                                                                    flashMessage(found.message.id)
+                                                                }
+                                                            }
+                                                        }
+                                                    )
+                                                }
+
+                                                val rawText = msg.text
+                                                when {
+                                                    rawText.startsWith("[voice]") -> {
+                                                        val path = rawText.removePrefix("[voice]").substringBefore("|")
+                                                        val durationSec = rawText.substringAfter("|", "0").toIntOrNull() ?: 0
+                                                        val isPlayingThis = voicePlayer.currentPlayingId == msg.id && voicePlayer.isPlaying
+
+                                                        VoiceNoteContent(
+                                                            outgoing = isOutgoing,
+                                                            amplitudes = remember(msg.id) { List(48) { (40 + (it * 7) % 180) } },
+                                                            durationMs = durationSec * 1000L,
+                                                            positionMs = if (voicePlayer.currentPlayingId == msg.id) voicePlayer.positionMs else 0L,
+                                                            isPlaying = isPlayingThis,
+                                                            isLoading = voicePlayer.currentPlayingId == msg.id && voicePlayer.isLoading,
+                                                            isUnread = !isOutgoing,
+                                                            speed = voicePlayer.speed,
+                                                            onPlayPause = {
+                                                                voicePlayer.playOrPause(
+                                                                    messageId = msg.id,
+                                                                    audioSource = path,
+                                                                    fallbackDurationMs = durationSec * 1000L,
+                                                                    onError = { err ->
+                                                                        Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                                                                    }
+                                                                )
+                                                            },
+                                                            onSeek = { seekFrac ->
+                                                                if (voicePlayer.currentPlayingId == msg.id) {
+                                                                    voicePlayer.seekTo(seekFrac)
+                                                                }
+                                                            },
+                                                            onSpeedClick = { voicePlayer.cycleSpeed() }
+                                                        )
+                                                    }
+
+                                                    rawText.startsWith("[img]") || rawText.startsWith("[imgs]") -> {
+                                                        val url = rawText.removePrefix("[img]").removePrefix("[imgs]").substringBefore("|")
+                                                        MediaFrame(
+                                                            aspectRatio = 1.25f,
+                                                            content = {
+                                                                AsyncImage(
+                                                                    model = url,
+                                                                    contentDescription = "Photo",
+                                                                    modifier = Modifier
+                                                                        .fillMaxSize()
+                                                                        .clickable {
+                                                                            val idx = allMediaItems.indexOfFirst { it.id == msg.id }
+                                                                            activeMediaViewerIndex = if (idx >= 0) idx else 0
+                                                                        },
+                                                                    contentScale = ContentScale.Crop
+                                                                )
+                                                            },
+                                                            overlay = {
+                                                                Box(
+                                                                    modifier = Modifier
+                                                                        .align(Alignment.BottomEnd)
+                                                                        .padding(6.dp)
+                                                                ) {
+                                                                    MediaTimeChip(
+                                                                        time = formatChatTime(msg.timestamp),
+                                                                        outgoing = isOutgoing,
+                                                                        status = status
+                                                                    )
+                                                                }
+                                                            }
+                                                        )
+                                                    }
+
+                                                    else -> {
+                                                        val annotated = buildMessageText(
+                                                            raw = rawText,
+                                                            mentionNames = listOf(partnerName),
+                                                            accent = colors.accentIn
+                                                        )
+                                                        MessageText(
+                                                            text = annotated,
+                                                            time = formatChatTime(msg.timestamp),
+                                                            outgoing = isOutgoing,
+                                                            status = status,
+                                                            onWordClick = { word ->
+                                                                activeWordLookup = WordLookupState(
+                                                                    word = word,
+                                                                    fullSentence = rawText,
+                                                                    isLoading = true
+                                                                )
+                                                                coroutineScope.launch {
+                                                                    val res = CloudAiManager.translateMessage(context, "word_${word.hashCode()}", word, "English")
+                                                                    activeWordLookup = activeWordLookup?.copy(
+                                                                        translation = res.getOrNull()?.text ?: "Could not translate",
+                                                                        isLoading = false
+                                                                    )
+                                                                }
+                                                            }
+                                                        )
+
+                                                        val trans = translatedMessages[msg.id]
+                                                        if (!trans.isNullOrBlank()) {
+                                                            TranslationStrip(
+                                                                translated = trans,
+                                                                languageLabel = "English",
+                                                                outgoing = isOutgoing,
+                                                                viaCloud = true,
+                                                                onListen = {
+                                                                    tts?.speak(trans, TextToSpeech.QUEUE_FLUSH, null, "tts_${msg.id}")
+                                                                }
+                                                            )
                                                         }
                                                     }
                                                 }
                                             }
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706)),
-                                        shape = RoundedCornerShape(12.dp),
-                                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
-                                    ) {
-                                        Text("Send Voice", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        }
+
+                                        // Reactions
+                                        if (item.reactions.isNotEmpty()) {
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            ReactionRow(
+                                                reactions = item.reactions,
+                                                onClick = { emoji ->
+                                                    coroutineScope.launch {
+                                                        // Toggle reaction
+                                                    }
+                                                }
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
-            }
-        ) { paddingValues ->
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp)
-            ) {
-                // Date separator
-                item {
-                    DateSeparatorPill(dateText = "Today")
-                }
 
-                // Blocked Warning Banner
-                if (isBlocked) {
-                    item {
-                        Surface(
-                            color = Color(0xFFFEF2F2),
-                            border = BorderStroke(1.dp, Color(0xFFFECACA)),
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 6.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFFFEE2E2)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        SoftBlockIcon(size = 16.dp, color = Color(0xFFDC2626))
+                // Scroll to bottom FAB
+                if (unreadCount > 0) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 12.dp, bottom = 12.dp)
+                    ) {
+                        ScrollToBottomFab(
+                            unread = unreadCount,
+                            onClick = {
+                                coroutineScope.launch {
+                                    if (timelineItems.isNotEmpty()) {
+                                        listState.animateScrollToItem(timelineItems.size - 1)
                                     }
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Column {
-                                        Text(
-                                            text = "You blocked $partnerName",
-                                            color = Color(0xFF991B1B),
-                                            fontSize = 13.5.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Text(
-                                            text = "Messages and calls are restricted",
-                                            color = Color(0xFFB91C1C),
-                                            fontSize = 11.5.sp
-                                        )
-                                    }
-                                }
-                                Button(
-                                    onClick = {
-                                        ChatPreferencesManager.unblockUser(context, partnerUserId)
-                                        Toast.makeText(context, "$partnerName unblocked successfully", Toast.LENGTH_SHORT).show()
-                                    },
-                                    shape = RoundedCornerShape(50.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
-                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-                                    modifier = Modifier.height(32.dp)
-                                ) {
-                                    Text("Unblock", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
                                 }
                             }
-                        }
-                    }
-                }
-
-                if (uiMessages.isEmpty()) {
-                    item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 40.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = if (recipientKeyReady == false) {
-                                    "$partnerName hasn't enabled secure chat yet.\nYou can message them once they open FunkyTalk."
-                                } else {
-                                    "No messages yet.\nSend a message, voice note, or photos to start chatting with $partnerName!"
-                                },
-                                fontSize = 14.sp,
-                                color = Color(0xFF9CA3AF),
-                                textAlign = TextAlign.Center,
-                                lineHeight = 20.sp
-                            )
-                        }
-                    }
-                }
-
-                // Dynamic message bubbles via ChatBubble shared component
-                itemsIndexed(uiMessages.distinctBy { it.id }, key = { _, msg -> msg.id }) { index, msg ->
-                    val isMe = msg.isMe
-                    val list = uiMessages.distinctBy { it.id }
-                    val olderMsg = list.getOrNull(index - 1)
-                    val newerMsg = list.getOrNull(index + 1)
-
-                    val isSameSenderAsOlder = olderMsg != null && (olderMsg.isMe == isMe)
-                    val isSameSenderAsNewer = newerMsg != null && (newerMsg.isMe == isMe)
-
-                    val isFirstInGroup = !isSameSenderAsOlder
-                    val isLastInGroup = !isSameSenderAsNewer
-                    val isSingleInGroup = isFirstInGroup && isLastInGroup
-
-                    val msgReactions = dmReactionsByMessage[msg.id]?.map { rx ->
-                        ChatReactionItem(
-                            emoji = rx.emoji,
-                            count = 1,
-                            isMine = rx.senderId == myUserId
                         )
-                    }.orEmpty()
+                    }
+                }
 
-                    val isVoice = msg.type == ChatMessageType.AUDIO
-                    val isMedia = msg.type == ChatMessageType.IMAGE || msg.getAllImages().isNotEmpty()
-
-                    ChatBubble(
-                        messageId = msg.id,
-                        senderId = if (isMe) myUserId else partnerUserId,
-                        senderName = if (isMe) "You" else partnerName,
-                        text = if (isVoice || isMedia) "" else msg.text,
-                        timeText = msg.time,
-                        isOutgoing = isMe,
-                        isFirstInGroup = isFirstInGroup,
-                        isLastInGroup = isLastInGroup,
-                        isSingleInGroup = isSingleInGroup,
-                        showSenderName = false,
-                        showAvatar = !isMe,
-                        avatarUrl = partnerAvatarUrl,
-                        replySenderName = msg.replyToSender,
-                        replyText = msg.replyToText,
-                        statusCheck = if (isMe) 2 else 1,
-                        reactions = msgReactions,
-                        onLongClick = { selectedMessageForMenu = msg },
-                        onToggleReaction = { emoji ->
-                            coroutineScope.launch {
-                                EncryptedChatRepository.sendDmReaction(
-                                    context = context,
-                                    conversationId = conversationId,
-                                    recipientUserId = partnerUserId,
-                                    targetMessageId = msg.id,
-                                    emoji = emoji,
-                                    op = "set"
-                                )
+                // Long press message overlay
+                selectedMessageForMenu?.let { selectedMsg ->
+                    MessageLongPressOverlay(
+                        myReaction = null,
+                        actions = listOf(
+                            MessageAction("reply", "Reply", Icons.AutoMirrored.Rounded.Reply),
+                            MessageAction("copy", "Copy", Icons.Rounded.ContentCopy),
+                            MessageAction("translate", "Translate", Icons.Rounded.Translate),
+                            MessageAction("listen", "Listen", Icons.AutoMirrored.Rounded.VolumeUp),
+                            MessageAction("select", "Select", Icons.Rounded.CheckCircleOutline),
+                            MessageAction("delete", "Delete", Icons.Rounded.DeleteOutline, destructive = true)
+                        ),
+                        onPickEmoji = { emoji ->
+                            // Add reaction
+                        },
+                        onMoreEmoji = {},
+                        onAction = { actionId ->
+                            when (actionId) {
+                                "reply" -> replyingToMessage = selectedMsg
+                                "copy" -> {
+                                    clipboardManager.setText(AnnotatedString(selectedMsg.text))
+                                    Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
+                                }
+                                "translate" -> {
+                                    coroutineScope.launch {
+                                        val res = CloudAiManager.translateMessage(context, selectedMsg.id, selectedMsg.text, "English")
+                                        res.onSuccess {
+                                            translatedMessages[selectedMsg.id] = it.text
+                                        }.onFailure {
+                                            Toast.makeText(context, "Translation failed", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                                "listen" -> {
+                                    tts?.speak(selectedMsg.text, TextToSpeech.QUEUE_FLUSH, null, "tts_${selectedMsg.id}")
+                                }
+                                "select" -> {
+                                    isSelectionMode = true
+                                    selectedMessageIds.add(selectedMsg.id)
+                                }
+                                "delete" -> {
+                                    coroutineScope.launch {
+                                        EncryptedChatRepository.deleteConversationLocally(conversationId)
+                                    }
+                                }
                             }
                         },
-                        onShowReactionDetails = { showReactionDetailsForMsgId = msg.id },
-                        voiceContent = if (isVoice) {
-                            {
-                                VoiceNotePlayer(
-                                    isPlaying = playingAudioMsgId == msg.id,
-                                    audioDurationFormatted = msg.audioDuration.ifBlank { "0:12" },
-                                    onPlayPauseClick = { togglePlayAudio(msg) },
-                                    onSeek = { /* seek */ },
-                                    onSpeedClick = { /* speed */ }
-                                )
-                            }
-                        } else null,
-                        mediaContent = if (isMedia) {
-                            {
-                                val urls = msg.getAllImages().ifEmpty { listOf(msg.imageUrl ?: "") }.filter { it.isNotBlank() }
-                                MediaBubble(
-                                    mediaUrls = urls,
-                                    time = msg.time,
-                                    isOutgoing = isMe,
-                                    onMediaClick = { index ->
-                                        previewImageUrl = urls.getOrNull(index)
-                                    }
-                                )
-                            }
-                        } else null
+                        onDismiss = { selectedMessageForMenu = null }
                     )
                 }
             }
         }
 
-        // Fullscreen Image Preview Modal
-        if (previewImageUrl != null) {
-            ChatImagePreviewDialog(
-                imageUrl = previewImageUrl,
-                onDismiss = { previewImageUrl = null }
+        // Telephoto Fullscreen Media Viewer
+        activeMediaViewerIndex?.let { initialIdx ->
+            TelephotoMediaViewerDialog(
+                mediaList = allMediaItems,
+                initialIndex = initialIdx,
+                onDismiss = { activeMediaViewerIndex = null },
+                onSave = { item ->
+                    Toast.makeText(context, "Saved photo to gallery", Toast.LENGTH_SHORT).show()
+                },
+                onShare = { item ->
+                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                        putExtra(Intent.EXTRA_TEXT, item.url)
+                        type = "text/plain"
+                    }
+                    context.startActivity(Intent.createChooser(sendIntent, "Share media"))
+                }
             )
         }
 
-        // Attachment / Image Upload Bottom Sheet
-        if (showAttachmentSheet) {
+        // Word lookup bottom sheet
+        activeWordLookup?.let { lookup ->
             ModalBottomSheet(
-                onDismissRequest = { showAttachmentSheet = false },
-                sheetState = attachmentSheetState,
-                containerColor = Color.White,
+                onDismissRequest = { activeWordLookup = null },
+                containerColor = colors.surface,
+                contentColor = colors.text,
                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 28.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    Text(
-                        text = "Share Images & Media",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF111827)
-                    )
-                    Text(
-                        text = "End-to-End Encrypted media transfer",
-                        fontSize = 12.sp,
-                        color = Color(0xFF6B7280)
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // Option 1: Gallery Multi-picker
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = Color(0xFFF9FAFB),
-                        border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                showAttachmentSheet = false
-                                multiplePhotoPickerLauncher.launch(
-                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                )
-                            }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFFFEF3C7)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                SoftImageIcon(
-                                    size = 24.dp,
-                                    color = Color(0xFFD97706)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(14.dp))
-                            Column {
-                                Text(
-                                    text = "Choose from Gallery",
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF111827)
-                                )
-                                Text(
-                                    text = "Select single or multiple photos to send in stack",
-                                    fontSize = 12.sp,
-                                    color = Color(0xFF6B7280)
-                                )
-                            }
-                        }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.Translate, contentDescription = null, tint = colors.accentIn)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(lookup.word, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = colors.text)
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Option 2: Curated Travel Photos Stack (Instant sample for instant testing)
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = Color(0xFFF9FAFB),
-                        border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                showAttachmentSheet = false
-                                coroutineScope.launch {
-                                    isSending = true
-                                    val sampleStack = listOf(
-                                        "https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?w=800",
-                                        "https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=800",
-                                        "https://images.unsplash.com/photo-1492571350019-22de08371fd3?w=800",
-                                        "https://images.unsplash.com/photo-1542051841857-5f90071e7989?w=800"
-                                    )
-                                    val encodedText = "[imgs]${sampleStack.joinToString(",")}"
-                                    val sendResult = EncryptedChatRepository.sendMessage(
-                                        context = context,
-                                        recipientUserId = partnerUserId.ifBlank { "partner_mock_id" },
-                                        recipientName = partnerName,
-                                        recipientAvatar = partnerAvatarUrl,
-                                        text = encodedText,
-                                        replyToText = replyingToMessage?.text,
-                                        replyToSender = replyingToMessage?.let { if (it.isMe) "You" else partnerName }
-                                    )
-                                    isSending = false
-                                    sendResult.onSuccess {
-                                        replyingToMessage = null
-                                        recipientKeyReady = true
-                                    }.onFailure { ex ->
-                                        if (ex is RecipientNotReadyException) {
-                                            recipientKeyReady = false
-                                            showNotReadyDialog = true
-                                        } else {
-                                            Toast.makeText(context, ex.message ?: "Failed to send", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                }
-                            }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFFE0E7FF)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                SoftImageIcon(
-                                    size = 24.dp,
-                                    color = Color(0xFF4F46E5)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(14.dp))
-                            Column {
-                                Text(
-                                    text = "Send Travel Photo Album (4 Photos Stack)",
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF111827)
-                                )
-                                Text(
-                                    text = "Instantly sends a 4-photo stack in beautiful grid layout",
-                                    fontSize = 12.sp,
-                                    color = Color(0xFF6B7280)
-                                )
-                            }
-                        }
+                    if (lookup.isLoading) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), color = colors.accentIn)
+                    } else if (lookup.translation != null) {
+                        Text(lookup.translation, fontSize = 16.sp, color = colors.text)
                     }
 
-                    Spacer(modifier = Modifier.height(24.dp))
+                    Button(
+                        onClick = {
+                            Toast.makeText(context, "Saved '${lookup.word}' to vocabulary", Toast.LENGTH_SHORT).show()
+                            activeWordLookup = null
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.brand, contentColor = colors.onBrand),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Save to Vocabulary")
+                    }
                 }
             }
         }
 
-        // Contextual Long-press Reaction Overlay for 1:1 Chat
-        if (selectedMessageForMenu != null) {
-            val target = selectedMessageForMenu!!
-            val targetLocalMsg = localDbMessages.find { it.id == target.id }
-                ?: com.example.db.LocalDmMessage(
-                    id = target.id,
-                    conversationId = conversationId,
-                    senderId = if (target.isMe) myUserId else partnerUserId,
-                    recipientId = if (target.isMe) partnerUserId else myUserId,
-                    text = target.text,
-                    timestamp = System.currentTimeMillis(),
-                    isOutgoing = target.isMe
-                )
-            val msgReactions = dmReactionsByMessage[target.id] ?: emptyList()
-            val myReaction = msgReactions.find { it.senderId == myUserId }?.emoji
-
-            DmMessageReactionOverlay(
-                message = targetLocalMsg,
-                myReaction = myReaction,
-                onDismiss = { selectedMessageForMenu = null },
-                onSelectEmoji = { emoji, isRemove ->
-                    selectedMessageForMenu = null
-                    coroutineScope.launch {
-                        EncryptedChatRepository.sendDmReaction(
-                            context = context,
-                            conversationId = conversationId,
-                            recipientUserId = partnerUserId,
-                            targetMessageId = target.id,
-                            emoji = emoji,
-                            op = if (isRemove) "remove" else "set"
-                        )
-                    }
+        // AI Writing Assist Sheet
+        if (showAiAssistSheet) {
+            AiWritingAssistBottomSheet(
+                initialText = inputText,
+                onReplaceText = { enhanced ->
+                    inputText = enhanced
+                    showAiAssistSheet = false
                 },
-                onOpenFullPicker = {
-                    showFullEmojiPickerForMsgId = target.id
-                    selectedMessageForMenu = null
-                },
-                onReply = {
-                    replyingToMessage = target
-                    selectedMessageForMenu = null
-                },
-                onCopy = {
-                    clipboardManager.setText(AnnotatedString(target.text))
-                    Toast.makeText(context, "Message copied", Toast.LENGTH_SHORT).show()
-                    selectedMessageForMenu = null
-                },
-                onTranslate = {
-                    Toast.makeText(context, "Translating message...", Toast.LENGTH_SHORT).show()
-                    selectedMessageForMenu = null
-                },
-                onReport = {
-                    reportingMessage = target
-                    selectedMessageForMenu = null
-                }
+                onDismiss = { showAiAssistSheet = false }
             )
         }
 
-        // Full Emoji Picker Bottom Sheet for 1:1 Message
-        if (showFullEmojiPickerForMsgId != null) {
-            val targetId = showFullEmojiPickerForMsgId!!
-            val myReaction = dmReactionsByMessage[targetId]?.find { it.senderId == myUserId }?.emoji
-            FullEmojiPickerBottomSheet(
-                myCurrentReaction = myReaction,
-                onEmojiSelected = { emoji, isRemove ->
-                    coroutineScope.launch {
-                        EncryptedChatRepository.sendDmReaction(
-                            context = context,
-                            conversationId = conversationId,
-                            recipientUserId = partnerUserId,
-                            targetMessageId = targetId,
-                            emoji = emoji,
-                            op = if (isRemove) "remove" else "set"
-                        )
-                    }
-                },
-                onDismiss = { showFullEmojiPickerForMsgId = null }
-            )
-        }
-
-        // Reactions Details Bottom Sheet for 1:1 Message
-        if (showReactionDetailsForMsgId != null) {
-            val targetId = showReactionDetailsForMsgId!!
-            val targetReactions = dmReactionsByMessage[targetId] ?: emptyList()
-            DmReactionDetailsBottomSheet(
-                reactions = targetReactions,
-                currentUserId = myUserId,
-                partnerName = partnerName,
-                partnerAvatarUrl = partnerAvatarUrl,
-                onRemoveMyReaction = { emoji ->
-                    coroutineScope.launch {
-                        EncryptedChatRepository.sendDmReaction(
-                            context = context,
-                            conversationId = conversationId,
-                            recipientUserId = partnerUserId,
-                            targetMessageId = targetId,
-                            emoji = emoji,
-                            op = "remove"
-                        )
-                    }
-                },
-                onDismiss = { showReactionDetailsForMsgId = null }
-            )
-        }
-
-        // Report DM Message Dialog (Generates encrypted screenshot evidence & uploads to report-evidence)
-        reportingMessage?.let { msg ->
-            ReportUserDialog(
-                reportedUserId = partnerUserId,
-                reportedUserName = partnerName,
-                contextType = "dm",
-                contextId = msg.id,
-                dmMessageText = msg.text,
-                onDismiss = { reportingMessage = null },
-                onReportSubmitted = { reportingMessage = null }
-            )
-        }
-
-        // Report User Dialog (general profile context)
-        if (showReportUserDialog) {
-            ReportUserDialog(
-                reportedUserId = partnerUserId,
-                reportedUserName = partnerName,
-                contextType = "profile",
-                contextId = null,
-                onDismiss = { showReportUserDialog = false },
-                onReportSubmitted = { showReportUserDialog = false }
-            )
-        }
-
-        // Send Gift Bottom Sheet
-        if (showSendGiftSheet) {
-            SendGiftBottomSheet(
-                recipientId = partnerUserId,
-                recipientName = partnerName,
-                recipientAvatar = partnerAvatarUrl,
-                onDismiss = { showSendGiftSheet = false }
-            )
-        }
-
-        // Prompt vault setup or unlock if not unlocked
-        if (vaultStatus != VaultStatus.UNLOCKED) {
-            VaultManagementDialogs(onDismissRequest = onBack)
-        }
-
-        // Graceful Edge Case Dialog when recipient hasn't opened app / initialized keys
-        if (showNotReadyDialog) {
-            Dialog(
-                onDismissRequest = { showNotReadyDialog = false },
-                properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = true)
+        // Attachment Sheet
+        if (showAttachmentSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showAttachmentSheet = false },
+                containerColor = colors.surface,
+                contentColor = colors.text,
+                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
             ) {
-                Surface(
-                    shape = RoundedCornerShape(28.dp),
-                    color = Color.White,
-                    shadowElevation = 16.dp,
-                    border = BorderStroke(1.dp, Color(0xFFF3F4F6)),
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 12.dp)
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Column(
+                    Text("Attach", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = colors.text)
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        // Icon in amber/gold soft container
-                        Box(
-                            modifier = Modifier
-                                .size(60.dp)
-                                .background(Color(0xFFFEF3C7), RoundedCornerShape(30.dp))
-                                .border(1.5.dp, Color(0xFFFDE68A), RoundedCornerShape(30.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            SoftShieldIcon(
-                                size = 28.dp,
-                                color = Color(0xFFD97706)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        Text(
-                            text = "Secure Chat Unavailable",
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 20.sp,
-                            color = Color(0xFF111827),
-                            textAlign = TextAlign.Center,
-                            letterSpacing = (-0.3).sp
-                        )
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        Text(
-                            text = "This user is not ready for secure chat yet.",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp,
-                            color = Color(0xFFB45309),
-                            textAlign = TextAlign.Center
-                        )
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        Text(
-                            text = "$partnerName has not opened FunkyTalk yet, so their end-to-end encryption keys have not been registered.\n\nAs soon as $partnerName launches the app, secure chat will be ready automatically.\n\nYour message draft has been saved.",
-                            fontSize = 13.sp,
-                            color = Color(0xFF4B5563),
-                            textAlign = TextAlign.Center,
-                            lineHeight = 18.sp
-                        )
-
-                        Spacer(modifier = Modifier.height(24.dp))
-
-                        Button(
-                            onClick = { showNotReadyDialog = false },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF111827)),
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp)
-                        ) {
-                            Text(
-                                text = "Got it",
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        OutlinedButton(
-                            onClick = {
-                                showNotReadyDialog = false
-                                coroutineScope.launch {
-                                    isCheckingKey = true
-                                    val ready = EncryptedChatRepository.checkRecipientKeyStatus(context, partnerUserId)
-                                    recipientKeyReady = ready
-                                    isCheckingKey = false
-                                    if (ready == true) {
-                                        Toast.makeText(context, "$partnerName is now ready for secure chat!", Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        Toast.makeText(context, "$partnerName is still not ready.", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            },
-                            shape = RoundedCornerShape(16.dp),
-                            border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp)
-                        ) {
-                            SoftSwapIcon(
-                                size = 16.dp,
-                                color = Color(0xFF4B5563)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Check Again",
-                                color = Color(0xFF4B5563),
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 14.sp
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // Custom Luxury Block Confirmation Dialog
-        if (showBlockConfirmDialog) {
-            Dialog(
-                onDismissRequest = { showBlockConfirmDialog = false },
-                properties = DialogProperties(usePlatformDefaultWidth = false)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.55f))
-                        .clickable { showBlockConfirmDialog = false },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Surface(
-                        modifier = Modifier
-                            .padding(horizontal = 24.dp)
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(32.dp))
-                            .clickable(enabled = false) {},
-                        shape = RoundedCornerShape(32.dp),
-                        color = Color.White,
-                        shadowElevation = 24.dp,
-                        border = BorderStroke(1.dp, Color(0xFFFEE2E2))
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            // Double ring circular avatar with crimson ban badge
-                            Box(
-                                modifier = Modifier.size(76.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                UserAvatarImage(
-                                    avatarUrl = partnerAvatarUrl,
-                                    contentDescription = partnerName,
-                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                                    modifier = Modifier
-                                        .size(72.dp)
-                                        .clip(CircleShape)
-                                        .border(2.5.dp, Color(0xFFFECDD3), CircleShape)
+                            .clickable {
+                                showAttachmentSheet = false
+                                photoPickerLauncher.launch(
+                                    androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
                                 )
-
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.BottomEnd)
-                                        .size(26.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFFE11D48))
-                                        .border(2.dp, Color.White, CircleShape),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    SoftBlockIcon(size = 14.dp, color = Color.White)
-                                }
                             }
-
-                            Spacer(modifier = Modifier.height(16.dp))
-
-                            Text(
-                                text = "Block $partnerName?",
-                                fontSize = 21.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color(0xFF111827),
-                                textAlign = TextAlign.Center
-                            )
-
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            Surface(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(18.dp),
-                                color = Color(0xFFFFF1F2),
-                                border = BorderStroke(1.dp, Color(0xFFFFE4E6))
-                            ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(14.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        SoftBlockIcon(size = 15.dp, color = Color(0xFFE11D48))
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = "Cannot send messages or voice notes",
-                                            fontSize = 12.5.sp,
-                                            color = Color(0xFF9F1239),
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    }
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        SoftMuteIcon(size = 15.dp, color = Color(0xFFE11D48))
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = "Cannot call you or see your online status",
-                                            fontSize = 12.5.sp,
-                                            color = Color(0xFF9F1239),
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    }
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        SoftShieldIcon(size = 15.dp, color = Color(0xFFE11D48))
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = "Hidden from your conversations list",
-                                            fontSize = 12.5.sp,
-                                            color = Color(0xFF9F1239),
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    }
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            Text(
-                                text = "💡 You can unblock this user anytime from 3-dots Menu > Blocked Users.",
-                                fontSize = 12.sp,
-                                color = Color(0xFF6B7280),
-                                textAlign = TextAlign.Center,
-                                lineHeight = 16.sp
-                            )
-
-                            Spacer(modifier = Modifier.height(20.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                OutlinedButton(
-                                    onClick = { showBlockConfirmDialog = false },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(48.dp),
-                                    shape = RoundedCornerShape(16.dp),
-                                    border = BorderStroke(1.dp, Color(0xFFE5E7EB))
-                                ) {
-                                    Text(
-                                        text = "Cancel",
-                                        color = Color(0xFF374151),
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 14.sp
-                                    )
-                                }
-
-                                Button(
-                                    onClick = {
-                                        showBlockConfirmDialog = false
-                                        ChatPreferencesManager.blockUser(context, partnerUserId)
-                                        ChatPreferencesManager.markChatDeleted(context, partnerUserId)
-                                        Toast.makeText(
-                                            context,
-                                            "$partnerName blocked. You can unblock anytime from 3-dots Menu > Blocked Users.",
-                                            Toast.LENGTH_LONG
-                                        ).show()
-                                    },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(48.dp),
-                                    shape = RoundedCornerShape(16.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48))
-                                ) {
-                                    Text(
-                                        text = "Block User",
-                                        color = Color.White,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontSize = 14.sp
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Custom Clear Chat Confirmation Dialog
-        if (showClearConfirmDialog) {
-            Dialog(
-                onDismissRequest = { showClearConfirmDialog = false },
-                properties = DialogProperties(usePlatformDefaultWidth = false)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.5f))
-                        .clickable { showClearConfirmDialog = false },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Surface(
-                        modifier = Modifier
-                            .padding(horizontal = 28.dp)
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(28.dp))
-                            .clickable(enabled = false) {},
-                        shape = RoundedCornerShape(28.dp),
-                        color = Color.White,
-                        shadowElevation = 16.dp
+                            .padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(24.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(56.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFFFEE2E2)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                SoftBroomIcon(size = 28.dp, color = Color(0xFFDC2626))
+                        Icon(Icons.Rounded.PhotoLibrary, contentDescription = null, tint = colors.accentIn, modifier = Modifier.size(26.dp))
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Text("Photo & Video", fontSize = 16.sp, color = colors.text)
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                showAttachmentSheet = false
+                                docPickerLauncher.launch(arrayOf("*/*"))
                             }
-
-                            Spacer(modifier = Modifier.height(16.dp))
-
-                            Text(
-                                text = "Clear Chat History?",
-                                fontSize = 19.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color(0xFF111827)
-                            )
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            Text(
-                                text = "This will permanently delete all messages in this conversation from your device.",
-                                fontSize = 13.5.sp,
-                                color = Color(0xFF6B7280),
-                                textAlign = TextAlign.Center,
-                                lineHeight = 19.sp
-                            )
-
-                            Spacer(modifier = Modifier.height(24.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                OutlinedButton(
-                                    onClick = { showClearConfirmDialog = false },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(48.dp),
-                                    shape = RoundedCornerShape(16.dp),
-                                    border = BorderStroke(1.dp, Color(0xFFE5E7EB))
-                                ) {
-                                    Text("Cancel", color = Color(0xFF374151), fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                }
-
-                                Button(
-                                    onClick = {
-                                        showClearConfirmDialog = false
-                                        if (conversationId.isNotBlank()) {
-                                            coroutineScope.launch {
-                                                EncryptedChatRepository.clearConversationMessages(conversationId)
-                                                Toast.makeText(context, "Chat history cleared", Toast.LENGTH_SHORT).show()
-                                            }
-                                        }
-                                    },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(48.dp),
-                                    shape = RoundedCornerShape(16.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
-                                ) {
-                                    Text("Clear", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
-                                }
-                            }
-                        }
+                            .padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Rounded.InsertDriveFile, contentDescription = null, tint = colors.accentIn, modifier = Modifier.size(26.dp))
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Text("Document / File", fontSize = 16.sp, color = colors.text)
                     }
                 }
             }
-        }
-
-        // Blocked Users Bottom Sheet
-        if (showBlockedUsersSheet) {
-            BlockedUsersBottomSheet(
-                onDismiss = { showBlockedUsersSheet = false }
-            )
         }
     }
 }

@@ -8,9 +8,11 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -72,7 +74,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ProfileTabContent(
     currentUserProfile: UserProfile,
@@ -91,6 +93,8 @@ fun ProfileTabContent(
     var showBlockedUsersSheet by remember { mutableStateOf(false) }
     var showBlockedGroupsSheet by remember { mutableStateOf(false) }
     var showChatBackupScreen by remember { mutableStateOf(false) }
+    var showChatAppearanceSheet by remember { mutableStateOf(false) }
+    var showChatKitGalleryDebug by remember { mutableStateOf(false) }
     var showOptionsMenuSheet by remember { mutableStateOf(false) }
     var isAdmin by remember { mutableStateOf(false) }
 
@@ -1516,7 +1520,30 @@ fun ProfileTabContent(
                     }
                 }
 
-                // 5. Logout
+                // 6. Settings > Chat appearance & AI
+                Surface(
+                    onClick = {
+                        showOptionsMenuSheet = false
+                        showChatAppearanceSheet = true
+                    },
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0xFFEFF6FF),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Soft3DCloudIcon(size = 20.dp)
+                        Column {
+                            Text("Chat appearance & AI", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1D4ED8))
+                            Text("Presets (Butter, Sky, Mint, Graphite) · Text size · Cloud AI", fontSize = 11.sp, color = Color(0xFF1E40AF))
+                        }
+                    }
+                }
+
+                // 7. Logout
                 Surface(
                     onClick = {
                         showOptionsMenuSheet = false
@@ -1535,8 +1562,48 @@ fun ProfileTabContent(
                         Text("Log Out of Account", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE11D48))
                     }
                 }
+
+                // 8. App Version (Long-press opens hidden ChatKitGallery debug screen)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .combinedClickable(
+                            onClick = {},
+                            onLongClick = {
+                                showOptionsMenuSheet = false
+                                showChatKitGalleryDebug = true
+                            }
+                        )
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "FunkyTalk v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                        fontSize = 12.sp,
+                        color = Color(0xFF94A3B8),
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
         }
+    }
+
+    if (showChatAppearanceSheet) {
+        com.example.ui.chat.ChatAppearanceBottomSheet(
+            onDismiss = { showChatAppearanceSheet = false },
+            onOpenDebugGallery = {
+                showChatAppearanceSheet = false
+                showChatKitGalleryDebug = true
+            }
+        )
+    }
+
+    if (showChatKitGalleryDebug) {
+        com.example.ui.chat.ChatKitGalleryDebugDialog(
+            onDismiss = { showChatKitGalleryDebug = false }
+        )
     }
 
     // Blocked Users Bottom Sheet

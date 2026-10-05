@@ -2,12 +2,20 @@ package com.example
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.example.ui.chat.ChatPreset
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+
+data class SavedVocabWord(
+    val word: String,
+    val translation: String,
+    val language: String,
+    val timestamp: Long = System.currentTimeMillis()
+)
 
 data class LocalGroupChat(
     val id: String = UUID.randomUUID().toString(),
@@ -30,6 +38,11 @@ object ChatPreferencesManager {
     private const val KEY_UNREAD_OVERRIDE_CHATS = "unread_override_chat_ids"
     private const val KEY_GROUPS_JSON = "custom_groups_json"
     private const val KEY_MINIMALIST_MODE = "is_minimalist_mode_enabled"
+    private const val KEY_CHAT_PRESET = "chat_appearance_preset"
+    private const val KEY_CHAT_TEXT_SCALE = "chat_appearance_text_scale"
+    private const val KEY_CHAT_DARK_THEME = "chat_appearance_dark_theme" // -1 = system, 0 = light, 1 = dark
+    private const val KEY_VOCAB_JSON = "saved_vocab_json"
+    private const val KEY_PINNED_MESSAGES_JSON = "pinned_messages_json"
 
     private val _mutedChats = MutableStateFlow<Set<String>>(emptySet())
     val mutedChats: StateFlow<Set<String>> = _mutedChats.asStateFlow()
@@ -49,6 +62,21 @@ object ChatPreferencesManager {
     private val _isMinimalistMode = MutableStateFlow<Boolean>(false)
     val isMinimalistMode: StateFlow<Boolean> = _isMinimalistMode.asStateFlow()
 
+    private val _chatPreset = MutableStateFlow<ChatPreset>(ChatPreset.Butter)
+    val chatPreset: StateFlow<ChatPreset> = _chatPreset.asStateFlow()
+
+    private val _chatTextScale = MutableStateFlow<Float>(1f)
+    val chatTextScale: StateFlow<Float> = _chatTextScale.asStateFlow()
+
+    private val _chatDarkThemeOverride = MutableStateFlow<Boolean?>(null)
+    val chatDarkThemeOverride: StateFlow<Boolean?> = _chatDarkThemeOverride.asStateFlow()
+
+    private val _savedVocab = MutableStateFlow<List<SavedVocabWord>>(emptyList())
+    val savedVocab: StateFlow<List<SavedVocabWord>> = _savedVocab.asStateFlow()
+
+    private val _pinnedMessages = MutableStateFlow<Map<String, String>>(emptyMap())
+    val pinnedMessages: StateFlow<Map<String, String>> = _pinnedMessages.asStateFlow()
+
     private val _groups = MutableStateFlow<List<LocalGroupChat>>(emptyList())
     val groups: StateFlow<List<LocalGroupChat>> = _groups.asStateFlow()
 
@@ -66,6 +94,48 @@ object ChatPreferencesManager {
         _deletedChats.value = prefs.getStringSet(KEY_DELETED_CHATS, emptySet()) ?: emptySet()
         _unreadOverrideChats.value = prefs.getStringSet(KEY_UNREAD_OVERRIDE_CHATS, emptySet()) ?: emptySet()
         _isMinimalistMode.value = prefs.getBoolean(KEY_MINIMALIST_MODE, false)
+
+        val presetName = prefs.getString(KEY_CHAT_PRESET, ChatPreset.Butter.name) ?: ChatPreset.Butter.name
+        _chatPreset.value = runCatching { ChatPreset.valueOf(presetName) }.getOrDefault(ChatPreset.Butter)
+        _chatTextScale.value = prefs.getFloat(KEY_CHAT_TEXT_SCALE, 1f).coerceIn(0.85f, 1.4f)
+        val darkPref = prefs.getInt(KEY_CHAT_DARK_THEME, -1)
+        _chatDarkThemeOverride.value = when (darkPref) {
+            0 -> false
+            1 -> true
+            else -> null
+        }
+
+        val vocabJson = prefs.getString(KEY_VOCAB_JSON, null)
+        if (!vocabJson.isNullOrBlank()) {
+            try {
+                val arr = JSONArray(vocabJson)
+                val list = mutableListOf<SavedVocabWord>()
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    list.add(
+                        SavedVocabWord(
+                            word = obj.getString("word"),
+                            translation = obj.getString("translation"),
+                            language = obj.optString("language", "English"),
+                            timestamp = obj.optLong("timestamp", System.currentTimeMillis())
+                        )
+                    )
+                }
+                _savedVocab.value = list
+            } catch (_: Exception) {}
+        }
+
+        val pinnedJson = prefs.getString(KEY_PINNED_MESSAGES_JSON, null)
+        if (!pinnedJson.isNullOrBlank()) {
+            try {
+                val obj = JSONObject(pinnedJson)
+                val map = mutableMapOf<String, String>()
+                obj.keys().forEach { k ->
+                    map[k] = obj.getString(k)
+                }
+                _pinnedMessages.value = map
+            } catch (_: Exception) {}
+        }
 
         val groupsJson = prefs.getString(KEY_GROUPS_JSON, null)
         if (!groupsJson.isNullOrBlank()) {
@@ -262,5 +332,95 @@ object ChatPreferencesManager {
     private fun saveStringSet(context: Context, key: String, set: Set<String>) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putStringSet(key, set).apply()
+    }
+
+    fun setChatPreset(context: Context, preset: ChatPreset) {
+        init(context)
+        _chatPreset.value = preset
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_CHAT_PRESET, preset.name)
+            .apply()
+    }
+
+    fun setChatTextScale(context: Context, scale: Float) {
+        init(context)
+        val clamped = scale.coerceIn(0.85f, 1.4f)
+        _chatTextScale.value = clamped
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putFloat(KEY_CHAT_TEXT_SCALE, clamped)
+            .apply()
+    }
+
+    fun setChatDarkThemeOverride(context: Context, dark: Boolean?) {
+        init(context)
+        _chatDarkThemeOverride.value = dark
+        val code = when (dark) {
+            false -> 0
+            true -> 1
+            null -> -1
+        }
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putInt(KEY_CHAT_DARK_THEME, code)
+            .apply()
+    }
+
+    fun saveVocabWord(context: Context, word: String, translation: String, language: String) {
+        init(context)
+        val clean = word.trim()
+        if (clean.isEmpty()) return
+        val updated = listOf(SavedVocabWord(clean, translation, language)) +
+            _savedVocab.value.filterNot { it.word.equals(clean, ignoreCase = true) }
+        _savedVocab.value = updated
+        persistVocab(context, updated)
+    }
+
+    fun removeVocabWord(context: Context, word: String) {
+        init(context)
+        val updated = _savedVocab.value.filterNot { it.word.equals(word, ignoreCase = true) }
+        _savedVocab.value = updated
+        persistVocab(context, updated)
+    }
+
+    private fun persistVocab(context: Context, list: List<SavedVocabWord>) {
+        try {
+            val arr = JSONArray()
+            list.forEach { item ->
+                val obj = JSONObject()
+                obj.put("word", item.word)
+                obj.put("translation", item.translation)
+                obj.put("language", item.language)
+                obj.put("timestamp", item.timestamp)
+                arr.put(obj)
+            }
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putString(KEY_VOCAB_JSON, arr.toString())
+                .apply()
+        } catch (_: Exception) {}
+    }
+
+    fun togglePinMessage(context: Context, chatId: String, messageId: String): Boolean {
+        init(context)
+        val current = _pinnedMessages.value.toMutableMap()
+        val isNowPinned = if (current[chatId] == messageId) {
+            current.remove(chatId)
+            false
+        } else {
+            current[chatId] = messageId
+            true
+        }
+        _pinnedMessages.value = current
+        try {
+            val obj = JSONObject()
+            current.forEach { (k, v) -> obj.put(k, v) }
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putString(KEY_PINNED_MESSAGES_JSON, obj.toString())
+                .apply()
+        } catch (_: Exception) {}
+        return isNowPinned
     }
 }
