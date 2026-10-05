@@ -38,6 +38,17 @@ sealed class ChatIconAsset {
     object Book : ChatIconAsset()
     object Lightbulb : ChatIconAsset()
     object Smiley : ChatIconAsset()
+    object Attachment : ChatIconAsset()
+    object Close : ChatIconAsset()
+    object Sparkles : ChatIconAsset()
+    object Clock : ChatIconAsset()
+    object Search : ChatIconAsset()
+    object Trash : ChatIconAsset()
+    object Share : ChatIconAsset()
+    object Forward : ChatIconAsset()
+    object Check : ChatIconAsset()
+    object Lock : ChatIconAsset()
+    object MicOff : ChatIconAsset()
 }
 
 @Composable
@@ -324,6 +335,109 @@ fun AppSvgIcon(
                     cubicTo(w * 0.416f, h * 0.72f, w * 0.583f, h * 0.72f, w * 0.666f, h * 0.583f)
                 }
                 drawPath(smile, c, style = Stroke(stroke, cap = StrokeCap.Round))
+            }
+            ChatIconAsset.Attachment -> {
+                val c = if (tint == Color.Unspecified) Color.Black else tint
+                val stroke = 1.8f * densityFactor
+                val clip = Path().apply {
+                    moveTo(w * 0.70f, h * 0.33f)
+                    lineTo(w * 0.38f, h * 0.65f)
+                    cubicTo(w * 0.28f, h * 0.75f, w * 0.15f, h * 0.75f, w * 0.15f, h * 0.58f)
+                    cubicTo(w * 0.15f, h * 0.45f, w * 0.28f, h * 0.30f, w * 0.45f, h * 0.15f)
+                    cubicTo(w * 0.62f, h * 0.08f, w * 0.82f, h * 0.18f, w * 0.85f, h * 0.38f)
+                    cubicTo(w * 0.88f, h * 0.58f, w * 0.72f, h * 0.82f, w * 0.48f, h * 0.88f)
+                    cubicTo(w * 0.30f, h * 0.92f, w * 0.12f, h * 0.80f, w * 0.12f, h * 0.60f)
+                }
+                drawPath(clip, c, style = Stroke(stroke, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            }
+            ChatIconAsset.Close -> {
+                val c = if (tint == Color.Unspecified) Color.Black else tint
+                val stroke = 2.0f * densityFactor
+                drawLine(c, Offset(w * 0.25f, h * 0.25f), Offset(w * 0.75f, h * 0.75f), strokeWidth = stroke, cap = StrokeCap.Round)
+                drawLine(c, Offset(w * 0.75f, h * 0.25f), Offset(w * 0.25f, h * 0.75f), strokeWidth = stroke, cap = StrokeCap.Round)
+            }
+            ChatIconAsset.Sparkles -> {
+                val c = if (tint == Color.Unspecified) Color(0xFFEAB308) else tint
+                val stroke = 1.8f * densityFactor
+                val mainStar = Path().apply {
+                    moveTo(w * 0.50f, h * 0.10f)
+                    cubicTo(w * 0.50f, h * 0.35f, w * 0.65f, h * 0.50f, w * 0.90f, h * 0.50f)
+                    cubicTo(w * 0.65f, h * 0.50f, w * 0.50f, h * 0.65f, w * 0.50f, h * 0.90f)
+                    cubicTo(w * 0.50f, h * 0.65f, w * 0.35f, h * 0.50f, w * 0.10f, h * 0.50f)
+                    cubicTo(w * 0.35f, h * 0.50f, w * 0.50f, h * 0.35f, w * 0.50f, h * 0.10f)
+                    close()
+                }
+                drawPath(mainStar, c, style = Fill)
+            }
+            ChatIconAsset.Clock -> {
+                val c = if (tint == Color.Unspecified) Color.Gray else tint
+                val stroke = 1.8f * densityFactor
+                drawCircle(c, radius = w * 0.40f, center = Offset(w * 0.5f, h * 0.5f), style = Stroke(stroke))
+                drawLine(c, Offset(w * 0.50f, h * 0.28f), Offset(w * 0.50f, h * 0.50f), strokeWidth = stroke, cap = StrokeCap.Round)
+                drawLine(c, Offset(w * 0.50f, h * 0.50f), Offset(w * 0.68f, h * 0.50f), strokeWidth = stroke, cap = StrokeCap.Round)
+            }
+            ChatIconAsset.Search -> {
+                val c = if (tint == Color.Unspecified) Color.Black else tint
+                val stroke = 1.8f * densityFactor
+                drawCircle(c, radius = w * 0.30f, center = Offset(w * 0.42f, h * 0.42f), style = Stroke(stroke))
+                drawLine(c, Offset(w * 0.62f, h * 0.62f), Offset(w * 0.85f, h * 0.85f), strokeWidth = stroke, cap = StrokeCap.Round)
+            }
+            ChatIconAsset.Trash -> {
+                val c = if (tint == Color.Unspecified) Color(0xFFEF4444) else tint
+                val stroke = 1.8f * densityFactor
+                drawLine(c, Offset(w * 0.20f, h * 0.28f), Offset(w * 0.80f, h * 0.28f), strokeWidth = stroke, cap = StrokeCap.Round)
+                drawLine(c, Offset(w * 0.38f, h * 0.18f), Offset(w * 0.62f, h * 0.18f), strokeWidth = stroke, cap = StrokeCap.Round)
+                val bin = Path().apply {
+                    moveTo(w * 0.28f, h * 0.28f)
+                    lineTo(w * 0.32f, h * 0.82f)
+                    lineTo(w * 0.68f, h * 0.82f)
+                    lineTo(w * 0.72f, h * 0.28f)
+                }
+                drawPath(bin, c, style = Stroke(stroke, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            }
+            ChatIconAsset.Share -> {
+                val c = if (tint == Color.Unspecified) Color.Black else tint
+                val stroke = 1.8f * densityFactor
+                drawCircle(c, radius = w * 0.12f, center = Offset(w * 0.75f, h * 0.25f))
+                drawCircle(c, radius = w * 0.12f, center = Offset(w * 0.25f, h * 0.50f))
+                drawCircle(c, radius = w * 0.12f, center = Offset(w * 0.75f, h * 0.75f))
+                drawLine(c, Offset(w * 0.35f, h * 0.44f), Offset(w * 0.65f, h * 0.30f), strokeWidth = stroke)
+                drawLine(c, Offset(w * 0.35f, h * 0.56f), Offset(w * 0.65f, h * 0.70f), strokeWidth = stroke)
+            }
+            ChatIconAsset.Forward -> {
+                val c = if (tint == Color.Unspecified) Color.Black else tint
+                val stroke = 1.8f * densityFactor
+                val fwd = Path().apply {
+                    moveTo(w * 0.30f, h * 0.25f)
+                    lineTo(w * 0.70f, h * 0.50f)
+                    lineTo(w * 0.30f, h * 0.75f)
+                }
+                drawPath(fwd, c, style = Stroke(stroke, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            }
+            ChatIconAsset.Check -> {
+                val c = if (tint == Color.Unspecified) Color.Black else tint
+                val stroke = 1.8f * densityFactor
+                val chk = Path().apply {
+                    moveTo(w * 0.20f, h * 0.50f)
+                    lineTo(w * 0.42f, h * 0.75f)
+                    lineTo(w * 0.80f, h * 0.28f)
+                }
+                drawPath(chk, c, style = Stroke(stroke, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            }
+            ChatIconAsset.Lock -> {
+                val c = if (tint == Color.Unspecified) Color.Black else tint
+                val stroke = 1.8f * densityFactor
+                drawRoundRect(c, topLeft = Offset(w * 0.25f, h * 0.45f), size = Size(w * 0.50f, h * 0.45f), style = Stroke(stroke))
+                val arch = Path().apply {
+                    moveTo(w * 0.35f, h * 0.45f)
+                    cubicTo(w * 0.35f, h * 0.22f, w * 0.65f, h * 0.22f, w * 0.65f, h * 0.45f)
+                }
+                drawPath(arch, c, style = Stroke(stroke, cap = StrokeCap.Round))
+            }
+            ChatIconAsset.MicOff -> {
+                val c = if (tint == Color.Unspecified) Color.Red else tint
+                val stroke = 1.8f * densityFactor
+                drawLine(c, Offset(w * 0.20f, h * 0.20f), Offset(w * 0.80f, h * 0.80f), strokeWidth = stroke * 1.2f, cap = StrokeCap.Round)
             }
         }
     }

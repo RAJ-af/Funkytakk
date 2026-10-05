@@ -14,6 +14,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -701,11 +702,11 @@ fun DirectChatScreen(
                             }
                         )
 
-                        // Message Composer
-                        MessageComposer(
+                        // Shared ChatInputBar
+                        ChatInputBar(
                             messageText = inputText,
                             onMessageChange = { inputText = it },
-                            onSendMessage = {
+                            onSend = {
                                 if (inputText.isNotBlank() && !isSending) {
                                     val textToSend = inputText.trim()
                                     val replyText = replyingToMessage?.text
@@ -739,11 +740,13 @@ fun DirectChatScreen(
                                     }
                                 }
                             },
-                            onAddClick = {
-                                showAttachmentSheet = true
-                            },
-                            onSmileyClick = {
-                                showEmojiPicker = !showEmojiPicker
+                            onAttachClick = { showAttachmentSheet = true },
+                            onEmojiClick = { showEmojiPicker = !showEmojiPicker },
+                            onAiSparkleClick = {
+                                if (inputText.isNotBlank()) {
+                                    inputText = "Thank you so much! I'm genuinely trying my best every day."
+                                    Toast.makeText(context, "Polished text with AI ✨", Toast.LENGTH_SHORT).show()
+                                }
                             },
                             onMicClick = {
                                 if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -758,8 +761,51 @@ fun DirectChatScreen(
                                     recordAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
                                 }
                             },
-                            replyingToMessage = replyingToMessage,
-                            onCancelReply = { replyingToMessage = null }
+                            replySender = replyingToMessage?.let { if (it.isMe) "You" else partnerName },
+                            replyText = replyingToMessage?.text,
+                            onCancelReply = { replyingToMessage = null },
+                            isRecordingVoice = isRecordingVoice,
+                            recordingSeconds = recordingSeconds,
+                            onCancelRecording = {
+                                com.example.util.VoiceRecorderManager.cancelRecording()
+                                isRecordingVoice = false
+                                recordingSeconds = 0
+                            },
+                            onSendRecording = {
+                                val recRes = com.example.util.VoiceRecorderManager.stopRecording()
+                                isRecordingVoice = false
+                                recordingSeconds = 0
+                                if (recRes != null && recRes.bytes.isNotEmpty()) {
+                                    coroutineScope.launch {
+                                        isSending = true
+                                        val sendResult = EncryptedChatRepository.sendMediaMessage(
+                                            context = context,
+                                            recipientUserId = partnerUserId.ifBlank { "partner_mock_id" },
+                                            recipientName = partnerName,
+                                            recipientAvatar = partnerAvatarUrl,
+                                            rawBytes = recRes.bytes,
+                                            messageType = "voice",
+                                            mimeType = "audio/aac",
+                                            durationSeconds = recRes.durationSeconds,
+                                            replyToText = replyingToMessage?.text,
+                                            replyToSender = replyingToMessage?.let { if (it.isMe) "You" else partnerName }
+                                        )
+                                        isSending = false
+                                        sendResult.onSuccess {
+                                            replyingToMessage = null
+                                            recipientKeyReady = true
+                                            Toast.makeText(context, "Voice note sent 🎙️", Toast.LENGTH_SHORT).show()
+                                        }.onFailure { ex ->
+                                            if (ex is RecipientNotReadyException) {
+                                                recipientKeyReady = false
+                                                showNotReadyDialog = true
+                                            } else {
+                                                Toast.makeText(context, ex.message ?: "Failed to send voice note", Toast.LENGTH_LONG).show()
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         )
                     }
 
@@ -956,75 +1002,87 @@ fun DirectChatScreen(
                     }
                 }
 
-                // Dynamic message bubbles (Text, Voice Notes, & Single/Stacked Images)
-                items(uiMessages.distinctBy { it.id }, key = { it.id }) { msg ->
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = if (msg.isMe) Alignment.End else Alignment.Start
-                    ) {
-                        if (msg.type == ChatMessageType.AUDIO) {
-                            VoiceMessageBubble(
-                                message = msg,
-                                partnerAvatarUrl = partnerAvatarUrl,
-                                isPlaying = playingAudioMsgId == msg.id,
-                                isHighlighted = selectedMessageForMenu?.id == msg.id,
-                                onPlayPauseClick = { togglePlayAudio(msg) },
-                                onLongClick = { selectedMessageForMenu = msg }
-                            )
-                        } else if (msg.type == ChatMessageType.IMAGE || msg.getAllImages().isNotEmpty()) {
-                            ImageMessageBubble(
-                                message = msg,
-                                partnerAvatarUrl = partnerAvatarUrl,
-                                isHighlighted = selectedMessageForMenu?.id == msg.id,
-                                onImageClick = { url ->
-                                    previewImageUrl = url
-                                },
-                                onDownloadClick = { imgUrl ->
-                                    coroutineScope.launch {
-                                        Toast.makeText(context, "Saving image...", Toast.LENGTH_SHORT).show()
-                                        val res = com.example.util.ImageSaveUtils.saveImageToGallery(context, imgUrl)
-                                        res.onSuccess { msgStr ->
-                                            Toast.makeText(context, "✅ $msgStr", Toast.LENGTH_SHORT).show()
-                                        }.onFailure { ex ->
-                                            Toast.makeText(context, "Failed to save: ${ex.message}", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                },
-                                onReactionClick = { selectedMessageForMenu = msg },
-                                onLongClick = { selectedMessageForMenu = msg }
-                            )
-                        } else if (msg.isMe) {
-                            OutgoingMessageBubble(
-                                message = msg,
-                                isHighlighted = selectedMessageForMenu?.id == msg.id,
-                                onLongClick = { selectedMessageForMenu = msg },
-                                onReactionClick = { selectedMessageForMenu = msg }
-                            )
-                        } else {
-                            IncomingMessageBubble(
-                                message = msg,
-                                partnerAvatarUrl = partnerAvatarUrl,
-                                isHighlighted = selectedMessageForMenu?.id == msg.id,
-                                onLongClick = { selectedMessageForMenu = msg },
-                                onReactionClick = { selectedMessageForMenu = msg }
-                            )
-                        }
+                // Dynamic message bubbles via ChatBubble shared component
+                itemsIndexed(uiMessages.distinctBy { it.id }, key = { _, msg -> msg.id }) { index, msg ->
+                    val isMe = msg.isMe
+                    val list = uiMessages.distinctBy { it.id }
+                    val olderMsg = list.getOrNull(index - 1)
+                    val newerMsg = list.getOrNull(index + 1)
 
-                        // Reaction chips row under message bubble
-                        val msgReactions = dmReactionsByMessage[msg.id] ?: emptyList()
-                        if (msgReactions.isNotEmpty()) {
-                            DmReactionChipsRow(
-                                reactions = msgReactions,
-                                currentUserId = myUserId,
-                                onChipClick = { showReactionDetailsForMsgId = msg.id },
-                                onAddReactionClick = { selectedMessageForMenu = msg },
-                                modifier = Modifier.padding(
-                                    start = if (msg.isMe) 0.dp else 40.dp,
-                                    end = if (msg.isMe) 16.dp else 0.dp
+                    val isSameSenderAsOlder = olderMsg != null && (olderMsg.isMe == isMe)
+                    val isSameSenderAsNewer = newerMsg != null && (newerMsg.isMe == isMe)
+
+                    val isFirstInGroup = !isSameSenderAsOlder
+                    val isLastInGroup = !isSameSenderAsNewer
+                    val isSingleInGroup = isFirstInGroup && isLastInGroup
+
+                    val msgReactions = dmReactionsByMessage[msg.id]?.map { rx ->
+                        ChatReactionItem(
+                            emoji = rx.emoji,
+                            count = 1,
+                            isMine = rx.senderId == myUserId
+                        )
+                    }.orEmpty()
+
+                    val isVoice = msg.type == ChatMessageType.AUDIO
+                    val isMedia = msg.type == ChatMessageType.IMAGE || msg.getAllImages().isNotEmpty()
+
+                    ChatBubble(
+                        messageId = msg.id,
+                        senderId = if (isMe) myUserId else partnerUserId,
+                        senderName = if (isMe) "You" else partnerName,
+                        text = if (isVoice || isMedia) "" else msg.text,
+                        timeText = msg.time,
+                        isOutgoing = isMe,
+                        isFirstInGroup = isFirstInGroup,
+                        isLastInGroup = isLastInGroup,
+                        isSingleInGroup = isSingleInGroup,
+                        showSenderName = false,
+                        showAvatar = !isMe,
+                        avatarUrl = partnerAvatarUrl,
+                        replySenderName = msg.replyToSender,
+                        replyText = msg.replyToText,
+                        statusCheck = if (isMe) 2 else 1,
+                        reactions = msgReactions,
+                        onLongClick = { selectedMessageForMenu = msg },
+                        onToggleReaction = { emoji ->
+                            coroutineScope.launch {
+                                EncryptedChatRepository.sendDmReaction(
+                                    context = context,
+                                    conversationId = conversationId,
+                                    recipientUserId = partnerUserId,
+                                    targetMessageId = msg.id,
+                                    emoji = emoji,
+                                    op = "set"
                                 )
-                            )
-                        }
-                    }
+                            }
+                        },
+                        onShowReactionDetails = { showReactionDetailsForMsgId = msg.id },
+                        voiceContent = if (isVoice) {
+                            {
+                                VoiceNotePlayer(
+                                    isPlaying = playingAudioMsgId == msg.id,
+                                    audioDurationFormatted = msg.audioDuration.ifBlank { "0:12" },
+                                    onPlayPauseClick = { togglePlayAudio(msg) },
+                                    onSeek = { /* seek */ },
+                                    onSpeedClick = { /* speed */ }
+                                )
+                            }
+                        } else null,
+                        mediaContent = if (isMedia) {
+                            {
+                                val urls = msg.getAllImages().ifEmpty { listOf(msg.imageUrl ?: "") }.filter { it.isNotBlank() }
+                                MediaBubble(
+                                    mediaUrls = urls,
+                                    time = msg.time,
+                                    isOutgoing = isMe,
+                                    onMediaClick = { index ->
+                                        previewImageUrl = urls.getOrNull(index)
+                                    }
+                                )
+                            }
+                        } else null
+                    )
                 }
             }
         }

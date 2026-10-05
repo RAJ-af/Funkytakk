@@ -19,6 +19,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -57,10 +58,7 @@ import com.example.db.LocalGroupMessage
 import com.example.db.LocalMessageReaction
 import com.example.repository.GroupChatRepository
 import com.example.ui.components.*
-import com.example.ui.screens.chat.components.FullEmojiPickerBottomSheet
-import com.example.ui.screens.chat.components.GroupMessageReactionOverlay
-import com.example.ui.screens.chat.components.GroupReactionChipsRow
-import com.example.ui.screens.chat.components.GroupReactionDetailsBottomSheet
+import com.example.ui.screens.chat.components.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -1167,43 +1165,106 @@ fun GroupChatScreen(
                 reverseLayout = true,
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(paddingValues)
-                    .padding(horizontal = 16.dp),
-                contentPadding = PaddingValues(vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .padding(paddingValues),
+                contentPadding = PaddingValues(vertical = 12.dp)
             ) {
-                items(visibleMessages, key = { it.id }) { msg ->
+                itemsIndexed(visibleMessages, key = { _, msg -> msg.id }) { index, msg ->
                     if (msg.messageType == "system" || msg.senderId == "system") {
-                        GroupSystemEventRow(text = msg.text)
+                        SystemEventLine(eventText = msg.text)
                     } else {
                         val isMe = msg.isOutgoing || msg.senderId == myUserId
-                        val mentionIds = remember(msg.mentionsJson) {
-                            GroupChatRepository.parseMentionsJson(msg.mentionsJson)
-                        }
-                        val replyToId = msg.replyToMessageId.orEmpty()
-                        val isReplyToMe = remember(replyToId, myUserId, messages) {
-                            replyToId.isNotBlank() && messages.any { it.id == replyToId && (it.senderId == myUserId || it.isOutgoing) }
-                        }
-                        val isMentionedMe = (myUserId.isNotBlank() && mentionIds.contains(myUserId)) || isReplyToMe
+                        val olderMsg = visibleMessages.getOrNull(index + 1)
+                        val newerMsg = visibleMessages.getOrNull(index - 1)
 
-                        GroupMessageItem(
-                            message = msg,
-                            isMe = isMe,
-                            isMentioned = isMentionedMe,
-                            reactions = reactionsByMessage[msg.id].orEmpty(),
-                            currentUserId = myUserId,
-                            onReplyClick = { replyingToMessage = msg },
+                        val isSameSenderAsOlder = olderMsg != null && olderMsg.senderId == msg.senderId && olderMsg.messageType != "system" && kotlin.math.abs(msg.timestamp - olderMsg.timestamp) <= 120_000L
+                        val isSameSenderAsNewer = newerMsg != null && newerMsg.senderId == msg.senderId && newerMsg.messageType != "system" && kotlin.math.abs(msg.timestamp - newerMsg.timestamp) <= 120_000L
+
+                        val isFirstInGroup = !isSameSenderAsOlder
+                        val isLastInGroup = !isSameSenderAsNewer
+                        val isSingleInGroup = isFirstInGroup && isLastInGroup
+
+                        val member = groupMembers.find { it.user_id == msg.senderId }
+                        val senderDisplayName = when {
+                            isMe -> "You"
+                            member != null && !member.profile_name.isNullOrBlank() -> member.profile_name
+                            member != null && !member.username.isNullOrBlank() -> member.username
+                            else -> msg.senderName ?: "Member"
+                        }
+                        val avatarUrl = member?.avatar_url
+
+                        val isVoice = msg.messageType == "voice" || msg.text.startsWith("[voice]") || msg.text.startsWith("[audio]")
+                        val isMedia = msg.messageType == "image" || msg.text.startsWith("[img]") || msg.text.startsWith("[imgs]")
+
+                        val formattedTime = remember(msg.timestamp) {
+                            java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(msg.timestamp))
+                        }
+
+                        val msgReactions = reactionsByMessage[msg.id]?.map { rx ->
+                            ChatReactionItem(
+                                emoji = rx.emoji,
+                                count = 1,
+                                isMine = rx.senderId == myUserId
+                            )
+                        }.orEmpty()
+
+                        ChatBubble(
+                            messageId = msg.id,
+                            senderId = msg.senderId,
+                            senderName = senderDisplayName,
+                            text = if (isVoice || isMedia) "" else msg.text,
+                            timeText = formattedTime,
+                            isOutgoing = isMe,
+                            isFirstInGroup = isFirstInGroup,
+                            isLastInGroup = isLastInGroup,
+                            isSingleInGroup = isSingleInGroup,
+                            showSenderName = isFirstInGroup && !isMe,
+                            showAvatar = !isMe,
+                            avatarUrl = avatarUrl,
+                            replySenderName = msg.replyToSenderName,
+                            replyText = msg.replyToPreview,
+                            statusCheck = if (isMe) 2 else 1,
+                            reactions = msgReactions,
                             onLongClick = { selectedMessageForReactions = msg },
-                            onReactionChipClick = { selectedMessageForReactionDetails = msg },
-                            onImageClick = { url -> previewImageUrl = url },
-                            onRequestDownloadMedia = { targetMsg ->
+                            onToggleReaction = { emoji ->
                                 scope.launch {
-                                    val dl = GroupChatRepository.downloadGroupMessageMediaOnDemand(context, targetMsg)
-                                    dl.onFailure { err ->
-                                        Toast.makeText(context, err.message ?: "Failed to decrypt media", Toast.LENGTH_SHORT).show()
-                                    }
+                                    GroupChatRepository.sendGroupReaction(
+                                        context = context,
+                                        groupId = group.id,
+                                        targetMessageId = msg.id,
+                                        emoji = emoji,
+                                        op = "set"
+                                    )
                                 }
-                            }
+                            },
+                            onShowReactionDetails = { selectedMessageForReactionDetails = msg },
+                            voiceContent = if (isVoice) {
+                                {
+                                    VoiceNotePlayer(
+                                        isPlaying = false,
+                                        audioDurationFormatted = "0:12",
+                                        onPlayPauseClick = { /* voice play */ },
+                                        onSeek = { /* seek */ },
+                                        onSpeedClick = { /* speed */ }
+                                    )
+                                }
+                            } else null,
+                            mediaContent = if (isMedia) {
+                                {
+                                    val urls = if (msg.text.startsWith("[imgs]")) msg.text.removePrefix("[imgs]").split(",").map { it.trim() }
+                                    else if (msg.text.startsWith("[img]")) listOf(msg.text.removePrefix("[img]").trim())
+                                    else if (!msg.localMediaPath.isNullOrBlank()) listOf(msg.localMediaPath)
+                                    else emptyList()
+
+                                    MediaBubble(
+                                        mediaUrls = urls,
+                                        time = formattedTime,
+                                        isOutgoing = isMe,
+                                        onMediaClick = { index ->
+                                            previewImageUrl = urls.getOrNull(index)
+                                        }
+                                    )
+                                }
+                            } else null
                         )
                     }
                 }

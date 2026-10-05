@@ -345,6 +345,26 @@ fun FunkySendIcon(
 }
 
 @Composable
+fun FunkySingleCheckIcon(
+    color: Color = Color(0xFF6B7280),
+    modifier: Modifier = Modifier.size(16.dp),
+    strokeWidth: Float = 1.6f
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val sw = strokeWidth * density
+
+        val p1 = Path().apply {
+            moveTo(w * 0.18f, h * 0.52f)
+            lineTo(w * 0.42f, h * 0.74f)
+            lineTo(w * 0.82f, h * 0.32f)
+        }
+        drawPath(p1, color = color, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+@Composable
 fun FunkyDoubleCheckIcon(
     color: Color = Color(0xFF6B7280),
     modifier: Modifier = Modifier.size(16.dp),
