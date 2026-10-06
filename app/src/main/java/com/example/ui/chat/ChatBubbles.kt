@@ -295,10 +295,8 @@ fun MessageMeta(
         if (edited) Text("edited", color = base, fontSize = 11f.chatSp())
         Text(time, color = base, fontSize = 11f.chatSp())
         when (status) {
-            null -> Unit
             MessageStatus.Sending -> CircularProgressIndicator(Modifier.size(10.dp), color = base, strokeWidth = 1.2.dp)
-            MessageStatus.Sent -> TickMark(false, tick)
-            MessageStatus.Delivered, MessageStatus.Read -> TickMark(true, tick)
+            else -> Unit
         }
     }
 }

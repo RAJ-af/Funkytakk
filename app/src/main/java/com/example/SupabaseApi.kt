@@ -1161,6 +1161,51 @@ interface SupabaseApi {
     ): Response<List<GiftTransactionItem>>
 
     // ----------------------------------------------------
+    // STORE & COSMETICS RPCs
+    // ----------------------------------------------------
+    @POST("rest/v1/rpc/get_store_items")
+    suspend fun getStoreItems(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: GetStoreItemsRequest
+    ): Response<List<StoreItemRow>>
+
+    @POST("rest/v1/rpc/purchase_item")
+    suspend fun purchaseItem(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: PurchaseItemRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/equip_item")
+    suspend fun equipItem(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: EquipItemRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/unequip_slot")
+    suspend fun unequipSlot(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: UnequipSlotRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/get_user_cosmetics")
+    suspend fun getUserCosmetics(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: GetUserCosmeticsRequest
+    ): Response<List<UserCosmeticsRow>>
+
+    @POST("rest/v1/rpc/verify_owned_items")
+    suspend fun verifyOwnedItems(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: VerifyOwnedItemsRequest
+    ): Response<List<VerifiedOwnedItemRow>>
+
+    // ----------------------------------------------------
     // GROUP CHAT (E2EE FAN-OUT & RPCs)
     // ----------------------------------------------------
     @POST("rest/v1/rpc/get_my_groups")
@@ -1930,6 +1975,78 @@ data class AiAssistResponse(
     val provider: String? = null, // "sarvam" | "cerebras" | "gemini"
     val error: String? = null,
     val code: String? = null
+)
+
+// ----------------------------------------------------
+// STORE & COSMETICS MODELS
+// ----------------------------------------------------
+@JsonClass(generateAdapter = true)
+data class GetStoreItemsRequest(
+    val p_type: String? = null,
+    val p_owned_only: Boolean = false
+)
+
+@JsonClass(generateAdapter = true)
+data class StoreItemRow(
+    val id: Long,
+    val code: String,
+    val item_type: String, // "bubble_theme", "chat_bg", "avatar_frame", "name_effect", "sticker_pack"
+    val name: String,
+    val description: String? = null,
+    val preview_url: String? = null,
+    val price_coins: Int = 0,
+    val config: Map<String, Any?>? = null,
+    val owned: Boolean = false,
+    val equipped: Boolean = false
+)
+
+@JsonClass(generateAdapter = true)
+data class PurchaseItemRequest(
+    val p_item_id: Long
+)
+
+@JsonClass(generateAdapter = true)
+data class EquipItemRequest(
+    val p_item_id: Long
+)
+
+@JsonClass(generateAdapter = true)
+data class UnequipSlotRequest(
+    val p_slot: String // "bubble_theme", "chat_bg", "avatar_frame", "name_effect"
+)
+
+@JsonClass(generateAdapter = true)
+data class GetUserCosmeticsRequest(
+    val p_user_ids: List<String>
+)
+
+@JsonClass(generateAdapter = true)
+data class CosmeticSlotInfo(
+    val id: Long? = null,
+    val code: String? = null,
+    val config: Map<String, Any?>? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class UserCosmeticsRow(
+    val user_id: String,
+    val bubble_theme: CosmeticSlotInfo? = null,
+    val avatar_frame: CosmeticSlotInfo? = null,
+    val name_effect: CosmeticSlotInfo? = null,
+    val chat_bg: CosmeticSlotInfo? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class VerifyOwnedItemsRequest(
+    val p_user_id: String,
+    val p_item_ids: List<Long>
+)
+
+@JsonClass(generateAdapter = true)
+data class VerifiedOwnedItemRow(
+    val item_id: Long,
+    val item_type: String,
+    val config: Map<String, Any?>? = null
 )
 
 

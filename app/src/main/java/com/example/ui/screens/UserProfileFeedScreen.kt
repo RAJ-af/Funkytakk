@@ -540,6 +540,7 @@ fun UserProfileFeedScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
+                .statusBarsPadding()
                 .background(Color(0xFFFAFAEE)),
             contentPadding = PaddingValues(bottom = 36.dp)
         ) {

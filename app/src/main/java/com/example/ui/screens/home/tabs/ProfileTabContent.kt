@@ -823,13 +823,13 @@ fun ProfileTabContent(
                                 Text("🎨", fontSize = 22.sp)
                                 Column {
                                     Text(
-                                        text = "Chat Theme & Bubble Store",
+                                        text = "Funky Theme & Cosmetics Store",
                                         fontSize = 15.sp,
                                         fontWeight = FontWeight.ExtraBold,
                                         color = Color(0xFF78350F)
                                     )
                                     Text(
-                                        text = "Customize bubble colors, wallpapers & presets",
+                                        text = "Customize bubbles, frames, effects & stickers",
                                         fontSize = 12.sp,
                                         color = Color(0xFF92400E)
                                     )
@@ -1618,8 +1618,8 @@ fun ProfileTabContent(
                     }
                 }
 
-                // 8. App Version (Long-press opens hidden ChatKitGallery debug screen)
-                Box(
+                // 8. App Version & Credits (Long-press opens hidden ChatKitGallery debug screen)
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 6.dp)
@@ -1632,13 +1632,19 @@ fun ProfileTabContent(
                             }
                         )
                         .padding(vertical = 8.dp),
-                    contentAlignment = Alignment.Center
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
                         text = "FunkyTalk v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
                         fontSize = 12.sp,
                         color = Color(0xFF94A3B8),
                         fontWeight = FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "Animated emoji by Google, licensed CC BY 4.0",
+                        fontSize = 10.5.sp,
+                        color = Color(0xFF94A3B8)
                     )
                 }
             }
@@ -1783,7 +1789,7 @@ fun ProfileTabContent(
     }
 
     if (showThemeStoreSheet) {
-        com.example.ui.screens.profile.ChatThemeStoreSheet(
+        com.example.ui.screens.profile.FunkyStoreSheet(
             onDismiss = { showThemeStoreSheet = false }
         )
     }

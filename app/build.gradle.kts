@@ -132,6 +132,7 @@ dependencies {
   implementation(libs.androidx.media3.exoplayer)
   implementation(libs.androidx.media3.common)
   implementation(libs.telephoto.zoomable.image.coil)
+  implementation(libs.lottie.compose)
   implementation(libs.coil.compose)
   implementation(libs.coil.svg)
   implementation(libs.coil.gif)
