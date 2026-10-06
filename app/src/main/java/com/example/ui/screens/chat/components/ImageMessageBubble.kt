@@ -143,13 +143,6 @@ fun ImageMessageBubble(
                             color = if (message.isMe) Color(0xFF78350F).copy(alpha = 0.85f) else Color(0xFF6B7280),
                             fontWeight = FontWeight.Medium
                         )
-                        if (message.isMe) {
-                            Spacer(modifier = Modifier.width(4.dp))
-                            FunkyDoubleCheckIcon(
-                                color = Color(0xFF78350F),
-                                modifier = Modifier.size(13.dp)
-                            )
-                        }
                     }
                 }
             }

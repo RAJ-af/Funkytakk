@@ -471,8 +471,6 @@ fun SentVoiceNoteBubble(
                         color = Color(0xFF4B5563),
                         fontWeight = FontWeight.Medium
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    FunkyDoubleCheckIcon(color = Color(0xFF374151), modifier = Modifier.size(13.dp))
                 }
             }
         }

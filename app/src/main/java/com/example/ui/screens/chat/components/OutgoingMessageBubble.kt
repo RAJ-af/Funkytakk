@@ -109,11 +109,6 @@ fun OutgoingMessageBubble(
                             color = Color(0xFF78350F).copy(alpha = 0.85f),
                             fontWeight = FontWeight.Medium
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        FunkyDoubleCheckIcon(
-                            color = Color(0xFF78350F),
-                            modifier = Modifier.size(13.dp)
-                        )
                     }
                 }
             }

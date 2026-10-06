@@ -94,6 +94,7 @@ fun ProfileTabContent(
     var showBlockedGroupsSheet by remember { mutableStateOf(false) }
     var showChatBackupScreen by remember { mutableStateOf(false) }
     var showChatAppearanceSheet by remember { mutableStateOf(false) }
+    var showThemeStoreSheet by remember { mutableStateOf(false) }
     var showChatKitGalleryDebug by remember { mutableStateOf(false) }
     var showOptionsMenuSheet by remember { mutableStateOf(false) }
     var isAdmin by remember { mutableStateOf(false) }
@@ -790,6 +791,60 @@ fun ProfileTabContent(
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF0F172A)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // 🎨 Chat Theme Store & Bubbles Banner Card
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(18.dp))
+                            .clickable { showThemeStoreSheet = true },
+                        shape = RoundedCornerShape(18.dp),
+                        color = Color(0xFFFEF9C3),
+                        border = BorderStroke(1.dp, Color(0xFFFDE047)),
+                        shadowElevation = 1.dp
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Text("🎨", fontSize = 22.sp)
+                                Column {
+                                    Text(
+                                        text = "Chat Theme & Bubble Store",
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = Color(0xFF78350F)
+                                    )
+                                    Text(
+                                        text = "Customize bubble colors, wallpapers & presets",
+                                        fontSize = 12.sp,
+                                        color = Color(0xFF92400E)
+                                    )
+                                }
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(100.dp),
+                                color = Color(0xFFFFC629)
+                            ) {
+                                Text(
+                                    text = "Open Store",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF0F172A),
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                                 )
                             }
                         }
@@ -1725,5 +1780,11 @@ fun ProfileTabContent(
                 onBackClick = { showChatBackupScreen = false }
             )
         }
+    }
+
+    if (showThemeStoreSheet) {
+        com.example.ui.screens.profile.ChatThemeStoreSheet(
+            onDismiss = { showThemeStoreSheet = false }
+        )
     }
 }

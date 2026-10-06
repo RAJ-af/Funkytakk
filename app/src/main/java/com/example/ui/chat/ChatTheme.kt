@@ -29,7 +29,7 @@ import androidx.compose.ui.unit.sp
  *    (a yellow button on a yellow bubble would disappear).
  */
 
-enum class ChatPreset { Butter, Sky, Mint, Graphite }
+enum class ChatPreset { Butter, Sky, Mint, Graphite, SunsetGlow, LavenderBliss, RoseVelvet, TelegramBlue, SignalEmerald }
 
 @Immutable
 data class ChatColors(
@@ -182,6 +182,71 @@ fun chatColors(preset: ChatPreset, dark: Boolean): ChatColors = when (preset) {
             voiceButtonOut = Color(0xFF3B5BDB), onVoiceButtonOut = Color(0xFFFFFFFF),
             waveIdleOut = Color(0x593B5BDB), wavePlayedOut = Color(0xFF3B5BDB),
             brand = Color(0xFF3B5BDB), onBrand = Color(0xFFFFFFFF),
+        )
+    }
+    ChatPreset.SunsetGlow -> if (dark) {
+        ButterDark.copy(
+            wallpaper = Color(0xFF1B0E12), outgoingBubble = Color(0xFF6B2D39),
+            textSecondaryOut = Color(0xFFF5B5C1), accentOut = Color(0xFFFF7A93), tickRead = Color(0xFFFF7A93),
+            brand = Color(0xFFFF7A93), onBrand = Color(0xFF3B0A14),
+        )
+    } else {
+        ButterLight.copy(
+            wallpaper = Color(0xFFFFF4F1), outgoingBubble = Color(0xFFFFD4C1),
+            textSecondaryOut = Color(0xFF8C3A20), accentOut = Color(0xFFE54A20), tickRead = Color(0xFFE54A20),
+            brand = Color(0xFFFF6B35), onBrand = Color(0xFFFFFFFF),
+        )
+    }
+    ChatPreset.LavenderBliss -> if (dark) {
+        ButterDark.copy(
+            wallpaper = Color(0xFF14101F), outgoingBubble = Color(0xFF3F2B6B),
+            textSecondaryOut = Color(0xFFCBB8F5), accentOut = Color(0xFFA77CFF), tickRead = Color(0xFFA77CFF),
+            brand = Color(0xFFA77CFF), onBrand = Color(0xFF1F0842),
+        )
+    } else {
+        ButterLight.copy(
+            wallpaper = Color(0xFFF6F0FF), outgoingBubble = Color(0xFFE4D5FF),
+            textSecondaryOut = Color(0xFF593A8C), accentOut = Color(0xFF7C3AED), tickRead = Color(0xFF7C3AED),
+            brand = Color(0xFF8B5CF6), onBrand = Color(0xFFFFFFFF),
+        )
+    }
+    ChatPreset.RoseVelvet -> if (dark) {
+        ButterDark.copy(
+            wallpaper = Color(0xFF1C0D16), outgoingBubble = Color(0xFF5E1B3D),
+            textSecondaryOut = Color(0xFFF2A3CA), accentOut = Color(0xFFFF66AA), tickRead = Color(0xFFFF66AA),
+            brand = Color(0xFFFF66AA), onBrand = Color(0xFF380220),
+        )
+    } else {
+        ButterLight.copy(
+            wallpaper = Color(0xFFFFF0F5), outgoingBubble = Color(0xFFFBCFE8),
+            textSecondaryOut = Color(0xFF831843), accentOut = Color(0xFFDB2777), tickRead = Color(0xFFDB2777),
+            brand = Color(0xFFEC4899), onBrand = Color(0xFFFFFFFF),
+        )
+    }
+    ChatPreset.TelegramBlue -> if (dark) {
+        ButterDark.copy(
+            wallpaper = Color(0xFF0F1A24), outgoingBubble = Color(0xFF2B5278),
+            textSecondaryOut = Color(0xFF87B3D8), accentOut = Color(0xFF64B5EF), tickRead = Color(0xFF64B5EF),
+            brand = Color(0xFF64B5EF), onBrand = Color(0xFF0A2236),
+        )
+    } else {
+        ButterLight.copy(
+            wallpaper = Color(0xFFEDF4FA), outgoingBubble = Color(0xFFEFF7FF),
+            textSecondaryOut = Color(0xFF386B92), accentOut = Color(0xFF2A80B9), tickRead = Color(0xFF2A80B9),
+            brand = Color(0xFF2B93D3), onBrand = Color(0xFFFFFFFF),
+        )
+    }
+    ChatPreset.SignalEmerald -> if (dark) {
+        ButterDark.copy(
+            wallpaper = Color(0xFF0D1714), outgoingBubble = Color(0xFF184534),
+            textSecondaryOut = Color(0xFF89CFB1), accentOut = Color(0xFF34D399), tickRead = Color(0xFF34D399),
+            brand = Color(0xFF34D399), onBrand = Color(0xFF04291B),
+        )
+    } else {
+        ButterLight.copy(
+            wallpaper = Color(0xFFE8F5E9), outgoingBubble = Color(0xFFC8E6C9),
+            textSecondaryOut = Color(0xFF2E7D32), accentOut = Color(0xFF1B5E20), tickRead = Color(0xFF1B5E20),
+            brand = Color(0xFF2E7D32), onBrand = Color(0xFFFFFFFF),
         )
     }
 }

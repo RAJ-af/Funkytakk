@@ -550,7 +550,7 @@ fun UserProfileFeedScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(235.dp)
+                        .height(255.dp)
                 ) {
                     // Sunset / City Cover Image
                     val displayCover = currentCoverUrl.ifBlank { "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=800" }
@@ -563,61 +563,66 @@ fun UserProfileFeedScreen(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(185.dp)
+                            .height(205.dp)
                     )
 
-                    // Floating Round Back Button (Top Left)
-                    Box(
-                        modifier = Modifier
-                            .padding(start = 16.dp, top = 16.dp)
-                            .align(Alignment.TopStart)
-                            .size(38.dp)
-                            .background(Color.White, CircleShape)
-                            .shadow(elevation = 2.dp, shape = CircleShape)
-                            .clickable { onBack() },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        ProfileBackArrowIcon(modifier = Modifier.size(16.dp), color = Color(0xFF1E293B))
-                    }
-
-                    // Floating Round Actions (Share & Menu) (Top Right)
+                    // Floating Round Buttons Row with statusBarsPadding() (Back, Share, Menu)
                     Row(
                         modifier = Modifier
-                            .padding(end = 16.dp, top = 16.dp)
-                            .align(Alignment.TopEnd),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(horizontal = 16.dp, vertical = 10.dp)
+                            .align(Alignment.TopCenter),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Share Button
+                        // Floating Round Back Button (Top Left)
                         Box(
                             modifier = Modifier
                                 .size(38.dp)
                                 .background(Color.White, CircleShape)
                                 .shadow(elevation = 2.dp, shape = CircleShape)
-                                .clickable {
-                                    Toast.makeText(context, "Shared profile link", Toast.LENGTH_SHORT).show()
-                                },
+                                .clickable { onBack() },
                             contentAlignment = Alignment.Center
                         ) {
-                            ProfileShareIcon(modifier = Modifier.size(16.dp), color = Color(0xFF1E293B))
+                            ProfileBackArrowIcon(modifier = Modifier.size(16.dp), color = Color(0xFF1E293B))
                         }
 
-                        // Three Dots Menu Button
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .background(Color.White, CircleShape)
-                                .shadow(elevation = 2.dp, shape = CircleShape)
-                                .clickable {
-                                    showMoreOptionsMenu = true
-                                },
-                            contentAlignment = Alignment.Center
+                        // Floating Round Actions (Share & Menu) (Top Right)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            ProfileMoreDotsIcon(modifier = Modifier.size(16.dp), color = Color(0xFF1E293B))
+                            // Share Button
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .background(Color.White, CircleShape)
+                                    .shadow(elevation = 2.dp, shape = CircleShape)
+                                    .clickable {
+                                        Toast.makeText(context, "Shared profile link", Toast.LENGTH_SHORT).show()
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                ProfileShareIcon(modifier = Modifier.size(16.dp), color = Color(0xFF1E293B))
+                            }
 
-                            DropdownMenu(
-                                expanded = showMoreOptionsMenu,
-                                onDismissRequest = { showMoreOptionsMenu = false },
+                            // Three Dots Menu Button
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .background(Color.White, CircleShape)
+                                    .shadow(elevation = 2.dp, shape = CircleShape)
+                                    .clickable {
+                                        showMoreOptionsMenu = true
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                ProfileMoreDotsIcon(modifier = Modifier.size(16.dp), color = Color(0xFF1E293B))
+
+                                DropdownMenu(
+                                    expanded = showMoreOptionsMenu,
+                                    onDismissRequest = { showMoreOptionsMenu = false },
                                 modifier = Modifier.background(Color.White, RoundedCornerShape(14.dp))
                             ) {
                                 if (!isSelfProfile) {
@@ -647,6 +652,7 @@ fun UserProfileFeedScreen(
                             }
                         }
                     }
+                }
 
                     // Circular Avatar with Online Dot & Flag
                     Box(

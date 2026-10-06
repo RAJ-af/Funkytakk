@@ -225,7 +225,7 @@ fun ChatFab(icon: @Composable () -> Unit, contentDescription: String, badge: Int
 }
 
 @Composable
-fun ScrollToBottomFab(unread: Int, onClick: () -> Unit, modifier: Modifier = Modifier) =
+fun ScrollToBottomFab(unread: Int = 0, onClick: () -> Unit, modifier: Modifier = Modifier) =
     ChatFab(icon = {
         Canvas(Modifier.size(20.dp)) {
             val sw = 2.dp.toPx()
@@ -236,7 +236,7 @@ fun ScrollToBottomFab(unread: Int, onClick: () -> Unit, modifier: Modifier = Mod
             }
             drawPath(p, Color(0xFF6B6B66), style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
         }
-    }, contentDescription = "Scroll to latest message", badge = unread, onClick = onClick, modifier = modifier)
+    }, contentDescription = "Scroll to latest message", badge = 0, onClick = onClick, modifier = modifier)
 
 @Composable
 fun MentionFab(unreadMentions: Int, onClick: () -> Unit, modifier: Modifier = Modifier) =

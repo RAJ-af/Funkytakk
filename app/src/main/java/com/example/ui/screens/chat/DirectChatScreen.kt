@@ -14,6 +14,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -40,14 +41,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
+import com.example.BuildConfig
 import com.example.ChatPreferencesManager
 import com.example.CloudAiManager
+import com.example.SupabaseClient
 import com.example.SupabaseSessionManager
 import com.example.db.LocalDmConversation
 import com.example.db.LocalDmMessage
 import com.example.db.LocalDmMessageReaction
 import com.example.repository.EncryptedChatRepository
 import com.example.ui.chat.*
+import com.example.ui.components.CircleFlag
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -188,6 +192,52 @@ fun DirectChatScreen(
                         Toast.makeText(context, "Error sending photo: ${e.message}", Toast.LENGTH_SHORT).show()
                     }
                 }
+            }
+        }
+    }
+
+    var resolvedAvatarUrl by remember(partnerAvatarUrl) { mutableStateOf(partnerAvatarUrl.orEmpty()) }
+    var resolvedCountryCode by remember(partnerCountryCode) { mutableStateOf(partnerCountryCode.orEmpty()) }
+    var resolvedCountryName by remember(partnerCountry) { mutableStateOf(partnerCountry.orEmpty()) }
+    var resolvedIsOnline by remember { mutableStateOf(true) }
+
+    LaunchedEffect(partnerUserId) {
+        if (partnerUserId.isNotBlank()) {
+            try {
+                val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                    ?: SupabaseSessionManager.getBearerToken(context)
+                    ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+
+                val discResp = SupabaseClient.api.getDiscoverableProfiles(
+                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                    auth = token,
+                    options = emptyMap()
+                )
+                if (discResp.isSuccessful) {
+                    val dp = discResp.body()?.find { it.auth_user_id == partnerUserId }
+                    if (dp != null) {
+                        if (!dp.avatar_url.isNullOrBlank()) resolvedAvatarUrl = dp.avatar_url
+                        if (!dp.country_code.isNullOrBlank()) resolvedCountryCode = dp.country_code
+                        if (!dp.country.isNullOrBlank()) resolvedCountryName = dp.country
+                        resolvedIsOnline = dp.is_online == true
+                    }
+                }
+
+                val profileRes = SupabaseClient.api.getProfile(
+                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                    auth = token,
+                    authUserIdEq = "eq.$partnerUserId"
+                )
+                if (profileRes.isSuccessful) {
+                    val p = profileRes.body()?.firstOrNull()
+                    if (p != null) {
+                        if (!p.avatar_url.isNullOrBlank()) resolvedAvatarUrl = p.avatar_url
+                        if (!p.country_code.isNullOrBlank()) resolvedCountryCode = p.country_code
+                        if (!p.country.isNullOrBlank()) resolvedCountryName = p.country
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("DirectChatScreen", "Error resolving partner profile", e)
             }
         }
     }
@@ -357,28 +407,40 @@ fun DirectChatScreen(
                                 ChatIconBack(tint = colors.text, modifier = Modifier.size(24.dp))
                             }
 
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(colors.accentIn.copy(alpha = 0.15f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (!partnerAvatarUrl.isNullOrBlank()) {
-                                    AsyncImage(
-                                        model = partnerAvatarUrl,
-                                        contentDescription = "Avatar",
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                } else {
-                                    Text(
-                                        text = partnerName.take(1).uppercase(),
-                                        color = colors.accentIn,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 17.sp
-                                    )
+                            Box(modifier = Modifier.size(42.dp)) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(42.dp)
+                                        .clip(CircleShape)
+                                        .background(colors.accentIn.copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (resolvedAvatarUrl.isNotBlank()) {
+                                        AsyncImage(
+                                            model = resolvedAvatarUrl,
+                                            contentDescription = partnerName,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        Text(
+                                            text = partnerName.take(1).uppercase(),
+                                            color = colors.accentIn,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 17.sp
+                                        )
+                                    }
                                 }
+
+                                val flagCode = resolvedCountryCode.takeIf { it.isNotBlank() } ?: "us"
+                                CircleFlag(
+                                    countryCode = flagCode,
+                                    modifier = Modifier
+                                        .size(15.dp)
+                                        .align(Alignment.BottomEnd)
+                                        .clip(CircleShape)
+                                        .border(1.5.dp, Color.White, CircleShape)
+                                )
                             }
 
                             Spacer(modifier = Modifier.width(10.dp))
@@ -397,11 +459,13 @@ fun DirectChatScreen(
                                         modifier = Modifier
                                             .size(7.dp)
                                             .clip(CircleShape)
-                                            .background(Color(0xFF22C55E))
+                                            .background(if (resolvedIsOnline) Color(0xFF22C55E) else Color(0xFF94A3B8))
                                     )
                                     Spacer(modifier = Modifier.width(5.dp))
+                                    val statusTxt = if (resolvedIsOnline) "Online" else "Offline"
+                                    val displayLocation = if (resolvedCountryName.isNotBlank()) "$statusTxt · $resolvedCountryName" else statusTxt
                                     Text(
-                                        text = if (!partnerCountry.isNullOrBlank()) "Online · $partnerCountry" else "Online",
+                                        text = displayLocation,
                                         color = colors.textSecondary,
                                         fontSize = 12f.chatSp()
                                     )
