@@ -1141,7 +1141,72 @@ object GroupChatRepository {
                 return@withContext Result.failure(Exception(mapGroupError(err, "Failed to load group members")))
             }
 
-            val list = resp.body().orEmpty()
+            val rawList = resp.body().orEmpty()
+            val currentUserId = SupabaseSessionManager.getUserId(context)
+
+            // Enrich member list with real profile details from Supabase profiles tables
+            val profileLookup = mutableMapOf<String, GroupMemberProfileDetails>()
+
+            try {
+                val discResp = SupabaseClient.api.getDiscoverableProfiles(
+                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                    auth = token,
+                    options = emptyMap()
+                )
+                if (discResp.isSuccessful) {
+                    discResp.body().orEmpty().forEach { dp ->
+                        if (dp.auth_user_id.isNotBlank()) {
+                            profileLookup[dp.auth_user_id] = GroupMemberProfileDetails(
+                                avatarUrl = dp.avatar_url,
+                                displayName = dp.profile_name?.takeIf { it.isNotBlank() } ?: dp.username,
+                                username = dp.username,
+                                isOnline = dp.is_online == true,
+                                countryCode = dp.country_code?.takeIf { it.isNotBlank() } ?: dp.country
+                            )
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+
+            try {
+                val allProfilesRes = SupabaseClient.api.getAllProfiles(
+                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                    auth = token
+                )
+                if (allProfilesRes.isSuccessful) {
+                    allProfilesRes.body().orEmpty().forEach { p ->
+                        val uid = p.auth_user_id ?: p.id?.toString().orEmpty()
+                        if (uid.isNotBlank()) {
+                            val existing = profileLookup[uid]
+                            profileLookup[uid] = GroupMemberProfileDetails(
+                                avatarUrl = p.avatar_url?.takeIf { it.isNotBlank() } ?: existing?.avatarUrl,
+                                displayName = p.profile_name?.takeIf { it.isNotBlank() } ?: p.username?.takeIf { it.isNotBlank() } ?: existing?.displayName,
+                                username = p.username?.takeIf { it.isNotBlank() } ?: existing?.username,
+                                isOnline = existing?.isOnline ?: false,
+                                countryCode = p.country_code?.takeIf { it.isNotBlank() } ?: p.country?.takeIf { it.isNotBlank() } ?: existing?.countryCode
+                            )
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+
+            val list = rawList.map { m ->
+                val info = profileLookup[m.user_id]
+                val realAvatar = info?.avatarUrl?.takeIf { it.isNotBlank() } ?: m.avatar_url
+                val realName = info?.displayName?.takeIf { it.isNotBlank() } ?: m.profile_name
+                val realUsername = info?.username?.takeIf { it.isNotBlank() } ?: m.username
+                val realCountry = info?.countryCode?.takeIf { it.isNotBlank() } ?: m.country_code ?: m.country
+                val isOnlineUser = if (m.user_id == currentUserId) true else (info?.isOnline == true)
+
+                m.copy(
+                    avatar_url = realAvatar,
+                    profile_name = realName,
+                    username = realUsername,
+                    presence_status = if (isOnlineUser) "online" else "offline",
+                    country_code = realCountry
+                )
+            }
+
             // Cache member names and avatars for message resolution
             for (m in list) {
                 val displayName = m.profile_name?.takeIf { it.isNotBlank() }
@@ -2373,7 +2438,7 @@ object GroupChatRepository {
 
         // Check local contact cache (1:1 DM conversations & past group messages)
         try {
-            val dmConv = database?.conversationDao()?.getConversation(senderId)
+            val dmConv = database?.conversationDao()?.getConversationByOtherUser(senderId)
             if (dmConv != null && dmConv.otherUserName.isNotBlank()) {
                 userProfileCache[senderId] = dmConv.otherUserName to dmConv.otherUserAvatar
                 return dmConv.otherUserName
@@ -2409,7 +2474,30 @@ object GroupChatRepository {
 
     private suspend fun resolveSenderAvatar(context: Context, token: String, senderId: String): String? {
         if (senderId.isBlank()) return null
-        return userProfileCache[senderId]?.second
+        val cached = userProfileCache[senderId]?.second
+        if (!cached.isNullOrBlank()) return cached
+        try {
+            val dmConv = database?.conversationDao()?.getConversationByOtherUser(senderId)
+            if (dmConv != null && !dmConv.otherUserAvatar.isNullOrBlank()) {
+                val name = dmConv.otherUserName.ifBlank { "A member" }
+                userProfileCache[senderId] = name to dmConv.otherUserAvatar
+                return dmConv.otherUserAvatar
+            }
+            if (token.isNotBlank()) {
+                val profResp = SupabaseClient.api.getDiscoverableProfiles(
+                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                    auth = token,
+                    options = mapOf("auth_user_id" to "eq.$senderId")
+                )
+                val p = profResp.body()?.firstOrNull()
+                if (!p?.avatar_url.isNullOrBlank()) {
+                    val name = p?.profile_name?.ifBlank { null } ?: p?.username?.ifBlank { null } ?: "A member"
+                    userProfileCache[senderId] = name to p?.avatar_url
+                    return p?.avatar_url
+                }
+            }
+        } catch (_: Exception) {}
+        return null
     }
 
     // ========================================================================
@@ -2613,6 +2701,14 @@ object GroupChatRepository {
         val cleanGroupId = groupId.trim().replace("\"", "")
         database?.groupConversationDao()?.markRead(cleanGroupId)
     }
+
+    private data class GroupMemberProfileDetails(
+        val avatarUrl: String? = null,
+        val displayName: String? = null,
+        val username: String? = null,
+        val isOnline: Boolean = false,
+        val countryCode: String? = null
+    )
 
     private fun parseIsoTimestampToMillis(iso: String?): Long? {
         if (iso.isNullOrBlank() || iso == "null") return null

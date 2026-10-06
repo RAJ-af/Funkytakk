@@ -101,12 +101,13 @@ fun ChatTopBar(
             Spacer(modifier = Modifier.height(1.dp))
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "$partnerCountry • ",
-                    fontSize = 12.sp,
-                    color = Color(0xFF6B7280),
-                    fontWeight = FontWeight.Medium
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(if (isOnline) Color(0xFF22C55E) else Color(0xFF94A3B8))
                 )
+                Spacer(modifier = Modifier.width(5.dp))
                 Text(
                     text = if (isOnline) "Online" else "Offline",
                     fontSize = 12.sp,

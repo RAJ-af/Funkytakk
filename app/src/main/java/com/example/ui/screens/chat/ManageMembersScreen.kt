@@ -66,7 +66,7 @@ fun ManageMembersScreen(
     val selectedUserIds = remember { mutableStateListOf<String>() }
 
     var showAddMemberSheet by remember { mutableStateOf(initialShowAddSheet) }
-    var selectedMemberForProfile by remember { mutableStateOf<SupabaseGroupMember?>(null) }
+    var activeProfileUserId by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(initialShowAddSheet) {
         if (initialShowAddSheet) {
@@ -448,11 +448,11 @@ fun ManageMembersScreen(
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(16.dp))
                                 .clickable {
-                                    if (isAdmin && !isSelf && statusLower == "joined") {
+                                    if (selectedUserIds.isNotEmpty()) {
                                         if (isChecked) selectedUserIds.remove(member.user_id)
                                         else selectedUserIds.add(member.user_id)
                                     } else {
-                                        selectedMemberForProfile = member
+                                        activeProfileUserId = member.user_id
                                     }
                                 },
                             shape = RoundedCornerShape(16.dp),
@@ -738,7 +738,7 @@ fun ManageMembersScreen(
                                                     leadingIcon = { GroupEyeIcon(size = 18.dp, color = Color(0xFF0F172A)) },
                                                     onClick = {
                                                         showMenu = false
-                                                        selectedMemberForProfile = member
+                                                        activeProfileUserId = member.user_id
                                                     }
                                                 )
                                             }
@@ -753,24 +753,15 @@ fun ManageMembersScreen(
         }
     }
 
-    if (selectedMemberForProfile != null) {
-        val m = selectedMemberForProfile!!
-        val name = m.profile_name?.takeIf { it.isNotBlank() }
-            ?: m.username?.takeIf { it.isNotBlank() }
-            ?: "Member"
-        val details = buildString {
-            if (!m.username.isNullOrBlank()) append("Username: @${m.username}\n")
-            append("Role: ${m.role.replaceFirstChar { it.uppercase() }}\n")
-            append("Status: ${m.status.replaceFirstChar { it.uppercase() }}")
-        }
-        AppCustomConfirmDialog(
-            onDismissRequest = { selectedMemberForProfile = null },
-            title = name,
-            message = details,
-            confirmText = "Close",
-            cancelText = "Back",
-            isDestructive = false,
-            onConfirm = { selectedMemberForProfile = null }
+    if (activeProfileUserId != null) {
+        val targetMember = membersList.find { it.user_id == activeProfileUserId }
+        val pName = targetMember?.profile_name?.ifBlank { null } ?: targetMember?.username?.ifBlank { null } ?: "Profile"
+        val pAvatar = targetMember?.avatar_url ?: ""
+        com.example.ui.screens.UserProfileFeedScreen(
+            userId = activeProfileUserId!!,
+            profileName = pName,
+            avatarUrl = pAvatar,
+            onBack = { activeProfileUserId = null }
         )
     }
 

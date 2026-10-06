@@ -73,6 +73,7 @@ fun GroupInfoScreen(
     var showLocalSearchSheet by remember { mutableStateOf(false) }
     var showAllMediaSheet by remember { mutableStateOf(false) }
     var isLeaving by remember { mutableStateOf(false) }
+    var activeProfileUserId by remember { mutableStateOf<String?>(null) }
 
     val sharedMediaFlow = remember(group.id) { GroupChatRepository.getSharedMediaFlow(group.id) }
     val sharedMediaMessages by sharedMediaFlow.collectAsState(initial = emptyList())
@@ -523,7 +524,9 @@ fun GroupInfoScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 8.dp),
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { activeProfileUserId = member.user_id }
+                                    .padding(vertical = 8.dp, horizontal = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
@@ -845,6 +848,18 @@ fun GroupInfoScreen(
                     }
                 }
             }
+        )
+    }
+
+    if (activeProfileUserId != null) {
+        val targetMember = joinedMembers.find { it.user_id == activeProfileUserId }
+        val pName = targetMember?.profile_name?.ifBlank { null } ?: targetMember?.username?.ifBlank { null } ?: "Profile"
+        val pAvatar = targetMember?.avatar_url ?: ""
+        com.example.ui.screens.UserProfileFeedScreen(
+            userId = activeProfileUserId!!,
+            profileName = pName,
+            avatarUrl = pAvatar,
+            onBack = { activeProfileUserId = null }
         )
     }
 }
