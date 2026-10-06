@@ -68,6 +68,10 @@ object VaultSecurityManager {
         return activeVaultKey != null && _vaultStatus.value == VaultStatus.UNLOCKED
     }
 
+    fun isVaultLocked(): Boolean {
+        return !isUnlocked()
+    }
+
     fun getActiveVaultKey(): ByteArray? = activeVaultKey
 
     fun init(context: Context) {

@@ -17,7 +17,7 @@ import net.sqlcipher.database.SupportFactory
         LocalMessageReaction::class,
         LocalMessageTranslation::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 abstract class EncryptedChatDatabase : RoomDatabase() {

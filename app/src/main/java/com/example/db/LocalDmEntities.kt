@@ -16,6 +16,7 @@ data class LocalDmConversation(
     val otherUserAvatar: String? = null,
     val otherUserFlag: String? = null,
     val lastMessageText: String = "",
+    val lastMessageType: String = "text",
     val lastMessageTime: Long = System.currentTimeMillis(),
     val unreadCount: Int = 0,
     val createdAt: Long = System.currentTimeMillis()
@@ -35,6 +36,7 @@ data class LocalDmMessage(
     val senderId: String,
     val recipientId: String,
     val text: String, // Plaintext, decrypted locally!
+    val messageType: String = "text", // "text", "image", "voice", "video", "file"
     val timestamp: Long = System.currentTimeMillis(),
     val isOutgoing: Boolean,
     val replyToText: String? = null,

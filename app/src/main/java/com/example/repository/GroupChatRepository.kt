@@ -2074,6 +2074,8 @@ object GroupChatRepository {
      * Each row carries group_id, sender_id and message_type, so one event is enough to decrypt.
      * Saves to local DB, then deletes the inbox row.
      */
+    suspend fun drainPendingGroupMessages(context: Context) = fetchAndProcessPendingGroupMessages(context)
+
     suspend fun fetchAndProcessPendingGroupMessages(context: Context) = withContext(Dispatchers.IO) {
         try {
             val myUserId = SupabaseSessionManager.getUserId(context) ?: return@withContext

@@ -30,10 +30,15 @@ data class LocalGroupConversation(
     val disappearingSeconds: Int = 0, // 0, 86400, 604800, 7776000
     val memberListVisibility: String = "members", // "members", "admins"
     val lastMessageText: String = "",
+    val lastMessageType: String = "text",
     val lastMessageSenderName: String = "",
     val lastMessageTime: Long = System.currentTimeMillis(),
     val unreadCount: Int = 0,
     val hasUnreadMention: Boolean = false,
+    val invitedByName: String? = null,
+    val isArchived: Boolean = false,
+    val tombstoneReason: String? = null,
+    val tombstoneDeletedByName: String? = null,
     val lastSyncedEventAt: String = "",
     val createdAt: Long = System.currentTimeMillis()
 )

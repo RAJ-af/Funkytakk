@@ -1050,8 +1050,51 @@ interface SupabaseApi {
     suspend fun getPendingDmMessages(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String,
-        @Query("recipient_id") recipientIdFilter: String
+        @Query("recipient_id") recipientIdFilter: String,
+        @Query("delivered_at") deliveredAtFilter: String? = "is.null"
     ): Response<List<SupabaseDmMessage>>
+
+    @PATCH("rest/v1/dm_messages")
+    suspend fun markDmDelivered(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("id") idFilter: String,
+        @Body body: MarkDmDeliveredRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/register_push_token")
+    suspend fun registerPushToken(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: PushTokenRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/unregister_push_token")
+    suspend fun unregisterPushToken(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: PushTokenRequest
+    ): Response<ResponseBody>
+
+    @GET("rest/v1/group_tombstones?select=*&order=created_at.asc")
+    suspend fun getGroupTombstones(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String
+    ): Response<List<GroupTombstoneRow>>
+
+    @DELETE("rest/v1/group_tombstones")
+    suspend fun deleteGroupTombstone(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("id") idFilter: String
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/get_group_invite_details")
+    suspend fun getGroupInviteDetails(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: GroupIdRequest
+    ): Response<GroupInviteDetailsResponse>
 
     @POST("rest/v1/dm_messages")
     suspend fun sendDmMessage(
@@ -1744,10 +1787,58 @@ data class GiftTransactionItem(
 // GROUP CHAT MODELS
 // ----------------------------------------------------
 @JsonClass(generateAdapter = true)
+data class PushTokenRequest(
+    val p_token: String
+)
+
+@JsonClass(generateAdapter = true)
+data class MarkDmDeliveredRequest(
+    val delivered_at: String
+)
+
+@JsonClass(generateAdapter = true)
+data class GroupTombstoneRow(
+    val id: String = "",
+    val group_id: String = "",
+    val group_name: String = "",
+    val reason: String = "deleted", // 'deleted' | 'removed' | 'request_rejected'
+    val deleted_by_name: String? = null,
+    val created_at: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class InviteMemberPreviewItem(
+    val user_id: String = "",
+    val avatar_url: String? = null,
+    val profile_name: String? = null,
+    val username: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class GroupInviteDetailsResponse(
+    val group_id: String = "",
+    val name: String = "",
+    val avatar_url: String? = null,
+    val description: String? = null,
+    val inviter_name: String? = null,
+    val invited_by_name: String? = null,
+    val inviter_avatar: String? = null,
+    val invited_by_avatar: String? = null,
+    val member_count: Int = 1,
+    val joined_count: Int = 1,
+    val member_preview: List<InviteMemberPreviewItem>? = null,
+    val who_can_send: String? = "everyone",
+    val approve_new_members: Boolean = false,
+    val disappearing_seconds: Int = 0
+)
+
+@JsonClass(generateAdapter = true)
 data class MyGroupRow(
     val group_id: String = "",
     val name: String = "",
     val avatar_url: String? = null,
+    val description: String? = null,
+    val invited_by_name: String? = null,
     val my_role: String? = "member",
     val my_status: String? = "joined", // joined | invited | requested
     val joined_count: Int? = 1,

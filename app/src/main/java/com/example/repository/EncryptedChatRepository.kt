@@ -40,6 +40,10 @@ object EncryptedChatRepository {
     @Volatile
     private var database: EncryptedChatDatabase? = null
 
+    fun getDatabase(context: Context? = null): EncryptedChatDatabase? = database
+
+    suspend fun drainPendingDmMessages(context: Context) = fetchAndProcessPendingInbox(context)
+
     private val _conversations = MutableStateFlow<List<LocalDmConversation>>(emptyList())
     val conversations: StateFlow<List<LocalDmConversation>> = _conversations.asStateFlow()
 

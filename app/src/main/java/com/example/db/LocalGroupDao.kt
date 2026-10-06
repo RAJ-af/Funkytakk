@@ -5,20 +5,23 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface GroupConversationDao {
-    @Query("SELECT * FROM group_conversations WHERE myStatus = 'joined' ORDER BY lastMessageTime DESC")
+    @Query("SELECT * FROM group_conversations WHERE myStatus = 'joined' AND isArchived = 0 ORDER BY lastMessageTime DESC")
     fun getAllJoinedGroups(): Flow<List<LocalGroupConversation>>
 
-    @Query("SELECT * FROM group_conversations WHERE myStatus = 'joined' ORDER BY lastMessageTime DESC")
+    @Query("SELECT * FROM group_conversations WHERE myStatus = 'joined' AND isArchived = 0 ORDER BY lastMessageTime DESC")
     suspend fun getAllJoinedGroupsList(): List<LocalGroupConversation>
 
-    @Query("SELECT * FROM group_conversations WHERE myStatus IN ('invited', 'requested') ORDER BY createdAt DESC")
+    @Query("SELECT * FROM group_conversations WHERE myStatus IN ('invited', 'requested') AND isArchived = 0 ORDER BY createdAt DESC")
     fun getPendingInvites(): Flow<List<LocalGroupConversation>>
 
-    @Query("SELECT * FROM group_conversations WHERE myStatus IN ('invited', 'requested') ORDER BY createdAt DESC")
+    @Query("SELECT * FROM group_conversations WHERE myStatus IN ('invited', 'requested') AND isArchived = 0 ORDER BY createdAt DESC")
     suspend fun getPendingInvitesList(): List<LocalGroupConversation>
 
-    @Query("SELECT * FROM group_conversations WHERE myStatus IN ('joined', 'invited', 'requested') ORDER BY CASE WHEN myStatus = 'invited' THEN 0 WHEN myStatus = 'requested' THEN 1 ELSE 2 END, lastMessageTime DESC")
+    @Query("SELECT * FROM group_conversations WHERE myStatus IN ('joined', 'invited', 'requested') AND isArchived = 0 ORDER BY CASE WHEN myStatus = 'invited' THEN 0 WHEN myStatus = 'requested' THEN 1 ELSE 2 END, lastMessageTime DESC")
     fun getAllMyGroups(): Flow<List<LocalGroupConversation>>
+
+    @Query("SELECT * FROM group_conversations WHERE isArchived = 1 ORDER BY lastMessageTime DESC")
+    fun getArchivedGroups(): Flow<List<LocalGroupConversation>>
 
     @Query("SELECT * FROM group_conversations WHERE id = :id LIMIT 1")
     fun getGroupFlow(id: String): Flow<LocalGroupConversation?>
@@ -28,6 +31,9 @@ interface GroupConversationDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdate(group: LocalGroupConversation)
+
+    @Query("UPDATE group_conversations SET isArchived = 1, myStatus = :reason, tombstoneReason = :reason, tombstoneDeletedByName = :deletedByName WHERE id = :groupId")
+    suspend fun archiveGroup(groupId: String, reason: String, deletedByName: String?)
 
     @Query("UPDATE group_conversations SET myStatus = :status WHERE id = :groupId")
     suspend fun updateStatus(groupId: String, status: String)
