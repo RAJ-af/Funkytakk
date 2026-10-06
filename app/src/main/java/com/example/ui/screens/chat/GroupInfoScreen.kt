@@ -35,6 +35,7 @@ import com.example.SupabaseSessionManager
 import com.example.db.LocalGroupConversation
 import com.example.db.LocalGroupMessage
 import com.example.repository.GroupChatRepository
+import com.example.ui.chat.*
 import com.example.ui.components.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -556,29 +557,40 @@ fun GroupInfoScreen(
                                                 )
                                             }
                                         }
-                                        if (isOnline) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(11.dp)
-                                                    .align(Alignment.BottomEnd)
-                                                    .clip(CircleShape)
-                                                    .background(Color(0xFF22C55E))
-                                                    .border(1.8.dp, Color.White, CircleShape)
-                                            )
-                                        }
+                                        val memberCountry = member.country_code?.takeIf { it.isNotBlank() }
+                                            ?: member.country?.takeIf { it.isNotBlank() }
+                                            ?: com.example.realtime.VoiceRoomRealtimeManager.getUserSnippet(member.user_id)?.countryCode
+                                            ?: "in"
+                                        CircleFlag(
+                                            countryCode = memberCountry,
+                                            modifier = Modifier
+                                                .size(15.dp)
+                                                .align(Alignment.BottomEnd)
+                                                .clip(CircleShape)
+                                                .border(1.5.dp, Color.White, CircleShape)
+                                        )
                                     }
 
                                     Spacer(modifier = Modifier.width(12.dp))
 
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = displayName,
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF0F172A),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = displayName,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF0F172A),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(7.dp)
+                                                    .clip(CircleShape)
+                                                    .background(if (isOnline) Color(0xFF22C55E) else Color(0xFF94A3B8))
+                                            )
+                                        }
                                         Text(
                                             text = subline,
                                             fontSize = 11.5.sp,
@@ -763,65 +775,35 @@ fun GroupInfoScreen(
     }
 
     if (showEditInfoDialog) {
-        var draftName by remember(group.name) { mutableStateOf(group.name) }
-        var draftDesc by remember(group.description) { mutableStateOf(group.description) }
         var isSaving by remember { mutableStateOf(false) }
 
-        AlertDialog(
+        AppCustomInputDialog(
             onDismissRequest = { if (!isSaving) showEditInfoDialog = false },
-            title = { Text("Edit Group Info", fontWeight = FontWeight.Bold) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
-                        value = draftName,
-                        onValueChange = { if (it.length <= 60) draftName = it },
-                        label = { Text("Group name") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = draftDesc,
-                        onValueChange = { if (it.length <= 300) draftDesc = it },
-                        label = { Text("Description") },
-                        maxLines = 4,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+            title = "Edit Group Info",
+            initialValue = group.name,
+            placeholder = "Enter group name...",
+            maxChars = 60,
+            singleLine = true,
+            confirmText = "Save",
+            isLoading = isSaving,
+            icon = { ChatIconEdit(modifier = Modifier.size(24.dp), tint = Color(0xFFD97706)) },
+            onSave = { newName ->
+                if (newName.trim() == group.name) {
+                    showEditInfoDialog = false
+                    return@AppCustomInputDialog
                 }
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = !isSaving && draftName.trim().isNotEmpty(),
-                    onClick = {
-                        val patch = mutableMapOf<String, Any?>()
-                        if (draftName.trim() != group.name) patch["name"] = draftName.trim()
-                        if (draftDesc.trim() != group.description) patch["description"] = draftDesc.trim()
-                        if (patch.isEmpty()) {
-                            showEditInfoDialog = false
-                            return@TextButton
-                        }
-                        scope.launch {
-                            isSaving = true
-                            val res = GroupChatRepository.updateGroupSettings(context, group.id, patch)
-                            isSaving = false
-                            res.onSuccess {
-                                showEditInfoDialog = false
-                                Toast.makeText(context, "Group info updated", Toast.LENGTH_SHORT).show()
-                            }.onFailure { err ->
-                                Toast.makeText(context, err.message ?: "Failed to update group info", Toast.LENGTH_SHORT).show()
-                            }
-                        }
+                scope.launch {
+                    isSaving = true
+                    val res = GroupChatRepository.updateGroupSettings(context, group.id, mapOf("name" to newName.trim()))
+                    isSaving = false
+                    res.onSuccess {
+                        showEditInfoDialog = false
+                        Toast.makeText(context, "Group info updated", Toast.LENGTH_SHORT).show()
+                    }.onFailure { err ->
+                        Toast.makeText(context, err.message ?: "Failed to update group info", Toast.LENGTH_SHORT).show()
                     }
-                ) {
-                    Text("Save", fontWeight = FontWeight.Bold, color = Color(0xFFB45309))
                 }
-            },
-            dismissButton = {
-                TextButton(onClick = { showEditInfoDialog = false }) {
-                    Text("Cancel", color = Color(0xFF64748B))
-                }
-            },
-            containerColor = Color.White,
-            shape = RoundedCornerShape(20.dp)
+            }
         )
     }
 
@@ -840,38 +822,29 @@ fun GroupInfoScreen(
     }
 
     if (showLeaveDialog) {
-        AlertDialog(
+        AppCustomConfirmDialog(
             onDismissRequest = { if (!isLeaving) showLeaveDialog = false },
-            title = { Text("Leave Group?", fontWeight = FontWeight.Bold) },
-            text = { Text("Are you sure you want to leave \"${group.name}\"?") },
-            confirmButton = {
-                TextButton(
-                    enabled = !isLeaving,
-                    onClick = {
-                        scope.launch {
-                            isLeaving = true
-                            val res = GroupChatRepository.leaveGroup(context, group.id)
-                            isLeaving = false
-                            res.onSuccess {
-                                showLeaveDialog = false
-                                Toast.makeText(context, "Left group", Toast.LENGTH_SHORT).show()
-                                onLeaveGroupClick()
-                            }.onFailure { err ->
-                                Toast.makeText(context, err.message ?: "Failed to leave group", Toast.LENGTH_SHORT).show()
-                            }
-                        }
+            title = "Leave Group?",
+            message = "Are you sure you want to leave \"${group.name}\"?",
+            confirmText = "Leave Group",
+            cancelText = "Cancel",
+            isDestructive = true,
+            isLoading = isLeaving,
+            icon = { ChatIconLeave(modifier = Modifier.size(26.dp), tint = Color(0xFFDC2626)) },
+            onConfirm = {
+                scope.launch {
+                    isLeaving = true
+                    val res = GroupChatRepository.leaveGroup(context, group.id)
+                    isLeaving = false
+                    res.onSuccess {
+                        showLeaveDialog = false
+                        Toast.makeText(context, "Left group", Toast.LENGTH_SHORT).show()
+                        onLeaveGroupClick()
+                    }.onFailure { err ->
+                        Toast.makeText(context, err.message ?: "Failed to leave group", Toast.LENGTH_SHORT).show()
                     }
-                ) {
-                    Text("Leave", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
                 }
-            },
-            dismissButton = {
-                TextButton(onClick = { showLeaveDialog = false }) {
-                    Text("Cancel", color = Color(0xFF64748B))
-                }
-            },
-            containerColor = Color.White,
-            shape = RoundedCornerShape(20.dp)
+            }
         )
     }
 }

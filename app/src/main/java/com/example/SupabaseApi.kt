@@ -1829,7 +1829,9 @@ data class SupabaseGroupMember(
     val username: String? = null,
     val profile_name: String? = null,
     val avatar_url: String? = null,
-    val presence_status: String? = null
+    val presence_status: String? = null,
+    val country: String? = null,
+    val country_code: String? = null
 )
 
 @JsonClass(generateAdapter = true)

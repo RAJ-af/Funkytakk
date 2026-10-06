@@ -36,6 +36,7 @@ import com.example.SupabaseSessionManager
 import com.example.db.LocalGroupConversation
 import com.example.repository.EncryptedChatRepository
 import com.example.repository.GroupChatRepository
+import com.example.ui.chat.*
 import com.example.ui.components.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -496,29 +497,40 @@ fun ManageMembersScreen(
                                             }
                                         }
 
-                                        if (isOnline) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(12.dp)
-                                                    .align(Alignment.BottomEnd)
-                                                    .clip(CircleShape)
-                                                    .background(Color(0xFF22C55E))
-                                                    .border(2.dp, Color.White, CircleShape)
-                                            )
-                                        }
+                                        val memberCountry = member.country_code?.takeIf { it.isNotBlank() }
+                                            ?: member.country?.takeIf { it.isNotBlank() }
+                                            ?: com.example.realtime.VoiceRoomRealtimeManager.getUserSnippet(member.user_id)?.countryCode
+                                            ?: "in"
+                                        CircleFlag(
+                                            countryCode = memberCountry,
+                                            modifier = Modifier
+                                                .size(16.dp)
+                                                .align(Alignment.BottomEnd)
+                                                .clip(CircleShape)
+                                                .border(1.5.dp, Color.White, CircleShape)
+                                        )
                                     }
 
                                     Spacer(modifier = Modifier.width(12.dp))
 
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = displayName,
-                                            fontSize = 14.5.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF0F172A),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = displayName,
+                                                fontSize = 14.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF0F172A),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(7.dp)
+                                                    .clip(CircleShape)
+                                                    .background(if (isOnline) Color(0xFF22C55E) else Color(0xFF94A3B8))
+                                            )
+                                        }
                                         Spacer(modifier = Modifier.height(2.dp))
                                         Text(
                                             text = subtitleText,
@@ -746,25 +758,19 @@ fun ManageMembersScreen(
         val name = m.profile_name?.takeIf { it.isNotBlank() }
             ?: m.username?.takeIf { it.isNotBlank() }
             ?: "Member"
-        AlertDialog(
+        val details = buildString {
+            if (!m.username.isNullOrBlank()) append("Username: @${m.username}\n")
+            append("Role: ${m.role.replaceFirstChar { it.uppercase() }}\n")
+            append("Status: ${m.status.replaceFirstChar { it.uppercase() }}")
+        }
+        AppCustomConfirmDialog(
             onDismissRequest = { selectedMemberForProfile = null },
-            title = { Text(name, fontWeight = FontWeight.Bold) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (!m.username.isNullOrBlank()) {
-                        Text("Username: @${m.username}", fontSize = 13.sp, color = Color(0xFF475569))
-                    }
-                    Text("Role: ${m.role.replaceFirstChar { it.uppercase() }}", fontSize = 13.sp, color = Color(0xFF475569))
-                    Text("Status: ${m.status.replaceFirstChar { it.uppercase() }}", fontSize = 13.sp, color = Color(0xFF475569))
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { selectedMemberForProfile = null }) {
-                    Text("Close", fontWeight = FontWeight.Bold, color = Color(0xFFB45309))
-                }
-            },
-            containerColor = Color.White,
-            shape = RoundedCornerShape(20.dp)
+            title = name,
+            message = details,
+            confirmText = "Close",
+            cancelText = "Back",
+            isDestructive = false,
+            onConfirm = { selectedMemberForProfile = null }
         )
     }
 

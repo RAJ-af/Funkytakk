@@ -505,3 +505,109 @@ fun ChatIconMoreVert(modifier: Modifier = Modifier.size(20.dp), tint: Color = Co
         drawCircle(tint, radius = r, center = Offset(w / 2f, h * 0.75f))
     }
 }
+
+@Composable
+fun ChatIconAlert(modifier: Modifier = Modifier.size(24.dp), tint: Color = Color(0xFFDC2626)) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val sw = 2.dp.toPx()
+        val path = Path().apply {
+            moveTo(w * 0.5f, h * 0.12f)
+            lineTo(w * 0.90f, h * 0.85f)
+            lineTo(w * 0.10f, h * 0.85f)
+            close()
+        }
+        drawPath(path, tint, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawLine(tint, Offset(w * 0.5f, h * 0.38f), Offset(w * 0.5f, h * 0.60f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawCircle(tint, radius = sw * 0.7f, center = Offset(w * 0.5f, h * 0.73f))
+    }
+}
+
+@Composable
+fun ChatIconLeave(modifier: Modifier = Modifier.size(24.dp), tint: Color = Color(0xFFDC2626)) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val sw = 2.dp.toPx()
+        // Door frame
+        val door = Path().apply {
+            moveTo(w * 0.55f, h * 0.20f)
+            lineTo(w * 0.20f, h * 0.20f)
+            lineTo(w * 0.20f, h * 0.80f)
+            lineTo(w * 0.55f, h * 0.80f)
+        }
+        drawPath(door, tint, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        // Exit arrow
+        drawLine(tint, Offset(w * 0.38f, h * 0.50f), Offset(w * 0.85f, h * 0.50f), strokeWidth = sw, cap = StrokeCap.Round)
+        val arrowHead = Path().apply {
+            moveTo(w * 0.68f, h * 0.34f)
+            lineTo(w * 0.85f, h * 0.50f)
+            lineTo(w * 0.68f, h * 0.66f)
+        }
+        drawPath(arrowHead, tint, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+@Composable
+fun ChatIconEdit(modifier: Modifier = Modifier.size(22.dp), tint: Color = Color(0xFFD97706)) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val sw = 1.9.dp.toPx()
+        val path = Path().apply {
+            moveTo(w * 0.65f, h * 0.18f)
+            lineTo(w * 0.82f, h * 0.35f)
+            lineTo(w * 0.35f, h * 0.82f)
+            lineTo(w * 0.18f, h * 0.82f)
+            lineTo(w * 0.18f, h * 0.65f)
+            close()
+        }
+        drawPath(path, tint, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawLine(tint, Offset(w * 0.52f, h * 0.31f), Offset(w * 0.69f, h * 0.48f), strokeWidth = sw, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+fun ChatIconClock(modifier: Modifier = Modifier.size(22.dp), tint: Color = Color(0xFFD97706)) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val sw = 1.9.dp.toPx()
+        drawCircle(tint, radius = w * 0.38f, center = Offset(w * 0.5f, h * 0.5f), style = Stroke(width = sw))
+        drawLine(tint, Offset(w * 0.5f, h * 0.5f), Offset(w * 0.5f, h * 0.28f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(tint, Offset(w * 0.5f, h * 0.5f), Offset(w * 0.68f, h * 0.5f), strokeWidth = sw, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+fun ChatIconBell(modifier: Modifier = Modifier.size(22.dp), tint: Color = Color(0xFFD97706)) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val sw = 1.9.dp.toPx()
+        val bell = Path().apply {
+            moveTo(w * 0.5f, h * 0.18f)
+            cubicTo(w * 0.32f, h * 0.22f, w * 0.25f, h * 0.45f, w * 0.25f, h * 0.62f)
+            lineTo(w * 0.18f, h * 0.72f)
+            lineTo(w * 0.82f, h * 0.72f)
+            lineTo(w * 0.75f, h * 0.62f)
+            cubicTo(w * 0.75f, h * 0.45f, w * 0.68f, h * 0.22f, w * 0.5f, h * 0.18f)
+            close()
+        }
+        drawPath(bell, tint, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawArc(tint, 0f, 180f, false, topLeft = Offset(w * 0.42f, h * 0.74f), size = Size(w * 0.16f, h * 0.12f), style = Stroke(width = sw))
+    }
+}
+
+@Composable
+fun ChatIconBlock(modifier: Modifier = Modifier.size(22.dp), tint: Color = Color(0xFFDC2626)) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val sw = 2.dp.toPx()
+        drawCircle(tint, radius = w * 0.38f, center = Offset(w * 0.5f, h * 0.5f), style = Stroke(width = sw))
+        drawLine(tint, Offset(w * 0.25f, h * 0.25f), Offset(w * 0.75f, h * 0.75f), strokeWidth = sw, cap = StrokeCap.Round)
+    }
+}
+
