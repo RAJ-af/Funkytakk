@@ -1,12 +1,14 @@
 package com.example.ui.screens.chat
 
+import android.Manifest
 import android.content.Context
-import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.speech.tts.TextToSpeech
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Animatable
@@ -21,12 +23,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.automirrored.rounded.Forward
-import androidx.compose.material.icons.automirrored.rounded.Reply
-import androidx.compose.material.icons.automirrored.rounded.VolumeUp
-import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -42,6 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.example.ChatPreferencesManager
 import com.example.CloudAiManager
@@ -53,27 +50,29 @@ import com.example.repository.EncryptedChatRepository
 import com.example.ui.chat.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.*
 
-sealed class DmTimelineItem {
-    abstract val id: String
-    data class DateHeader(val label: String) : DmTimelineItem() {
+sealed interface DmTimelineItem {
+    val id: String
+
+    data class DateHeader(val label: String) : DmTimelineItem {
         override val id: String = "date_$label"
     }
-    data class SecurityHeader(val text: String) : DmTimelineItem() {
-        override val id: String = "security_header"
+
+    data class SecurityHeader(val text: String) : DmTimelineItem {
+        override val id: String = "sec_header"
     }
+
     data class MessageItem(
         val message: LocalDmMessage,
         val position: GroupPosition,
         val reactions: List<ReactionUi>,
         val isFirstInGroup: Boolean,
-        val isLastInGroup: Boolean
-    ) : DmTimelineItem() {
+        val isLastInGroup: Boolean,
+    ) : DmTimelineItem {
         override val id: String = message.id
     }
 }
@@ -98,7 +97,6 @@ fun DirectChatScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val clipboardManager = LocalClipboardManager.current
-    val listState = rememberLazyListState()
 
     LaunchedEffect(context) {
         ChatPreferencesManager.init(context)
@@ -110,78 +108,66 @@ fun DirectChatScreen(
     val chatTextScale by ChatPreferencesManager.chatTextScale.collectAsState()
     val isAiConsentGranted by CloudAiManager.isCloudAiEnabled.collectAsState()
 
-    val currentUserId = remember(context) { SupabaseSessionManager.getUserId(context) ?: "" }
-    val voicePlayer = rememberVoicePlaybackController()
-    val voiceRecorder = remember { LiveVoiceRecorder(context.applicationContext, coroutineScope) }
-
-    var resolvedConversation by remember { mutableStateOf<LocalDmConversation?>(null) }
     var conversationId by remember { mutableStateOf("") }
     var rawMessages by remember { mutableStateOf<List<LocalDmMessage>>(emptyList()) }
     var rawReactions by remember { mutableStateOf<List<LocalDmMessageReaction>>(emptyList()) }
+    var currentUserId by remember { mutableStateOf("") }
 
     var inputText by remember { mutableStateOf("") }
+    var isEmojiPickerOpen by remember { mutableStateOf(false) }
     var replyingToMessage by remember { mutableStateOf<LocalDmMessage?>(null) }
     var selectedMessageForMenu by remember { mutableStateOf<LocalDmMessage?>(null) }
     var isSelectionMode by remember { mutableStateOf(false) }
     val selectedMessageIds = remember { mutableStateListOf<String>() }
 
-    var activeMediaViewerIndex by remember { mutableStateOf<Int?>(null) }
     var activeWordLookup by remember { mutableStateOf<WordLookupState?>(null) }
     var showAiAssistSheet by remember { mutableStateOf(false) }
-    var showAttachmentSheet by remember { mutableStateOf(false) }
-    var translatedMessages = remember { mutableStateMapOf<String, String>() }
+    var activeMediaViewerIndex by remember { mutableStateOf<Int?>(null) }
 
-    val flashAnimatables = remember { mutableStateMapOf<String, Animatable<Float, *>>() }
+    val listState = rememberLazyListState()
+    val voicePlayer = rememberVoicePlaybackController()
+    val voiceRecorder = rememberLiveVoiceRecorder()
 
-    fun flashMessage(messageId: String) {
-        coroutineScope.launch {
-            val anim = flashAnimatables.getOrPut(messageId) { Animatable(0f) }
-            anim.snapTo(1f)
-            anim.animateTo(0f, animationSpec = tween(durationMillis = 1200))
-        }
-    }
-
-    // TTS
-    var tts: TextToSpeech? by remember { mutableStateOf(null) }
+    // TTS engine
+    var ttsEngine by remember { mutableStateOf<TextToSpeech?>(null) }
     DisposableEffect(context) {
-        tts = TextToSpeech(context) { status ->
+        val tts = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale.getDefault()
+                ttsEngine?.language = Locale.getDefault()
             }
         }
+        ttsEngine = tts
         onDispose {
-            tts?.stop()
-            tts?.shutdown()
+            tts.stop()
+            tts.shutdown()
         }
     }
 
-    // Initialize Conversation & Observe DB
-    LaunchedEffect(partnerUserId) {
-        try {
-            val conv = EncryptedChatRepository.getOrCreateLocalConversation(
-                context = context,
-                otherUserId = partnerUserId,
-                otherUserName = partnerName,
-                otherUserAvatar = partnerAvatarUrl
-            )
-            resolvedConversation = conv
-            conversationId = conv.id
-            EncryptedChatRepository.markConversationRead(conv.id)
-        } catch (e: Exception) {
-            android.util.Log.e("DirectChatScreen", "Error resolving conversation", e)
+    // Flashing animation state for jump-to-message
+    val flashAnimatables = remember { mutableStateMapOf<String, Animatable<Float, *>>() }
+    fun flashMessage(msgId: String) {
+        coroutineScope.launch {
+            val anim = flashAnimatables.getOrPut(msgId) { Animatable(0f) }
+            anim.snapTo(1f)
+            anim.animateTo(0f, animationSpec = tween(1200))
         }
     }
 
-    LaunchedEffect(conversationId) {
-        if (conversationId.isNotBlank()) {
-            EncryptedChatRepository.getMessagesFlow(conversationId).collect { msgs ->
-                rawMessages = msgs
-            }
+    // Audio record permission launcher
+    val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            voiceRecorder.start()
+        } else {
+            Toast.makeText(context, "Microphone permission is required to record voice notes", Toast.LENGTH_SHORT).show()
         }
     }
 
-    // Pick photos
-    val photoPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(4)) { uris ->
+    // Photo picker launcher (Direct - no docs/file popup)
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(10)
+    ) { uris ->
         if (uris.isNotEmpty()) {
             coroutineScope.launch {
                 uris.forEach { uri ->
@@ -206,25 +192,27 @@ fun DirectChatScreen(
         }
     }
 
-    // Pick document
-    val docPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            coroutineScope.launch {
-                try {
-                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    if (bytes != null && bytes.isNotEmpty()) {
-                        EncryptedChatRepository.sendMediaMessage(
-                            context = context,
-                            recipientUserId = partnerUserId,
-                            recipientName = partnerName,
-                            recipientAvatar = partnerAvatarUrl,
-                            rawBytes = bytes,
-                            messageType = "image",
-                            mimeType = "application/octet-stream"
-                        )
-                    }
-                } catch (e: Exception) {
-                    Toast.makeText(context, "Error sending file: ${e.message}", Toast.LENGTH_SHORT).show()
+    // Setup DM conversation and observers
+    LaunchedEffect(partnerUserId) {
+        try {
+            currentUserId = SupabaseSessionManager.getUserId(context) ?: ""
+            val conv = EncryptedChatRepository.getOrCreateLocalConversation(context, partnerUserId, partnerName, partnerAvatarUrl)
+            conversationId = conv.id
+        } catch (e: Exception) {
+            android.util.Log.e("DirectChatScreen", "Error resolving conversation", e)
+        }
+    }
+
+    LaunchedEffect(conversationId) {
+        if (conversationId.isNotBlank()) {
+            launch {
+                EncryptedChatRepository.getMessagesFlow(conversationId).collect { msgs ->
+                    rawMessages = msgs
+                }
+            }
+            launch {
+                EncryptedChatRepository.getDmReactionsFlow(conversationId).collect { reacts ->
+                    rawReactions = reacts
                 }
             }
         }
@@ -232,7 +220,7 @@ fun DirectChatScreen(
 
     ProvideChatTheme(
         preset = chatPreset,
-        darkTheme = darkTheme,
+        darkTheme = false,
         textScale = chatTextScale
     ) {
         val colors = LocalChatColors.current
@@ -304,8 +292,10 @@ fun DirectChatScreen(
             rawMessages.count { !it.isOutgoing }
         }
 
-        BackHandler(enabled = isSelectionMode || selectedMessageForMenu != null) {
-            if (isSelectionMode) {
+        BackHandler(enabled = isEmojiPickerOpen || isSelectionMode || selectedMessageForMenu != null) {
+            if (isEmojiPickerOpen) {
+                isEmojiPickerOpen = false
+            } else if (isSelectionMode) {
                 isSelectionMode = false
                 selectedMessageIds.clear()
             } else {
@@ -319,9 +309,9 @@ fun DirectChatScreen(
                     SelectionTopBar(
                         selectedCount = selectedMessageIds.size,
                         actions = listOf(
-                            MessageAction("copy", "Copy", Icons.Rounded.ContentCopy),
-                            MessageAction("forward", "Forward", Icons.AutoMirrored.Rounded.Forward),
-                            MessageAction("delete", "Delete", Icons.Rounded.DeleteOutline, destructive = true)
+                            MessageAction("copy", "Copy", { ChatIconCopy(tint = colors.text) }),
+                            MessageAction("forward", "Forward", { ChatIconForward(tint = colors.text) }),
+                            MessageAction("delete", "Delete", { ChatIconTrash(tint = colors.danger) }, destructive = true)
                         ),
                         onAction = { actionId ->
                             when (actionId) {
@@ -352,8 +342,8 @@ fun DirectChatScreen(
                     )
                 } else {
                     Surface(
-                        color = colors.wallpaper,
-                        shadowElevation = 0.5.dp,
+                        color = colors.surface,
+                        shadowElevation = 1.dp,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
@@ -364,12 +354,12 @@ fun DirectChatScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             IconButton(onClick = onBack) {
-                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back", tint = colors.text)
+                                ChatIconBack(tint = colors.text, modifier = Modifier.size(24.dp))
                             }
 
                             Box(
                                 modifier = Modifier
-                                    .size(38.dp)
+                                    .size(40.dp)
                                     .clip(CircleShape)
                                     .background(colors.accentIn.copy(alpha = 0.15f)),
                                 contentAlignment = Alignment.Center
@@ -386,7 +376,7 @@ fun DirectChatScreen(
                                         text = partnerName.take(1).uppercase(),
                                         color = colors.accentIn,
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp
+                                        fontSize = 17.sp
                                     )
                                 }
                             }
@@ -425,18 +415,24 @@ fun DirectChatScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(colors.wallpaper)
+                        .background(colors.surface)
                         .imePadding()
                 ) {
                     ChatInputBar(
                         text = inputText,
-                        onTextChange = { inputText = it },
+                        onTextChange = {
+                            inputText = it
+                            if (isEmojiPickerOpen && it.isNotEmpty()) {
+                                isEmojiPickerOpen = false
+                            }
+                        },
                         onSend = {
                             if (inputText.isNotBlank()) {
                                 val reply = replyingToMessage
                                 val textToSend = inputText
                                 inputText = ""
                                 replyingToMessage = null
+                                isEmojiPickerOpen = false
                                 coroutineScope.launch {
                                     EncryptedChatRepository.sendMessage(
                                         context = context,
@@ -455,10 +451,16 @@ fun DirectChatScreen(
                                 }
                             }
                         },
-                        onAttach = { showAttachmentSheet = true },
-                        onEmoji = {
-                            inputText += " 😊"
+                        onAttach = {
+                            isEmojiPickerOpen = false
+                            photoPickerLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
                         },
+                        onEmojiToggle = {
+                            isEmojiPickerOpen = !isEmojiPickerOpen
+                        },
+                        isEmojiOpen = isEmojiPickerOpen,
                         showAiButton = isAiConsentGranted,
                         onAi = { showAiAssistSheet = true },
                         topSlot = if (replyingToMessage != null) {
@@ -477,37 +479,84 @@ fun DirectChatScreen(
                                     amplitudes = voiceRecorder.liveAmplitudes.toList(),
                                     slideProgress = 0f,
                                     locked = false,
-                                    onCancel = { voiceRecorder.cancel() }
+                                    onCancel = { voiceRecorder.cancel() },
+                                    onSend = {
+                                        val result = voiceRecorder.stop()
+                                        if (result != null && result.bytes.isNotEmpty()) {
+                                            coroutineScope.launch {
+                                                EncryptedChatRepository.sendMediaMessage(
+                                                    context = context,
+                                                    recipientUserId = partnerUserId,
+                                                    recipientName = partnerName,
+                                                    recipientAvatar = partnerAvatarUrl,
+                                                    rawBytes = result.bytes,
+                                                    messageType = "voice",
+                                                    mimeType = "audio/aac",
+                                                    durationSeconds = (result.durationMs / 1000).toInt().coerceAtLeast(1)
+                                                )
+                                                if (timelineItems.isNotEmpty()) {
+                                                    listState.animateScrollToItem(timelineItems.size - 1)
+                                                }
+                                            }
+                                        }
+                                    }
                                 )
                             }
                         } else null,
                         micButton = {
                             MicHoldButton(
                                 isRecording = voiceRecorder.isRecording,
-                                onStart = {
-                                    voiceRecorder.start()
-                                },
-                                onMove = { dx, dy -> },
-                                onEnd = { cancelled, locked ->
-                                    val result = voiceRecorder.stop()
-                                    if (!cancelled && result != null && result.bytes.isNotEmpty()) {
-                                        coroutineScope.launch {
-                                            EncryptedChatRepository.sendMediaMessage(
-                                                context = context,
-                                                recipientUserId = partnerUserId,
-                                                recipientName = partnerName,
-                                                recipientAvatar = partnerAvatarUrl,
-                                                rawBytes = result.bytes,
-                                                messageType = "voice",
-                                                mimeType = "audio/aac",
-                                                durationSeconds = (result.durationMs / 1000).toInt()
-                                            )
+                                onClick = {
+                                    val hasPermission = ContextCompat.checkSelfPermission(
+                                        context,
+                                        Manifest.permission.RECORD_AUDIO
+                                    ) == PackageManager.PERMISSION_GRANTED
+                                    if (!voiceRecorder.isRecording) {
+                                        if (hasPermission) {
+                                            voiceRecorder.start()
+                                        } else {
+                                            recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                        }
+                                    } else {
+                                        val result = voiceRecorder.stop()
+                                        if (result != null && result.bytes.isNotEmpty()) {
+                                            coroutineScope.launch {
+                                                EncryptedChatRepository.sendMediaMessage(
+                                                    context = context,
+                                                    recipientUserId = partnerUserId,
+                                                    recipientName = partnerName,
+                                                    recipientAvatar = partnerAvatarUrl,
+                                                    rawBytes = result.bytes,
+                                                    messageType = "voice",
+                                                    mimeType = "audio/aac",
+                                                    durationSeconds = (result.durationMs / 1000).toInt().coerceAtLeast(1)
+                                                )
+                                            }
                                         }
                                     }
                                 }
                             )
                         }
                     )
+
+                    // Fluent Emoji Picker Drawer
+                    AnimatedVisibility(
+                        visible = isEmojiPickerOpen,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
+                        FluentEmojiPicker(
+                            onEmojiSelect = { emoji ->
+                                inputText += emoji
+                            },
+                            onBackspace = {
+                                if (inputText.isNotEmpty()) {
+                                    val lastCharCount = Character.charCount(inputText.codePointBefore(inputText.length))
+                                    inputText = inputText.dropLast(lastCharCount)
+                                }
+                            }
+                        )
+                    }
                 }
             },
             containerColor = colors.wallpaper
@@ -604,9 +653,6 @@ fun DirectChatScreen(
                                         }
 
                                         val bubbleModifier = Modifier
-                                            .swipeToReply {
-                                                replyingToMessage = msg
-                                            }
                                             .pointerInput(msg.id) {
                                                 detectTapGestures(
                                                     onLongPress = {
@@ -740,6 +786,11 @@ fun DirectChatScreen(
                                                             time = formatChatTime(msg.timestamp),
                                                             outgoing = isOutgoing,
                                                             status = status,
+                                                            onLongPress = {
+                                                                if (!isSelectionMode) {
+                                                                    selectedMessageForMenu = msg
+                                                                }
+                                                            },
                                                             onWordClick = { word ->
                                                                 activeWordLookup = WordLookupState(
                                                                     word = word,
@@ -748,41 +799,35 @@ fun DirectChatScreen(
                                                                 )
                                                                 coroutineScope.launch {
                                                                     val res = CloudAiManager.translateMessage(context, "word_${word.hashCode()}", word, "English")
-                                                                    activeWordLookup = activeWordLookup?.copy(
-                                                                        translation = res.getOrNull()?.text ?: "Could not translate",
-                                                                        isLoading = false
-                                                                    )
+                                                                    res.onSuccess { aiResult ->
+                                                                        activeWordLookup = activeWordLookup?.copy(
+                                                                            translation = aiResult.text,
+                                                                            isLoading = false
+                                                                        )
+                                                                    }.onFailure {
+                                                                        activeWordLookup = activeWordLookup?.copy(
+                                                                            translation = "Could not translate word",
+                                                                            isLoading = false
+                                                                        )
+                                                                    }
                                                                 }
                                                             }
                                                         )
-
-                                                        val trans = translatedMessages[msg.id]
-                                                        if (!trans.isNullOrBlank()) {
-                                                            TranslationStrip(
-                                                                translated = trans,
-                                                                languageLabel = "English",
-                                                                outgoing = isOutgoing,
-                                                                viaCloud = true,
-                                                                onListen = {
-                                                                    tts?.speak(trans, TextToSpeech.QUEUE_FLUSH, null, "tts_${msg.id}")
-                                                                }
-                                                            )
-                                                        }
                                                     }
                                                 }
                                             }
                                         }
 
-                                        // Reactions
+                                        // Reaction Row
                                         if (item.reactions.isNotEmpty()) {
-                                            Spacer(modifier = Modifier.height(2.dp))
                                             ReactionRow(
                                                 reactions = item.reactions,
                                                 onClick = { emoji ->
                                                     coroutineScope.launch {
-                                                        // Toggle reaction
+                                                        EncryptedChatRepository.sendDmReaction(context, conversationId, partnerUserId, msg.id, emoji)
                                                     }
-                                                }
+                                                },
+                                                modifier = Modifier.padding(top = 2.dp)
                                             )
                                         }
                                     }
@@ -792,12 +837,12 @@ fun DirectChatScreen(
                     }
                 }
 
-                // Scroll to bottom FAB
-                if (unreadCount > 0) {
+                // Scroll to bottom button
+                if (listState.canScrollForward) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
-                            .padding(end = 12.dp, bottom = 12.dp)
+                            .padding(end = 16.dp, bottom = 16.dp)
                     ) {
                         ScrollToBottomFab(
                             unread = unreadCount,
@@ -811,81 +856,83 @@ fun DirectChatScreen(
                         )
                     }
                 }
-
-                // Long press message overlay
-                selectedMessageForMenu?.let { selectedMsg ->
-                    MessageLongPressOverlay(
-                        myReaction = null,
-                        actions = listOf(
-                            MessageAction("reply", "Reply", Icons.AutoMirrored.Rounded.Reply),
-                            MessageAction("copy", "Copy", Icons.Rounded.ContentCopy),
-                            MessageAction("translate", "Translate", Icons.Rounded.Translate),
-                            MessageAction("listen", "Listen", Icons.AutoMirrored.Rounded.VolumeUp),
-                            MessageAction("select", "Select", Icons.Rounded.CheckCircleOutline),
-                            MessageAction("delete", "Delete", Icons.Rounded.DeleteOutline, destructive = true)
-                        ),
-                        onPickEmoji = { emoji ->
-                            // Add reaction
-                        },
-                        onMoreEmoji = {},
-                        onAction = { actionId ->
-                            when (actionId) {
-                                "reply" -> replyingToMessage = selectedMsg
-                                "copy" -> {
-                                    clipboardManager.setText(AnnotatedString(selectedMsg.text))
-                                    Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
-                                }
-                                "translate" -> {
-                                    coroutineScope.launch {
-                                        val res = CloudAiManager.translateMessage(context, selectedMsg.id, selectedMsg.text, "English")
-                                        res.onSuccess {
-                                            translatedMessages[selectedMsg.id] = it.text
-                                        }.onFailure {
-                                            Toast.makeText(context, "Translation failed", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                }
-                                "listen" -> {
-                                    tts?.speak(selectedMsg.text, TextToSpeech.QUEUE_FLUSH, null, "tts_${selectedMsg.id}")
-                                }
-                                "select" -> {
-                                    isSelectionMode = true
-                                    selectedMessageIds.add(selectedMsg.id)
-                                }
-                                "delete" -> {
-                                    coroutineScope.launch {
-                                        EncryptedChatRepository.deleteConversationLocally(conversationId)
-                                    }
-                                }
-                            }
-                        },
-                        onDismiss = { selectedMessageForMenu = null }
-                    )
-                }
             }
         }
 
-        // Telephoto Fullscreen Media Viewer
-        activeMediaViewerIndex?.let { initialIdx ->
-            TelephotoMediaViewerDialog(
-                mediaList = allMediaItems,
-                initialIndex = initialIdx,
-                onDismiss = { activeMediaViewerIndex = null },
-                onSave = { item ->
-                    Toast.makeText(context, "Saved photo to gallery", Toast.LENGTH_SHORT).show()
-                },
-                onShare = { item ->
-                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                        putExtra(Intent.EXTRA_TEXT, item.url)
-                        type = "text/plain"
+        // Long-Press Action Overlay Menu
+        if (selectedMessageForMenu != null) {
+            val selectedMsg = selectedMessageForMenu!!
+            MessageLongPressOverlay(
+                myReaction = rawReactions.find { it.targetMessageId == selectedMsg.id && it.senderId == currentUserId }?.emoji,
+                actions = listOf(
+                    MessageAction("reply", "Reply", { ChatIconReply(tint = colors.text) }),
+                    MessageAction("copy", "Copy Text", { ChatIconCopy(tint = colors.text) }),
+                    MessageAction("translate", "Translate", { ChatIconTranslate(tint = colors.text) }),
+                    MessageAction("listen", "Listen", { ChatIconVolume(tint = colors.text) }),
+                    MessageAction("forward", "Forward", { ChatIconForward(tint = colors.text) }),
+                    MessageAction("select", "Select", { ChatIconCheck(tint = colors.text) }),
+                    MessageAction("delete", "Delete", { ChatIconTrash(tint = colors.danger) }, destructive = true)
+                ),
+                onPickEmoji = { emoji ->
+                    coroutineScope.launch {
+                        EncryptedChatRepository.sendDmReaction(context, conversationId, partnerUserId, selectedMsg.id, emoji)
                     }
-                    context.startActivity(Intent.createChooser(sendIntent, "Share media"))
-                }
+                },
+                onMoreEmoji = {
+                    isEmojiPickerOpen = true
+                },
+                onAction = { actionId ->
+                    when (actionId) {
+                        "reply" -> replyingToMessage = selectedMsg
+                        "copy" -> {
+                            clipboardManager.setText(AnnotatedString(selectedMsg.text))
+                            Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                        }
+                        "translate" -> {
+                            coroutineScope.launch {
+                                val res = CloudAiManager.translateMessage(context, selectedMsg.id, selectedMsg.text, "English")
+                                res.onSuccess {
+                                    Toast.makeText(context, "Translation: ${it.text}", Toast.LENGTH_LONG).show()
+                                }.onFailure {
+                                    Toast.makeText(context, "Translation failed: ${it.message}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                        "listen" -> {
+                            ttsEngine?.speak(selectedMsg.text, TextToSpeech.QUEUE_FLUSH, null, "msg_${selectedMsg.id}")
+                        }
+                        "forward" -> {
+                            Toast.makeText(context, "Forwarding message", Toast.LENGTH_SHORT).show()
+                        }
+                        "select" -> {
+                            isSelectionMode = true
+                            selectedMessageIds.add(selectedMsg.id)
+                        }
+                        "delete" -> {
+                            coroutineScope.launch {
+                                EncryptedChatRepository.deleteConversationLocally(conversationId)
+                                Toast.makeText(context, "Message deleted", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                    selectedMessageForMenu = null
+                },
+                onDismiss = { selectedMessageForMenu = null }
             )
         }
 
-        // Word lookup bottom sheet
-        activeWordLookup?.let { lookup ->
+        // Telephoto Full-Screen Media Viewer
+        if (activeMediaViewerIndex != null && allMediaItems.isNotEmpty()) {
+            TelephotoMediaViewerDialog(
+                mediaItems = allMediaItems,
+                initialIndex = activeMediaViewerIndex!!.coerceIn(0, allMediaItems.size - 1),
+                onDismiss = { activeMediaViewerIndex = null }
+            )
+        }
+
+        // Word Lookup Bottom Sheet
+        if (activeWordLookup != null) {
+            val lookup = activeWordLookup!!
             ModalBottomSheet(
                 onDismissRequest = { activeWordLookup = null },
                 containerColor = colors.surface,
@@ -895,12 +942,11 @@ fun DirectChatScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp)
-                        .padding(bottom = 28.dp),
+                        .padding(horizontal = 24.dp, vertical = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Rounded.Translate, contentDescription = null, tint = colors.accentIn)
+                        ChatIconTranslate(tint = colors.accentIn, modifier = Modifier.size(24.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(lookup.word, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = colors.text)
                     }
@@ -919,7 +965,7 @@ fun DirectChatScreen(
                         colors = ButtonDefaults.buttonColors(containerColor = colors.brand, contentColor = colors.onBrand),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Save to Vocabulary")
+                        Text("Save to Vocabulary", fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -935,55 +981,6 @@ fun DirectChatScreen(
                 },
                 onDismiss = { showAiAssistSheet = false }
             )
-        }
-
-        // Attachment Sheet
-        if (showAttachmentSheet) {
-            ModalBottomSheet(
-                onDismissRequest = { showAttachmentSheet = false },
-                containerColor = colors.surface,
-                contentColor = colors.text,
-                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text("Attach", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = colors.text)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                showAttachmentSheet = false
-                                photoPickerLauncher.launch(
-                                    androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
-                                )
-                            }
-                            .padding(vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Rounded.PhotoLibrary, contentDescription = null, tint = colors.accentIn, modifier = Modifier.size(26.dp))
-                        Spacer(modifier = Modifier.width(14.dp))
-                        Text("Photo & Video", fontSize = 16.sp, color = colors.text)
-                    }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                showAttachmentSheet = false
-                                docPickerLauncher.launch(arrayOf("*/*"))
-                            }
-                            .padding(vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Rounded.InsertDriveFile, contentDescription = null, tint = colors.accentIn, modifier = Modifier.size(26.dp))
-                        Spacer(modifier = Modifier.width(14.dp))
-                        Text("Document / File", fontSize = 16.sp, color = colors.text)
-                    }
-                }
-            }
         }
     }
 }

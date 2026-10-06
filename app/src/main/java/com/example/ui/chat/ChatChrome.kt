@@ -10,6 +10,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -31,17 +32,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Send
-import androidx.compose.material.icons.rounded.AlternateEmail
-import androidx.compose.material.icons.rounded.AttachFile
-import androidx.compose.material.icons.rounded.AutoAwesome
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.EmojiEmotions
-import androidx.compose.material.icons.rounded.KeyboardArrowDown
-import androidx.compose.material.icons.rounded.Lock
-import androidx.compose.material.icons.rounded.Mic
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -66,7 +56,6 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -77,6 +66,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -107,7 +97,8 @@ fun DateChip(text: String, modifier: Modifier = Modifier) {
             fontSize = 12f.chatSp(),
             modifier = Modifier
                 .clip(RoundedCornerShape(10.dp))
-                .background(c.surface.copy(alpha = 0.92f))
+                .background(c.surface.copy(alpha = 0.94f))
+                .border(0.5.dp, c.hairline, RoundedCornerShape(10.dp))
                 .padding(horizontal = 10.dp, vertical = 3.dp),
         )
     }
@@ -138,13 +129,13 @@ fun SecurityNotice(text: String, modifier: Modifier = Modifier, onClick: (() -> 
         Row(
             modifier = Modifier
                 .clip(RoundedCornerShape(12.dp))
-                .background(c.surface.copy(alpha = 0.92f))
+                .background(c.surface.copy(alpha = 0.94f))
                 .border(0.5.dp, c.hairline, RoundedCornerShape(12.dp))
                 .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.Top,
         ) {
-            Icon(Icons.Rounded.Lock, contentDescription = null, tint = c.textSecondary, modifier = Modifier.size(14.dp).padding(top = 2.dp))
+            ChatIconLock(modifier = Modifier.size(14.dp).padding(top = 2.dp), tint = c.textSecondary)
             Spacer(Modifier.width(6.dp))
             Text(text, color = c.textSecondary, fontSize = 12f.chatSp(), lineHeight = 17f.chatSp(), textAlign = TextAlign.Center)
         }
@@ -198,7 +189,7 @@ fun PinnedMessageBar(preview: String, positionText: String?, onClick: () -> Unit
 // ---------------------------------------------------------------------------
 
 @Composable
-fun ChatFab(icon: ImageVector, contentDescription: String, badge: Int, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun ChatFab(icon: @Composable () -> Unit, contentDescription: String, badge: Int, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val c = LocalChatColors.current
     Box(modifier.size(ChatDimens.FabSize + 10.dp), contentAlignment = Alignment.BottomStart) {
         Surface(
@@ -209,7 +200,7 @@ fun ChatFab(icon: ImageVector, contentDescription: String, badge: Int, onClick: 
             modifier = Modifier.size(ChatDimens.FabSize),
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(icon, contentDescription, tint = c.textSecondary, modifier = Modifier.size(22.dp))
+                icon()
             }
         }
         if (badge > 0) {
@@ -225,7 +216,7 @@ fun ChatFab(icon: ImageVector, contentDescription: String, badge: Int, onClick: 
                     if (badge > 99) "99+" else badge.toString(),
                     color = c.onBrand,
                     fontSize = 11f.chatSp(),
-                    fontWeight = FontWeight.Medium,
+                    fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(horizontal = 5.dp),
                 )
             }
@@ -235,74 +226,32 @@ fun ChatFab(icon: ImageVector, contentDescription: String, badge: Int, onClick: 
 
 @Composable
 fun ScrollToBottomFab(unread: Int, onClick: () -> Unit, modifier: Modifier = Modifier) =
-    ChatFab(Icons.Rounded.KeyboardArrowDown, "Scroll to latest message", unread, onClick, modifier)
+    ChatFab(icon = {
+        Canvas(Modifier.size(20.dp)) {
+            val sw = 2.dp.toPx()
+            val p = Path().apply {
+                moveTo(size.width * 0.25f, size.height * 0.38f)
+                lineTo(size.width * 0.50f, size.height * 0.65f)
+                lineTo(size.width * 0.75f, size.height * 0.38f)
+            }
+            drawPath(p, Color(0xFF6B6B66), style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        }
+    }, contentDescription = "Scroll to latest message", badge = unread, onClick = onClick, modifier = modifier)
 
 @Composable
 fun MentionFab(unreadMentions: Int, onClick: () -> Unit, modifier: Modifier = Modifier) =
-    ChatFab(Icons.Rounded.AlternateEmail, "Jump to next mention", unreadMentions, onClick, modifier)
+    ChatFab(icon = {
+        Text("@", color = Color(0xFF2F6FDE), fontWeight = FontWeight.Bold, fontSize = 20.sp)
+    }, contentDescription = "Jump to next mention", badge = unreadMentions, onClick = onClick, modifier = modifier)
 
 // ---------------------------------------------------------------------------
-// Swipe right to reply (with arrow hint and a haptic tick at the threshold)
-// ---------------------------------------------------------------------------
-
-fun Modifier.swipeToReply(enabled: Boolean = true, onReply: () -> Unit): Modifier = composed {
-    if (!enabled) return@composed Modifier
-    val density = LocalDensity.current
-    val c = LocalChatColors.current
-    val threshold = with(density) { ChatDimens.SwipeReplyThreshold.toPx() }
-    val maxDrag = with(density) { ChatDimens.SwipeReplyMax.toPx() }
-    val offsetX = remember { Animatable(0f) }
-    val scope = rememberCoroutineScope()
-    val haptic = LocalHapticFeedback.current
-    var armed by remember { mutableStateOf(false) }
-    val reply by rememberUpdatedState(onReply)
-    this
-        .drawBehind {
-            val p = (offsetX.value / threshold).coerceIn(0f, 1f)
-            if (p > 0.05f) {
-                val cx = 22.dp.toPx()
-                val cy = size.height / 2f
-                drawCircle(c.surface.copy(alpha = p), radius = 14.dp.toPx() * p, center = Offset(cx, cy))
-                val a = 6.dp.toPx() * p
-                val arrow = Path().apply {
-                    moveTo(cx + a, cy - a * 0.9f)
-                    lineTo(cx - a, cy)
-                    lineTo(cx + a, cy + a * 0.9f)
-                }
-                drawPath(arrow, c.textSecondary.copy(alpha = p), style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
-            }
-        }
-        .offset { IntOffset(offsetX.value.roundToInt(), 0) }
-        .pointerInput(Unit) {
-            detectHorizontalDragGestures(
-                onDragEnd = {
-                    if (armed) reply()
-                    armed = false
-                    scope.launch { offsetX.animateTo(0f, spring()) }
-                },
-                onDragCancel = {
-                    armed = false
-                    scope.launch { offsetX.animateTo(0f, spring()) }
-                },
-            ) { change, dragAmount ->
-                change.consume()
-                val next = (offsetX.value + dragAmount * 0.6f).coerceIn(0f, maxDrag)
-                scope.launch { offsetX.snapTo(next) }
-                val nowArmed = next >= threshold
-                if (nowArmed && !armed) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                armed = nowArmed
-            }
-        }
-}
-
-// ---------------------------------------------------------------------------
-// Long-press: reaction bar + action menu (show them in a Popup/Dialog over a dimmed background)
+// Long-press: reaction bar + action menu
 // ---------------------------------------------------------------------------
 
 data class MessageAction(
-    val id: String, // "reply", "copy", "translate", "listen", "forward", "select", "pin", "delete" ...
+    val id: String,
     val label: String,
-    val icon: ImageVector? = null,
+    val icon: (@Composable () -> Unit)? = null,
     val destructive: Boolean = false,
 )
 
@@ -316,7 +265,7 @@ fun ReactionQuickBar(
 ) {
     val c = LocalChatColors.current
     Surface(shape = RoundedCornerShape(28.dp), color = c.surface, shadowElevation = 8.dp, modifier = modifier) {
-        Row(Modifier.padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             emojis.forEach { e ->
                 Box(
                     Modifier
@@ -351,10 +300,12 @@ fun MessageActionsMenu(actions: List<MessageAction>, onAction: (String) -> Unit,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (a.icon != null) {
-                        Icon(a.icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+                        Box(modifier = Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+                            a.icon.invoke()
+                        }
                         Spacer(Modifier.width(14.dp))
                     }
-                    Text(a.label, color = tint, fontSize = 15f.chatSp())
+                    Text(a.label, color = tint, fontSize = 15f.chatSp(), fontWeight = FontWeight.Medium)
                 }
             }
         }
@@ -364,7 +315,7 @@ fun MessageActionsMenu(actions: List<MessageAction>, onAction: (String) -> Unit,
 @Composable
 fun SelectionTopBar(
     selectedCount: Int,
-    actions: List<MessageAction>, // icons required here
+    actions: List<MessageAction>,
     onAction: (String) -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
@@ -372,12 +323,12 @@ fun SelectionTopBar(
     val c = LocalChatColors.current
     Surface(color = c.surface, shadowElevation = 2.dp, modifier = modifier.fillMaxWidth()) {
         Row(Modifier.height(56.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onClose) { Icon(Icons.Rounded.Close, "Cancel selection", tint = c.text) }
-            Text("$selectedCount selected", color = c.text, fontSize = 17f.chatSp(), fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+            IconButton(onClick = onClose) { ChatIconClose(tint = c.text) }
+            Text("$selectedCount selected", color = c.text, fontSize = 17f.chatSp(), fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             actions.forEach { a ->
                 IconButton(onClick = { onAction(a.id) }) {
-                    if (a.icon != null) Icon(a.icon, a.label, tint = if (a.destructive) c.danger else c.text)
-                    else Text(a.label, color = c.text, fontSize = 14f.chatSp())
+                    if (a.icon != null) a.icon.invoke()
+                    else Text(a.label, color = if (a.destructive) c.danger else c.text, fontSize = 14f.chatSp(), fontWeight = FontWeight.Medium)
                 }
             }
         }
@@ -395,109 +346,113 @@ fun ReplyPreviewStrip(title: String, preview: String, onClose: () -> Unit, modif
         Box(Modifier.width(3.dp).height(34.dp).clip(RoundedCornerShape(2.dp)).background(c.accentIn))
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, color = c.accentIn, fontSize = 12f.chatSp(), fontWeight = FontWeight.Medium, maxLines = 1)
+            Text(title, color = c.accentIn, fontSize = 12f.chatSp(), fontWeight = FontWeight.SemiBold, maxLines = 1)
             Text(preview, color = c.textSecondary, fontSize = 13f.chatSp(), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        IconButton(onClick = onClose) { Icon(Icons.Rounded.Close, "Cancel reply", tint = c.textSecondary) }
+        IconButton(onClick = onClose) { ChatIconClose(modifier = Modifier.size(16.dp), tint = c.textSecondary) }
     }
 }
 
 @Composable
 fun SendButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     val c = LocalChatColors.current
-    Box(
-        modifier.size(ChatDimens.MinTouch).clip(CircleShape).background(c.brand).clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) { Icon(Icons.AutoMirrored.Rounded.Send, "Send", tint = c.onBrand, modifier = Modifier.size(22.dp)) }
+    Surface(
+        onClick = onClick,
+        shape = CircleShape,
+        color = c.brand,
+        shadowElevation = 2.dp,
+        modifier = modifier.size(ChatDimens.MinTouch),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            ChatIconSend(tint = c.onBrand, modifier = Modifier.size(20.dp))
+        }
+    }
 }
 
 /**
- * Hold to record, slide left to cancel, slide up to lock. Stateless: the caller owns the recorder.
- * [onMove] receives pixel offsets from the touch-down point (negative dx = left, negative dy = up).
- * A press shorter than ~400ms should be treated as a tap by the caller ("Hold to record").
+ * Tap to toggle recording OR Hold to record.
  */
 @Composable
 fun MicHoldButton(
     isRecording: Boolean,
-    onStart: () -> Unit,
-    onMove: (dx: Float, dy: Float) -> Unit,
-    onEnd: (cancelled: Boolean, locked: Boolean) -> Unit,
+    onClick: () -> Unit,
+    onStart: () -> Unit = {},
+    onMove: (dx: Float, dy: Float) -> Unit = { _, _ -> },
+    onEnd: (cancelled: Boolean, locked: Boolean) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     val c = LocalChatColors.current
-    val start by rememberUpdatedState(onStart)
-    val move by rememberUpdatedState(onMove)
-    val end by rememberUpdatedState(onEnd)
-    val scale by animateFloatAsState(if (isRecording) 1.35f else 1f, tween(150), label = "micScale")
-    Box(
-        modifier
+    val scale by animateFloatAsState(if (isRecording) 1.20f else 1f, tween(150), label = "micScale")
+
+    Surface(
+        onClick = onClick,
+        shape = CircleShape,
+        color = if (isRecording) c.danger else c.brand,
+        shadowElevation = 2.dp,
+        modifier = modifier
             .size(ChatDimens.MinTouch)
-            .scale(scale)
-            .clip(CircleShape)
-            .background(c.brand)
-            .pointerInput(Unit) {
-                val cancelPx = 96.dp.toPx()
-                val lockPx = 80.dp.toPx()
-                awaitEachGesture {
-                    val down = awaitFirstDown()
-                    start()
-                    var cancelled = false
-                    var locked = false
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                        val dx = change.position.x - down.position.x
-                        val dy = change.position.y - down.position.y
-                        move(dx, dy)
-                        cancelled = dx < -cancelPx
-                        if (dy < -lockPx) locked = true
-                        change.consume()
-                        if (!change.pressed) break
-                    }
-                    end(cancelled && !locked, locked)
-                }
-            },
-        contentAlignment = Alignment.Center,
-    ) { Icon(Icons.Rounded.Mic, "Hold to record voice message", tint = c.onBrand, modifier = Modifier.size(22.dp)) }
+            .scale(scale),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            ChatIconMic(tint = if (isRecording) Color.White else c.onBrand, modifier = Modifier.size(22.dp))
+        }
+    }
 }
 
 /** Shown in place of the text field while recording. */
 @Composable
 fun RecordingBar(
     elapsedMs: Long,
-    amplitudes: List<Int>, // last ~48 live samples
-    slideProgress: Float, // 0f..1f toward the cancel zone
-    locked: Boolean,
+    amplitudes: List<Int>,
+    slideProgress: Float = 0f,
+    locked: Boolean = false,
     onCancel: () -> Unit,
+    onSend: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val c = LocalChatColors.current
     val pulse by rememberInfiniteTransition(label = "rec").animateFloat(
         initialValue = 1f,
         targetValue = 0.25f,
-        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
+        animationSpec = infiniteRepeatable(tween(600), RepeatMode.Reverse),
         label = "recDot",
     )
     Row(
-        modifier.fillMaxWidth().height(ChatDimens.MinTouch).padding(horizontal = 8.dp),
+        modifier = modifier.fillMaxWidth().height(48.dp).padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // Red pulsing dot
         Box(Modifier.size(10.dp).alpha(if (LocalReduceMotion.current) 1f else pulse).clip(CircleShape).background(c.danger))
         Spacer(Modifier.width(8.dp))
-        Text(formatDuration(elapsedMs), color = c.text, fontSize = 16f.chatSp(), fontWeight = FontWeight.Medium)
+        Text(formatDuration(elapsedMs), color = c.text, fontSize = 15f.chatSp(), fontWeight = FontWeight.Bold)
         Spacer(Modifier.width(10.dp))
-        Waveform(amplitudes, 1f, c.danger, c.danger, Modifier.weight(1f).height(24.dp))
-        Spacer(Modifier.width(10.dp))
-        if (locked) {
-            Text(
-                "Cancel",
-                color = c.danger,
-                fontSize = 14f.chatSp(),
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onCancel).padding(8.dp),
-            )
-        } else {
-            Text("‹ Slide to cancel", color = c.textSecondary, fontSize = 13f.chatSp(), modifier = Modifier.alpha((1f - slideProgress).coerceIn(0f, 1f)))
+        Waveform(amplitudes, 1f, c.danger.copy(alpha = 0.4f), c.danger, Modifier.weight(1f).height(24.dp))
+        Spacer(Modifier.width(8.dp))
+
+        // Trash / Cancel button
+        Surface(
+            onClick = onCancel,
+            shape = CircleShape,
+            color = c.danger.copy(alpha = 0.15f),
+            modifier = Modifier.size(36.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                ChatIconTrash(modifier = Modifier.size(18.dp), tint = c.danger)
+            }
+        }
+
+        Spacer(Modifier.width(6.dp))
+
+        // Send Voice Note button
+        Surface(
+            onClick = onSend,
+            shape = CircleShape,
+            color = c.brand,
+            modifier = Modifier.size(36.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                ChatIconSend(modifier = Modifier.size(18.dp), tint = c.onBrand)
+            }
         }
     }
 }
@@ -508,31 +463,33 @@ fun ChatInputBar(
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     onAttach: () -> Unit,
-    onEmoji: () -> Unit,
-    showAiButton: Boolean,
-    onAi: () -> Unit,
-    micButton: @Composable () -> Unit, // MicHoldButton(...)
+    onEmojiToggle: () -> Unit,
+    isEmojiOpen: Boolean = false,
+    showAiButton: Boolean = false,
+    onAi: () -> Unit = {},
+    micButton: @Composable () -> Unit,
     modifier: Modifier = Modifier,
-    topSlot: (@Composable () -> Unit)? = null, // ReplyPreviewStrip / edit strip
-    recording: (@Composable () -> Unit)? = null, // RecordingBar(...) replaces the field while recording
-    forceSend: Boolean = false, // true while a locked recording waits for "send"
+    topSlot: (@Composable () -> Unit)? = null,
+    recording: (@Composable () -> Unit)? = null,
     placeholder: String = "Message",
 ) {
     val c = LocalChatColors.current
-    Column(modifier.fillMaxWidth().background(c.surface)) {
+    Column(modifier = modifier.fillMaxWidth().background(c.surface)) {
         Box(Modifier.fillMaxWidth().height(0.5.dp).background(c.hairline))
         topSlot?.invoke()
         Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp), verticalAlignment = Alignment.Bottom) {
             if (recording == null) {
-                IconButton(onClick = onAttach) { Icon(Icons.Rounded.AttachFile, "Attach", tint = c.textSecondary) }
+                IconButton(onClick = onAttach, modifier = Modifier.size(44.dp)) {
+                    ChatIconPhoto(tint = c.textSecondary, modifier = Modifier.size(24.dp))
+                }
                 Surface(
                     modifier = Modifier.weight(1f).defaultMinSize(minHeight = 44.dp),
                     shape = RoundedCornerShape(22.dp),
                     color = c.surfaceVariant,
                 ) {
                     Row(verticalAlignment = Alignment.Bottom) {
-                        IconButton(onClick = onEmoji, modifier = Modifier.size(44.dp)) {
-                            Icon(Icons.Rounded.EmojiEmotions, "Emoji", tint = c.textSecondary)
+                        IconButton(onClick = onEmojiToggle, modifier = Modifier.size(44.dp)) {
+                            ChatIconEmoji(tint = if (isEmojiOpen) c.accentIn else c.textSecondary)
                         }
                         BasicTextField(
                             value = text,
@@ -550,7 +507,7 @@ fun ChatInputBar(
                         )
                         if (showAiButton && text.isNotBlank()) {
                             IconButton(onClick = onAi, modifier = Modifier.size(44.dp)) {
-                                Icon(Icons.Rounded.AutoAwesome, "Improve text", tint = c.accentIn)
+                                ChatIconSparkles(tint = c.accentIn)
                             }
                         }
                     }
@@ -559,7 +516,7 @@ fun ChatInputBar(
                 Box(Modifier.weight(1f)) { recording() }
             }
             Spacer(Modifier.width(4.dp))
-            Crossfade(targetState = (text.isNotBlank() && recording == null) || forceSend, animationSpec = tween(150), label = "micOrSend") { showSend ->
+            Crossfade(targetState = (text.isNotBlank() && recording == null), animationSpec = tween(150), label = "micOrSend") { showSend ->
                 if (showSend) SendButton(onSend) else micButton()
             }
         }

@@ -146,9 +146,9 @@ fun ChatKitGallery(darkTheme: Boolean, preset: ChatPreset = ChatPreset.Butter, t
                 Box(Modifier.height(8.dp))
             }
             ChatInputBar(
-                text = text, onTextChange = { text = it }, onSend = { text = "" }, onAttach = {}, onEmoji = {},
+                text = text, onTextChange = { text = it }, onSend = { text = "" }, onAttach = {}, onEmojiToggle = {},
                 showAiButton = true, onAi = {},
-                micButton = { MicHoldButton(isRecording = false, onStart = {}, onMove = { _, _ -> }, onEnd = { _, _ -> }) },
+                micButton = { MicHoldButton(isRecording = false, onClick = {}) },
             )
         }
     }

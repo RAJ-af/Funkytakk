@@ -21,12 +21,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.automirrored.rounded.Forward
-import androidx.compose.material.icons.automirrored.rounded.Reply
-import androidx.compose.material.icons.automirrored.rounded.VolumeUp
-import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
@@ -38,7 +32,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -58,13 +51,12 @@ import coil.compose.AsyncImage
 import com.example.CloudAiManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.saket.telephoto.zoomable.coil.ZoomableAsyncImage
-import me.saket.telephoto.zoomable.rememberZoomableImageState
-import me.saket.telephoto.zoomable.rememberZoomableState
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -72,54 +64,37 @@ import java.util.*
 import kotlin.math.abs
 
 // ===========================================================================
-// 1. Media3 ExoPlayer Voice Note Controller
+// 1. Voice Playback Controller (ExoPlayer + Cache Decryption)
 // ===========================================================================
 
-@androidx.annotation.OptIn(UnstableApi::class)
-@Stable
-class VoicePlaybackController(private val context: Context, private val scope: CoroutineScope) {
-    private val TAG = "VoicePlaybackController"
+@OptIn(UnstableApi::class)
+class VoicePlaybackController(
+    private val context: Context,
+    private val scope: CoroutineScope
+) {
+    private var exoPlayer: ExoPlayer? = null
+    private var progressJob: Job? = null
 
     private val _currentPlayingId = mutableStateOf<String?>(null)
-    var currentPlayingId: String?
-        get() = _currentPlayingId.value
-        set(value) { _currentPlayingId.value = value }
+    val currentPlayingId: String? get() = _currentPlayingId.value
 
     private val _isPlaying = mutableStateOf(false)
-    var isPlaying: Boolean
-        get() = _isPlaying.value
-        set(value) { _isPlaying.value = value }
+    val isPlaying: Boolean get() = _isPlaying.value
 
     private val _isLoading = mutableStateOf(false)
-    var isLoading: Boolean
-        get() = _isLoading.value
-        set(value) { _isLoading.value = value }
+    val isLoading: Boolean get() = _isLoading.value
 
     private val _positionMs = mutableStateOf(0L)
-    var positionMs: Long
-        get() = _positionMs.value
-        set(value) { _positionMs.value = value }
+    val positionMs: Long get() = _positionMs.value
 
     private val _durationMs = mutableStateOf(0L)
-    var durationMs: Long
-        get() = _durationMs.value
-        set(value) { _durationMs.value = value }
+    val durationMs: Long get() = _durationMs.value
 
     private val _speed = mutableStateOf(1.0f)
-    var speed: Float
-        get() = _speed.value
-        set(value) { _speed.value = value }
-
-    private var exoPlayer: ExoPlayer? = null
-    private var progressJob: kotlinx.coroutines.Job? = null
+    val speed: Float get() = _speed.value
 
     init {
-        initPlayer()
-    }
-
-    private fun initPlayer() {
         try {
-            exoPlayer?.release()
             exoPlayer = ExoPlayer.Builder(context).build().apply {
                 addListener(object : Player.Listener {
                     override fun onPlaybackStateChanged(playbackState: Int) {
@@ -130,35 +105,45 @@ class VoicePlaybackController(private val context: Context, private val scope: C
                         } else if (playbackState == Player.STATE_READY) {
                             this@VoicePlaybackController._isLoading.value = false
                             this@VoicePlaybackController._durationMs.value = duration.coerceAtLeast(0L)
+                        } else if (playbackState == Player.STATE_BUFFERING) {
+                            this@VoicePlaybackController._isLoading.value = true
                         }
                     }
 
                     override fun onIsPlayingChanged(playing: Boolean) {
                         this@VoicePlaybackController._isPlaying.value = playing
-                        if (playing) startProgressPolling() else stopProgressPolling()
+                        if (playing) {
+                            startProgressPolling()
+                        } else {
+                            stopProgressPolling()
+                        }
                     }
 
                     override fun onPlayerError(error: PlaybackException) {
-                        Log.e(TAG, "ExoPlayer playback error: ${error.message}", error)
-                        this@VoicePlaybackController._isPlaying.value = false
+                        Log.e("VoicePlayback", "ExoPlayer playback error: ${error.errorCodeName}", error)
                         this@VoicePlaybackController._isLoading.value = false
+                        this@VoicePlaybackController._isPlaying.value = false
                         stopProgressPolling()
                     }
                 })
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize ExoPlayer", e)
+            Log.e("VoicePlayback", "Failed to initialize ExoPlayer", e)
         }
     }
 
     fun playOrPause(
         messageId: String,
-        audioSource: Any, // File, Uri, String path, or ByteArray
+        audioSource: String,
         fallbackDurationMs: Long = 0L,
         onError: (String) -> Unit = {}
     ) {
-        if (currentPlayingId == messageId) {
-            val player = exoPlayer ?: return
+        val player = exoPlayer ?: run {
+            onError("Audio player is not available")
+            return
+        }
+
+        if (_currentPlayingId.value == messageId) {
             if (player.isPlaying) {
                 player.pause()
             } else {
@@ -167,113 +152,76 @@ class VoicePlaybackController(private val context: Context, private val scope: C
             return
         }
 
-        stop()
-        currentPlayingId = messageId
-        isLoading = true
-        positionMs = 0L
-        durationMs = fallbackDurationMs
+        // Switch to a new track
+        player.stop()
+        _currentPlayingId.value = messageId
+        _isLoading.value = true
+        _positionMs.value = 0L
+        _durationMs.value = fallbackDurationMs
 
-        scope.launch(Dispatchers.IO) {
+        scope.launch {
             try {
-                val preparedFile = prepareAudioFile(messageId, audioSource)
-                if (preparedFile == null || !preparedFile.exists() || preparedFile.length() == 0L) {
-                    throw IllegalStateException("Audio file unavailable or empty")
+                val resolvedFile = resolveAudioSourceToLocalFile(context, audioSource)
+                if (resolvedFile == null || !resolvedFile.exists() || resolvedFile.length() == 0L) {
+                    withContext(Dispatchers.Main) {
+                        _isLoading.value = false
+                        _currentPlayingId.value = null
+                        onError("Audio file could not be downloaded or decrypted")
+                    }
+                    return@launch
                 }
 
                 withContext(Dispatchers.Main) {
-                    val player = exoPlayer ?: ExoPlayer.Builder(context).build().also { exoPlayer = it }
-                    val mediaItem = MediaItem.fromUri(Uri.fromFile(preparedFile))
+                    val mediaItem = MediaItem.fromUri(Uri.fromFile(resolvedFile))
                     player.setMediaItem(mediaItem)
-                    player.setPlaybackSpeed(speed)
+                    player.setPlaybackSpeed(_speed.value)
                     player.prepare()
                     player.play()
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Voice note playback failed for message $messageId", e)
+                Log.e("VoicePlayback", "Error playing voice note: $audioSource", e)
                 withContext(Dispatchers.Main) {
-                    isLoading = false
-                    isPlaying = false
-                    currentPlayingId = null
-                    onError("Voice playback failed: ${e.message ?: "File unreadable"}")
+                    _isLoading.value = false
+                    _currentPlayingId.value = null
+                    onError("Voice playback failed: ${e.message}")
                 }
             }
         }
     }
 
-    private fun prepareAudioFile(messageId: String, source: Any): File? {
-        return try {
-            when (source) {
-                is File -> {
-                    if (source.exists() && source.length() > 0) source else null
-                }
-                is String -> {
-                    val clean = source.removePrefix("file://").trim()
-                    val f = File(clean)
-                    if (f.exists() && f.length() > 0) f else null
-                }
-                is ByteArray -> {
-                    val cacheFile = File(context.cacheDir, "voice_play_${messageId}.m4a")
-                    FileOutputStream(cacheFile).use { fos ->
-                        fos.write(source)
-                        fos.flush()
-                        try { fos.fd.sync() } catch (_: Exception) {}
-                    }
-                    cacheFile
-                }
-                else -> null
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error writing voice playback cache file", e)
-            null
-        }
-    }
-
-    fun seekTo(progress: Float) {
+    fun seekTo(fraction: Float) {
         val player = exoPlayer ?: return
-        val target = if (durationMs > 0) (progress * durationMs).toLong() else (progress * player.duration).toLong()
-        player.seekTo(target.coerceAtLeast(0L))
-        positionMs = target
+        val total = player.duration.takeIf { it > 0 } ?: _durationMs.value
+        if (total > 0) {
+            val targetMs = (total * fraction.coerceIn(0f, 1f)).toLong()
+            player.seekTo(targetMs)
+            _positionMs.value = targetMs
+        }
     }
 
     fun cycleSpeed() {
-        speed = when (speed) {
+        val newSpeed = when (_speed.value) {
             1.0f -> 1.5f
             1.5f -> 2.0f
             else -> 1.0f
         }
-        exoPlayer?.setPlaybackSpeed(speed)
-    }
-
-    fun stop() {
-        stopProgressPolling()
-        try {
-            exoPlayer?.stop()
-        } catch (_: Exception) {}
-        isPlaying = false
-        isLoading = false
-        currentPlayingId = null
-        positionMs = 0L
-    }
-
-    fun release() {
-        stop()
-        try {
-            exoPlayer?.release()
-        } catch (_: Exception) {}
-        exoPlayer = null
+        _speed.value = newSpeed
+        exoPlayer?.setPlaybackSpeed(newSpeed)
     }
 
     private fun startProgressPolling() {
         stopProgressPolling()
-        progressJob = scope.launch(Dispatchers.Main) {
+        progressJob = scope.launch {
             while (isActive) {
-                val player = exoPlayer
-                if (player != null && player.isPlaying) {
-                    positionMs = player.currentPosition.coerceAtLeast(0L)
-                    val d = player.duration
-                    if (d > 0) durationMs = d
+                exoPlayer?.let {
+                    if (it.isPlaying) {
+                        _positionMs.value = it.currentPosition
+                        if (it.duration > 0) {
+                            _durationMs.value = it.duration
+                        }
+                    }
                 }
-                delay(50L)
+                delay(50)
             }
         }
     }
@@ -282,13 +230,63 @@ class VoicePlaybackController(private val context: Context, private val scope: C
         progressJob?.cancel()
         progressJob = null
     }
+
+    fun release() {
+        stopProgressPolling()
+        exoPlayer?.release()
+        exoPlayer = null
+    }
+
+    private suspend fun resolveAudioSourceToLocalFile(context: Context, source: String): File? = withContext(Dispatchers.IO) {
+        try {
+            if (source.startsWith("http://") || source.startsWith("https://")) {
+                val cacheDir = File(context.cacheDir, "voice_notes").apply { mkdirs() }
+                val ext = when {
+                    source.contains(".m4a", ignoreCase = true) -> ".m4a"
+                    source.contains(".aac", ignoreCase = true) -> ".aac"
+                    source.contains(".ogg", ignoreCase = true) -> ".ogg"
+                    source.contains(".mp3", ignoreCase = true) -> ".mp3"
+                    else -> ".m4a"
+                }
+                val cachedFile = File(cacheDir, "voice_${source.hashCode()}$ext")
+                if (cachedFile.exists() && cachedFile.length() > 0) {
+                    return@withContext cachedFile
+                }
+                val url = java.net.URL(source)
+                val conn = url.openConnection()
+                conn.connectTimeout = 10000
+                conn.readTimeout = 15000
+                conn.getInputStream().use { input ->
+                    FileOutputStream(cachedFile).use { output ->
+                        input.copyTo(output)
+                        output.flush()
+                    }
+                }
+                return@withContext cachedFile
+            }
+
+            val directFile = File(source)
+            if (directFile.exists() && directFile.length() > 0) {
+                return@withContext directFile
+            }
+
+            val appCacheFile = File(context.cacheDir, source)
+            if (appCacheFile.exists() && appCacheFile.length() > 0) {
+                return@withContext appCacheFile
+            }
+            null
+        } catch (e: Exception) {
+            Log.e("VoicePlayback", "Failed to resolve audio source: $source", e)
+            null
+        }
+    }
 }
 
 @Composable
 fun rememberVoicePlaybackController(): VoicePlaybackController {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val controller = remember { VoicePlaybackController(context.applicationContext, scope) }
+    val controller = remember { VoicePlaybackController(context, scope) }
     DisposableEffect(Unit) {
         onDispose {
             controller.release()
@@ -298,138 +296,171 @@ fun rememberVoicePlaybackController(): VoicePlaybackController {
 }
 
 // ===========================================================================
-// 2. Live Voice Recorder with Amplitude Sampling
+// 2. Live Voice Recorder (Microphone + Amplitude Streaming)
 // ===========================================================================
 
-data class LiveVoiceResult(
+data class VoiceRecordResult(
     val file: File,
     val durationMs: Long,
     val amplitudes: List<Int>,
     val bytes: ByteArray
 )
 
-class LiveVoiceRecorder(private val context: Context, private val scope: CoroutineScope) {
-    private val TAG = "LiveVoiceRecorder"
+class LiveVoiceRecorder(
+    private val context: Context,
+    private val scope: CoroutineScope
+) {
+    private var mediaRecorder: MediaRecorder? = null
+    private var recordFile: File? = null
+    private var startTimeMs: Long = 0L
+    private var amplitudeJob: Job? = null
 
     var isRecording by mutableStateOf(false)
+        private set
+
     var elapsedMs by mutableStateOf(0L)
-    var liveAmplitudes = mutableStateListOf<Int>()
+        private set
 
-    private var recorder: MediaRecorder? = null
-    private var outputFile: File? = null
-    private var startTimeMs = 0L
-    private var samplingJob: kotlinx.coroutines.Job? = null
+    val liveAmplitudes = mutableStateListOf<Int>()
 
-    fun start(): Boolean {
-        cancel()
-        return try {
-            val file = File(context.cacheDir, "voice_rec_${System.currentTimeMillis()}.m4a")
-            outputFile = file
+    fun start() {
+        if (isRecording) return
+        try {
+            val voiceDir = File(context.cacheDir, "voice_recordings").apply { mkdirs() }
+            val file = File(voiceDir, "rec_${System.currentTimeMillis()}.m4a")
+            recordFile = file
 
-            val rec = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 MediaRecorder(context)
             } else {
                 @Suppress("DEPRECATION")
                 MediaRecorder()
             }
 
-            rec.setAudioSource(MediaRecorder.AudioSource.MIC)
-            rec.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-            rec.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-            rec.setAudioEncodingBitRate(64000)
-            rec.setAudioSamplingRate(44100)
-            rec.setOutputFile(file.absolutePath)
-            rec.prepare()
-            rec.start()
+            recorder.apply {
+                setAudioSource(MediaRecorder.AudioSource.MIC)
+                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                setAudioEncodingBitRate(128000)
+                setAudioSamplingRate(44100)
+                setOutputFile(file.absolutePath)
+                prepare()
+                start()
+            }
 
-            recorder = rec
+            mediaRecorder = recorder
             startTimeMs = System.currentTimeMillis()
+            isRecording = true
             elapsedMs = 0L
             liveAmplitudes.clear()
-            isRecording = true
 
-            // Sample max amplitude every ~80ms
-            samplingJob = scope.launch(Dispatchers.Default) {
+            amplitudeJob = scope.launch {
                 while (isActive && isRecording) {
-                    delay(80L)
-                    val rawAmp = try { rec.maxAmplitude } catch (_: Exception) { 0 }
-                    // Normalize 0..32767 to 0..255
-                    val normalized = ((rawAmp / 32767f) * 255f).toInt().coerceIn(10, 255)
-                    withContext(Dispatchers.Main) {
-                        elapsedMs = System.currentTimeMillis() - startTimeMs
-                        if (liveAmplitudes.size >= 48) liveAmplitudes.removeAt(0)
-                        liveAmplitudes.add(normalized)
+                    val maxAmp = try {
+                        mediaRecorder?.maxAmplitude ?: 0
+                    } catch (e: Exception) {
+                        0
                     }
+                    val normalized = (maxAmp.toFloat() / 32767f * 255f).toInt().coerceIn(10, 255)
+                    liveAmplitudes.add(normalized)
+                    if (liveAmplitudes.size > 50) {
+                        liveAmplitudes.removeAt(0)
+                    }
+                    elapsedMs = System.currentTimeMillis() - startTimeMs
+                    delay(80)
                 }
             }
-            true
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start live voice recorder", e)
-            cancel()
-            false
+            Log.e("VoiceRecorder", "Failed to start recording", e)
+            isRecording = false
+            Toast.makeText(context, "Cannot access microphone: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
-    fun stop(): LiveVoiceResult? {
-        samplingJob?.cancel()
-        samplingJob = null
-        val rec = recorder ?: return null
-        val file = outputFile ?: return null
-        val totalDuration = System.currentTimeMillis() - startTimeMs
+    fun stop(): VoiceRecordResult? {
+        if (!isRecording) return null
+        amplitudeJob?.cancel()
+        amplitudeJob = null
+        isRecording = false
 
-        return try {
-            rec.stop()
-            rec.release()
-            recorder = null
-            outputFile = null
-            isRecording = false
+        val duration = System.currentTimeMillis() - startTimeMs
+        val file = recordFile
 
-            if (file.exists() && file.length() > 200L && totalDuration >= 350L) {
-                val bytes = file.readBytes()
-                val finalAmps = if (liveAmplitudes.isEmpty()) List(48) { 40 } else liveAmplitudes.toList()
-                LiveVoiceResult(file, totalDuration, finalAmps, bytes)
-            } else {
-                file.delete()
-                null
+        try {
+            mediaRecorder?.apply {
+                try {
+                    stop()
+                } catch (e: Exception) {
+                    Log.w("VoiceRecorder", "Stop failed", e)
+                }
+                release()
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error stopping voice recorder", e)
-            try { rec.release() } catch (_: Exception) {}
-            recorder = null
-            file.delete()
-            outputFile = null
-            isRecording = false
-            null
+            Log.e("VoiceRecorder", "Error releasing recorder", e)
+        } finally {
+            mediaRecorder = null
         }
+
+        if (file != null && file.exists() && file.length() > 0 && duration >= 500L) {
+            val bytes = file.readBytes()
+            return VoiceRecordResult(
+                file = file,
+                durationMs = duration,
+                amplitudes = liveAmplitudes.toList(),
+                bytes = bytes
+            )
+        }
+        return null
     }
 
     fun cancel() {
-        samplingJob?.cancel()
-        samplingJob = null
-        try {
-            recorder?.stop()
-        } catch (_: Exception) {}
-        try {
-            recorder?.release()
-        } catch (_: Exception) {}
-        recorder = null
-        outputFile?.delete()
-        outputFile = null
+        if (!isRecording) return
+        amplitudeJob?.cancel()
+        amplitudeJob = null
         isRecording = false
-        elapsedMs = 0L
+
+        try {
+            mediaRecorder?.apply {
+                try { stop() } catch (e: Exception) {}
+                release()
+            }
+        } catch (e: Exception) {
+            Log.e("VoiceRecorder", "Error cancelling recorder", e)
+        } finally {
+            mediaRecorder = null
+        }
+
+        recordFile?.delete()
+        recordFile = null
         liveAmplitudes.clear()
+        elapsedMs = 0L
     }
 }
 
+@Composable
+fun rememberLiveVoiceRecorder(): LiveVoiceRecorder {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val recorder = remember { LiveVoiceRecorder(context, scope) }
+    DisposableEffect(Unit) {
+        onDispose {
+            if (recorder.isRecording) {
+                recorder.cancel()
+            }
+        }
+    }
+    return recorder
+}
+
 // ===========================================================================
-// 3. Fullscreen Media Viewer with Telephoto Zoomable Image
+// 3. Fullscreen Media Viewer Dialog with Telephoto Zoomable Image
 // ===========================================================================
 
 data class ChatViewerMediaItem(
     val id: String,
     val url: String,
-    val senderName: String = "User",
-    val dateText: String = "Today",
+    val senderName: String,
+    val dateText: String,
     val caption: String? = null,
     val isVideo: Boolean = false
 )
@@ -437,90 +468,92 @@ data class ChatViewerMediaItem(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TelephotoMediaViewerDialog(
-    mediaList: List<ChatViewerMediaItem>,
+    mediaItems: List<ChatViewerMediaItem>,
     initialIndex: Int = 0,
     onDismiss: () -> Unit,
-    onSave: (ChatViewerMediaItem) -> Unit = {},
     onShare: (ChatViewerMediaItem) -> Unit = {},
+    onSave: (ChatViewerMediaItem) -> Unit = {},
     onForward: (ChatViewerMediaItem) -> Unit = {},
     onDelete: (ChatViewerMediaItem) -> Unit = {}
 ) {
-    if (mediaList.isEmpty()) return
+    if (mediaItems.isEmpty()) return
 
-    val pagerState = rememberPagerState(initialPage = initialIndex.coerceIn(0, mediaList.size - 1)) { mediaList.size }
+    val context = LocalContext.current
+    val pagerState = rememberPagerState(
+        initialPage = initialIndex.coerceIn(0, mediaItems.size - 1),
+        pageCount = { mediaItems.size }
+    )
+
     var showChrome by remember { mutableStateOf(true) }
-    var showMoreMenu by remember { mutableStateOf(false) }
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    var showMoreMenu by remember { mutableStateOf(false) }
 
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
     ) {
         BackHandler(onBack = onDismiss)
 
-        val bgAlpha = (1f - (abs(dragOffsetY) / 600f)).coerceIn(0f, 1f)
+        val bgAlpha = (1f - (abs(dragOffsetY) / 600f)).coerceIn(0.2f, 1f)
 
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black.copy(alpha = bgAlpha))
                 .pointerInput(Unit) {
-                    detectTapGestures {
-                        showChrome = !showChrome
-                    }
+                    detectVerticalDragGestures(
+                        onDragEnd = {
+                            if (abs(dragOffsetY) > 160f) {
+                                onDismiss()
+                            } else {
+                                dragOffsetY = 0f
+                            }
+                        },
+                        onVerticalDrag = { _, dragAmount ->
+                            dragOffsetY += dragAmount
+                        }
+                    )
+                }
+                .graphicsLayer {
+                    translationY = dragOffsetY
                 }
         ) {
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize()
             ) { page ->
-                val item = mediaList[page]
-                val zoomableState = rememberZoomableState()
-                val zoomableImageState = rememberZoomableImageState(zoomableState)
-
+                val item = mediaItems[page]
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .graphicsLayer {
-                            translationY = dragOffsetY
-                        }
-                        .pointerInput(Unit) {
-                            detectVerticalDragGestures(
-                                onVerticalDrag = { _, dragAmount ->
-                                    val currentZoom = zoomableState.zoomFraction ?: 0f
-                                    if (currentZoom <= 0.05f) {
-                                        dragOffsetY += dragAmount
-                                    }
-                                },
-                                onDragEnd = {
-                                    if (abs(dragOffsetY) > 160f) {
-                                        onDismiss()
-                                    } else {
-                                        dragOffsetY = 0f
-                                    }
-                                }
-                            )
+                        .clickable(
+                            indication = null,
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                        ) {
+                            showChrome = !showChrome
                         },
                     contentAlignment = Alignment.Center
                 ) {
                     ZoomableAsyncImage(
                         model = item.url,
-                        contentDescription = "Zoomable photo",
-                        state = zoomableImageState,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize()
+                        contentDescription = "Media item",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit
                     )
                 }
             }
 
-            // Top Chrome Bar
+            // Top Header Chrome Bar
             AnimatedVisibility(
                 visible = showChrome,
                 enter = fadeIn(tween(150)) + slideInVertically(tween(150)),
                 exit = fadeOut(tween(150)) + slideOutVertically(tween(150)),
                 modifier = Modifier.align(Alignment.TopCenter)
             ) {
-                val currentItem = mediaList.getOrNull(pagerState.currentPage) ?: mediaList[0]
+                val currentItem = mediaItems.getOrNull(pagerState.currentPage) ?: mediaItems[0]
                 Surface(
                     color = Color.Black.copy(alpha = 0.65f),
                     modifier = Modifier.fillMaxWidth()
@@ -533,7 +566,7 @@ fun TelephotoMediaViewerDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         IconButton(onClick = onDismiss) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Close", tint = Color.White)
+                            ChatIconBack(tint = Color.White, modifier = Modifier.size(24.dp))
                         }
 
                         Column(modifier = Modifier.weight(1f)) {
@@ -546,19 +579,19 @@ fun TelephotoMediaViewerDialog(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "${currentItem.dateText} · ${pagerState.currentPage + 1} of ${mediaList.size}",
+                                text = "${currentItem.dateText} · ${pagerState.currentPage + 1} of ${mediaItems.size}",
                                 color = Color.White.copy(alpha = 0.7f),
                                 fontSize = 12.sp
                             )
                         }
 
                         IconButton(onClick = { onShare(currentItem) }) {
-                            Icon(Icons.Rounded.Share, contentDescription = "Share", tint = Color.White)
+                            ChatIconForward(tint = Color.White, modifier = Modifier.size(22.dp))
                         }
 
                         Box {
                             IconButton(onClick = { showMoreMenu = true }) {
-                                Icon(Icons.Rounded.MoreVert, contentDescription = "More", tint = Color.White)
+                                ChatIconMoreVert(tint = Color.White, modifier = Modifier.size(22.dp))
                             }
                             DropdownMenu(
                                 expanded = showMoreMenu,
@@ -566,16 +599,8 @@ fun TelephotoMediaViewerDialog(
                                 containerColor = Color(0xFF1E2128)
                             ) {
                                 DropdownMenuItem(
-                                    text = { Text("Save to gallery", color = Color.White) },
-                                    leadingIcon = { Icon(Icons.Rounded.Download, contentDescription = null, tint = Color.White) },
-                                    onClick = {
-                                        showMoreMenu = false
-                                        onSave(currentItem)
-                                    }
-                                )
-                                DropdownMenuItem(
                                     text = { Text("Forward", color = Color.White) },
-                                    leadingIcon = { Icon(Icons.AutoMirrored.Rounded.Forward, contentDescription = null, tint = Color.White) },
+                                    leadingIcon = { ChatIconForward(tint = Color.White, modifier = Modifier.size(18.dp)) },
                                     onClick = {
                                         showMoreMenu = false
                                         onForward(currentItem)
@@ -583,7 +608,7 @@ fun TelephotoMediaViewerDialog(
                                 )
                                 DropdownMenuItem(
                                     text = { Text("Delete", color = Color(0xFFFF7066)) },
-                                    leadingIcon = { Icon(Icons.Rounded.DeleteOutline, contentDescription = null, tint = Color(0xFFFF7066)) },
+                                    leadingIcon = { ChatIconTrash(tint = Color(0xFFFF7066), modifier = Modifier.size(18.dp)) },
                                     onClick = {
                                         showMoreMenu = false
                                         onDelete(currentItem)
@@ -598,29 +623,24 @@ fun TelephotoMediaViewerDialog(
             // Bottom Caption Chrome Bar
             AnimatedVisibility(
                 visible = showChrome,
-                enter = fadeIn(tween(150)) + slideInVertically(tween(150), initialOffsetY = { it }),
-                exit = fadeOut(tween(150)) + slideOutVertically(tween(150), targetOffsetY = { it }),
+                enter = fadeIn(tween(150)) + slideInVertically(tween(150)) { it },
+                exit = fadeOut(tween(150)) + slideOutVertically(tween(150)) { it },
                 modifier = Modifier.align(Alignment.BottomCenter)
             ) {
-                val currentItem = mediaList.getOrNull(pagerState.currentPage)
-                if (!currentItem?.caption.isNullOrBlank()) {
+                val currentItem = mediaItems.getOrNull(pagerState.currentPage) ?: mediaItems[0]
+                if (!currentItem.caption.isNullOrBlank()) {
                     Surface(
-                        color = Color.Black.copy(alpha = 0.75f),
+                        color = Color.Black.copy(alpha = 0.65f),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Box(
+                        Text(
+                            text = currentItem.caption,
+                            color = Color.White,
+                            fontSize = 14.sp,
                             modifier = Modifier
-                                .fillMaxWidth()
                                 .navigationBarsPadding()
                                 .padding(horizontal = 16.dp, vertical = 12.dp)
-                        ) {
-                            Text(
-                                text = currentItem!!.caption!!,
-                                color = Color.White,
-                                fontSize = 14.5.sp,
-                                lineHeight = 20.sp
-                            )
-                        }
+                        )
                     }
                 }
             }
@@ -629,7 +649,7 @@ fun TelephotoMediaViewerDialog(
 }
 
 // ===========================================================================
-// 4. AI Writing Assist Sheet for Composer (✨ Button)
+// 4. AI Writing Assist Bottom Sheet
 // ===========================================================================
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -640,26 +660,27 @@ fun AiWritingAssistBottomSheet(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    val c = LocalChatColors.current
     val scope = rememberCoroutineScope()
+    val c = LocalChatColors.current
 
     var selectedStyle by remember { mutableStateOf("fix") }
     var resultText by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var errorText by remember { mutableStateOf<String?>(null) }
 
     fun runImprove(style: String) {
         selectedStyle = style
+        if (initialText.isBlank()) return
         isLoading = true
-        errorMessage = null
-        resultText = null
+        errorText = null
         scope.launch {
             val res = CloudAiManager.improveDraftText(context, initialText, style)
-            isLoading = false
-            res.onSuccess { ai ->
-                resultText = ai.text
-            }.onFailure { err ->
-                errorMessage = err.message ?: "Failed to improve text"
+            res.onSuccess {
+                resultText = it.text
+                isLoading = false
+            }.onFailure {
+                errorText = it.message ?: "Failed to improve text"
+                isLoading = false
             }
         }
     }
@@ -685,7 +706,7 @@ fun AiWritingAssistBottomSheet(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = c.accentIn, modifier = Modifier.size(22.dp))
+                ChatIconSparkles(tint = c.accentIn, modifier = Modifier.size(24.dp))
                 Text("AI Writing Assist", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = c.text)
             }
 
@@ -724,28 +745,32 @@ fun AiWritingAssistBottomSheet(
                 }
             }
 
-            // Result Container
+            // Result Preview Card
             Surface(
                 shape = RoundedCornerShape(14.dp),
                 color = c.surfaceVariant,
-                modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 90.dp)
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Box(modifier = Modifier.padding(14.dp)) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp)
+                ) {
                     when {
                         isLoading -> {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
                                 CircularProgressIndicator(modifier = Modifier.size(18.dp), color = c.accentIn, strokeWidth = 2.dp)
-                                Text("Polishing with AI...", fontSize = 14.sp, color = c.textSecondary)
+                                Text("Refining text...", fontSize = 14.sp, color = c.textSecondary)
                             }
                         }
-                        errorMessage != null -> {
-                            Text(errorMessage!!, color = c.danger, fontSize = 14.sp)
+                        errorText != null -> {
+                            Text(errorText!!, fontSize = 14.sp, color = c.danger)
                         }
                         resultText != null -> {
-                            Text(resultText!!, color = c.text, fontSize = 15.sp, lineHeight = 21.sp)
-                        }
-                        else -> {
-                            Text(initialText, color = c.textSecondary, fontSize = 14.sp)
+                            Text(resultText!!, fontSize = 15.sp, color = c.text, lineHeight = 21.sp)
                         }
                     }
                 }
@@ -827,7 +852,7 @@ fun MessageLongPressOverlay(
                     }
                 )
 
-                // Message Actions Card (Scale animation from 0.9 to 1.0)
+                // Message Actions Card
                 var scaleTarget by remember { mutableFloatStateOf(0.92f) }
                 LaunchedEffect(Unit) {
                     scaleTarget = 1.0f

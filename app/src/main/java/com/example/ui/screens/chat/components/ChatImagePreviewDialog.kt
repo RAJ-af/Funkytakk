@@ -16,15 +16,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Report
-import androidx.compose.material.icons.filled.Save
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -42,6 +33,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import com.example.ui.chat.*
 import com.example.util.ImageSaveUtils
 import kotlinx.coroutines.launch
 
@@ -83,7 +75,7 @@ fun ChatImagePreviewDialog(
             scope.launch {
                 val res = ImageSaveUtils.saveImageToGallery(context, activeUrl)
                 isSaving = false
-                res.onSuccess { msg ->
+                res.onSuccess {
                     Toast.makeText(context, "Saved to device", Toast.LENGTH_SHORT).show()
                 }.onFailure { ex ->
                     Toast.makeText(context, "Could not save: ${ex.message}", Toast.LENGTH_SHORT).show()
@@ -205,12 +197,7 @@ fun ChatImagePreviewDialog(
                                 .clickable { onDismiss() },
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back",
-                                tint = Color.White,
-                                modifier = Modifier.size(20.dp)
-                            )
+                            ChatIconBack(tint = Color.White, modifier = Modifier.size(20.dp))
                         }
 
                         // Center-Left Counter: "3 / 12"
@@ -225,26 +212,20 @@ fun ChatImagePreviewDialog(
                         }
                     }
 
-                    // Top-Right: Download Icon & Three-Dot Menu
+                    // Top-Right: Share & Three-Dot Menu
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        // Direct Download Button
                         Box(
                             modifier = Modifier
                                 .size(38.dp)
                                 .clip(CircleShape)
                                 .background(Color.White.copy(alpha = 0.15f))
-                                .clickable { saveCurrent() },
+                                .clickable { shareCurrent() },
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Download,
-                                contentDescription = "Save to device",
-                                tint = Color.White,
-                                modifier = Modifier.size(20.dp)
-                            )
+                            ChatIconForward(tint = Color.White, modifier = Modifier.size(20.dp))
                         }
 
                         // Three-Dot Menu Button & Menu
@@ -257,12 +238,7 @@ fun ChatImagePreviewDialog(
                                     .clickable { showOptionsMenu = true },
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.MoreVert,
-                                    contentDescription = "More actions",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
+                                ChatIconMoreVert(tint = Color.White, modifier = Modifier.size(20.dp))
                             }
 
                             DropdownMenu(
@@ -280,7 +256,7 @@ fun ChatImagePreviewDialog(
                                 DropdownMenuItem(
                                     text = {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(Icons.Default.Share, contentDescription = null, tint = Color.White, modifier = Modifier.size(17.dp))
+                                            ChatIconForward(tint = Color.White, modifier = Modifier.size(17.dp))
                                             Spacer(modifier = Modifier.width(10.dp))
                                             Text("Share", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
                                         }
@@ -291,43 +267,12 @@ fun ChatImagePreviewDialog(
                                     }
                                 )
 
-                                // Action: Save to device
-                                DropdownMenuItem(
-                                    text = {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(Icons.Default.Save, contentDescription = null, tint = Color.White, modifier = Modifier.size(17.dp))
-                                            Spacer(modifier = Modifier.width(10.dp))
-                                            Text("Save to device", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
-                                        }
-                                    },
-                                    onClick = {
-                                        showOptionsMenu = false
-                                        saveCurrent()
-                                    }
-                                )
-
                                 if (isMyImage) {
-                                    // Action: Set as profile photo
-                                    DropdownMenuItem(
-                                        text = {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Icon(Icons.Default.Person, contentDescription = null, tint = Color(0xFFF6C945), modifier = Modifier.size(17.dp))
-                                                Spacer(modifier = Modifier.width(10.dp))
-                                                Text("Set as profile photo", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
-                                            }
-                                        },
-                                        onClick = {
-                                            showOptionsMenu = false
-                                            onSetAsProfilePhoto?.invoke()
-                                            Toast.makeText(context, "Profile photo updated", Toast.LENGTH_SHORT).show()
-                                        }
-                                    )
-
                                     // Action: Delete
                                     DropdownMenuItem(
                                         text = {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Icon(Icons.Default.Delete, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(17.dp))
+                                                ChatIconTrash(tint = Color(0xFFEF4444), modifier = Modifier.size(17.dp))
                                                 Spacer(modifier = Modifier.width(10.dp))
                                                 Text("Delete", color = Color(0xFFEF4444), fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
                                             }
@@ -338,21 +283,6 @@ fun ChatImagePreviewDialog(
                                             onDismiss()
                                         }
                                     )
-                                } else {
-                                    // Action: Report
-                                    DropdownMenuItem(
-                                        text = {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Icon(Icons.Default.Report, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(17.dp))
-                                                Spacer(modifier = Modifier.width(10.dp))
-                                                Text("Report", color = Color(0xFFEF4444), fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
-                                            }
-                                        },
-                                        onClick = {
-                                            showOptionsMenu = false
-                                            Toast.makeText(context, "Report submitted for review", Toast.LENGTH_SHORT).show()
-                                        }
-                                    )
                                 }
                             }
                         }
@@ -360,69 +290,50 @@ fun ChatImagePreviewDialog(
                 }
             }
 
-            // Bottom Minimal Thumbnail Strip (only if multiple images) & Optional Caption
+            // Bottom Caption Bar
             AnimatedVisibility(
-                visible = areControlsVisible,
+                visible = areControlsVisible && (captionText.isNotBlank() || senderName.isNotBlank()),
                 enter = fadeIn() + slideInVertically { it },
                 exit = fadeOut() + slideOutVertically { it },
                 modifier = Modifier.align(Alignment.BottomCenter)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(bottom = 18.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                Surface(
+                    color = Color.Black.copy(alpha = 0.75f),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    // Optional Caption if present
-                    if (captionText.isNotBlank()) {
-                        Box(
-                            modifier = Modifier
-                                .padding(horizontal = 24.dp, vertical = 8.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Color.Black.copy(alpha = 0.6f))
-                                .padding(horizontal = 14.dp, vertical = 6.dp)
-                        ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .padding(horizontal = 20.dp, vertical = 14.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (senderName.isNotBlank() || timestampText.isNotBlank()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = senderName,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFFFC629)
+                                )
+                                Text(
+                                    text = timestampText,
+                                    fontSize = 11.5.sp,
+                                    color = Color.White.copy(alpha = 0.6f)
+                                )
+                            }
+                        }
+                        if (captionText.isNotBlank()) {
                             Text(
                                 text = captionText,
-                                fontSize = 13.sp,
+                                fontSize = 14.sp,
                                 color = Color.White,
-                                maxLines = 2
+                                lineHeight = 19.sp
                             )
-                        }
-                    }
-
-                    // Compact Thumbnail Strip (4-5 thumbnails max visible)
-                    if (resolvedList.size > 1) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 16.dp)
-                        ) {
-                            val visibleSlice = resolvedList.take(5)
-                            visibleSlice.forEachIndexed { idx, url ->
-                                val isSelected = idx == pagerState.currentPage
-                                Box(
-                                    modifier = Modifier
-                                        .size(if (isSelected) 44.dp else 36.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .border(
-                                            width = if (isSelected) 2.dp else 0.dp,
-                                            color = if (isSelected) Color(0xFFF6C945) else Color.Transparent,
-                                            shape = RoundedCornerShape(8.dp)
-                                        )
-                                        .clickable {
-                                            scope.launch { pagerState.animateScrollToPage(idx) }
-                                        }
-                                ) {
-                                    AsyncImage(
-                                        model = url,
-                                        contentDescription = "Thumbnail",
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                }
-                            }
                         }
                     }
                 }

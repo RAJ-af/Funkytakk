@@ -30,11 +30,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.VolumeUp
-import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -68,7 +64,6 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.max
@@ -83,7 +78,6 @@ enum class MessageStatus { Sending, Sent, Delivered, Read }
 fun bubbleShape(outgoing: Boolean, position: GroupPosition): RoundedCornerShape {
     val big = ChatDimens.BubbleBig
     val small = ChatDimens.BubbleSmall
-    // RoundedCornerShape(topStart, topEnd, bottomEnd, bottomStart)
     return if (outgoing) {
         when (position) {
             GroupPosition.Single -> RoundedCornerShape(big, big, big, big)
@@ -119,9 +113,9 @@ fun MessageBubble(
     outgoing: Boolean,
     position: GroupPosition,
     modifier: Modifier = Modifier,
-    highlighted: Boolean = false, // true for ~1.2s after jumping to this message
-    selected: Boolean = false, // selection mode
-    transparent: Boolean = false, // emoji-only messages / stickers
+    highlighted: Boolean = false,
+    selected: Boolean = false,
+    transparent: Boolean = false,
     contentDescription: String? = null,
     contentPadding: PaddingValues = PaddingValues(
         horizontal = ChatDimens.BubblePadH,
@@ -137,7 +131,7 @@ fun MessageBubble(
         else -> Color.Transparent
     }
     val overlay by animateColorAsState(overlayTarget, tween(600), label = "bubbleOverlay")
-    val maxW = minOf(ChatDimens.BubbleMaxWidth, (LocalConfiguration.current.screenWidthDp * 0.80f).dp)
+    val maxW = minOf(ChatDimens.BubbleMaxWidth, (LocalConfiguration.current.screenWidthDp * 0.82f).dp)
     Surface(
         shape = bubbleShape(outgoing, position),
         color = when {
@@ -145,6 +139,7 @@ fun MessageBubble(
             outgoing -> c.outgoingBubble
             else -> c.incomingBubble
         },
+        shadowElevation = if (transparent) 0.dp else 0.5.dp,
         modifier = modifier
             .widthIn(max = maxW)
             .semantics(mergeDescendants = true) {
@@ -164,10 +159,10 @@ fun SenderName(name: String, userId: String, modifier: Modifier = Modifier) {
         text = name,
         color = c.senderColor(userId),
         fontSize = 13f.chatSp(),
-        fontWeight = FontWeight.Medium,
+        fontWeight = FontWeight.SemiBold,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
-        modifier = modifier.padding(bottom = 1.dp),
+        modifier = modifier.padding(bottom = 2.dp),
     )
 }
 
@@ -189,7 +184,7 @@ fun buildMessageText(
         while (true) {
             val i = raw.indexOf(t, from)
             if (i < 0) break
-            addStyle(SpanStyle(color = accent, fontWeight = FontWeight.Medium), i, i + t.length)
+            addStyle(SpanStyle(color = accent, fontWeight = FontWeight.SemiBold), i, i + t.length)
             from = i + t.length
         }
     }
@@ -207,7 +202,6 @@ fun buildMessageText(
 private fun Char.isWordChar(): Boolean {
     if (isLetterOrDigit() || this == '\'') return true
     val t = Character.getType(this)
-    // keep Devanagari/Indic vowel signs inside the word
     return t == Character.NON_SPACING_MARK.toInt() || t == Character.COMBINING_SPACING_MARK.toInt()
 }
 
@@ -233,7 +227,8 @@ fun MessageText(
     status: MessageStatus?,
     modifier: Modifier = Modifier,
     edited: Boolean = false,
-    onWordClick: ((String) -> Unit)? = null, // tap a word to look it up / save it to vocabulary
+    onLongPress: (() -> Unit)? = null,
+    onWordClick: ((String) -> Unit)? = null,
 ) {
     val c = LocalChatColors.current
     val metaSp = (if (status != null) 66f else 40f) + (if (edited) 32f else 0f)
@@ -258,12 +253,15 @@ fun MessageText(
             fontSize = 16f.chatSp(),
             lineHeight = 22f.chatSp(),
             onTextLayout = { layout = it },
-            modifier = if (onWordClick != null) {
+            modifier = if (onWordClick != null || onLongPress != null) {
                 Modifier.pointerInput(plain) {
-                    detectTapGestures { pos ->
-                        val l = layout ?: return@detectTapGestures
-                        wordAt(plain, l.getOffsetForPosition(pos))?.let(onWordClick)
-                    }
+                    detectTapGestures(
+                        onLongPress = { onLongPress?.invoke() },
+                        onTap = { pos ->
+                            val l = layout ?: return@detectTapGestures
+                            wordAt(plain, l.getOffsetForPosition(pos))?.let { onWordClick?.invoke(it) }
+                        }
+                    )
                 }
             } else {
                 Modifier
@@ -280,7 +278,7 @@ fun MessageMeta(
     status: MessageStatus?,
     modifier: Modifier = Modifier,
     edited: Boolean = false,
-    onMedia: Boolean = false, // true when drawn over a photo/video
+    onMedia: Boolean = false,
 ) {
     val c = LocalChatColors.current
     val base = when {
@@ -307,19 +305,10 @@ fun MessageMeta(
 
 @Composable
 fun TickMark(double: Boolean, color: Color, modifier: Modifier = Modifier) {
-    Canvas(modifier.size(width = if (double) 17.dp else 12.dp, height = 11.dp)) {
-        val s = size.height / 11f
-        val sw = 1.6.dp.toPx()
-        fun check(dx: Float) {
-            val p = Path().apply {
-                moveTo(dx + 1f * s, 6f * s)
-                lineTo(dx + 4.2f * s, 9.2f * s)
-                lineTo(dx + 10.2f * s, 2f * s)
-            }
-            drawPath(p, color, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
-        }
-        check(0f)
-        if (double) check(5f * s)
+    if (double) {
+        ChatIconDoubleTick(modifier = modifier.size(16.dp), tint = color)
+    } else {
+        ChatIconSingleTick(modifier = modifier.size(12.dp), tint = color)
     }
 }
 
@@ -330,25 +319,25 @@ fun TickMark(double: Boolean, color: Color, modifier: Modifier = Modifier) {
 @Composable
 fun ReplyQuote(
     sender: String,
-    preview: String, // "Voice message", "Photo", or the first line of the text
+    preview: String,
     outgoing: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    thumbnail: (@Composable () -> Unit)? = null, // 34dp square slot for media replies
+    thumbnail: (@Composable () -> Unit)? = null,
 ) {
     val c = LocalChatColors.current
     val accent = if (outgoing) c.accentOut else c.accentIn
     Row(
         modifier = modifier
             .padding(bottom = 4.dp)
-            .clip(RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(8.dp))
             .background(accent.copy(alpha = 0.12f))
             .clickable(onClick = onClick)
             .height(IntrinsicSize.Min),
     ) {
         Box(Modifier.width(3.dp).fillMaxHeight().background(accent))
         Column(Modifier.weight(1f, fill = false).padding(horizontal = 8.dp, vertical = 4.dp)) {
-            Text(sender, color = accent, fontSize = 12f.chatSp(), fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(sender, color = accent, fontSize = 12f.chatSp(), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
                 preview,
                 color = if (outgoing) c.textSecondaryOut else c.textSecondary,
@@ -358,7 +347,7 @@ fun ReplyQuote(
             )
         }
         if (thumbnail != null) {
-            Box(Modifier.size(34.dp).padding(end = 0.dp)) { thumbnail() }
+            Box(Modifier.size(34.dp)) { thumbnail() }
         }
     }
 }
@@ -377,7 +366,7 @@ fun ForwardedHeader(fromName: String, outgoing: Boolean, modifier: Modifier = Mo
     )
 }
 
-/** Translation under a message. Shows a small "Cloud AI" tag when the cloud was used (transparency). */
+/** Translation under a message. Shows a small "Cloud AI" tag when the cloud was used. */
 @Composable
 fun TranslationStrip(
     translated: String,
@@ -392,7 +381,7 @@ fun TranslationStrip(
     Column(modifier.padding(top = 6.dp)) {
         Box(Modifier.fillMaxWidth().height(0.5.dp).background(c.hairline))
         Row(Modifier.padding(top = 5.dp), verticalAlignment = Alignment.Top) {
-            Icon(Icons.Rounded.Translate, contentDescription = null, tint = muted, modifier = Modifier.size(15.dp).padding(top = 2.dp))
+            ChatIconTranslate(modifier = Modifier.size(16.dp).padding(top = 2.dp), tint = muted)
             Spacer(Modifier.width(6.dp))
             Column(Modifier.weight(1f)) {
                 Text(translated, color = c.text, fontSize = 14f.chatSp(), lineHeight = 19f.chatSp())
@@ -414,7 +403,7 @@ fun TranslationStrip(
                 Modifier.size(32.dp).clip(CircleShape).clickable(onClick = onListen),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.AutoMirrored.Rounded.VolumeUp, contentDescription = "Listen", tint = muted, modifier = Modifier.size(18.dp))
+                ChatIconVolume(modifier = Modifier.size(18.dp), tint = muted)
             }
         }
     }
@@ -425,32 +414,32 @@ fun TranslationStrip(
 // ---------------------------------------------------------------------------
 
 fun formatDuration(ms: Long): String {
-    val total = (ms / 1000).toInt()
+    val total = (ms / 1000).toInt().coerceAtLeast(0)
     return "%d:%02d".format(total / 60, total % 60)
 }
 
 @Composable
 fun VoiceNoteContent(
     outgoing: Boolean,
-    amplitudes: List<Int>, // 0..255, any length (resampled to the width)
+    amplitudes: List<Int>,
     durationMs: Long,
     positionMs: Long,
     isPlaying: Boolean,
-    isLoading: Boolean, // downloading / decrypting
+    isLoading: Boolean,
     isUnread: Boolean,
     speed: Float,
     onPlayPause: () -> Unit,
-    onSeek: (Float) -> Unit, // 0f..1f
+    onSeek: (Float) -> Unit,
     onSpeedClick: () -> Unit,
     modifier: Modifier = Modifier,
-    transcript: String? = null, // optional on-device/cloud transcript, great for language learners
+    transcript: String? = null,
 ) {
     val c = LocalChatColors.current
     val muted = if (outgoing) c.textSecondaryOut else c.textSecondary
-    Column(modifier.width(ChatDimens.VoiceWidth)) {
+    Column(modifier.width(ChatDimens.VoiceWidth).padding(vertical = 2.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             PlayPauseButton(outgoing, isPlaying, isLoading, onPlayPause)
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 val progress = if (durationMs > 0) (positionMs / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
                 Waveform(
@@ -459,28 +448,33 @@ fun VoiceNoteContent(
                     idle = if (outgoing) c.waveIdleOut else c.waveIdleIn,
                     played = if (outgoing) c.wavePlayedOut else c.wavePlayedIn,
                     onSeek = onSeek,
-                    modifier = Modifier.fillMaxWidth().height(28.dp),
+                    modifier = Modifier.fillMaxWidth().height(30.dp),
                 )
                 Row(
-                    Modifier.fillMaxWidth().padding(top = 2.dp),
+                    Modifier.fillMaxWidth().padding(top = 3.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(formatDuration(if (isPlaying || positionMs > 0) positionMs else durationMs), color = muted, fontSize = 11f.chatSp())
+                    val timeLabel = if (isPlaying || positionMs > 0) {
+                        "${formatDuration(positionMs)} / ${formatDuration(durationMs)}"
+                    } else {
+                        formatDuration(durationMs)
+                    }
+                    Text(timeLabel, color = muted, fontSize = 11f.chatSp(), fontWeight = FontWeight.Medium)
                     if (isPlaying || speed != 1f) {
                         Text(
                             text = if (speed % 1f == 0f) "${speed.toInt()}x" else "${speed}x",
                             color = c.text,
                             fontSize = 11f.chatSp(),
-                            fontWeight = FontWeight.Medium,
+                            fontWeight = FontWeight.Bold,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(c.hairline)
                                 .clickable(onClick = onSpeedClick)
-                                .padding(horizontal = 6.dp, vertical = 1.dp),
+                                .padding(horizontal = 7.dp, vertical = 2.dp),
                         )
                     } else if (isUnread) {
-                        Box(Modifier.size(7.dp).clip(CircleShape).background(if (outgoing) c.accentOut else c.accentIn))
+                        Box(Modifier.size(8.dp).clip(CircleShape).background(if (outgoing) c.accentOut else c.accentIn))
                     }
                 }
             }
@@ -496,28 +490,21 @@ fun PlayPauseButton(outgoing: Boolean, isPlaying: Boolean, isLoading: Boolean, o
     val c = LocalChatColors.current
     val bg = if (outgoing) c.voiceButtonOut else c.voiceButtonIn
     val fg = if (outgoing) c.onVoiceButtonOut else c.onVoiceButtonIn
-    Box(
-        modifier = Modifier.size(ChatDimens.MinTouch).clip(CircleShape).clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
+    Surface(
+        onClick = onClick,
+        shape = CircleShape,
+        color = bg,
+        shadowElevation = 2.dp,
+        modifier = Modifier.size(42.dp),
     ) {
-        Box(Modifier.size(ChatDimens.PlayButton).clip(CircleShape).background(bg), contentAlignment = Alignment.Center) {
+        Box(contentAlignment = Alignment.Center) {
             if (isLoading) {
                 CircularProgressIndicator(Modifier.size(20.dp), color = fg, strokeWidth = 2.dp)
             } else {
-                Canvas(Modifier.size(16.dp)) {
-                    if (isPlaying) {
-                        val w = size.width * 0.30f
-                        drawRoundRect(fg, Offset(size.width * 0.12f, 0f), Size(w, size.height), CornerRadius(2.dp.toPx()))
-                        drawRoundRect(fg, Offset(size.width * 0.58f, 0f), Size(w, size.height), CornerRadius(2.dp.toPx()))
-                    } else {
-                        val p = Path().apply {
-                            moveTo(size.width * 0.18f, 0f)
-                            lineTo(size.width * 0.95f, size.height / 2f)
-                            lineTo(size.width * 0.18f, size.height)
-                            close()
-                        }
-                        drawPath(p, fg)
-                    }
+                if (isPlaying) {
+                    ChatIconPause(modifier = Modifier.size(18.dp), tint = fg)
+                } else {
+                    ChatIconPlay(modifier = Modifier.size(18.dp), tint = fg)
                 }
             }
         }
@@ -549,13 +536,13 @@ fun Waveform(
         Modifier
     }
     Canvas(modifier.onSizeChanged { widthPx = it.width.toFloat() }.then(gestures)) {
-        val barW = 3.dp.toPx()
-        val gap = 2.dp.toPx()
+        val barW = 3.2.dp.toPx()
+        val gap = 2.2.dp.toPx()
         val count = max(1, ((size.width + gap) / (barW + gap)).toInt())
         val src = if (amplitudes.isEmpty()) List(count) { 40 } else amplitudes
         for (i in 0 until count) {
             val a = src[(i * src.size / count).coerceAtMost(src.size - 1)] / 255f
-            val h = max(3.dp.toPx(), a * size.height)
+            val h = max(4.dp.toPx(), a * size.height)
             drawRoundRect(
                 color = if ((i + 0.5f) / count <= progress) played else idle,
                 topLeft = Offset(i * (barW + gap), (size.height - h) / 2f),
@@ -570,16 +557,12 @@ fun Waveform(
 // Media, files, links, emoji-only
 // ---------------------------------------------------------------------------
 
-/**
- * Photo/video frame. Use MessageBubble(contentPadding = PaddingValues(ChatDimens.MediaPad)).
- * [aspectRatio] = width/height from the message metadata so the layout never jumps while loading.
- */
 @Composable
 fun MediaFrame(
     aspectRatio: Float,
     modifier: Modifier = Modifier,
     overlay: @Composable (androidx.compose.foundation.layout.BoxScope.() -> Unit) = {},
-    content: @Composable () -> Unit, // AsyncImage / blurred placeholder / video thumbnail
+    content: @Composable () -> Unit,
 ) {
     Box(
         modifier
@@ -609,13 +592,13 @@ fun MediaTimeChip(time: String, outgoing: Boolean, status: MessageStatus?, modif
 
 @Composable
 fun FileCard(
-    extLabel: String, // "PDF", "ZIP", "DOC"
+    extLabel: String,
     name: String,
     sizeText: String,
     outgoing: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    progress: Float? = null, // 0f..1f while downloading, null when ready
+    progress: Float? = null,
 ) {
     val c = LocalChatColors.current
     val bg = if (outgoing) c.voiceButtonOut else c.voiceButtonIn
@@ -625,7 +608,7 @@ fun FileCard(
             if (progress != null) {
                 CircularProgressIndicator(progress = { progress }, modifier = Modifier.size(28.dp), color = fg, strokeWidth = 2.dp)
             } else {
-                Text(extLabel.take(4), color = fg, fontSize = 12f.chatSp(), fontWeight = FontWeight.Medium)
+                Text(extLabel.take(4), color = fg, fontSize = 12f.chatSp(), fontWeight = FontWeight.SemiBold)
             }
         }
         Spacer(Modifier.width(10.dp))
@@ -644,14 +627,14 @@ fun LinkPreviewCard(
     outgoing: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    image: (@Composable () -> Unit)? = null, // 16:9 thumbnail slot
+    image: (@Composable () -> Unit)? = null,
 ) {
     val c = LocalChatColors.current
     val accent = if (outgoing) c.accentOut else c.accentIn
     Row(modifier.padding(bottom = 4.dp).clickable(onClick = onClick).height(IntrinsicSize.Min)) {
         Box(Modifier.width(3.dp).fillMaxHeight().background(accent))
         Column(Modifier.padding(start = 8.dp)) {
-            Text(siteName, color = accent, fontSize = 12f.chatSp(), fontWeight = FontWeight.Medium, maxLines = 1)
+            Text(siteName, color = accent, fontSize = 12f.chatSp(), fontWeight = FontWeight.SemiBold, maxLines = 1)
             Text(title, color = c.text, fontSize = 14f.chatSp(), fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
             if (!description.isNullOrBlank()) {
                 Text(description, color = if (outgoing) c.textSecondaryOut else c.textSecondary, fontSize = 13f.chatSp(), maxLines = 3, overflow = TextOverflow.Ellipsis)
@@ -688,7 +671,7 @@ fun emojiOnlyCount(text: String): Int {
 @Composable
 fun EmojiOnlyMessage(
     emoji: String,
-    count: Int, // from emojiOnlyCount()
+    count: Int,
     time: String,
     outgoing: Boolean,
     status: MessageStatus?,

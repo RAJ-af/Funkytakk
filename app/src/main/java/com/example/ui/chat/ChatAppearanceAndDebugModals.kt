@@ -6,18 +6,9 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.VolumeUp
-import androidx.compose.material.icons.rounded.BookmarkAdd
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.CloudQueue
-import androidx.compose.material.icons.rounded.DarkMode
-import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,36 +24,27 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.ChatPreferencesManager
 import com.example.CloudAiManager
-import com.example.db.EncryptedChatDatabase
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 @Composable
 fun rememberEffectiveChatDarkTheme(): Boolean {
-    val context = LocalContext.current
-    LaunchedEffect(Unit) {
-        ChatPreferencesManager.init(context)
-    }
-    val override by ChatPreferencesManager.chatDarkThemeOverride.collectAsState()
-    val systemDark = isSystemInDarkTheme()
-    return override ?: systemDark
+    // Only Light Theme as requested by user
+    return false
 }
 
 /**
  * Hidden debug entry screen (triggered by long-pressing the app version in Settings).
- * Wraps ChatKitGallery(darkTheme, preset, textScale) with debug toggles for darkTheme,
- * the four ChatPreset values, and textScale so everything can be inspected on the phone.
+ * Wraps ChatKitGallery(darkTheme, preset, textScale).
  */
 @Composable
 fun ChatKitGalleryDebugDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    val initialDark = rememberEffectiveChatDarkTheme()
     val savedPreset by ChatPreferencesManager.chatPreset.collectAsState()
     val savedScale by ChatPreferencesManager.chatTextScale.collectAsState()
 
-    var debugDark by remember(initialDark) { mutableStateOf(initialDark) }
     var debugPreset by remember(savedPreset) { mutableStateOf(savedPreset) }
     var debugScale by remember(savedScale) { mutableStateOf(savedScale) }
 
@@ -74,13 +56,13 @@ fun ChatKitGalleryDebugDialog(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(if (debugDark) Color(0xFF181B20) else Color(0xFFFFFFFF))
+                .background(Color(0xFFFFFFFF))
                 .statusBarsPadding()
                 .navigationBarsPadding()
         ) {
             // Debug Control Strip
             Surface(
-                color = if (debugDark) Color(0xFF181B20) else Color(0xFFFFFFFF),
+                color = Color(0xFFFFFFFF),
                 shadowElevation = 4.dp,
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -91,47 +73,13 @@ fun ChatKitGalleryDebugDialog(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "ChatKitGallery Debug",
+                            text = "ChatKitGallery (Light Theme)",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (debugDark) Color(0xFFF3EFE2) else Color(0xFF1B1B1B)
+                            color = Color(0xFF1B1B1B)
                         )
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(if (debugDark) Color(0xFF262A32) else Color(0xFFF1EEE4))
-                                    .clickable {
-                                        debugDark = !debugDark
-                                        ChatPreferencesManager.setChatDarkThemeOverride(context, debugDark)
-                                    }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp)
-                            ) {
-                                Icon(
-                                    Icons.Rounded.DarkMode,
-                                    contentDescription = "Toggle Dark Theme",
-                                    tint = if (debugDark) Color(0xFFFFC629) else Color(0xFF6B6B66),
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(Modifier.width(4.dp))
-                                Text(
-                                    text = if (debugDark) "Dark" else "Light",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = if (debugDark) Color(0xFFF3EFE2) else Color(0xFF1B1B1B)
-                                )
-                            }
-                            IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
-                                Icon(
-                                    Icons.Rounded.Close,
-                                    contentDescription = "Close Gallery",
-                                    tint = if (debugDark) Color(0xFFF3EFE2) else Color(0xFF1B1B1B)
-                                )
-                            }
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                            ChatIconClose(tint = Color(0xFF1B1B1B), modifier = Modifier.size(20.dp))
                         }
                     }
 
@@ -144,14 +92,14 @@ fun ChatKitGalleryDebugDialog(
                     ) {
                         ChatPreset.entries.forEach { p ->
                             val selected = debugPreset == p
-                            val previewColors = chatColors(p, debugDark)
+                            val previewColors = chatColors(p, false)
                             Surface(
                                 onClick = {
                                     debugPreset = p
                                     ChatPreferencesManager.setChatPreset(context, p)
                                 },
                                 shape = RoundedCornerShape(12.dp),
-                                color = if (selected) previewColors.brand else (if (debugDark) Color(0xFF262A32) else Color(0xFFF1EEE4)),
+                                color = if (selected) previewColors.brand else Color(0xFFF1EEE4),
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Box(
@@ -162,7 +110,7 @@ fun ChatKitGalleryDebugDialog(
                                         text = p.name,
                                         fontSize = 12.sp,
                                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (selected) previewColors.onBrand else (if (debugDark) Color(0xFFF3EFE2) else Color(0xFF1B1B1B))
+                                        color = if (selected) previewColors.onBrand else Color(0xFF1B1B1B)
                                     )
                                 }
                             }
@@ -177,7 +125,7 @@ fun ChatKitGalleryDebugDialog(
                         Text(
                             text = "Scale ${(debugScale * 100).roundToInt()}%",
                             fontSize = 11.sp,
-                            color = if (debugDark) Color(0xFFA7A59C) else Color(0xFF6B6B66),
+                            color = Color(0xFF6B6B66),
                             modifier = Modifier.width(72.dp)
                         )
                         Slider(
@@ -196,7 +144,7 @@ fun ChatKitGalleryDebugDialog(
             // Actual Stateless ChatKitGallery
             Box(modifier = Modifier.weight(1f)) {
                 ChatKitGallery(
-                    darkTheme = debugDark,
+                    darkTheme = false,
                     preset = debugPreset,
                     textScale = debugScale
                 )
@@ -209,7 +157,6 @@ fun ChatKitGalleryDebugDialog(
  * Settings > Chat appearance bottom sheet:
  * - Preset picker (Butter, Sky, Mint, Graphite)
  * - Text size slider (0.85x to 1.4x)
- * - Theme mode selector (System / Light / Dark)
  * - Cloud AI consent toggle (Settings > AI)
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -227,12 +174,10 @@ fun ChatAppearanceBottomSheet(
 
     val currentPreset by ChatPreferencesManager.chatPreset.collectAsState()
     val currentScale by ChatPreferencesManager.chatTextScale.collectAsState()
-    val darkOverride by ChatPreferencesManager.chatDarkThemeOverride.collectAsState()
-    val effectiveDark = rememberEffectiveChatDarkTheme()
     val isCloudAiOn by CloudAiManager.isCloudAiEnabled.collectAsState()
     var showAiConsentSheet by remember { mutableStateOf(false) }
 
-    val colors = chatColors(currentPreset, effectiveDark)
+    val colors = chatColors(currentPreset, false)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -256,7 +201,7 @@ fun ChatAppearanceBottomSheet(
 
             // Live Mini Preview
             ProvideChatTheme(
-                darkTheme = effectiveDark,
+                darkTheme = false,
                 preset = currentPreset,
                 textScale = currentScale
             ) {
@@ -305,7 +250,7 @@ fun ChatAppearanceBottomSheet(
                 ) {
                     ChatPreset.entries.forEach { preset ->
                         val isSelected = currentPreset == preset
-                        val pColors = chatColors(preset, effectiveDark)
+                        val pColors = chatColors(preset, false)
                         Surface(
                             onClick = { ChatPreferencesManager.setChatPreset(context, preset) },
                             shape = RoundedCornerShape(14.dp),
@@ -330,12 +275,7 @@ fun ChatAppearanceBottomSheet(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     if (isSelected) {
-                                        Icon(
-                                            Icons.Rounded.Check,
-                                            contentDescription = "Selected",
-                                            tint = pColors.text,
-                                            modifier = Modifier.size(16.dp)
-                                        )
+                                        ChatIconCheck(tint = pColors.text, modifier = Modifier.size(16.dp))
                                     }
                                 }
                                 Text(
@@ -390,52 +330,9 @@ fun ChatAppearanceBottomSheet(
                 }
             }
 
-            // 3. Dark Mode Option
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = "Dark mode",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.text
-                    )
-                    Text(
-                        text = when (darkOverride) {
-                            null -> "Match system (${if (effectiveDark) "Dark" else "Light"})"
-                            true -> "Always Dark"
-                            false -> "Always Light"
-                        },
-                        fontSize = 12.sp,
-                        color = colors.textSecondary
-                    )
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("Auto" to null, "Light" to false, "Dark" to true).forEach { (label, mode) ->
-                        val active = darkOverride == mode
-                        Surface(
-                            onClick = { ChatPreferencesManager.setChatDarkThemeOverride(context, mode) },
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (active) colors.brand else colors.surfaceVariant
-                        ) {
-                            Text(
-                                text = label,
-                                fontSize = 12.sp,
-                                fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                                color = if (active) colors.onBrand else colors.text,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                            )
-                        }
-                    }
-                }
-            }
-
             HorizontalDivider(color = colors.hairline)
 
-            // 4. Settings > AI: Cloud AI Toggle
+            // 3. Settings > AI: Cloud AI Toggle
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -446,12 +343,7 @@ fun ChatAppearanceBottomSheet(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    Icon(
-                        Icons.Rounded.CloudQueue,
-                        contentDescription = null,
-                        tint = colors.accentIn,
-                        modifier = Modifier.size(20.dp)
-                    )
+                    ChatIconCloud(tint = colors.accentIn, modifier = Modifier.size(22.dp))
                     Column {
                         Text(
                             text = "Cloud AI",
@@ -500,7 +392,7 @@ fun ChatAppearanceBottomSheet(
 }
 
 /**
- * One-time Cloud AI Consent Bottom Sheet with the exact required transparency copy.
+ * One-time Cloud AI Consent Bottom Sheet.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -526,12 +418,7 @@ fun AiConsentBottomSheet(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Icon(
-                    Icons.Rounded.CloudQueue,
-                    contentDescription = null,
-                    tint = c.accentIn,
-                    modifier = Modifier.size(24.dp)
-                )
+                ChatIconCloud(tint = c.accentIn, modifier = Modifier.size(24.dp))
                 Text(
                     text = "Cloud AI Features",
                     fontSize = 18.sp,
@@ -662,11 +549,7 @@ fun WordLookupBottomSheet(
                     )
                 }
                 IconButton(onClick = { onListen(word) }) {
-                    Icon(
-                        Icons.AutoMirrored.Rounded.VolumeUp,
-                        contentDescription = "Listen pronunciation",
-                        tint = c.accentIn
-                    )
+                    ChatIconVolume(tint = c.accentIn, modifier = Modifier.size(22.dp))
                 }
             }
 
@@ -742,11 +625,11 @@ fun WordLookupBottomSheet(
                         contentColor = if (isAlreadySaved) c.text else c.onBrand
                     )
                 ) {
-                    Icon(
-                        if (isAlreadySaved) Icons.Rounded.Check else Icons.Rounded.BookmarkAdd,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
+                    if (isAlreadySaved) {
+                        ChatIconCheck(tint = c.text, modifier = Modifier.size(18.dp))
+                    } else {
+                        ChatIconBookmark(tint = c.onBrand, modifier = Modifier.size(18.dp))
+                    }
                     Spacer(Modifier.width(8.dp))
                     Text(
                         text = if (isAlreadySaved) "Saved in Vocabulary" else "Save to Vocabulary",
@@ -782,12 +665,7 @@ fun WordLookupBottomSheet(
                                 onClick = { ChatPreferencesManager.removeVocabWord(context, item.word) },
                                 modifier = Modifier.size(32.dp)
                             ) {
-                                Icon(
-                                    Icons.Rounded.DeleteOutline,
-                                    contentDescription = "Remove",
-                                    tint = c.textSecondary,
-                                    modifier = Modifier.size(18.dp)
-                                )
+                                ChatIconTrash(tint = c.textSecondary, modifier = Modifier.size(18.dp))
                             }
                         }
                     }

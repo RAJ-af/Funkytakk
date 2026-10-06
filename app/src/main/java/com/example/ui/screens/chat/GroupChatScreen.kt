@@ -1,12 +1,14 @@
 package com.example.ui.screens.chat
 
+import android.Manifest
 import android.content.Context
-import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.speech.tts.TextToSpeech
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Animatable
@@ -21,12 +23,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.automirrored.rounded.Forward
-import androidx.compose.material.icons.automirrored.rounded.Reply
-import androidx.compose.material.icons.automirrored.rounded.VolumeUp
-import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -42,6 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.example.ChatPreferencesManager
 import com.example.CloudAiManager
@@ -96,60 +93,69 @@ fun GroupChatScreen(
         CloudAiManager.init(context)
     }
 
-    val darkTheme = rememberEffectiveChatDarkTheme()
+    val darkTheme = rememberEffectiveChatDarkTheme() // Force false for light mode
     val chatPreset by ChatPreferencesManager.chatPreset.collectAsState()
     val chatTextScale by ChatPreferencesManager.chatTextScale.collectAsState()
     val isAiConsentGranted by CloudAiManager.isCloudAiEnabled.collectAsState()
 
-    val currentUserId = remember(context) { SupabaseSessionManager.getUserId(context) ?: "" }
-    val voicePlayer = rememberVoicePlaybackController()
-    val voiceRecorder = remember { LiveVoiceRecorder(context.applicationContext, coroutineScope) }
-
-    val rawMessages by GroupChatRepository.getGroupMessagesFlow(group.id).collectAsState(initial = emptyList())
-    val rawReactions by GroupChatRepository.getGroupReactionsFlow(group.id).collectAsState(initial = emptyList())
+    var rawMessages by remember { mutableStateOf<List<LocalGroupMessage>>(emptyList()) }
+    var rawReactions by remember { mutableStateOf<List<LocalMessageReaction>>(emptyList()) }
+    var currentUserId by remember { mutableStateOf("") }
 
     var inputText by remember { mutableStateOf("") }
+    var isEmojiPickerOpen by remember { mutableStateOf(false) }
     var replyingToMessage by remember { mutableStateOf<LocalGroupMessage?>(null) }
     var selectedMessageForMenu by remember { mutableStateOf<LocalGroupMessage?>(null) }
     var isSelectionMode by remember { mutableStateOf(false) }
     val selectedMessageIds = remember { mutableStateListOf<String>() }
 
-    var activeMediaViewerIndex by remember { mutableStateOf<Int?>(null) }
     var activeWordLookup by remember { mutableStateOf<WordLookupState?>(null) }
     var showAiAssistSheet by remember { mutableStateOf(false) }
-    var showAttachmentSheet by remember { mutableStateOf(false) }
-    var translatedMessages = remember { mutableStateMapOf<String, String>() }
+    var activeMediaViewerIndex by remember { mutableStateOf<Int?>(null) }
 
-    val flashAnimatables = remember { mutableStateMapOf<String, Animatable<Float, *>>() }
+    val voicePlayer = rememberVoicePlaybackController()
+    val voiceRecorder = rememberLiveVoiceRecorder()
 
-    fun flashMessage(messageId: String) {
-        coroutineScope.launch {
-            val anim = flashAnimatables.getOrPut(messageId) { Animatable(0f) }
-            anim.snapTo(1f)
-            anim.animateTo(0f, animationSpec = tween(durationMillis = 1200))
-        }
-    }
-
-    // TTS
-    var tts: TextToSpeech? by remember { mutableStateOf(null) }
+    // TTS engine
+    var ttsEngine by remember { mutableStateOf<TextToSpeech?>(null) }
     DisposableEffect(context) {
-        tts = TextToSpeech(context) { status ->
+        val tts = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale.getDefault()
+                ttsEngine?.language = Locale.getDefault()
             }
         }
+        ttsEngine = tts
         onDispose {
-            tts?.stop()
-            tts?.shutdown()
+            tts.stop()
+            tts.shutdown()
         }
     }
 
-    LaunchedEffect(group.id) {
-        GroupChatRepository.markGroupRead(group.id)
+    // Flash animatables for jump to message
+    val flashAnimatables = remember { mutableStateMapOf<String, Animatable<Float, *>>() }
+    fun flashMessage(msgId: String) {
+        coroutineScope.launch {
+            val anim = flashAnimatables.getOrPut(msgId) { Animatable(0f) }
+            anim.snapTo(1f)
+            anim.animateTo(0f, animationSpec = tween(1200))
+        }
     }
 
-    // Photo picker
-    val photoPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(4)) { uris ->
+    // Audio record permission launcher
+    val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            voiceRecorder.start()
+        } else {
+            Toast.makeText(context, "Microphone permission is required to record voice notes", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Photo picker launcher
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(10)
+    ) { uris ->
         if (uris.isNotEmpty()) {
             coroutineScope.launch {
                 uris.forEach { uri ->
@@ -160,8 +166,8 @@ fun GroupChatScreen(
                                 context = context,
                                 groupId = group.id,
                                 rawBytes = bytes,
-                                mimeType = "image/jpeg",
-                                messageType = "image"
+                                messageType = "image",
+                                mimeType = "image/jpeg"
                             )
                         }
                     } catch (e: Exception) {
@@ -172,31 +178,24 @@ fun GroupChatScreen(
         }
     }
 
-    // Document picker
-    val docPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            coroutineScope.launch {
-                try {
-                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    if (bytes != null && bytes.isNotEmpty()) {
-                        GroupChatRepository.sendGroupMediaMessage(
-                            context = context,
-                            groupId = group.id,
-                            rawBytes = bytes,
-                            mimeType = "application/octet-stream",
-                            messageType = "image"
-                        )
-                    }
-                } catch (e: Exception) {
-                    Toast.makeText(context, "Error sending document: ${e.message}", Toast.LENGTH_SHORT).show()
-                }
+    // Observe messages and reactions
+    LaunchedEffect(group.id) {
+        currentUserId = SupabaseSessionManager.getUserId(context) ?: ""
+        launch {
+            GroupChatRepository.getGroupMessagesFlow(group.id).collect { msgs ->
+                rawMessages = msgs
+            }
+        }
+        launch {
+            GroupChatRepository.getGroupReactionsFlow(group.id).collect { reacts ->
+                rawReactions = reacts
             }
         }
     }
 
     ProvideChatTheme(
         preset = chatPreset,
-        darkTheme = darkTheme,
+        darkTheme = false,
         textScale = chatTextScale
     ) {
         val colors = LocalChatColors.current
@@ -204,11 +203,10 @@ fun GroupChatScreen(
         val timelineItems = remember(rawMessages, rawReactions, currentUserId) {
             val sorted = rawMessages.sortedBy { it.timestamp }
             val items = mutableListOf<GroupTimelineItem>()
-            items.add(GroupTimelineItem.SecurityHeader("Group messages are end-to-end encrypted. Only members can read or listen."))
+            items.add(GroupTimelineItem.SecurityHeader("Messages and media in this group are end-to-end encrypted."))
 
             var prevDateLabel = ""
-            var i = 0
-            while (i < sorted.size) {
+            for (i in sorted.indices) {
                 val msg = sorted[i]
                 val dateLabel = formatChatDateChip(msg.timestamp)
                 if (dateLabel != prevDateLabel) {
@@ -216,34 +214,16 @@ fun GroupChatScreen(
                     prevDateLabel = dateLabel
                 }
 
-                // Collapse consecutive system events within 10 minutes
                 if (msg.messageType == "system") {
-                    var j = i + 1
-                    var count = 1
-                    while (j < sorted.size && sorted[j].messageType == "system" &&
-                        sorted[j].senderId == msg.senderId &&
-                        (sorted[j].timestamp - msg.timestamp) <= 10 * 60 * 1000L
-                    ) {
-                        count++
-                        j++
-                    }
-                    val collapsedText = if (count > 1) {
-                        "${msg.senderName.ifBlank { "A member" }} updated group settings · $count changes"
-                    } else {
-                        msg.text.ifBlank { "Group updated" }
-                    }
-                    items.add(GroupTimelineItem.SystemEvent(eventId = msg.id, text = collapsedText))
-                    i = j
+                    items.add(GroupTimelineItem.SystemEvent(msg.id, msg.text))
                     continue
                 }
 
                 val isOlderSameSender = i > 0 &&
-                        sorted[i - 1].messageType != "system" &&
                         sorted[i - 1].senderId == msg.senderId &&
                         (msg.timestamp - sorted[i - 1].timestamp) <= 2 * 60 * 1000L
 
                 val isNewerSameSender = i < sorted.size - 1 &&
-                        sorted[i + 1].messageType != "system" &&
                         sorted[i + 1].senderId == msg.senderId &&
                         (sorted[i + 1].timestamp - msg.timestamp) <= 2 * 60 * 1000L
 
@@ -269,36 +249,33 @@ fun GroupChatScreen(
                         isLastInGroup = isLast
                     )
                 )
-                i++
             }
             items
         }
 
         val allMediaItems = remember(rawMessages) {
-            rawMessages.filter { it.messageType == "image" || !it.localMediaPath.isNullOrBlank() }
+            rawMessages.filter { it.messageType == "image" || it.messageType == "video" || it.text.startsWith("[img]") }
                 .map { msg ->
-                    val url = msg.localMediaPath ?: msg.storagePath.orEmpty()
+                    val url = msg.localMediaPath ?: msg.text.removePrefix("[img]").removePrefix("[imgs]").substringBefore("|")
                     ChatViewerMediaItem(
                         id = msg.id,
                         url = url,
-                        senderName = if (msg.isOutgoing) "You" else msg.senderName,
+                        senderName = if (msg.senderId == currentUserId) "You" else msg.senderName,
                         dateText = formatChatTime(msg.timestamp),
-                        caption = msg.text.takeIf { it != "Photo" },
-                        isVideo = false
+                        caption = null,
+                        isVideo = msg.messageType == "video"
                     )
                 }
         }
 
-        val unreadCount = remember(rawMessages) {
-            rawMessages.count { !it.isOutgoing }
+        val unreadCount = remember(rawMessages, currentUserId) {
+            rawMessages.count { it.senderId != currentUserId }
         }
 
-        val unreadMentionCount = remember(rawMessages) {
-            rawMessages.count { it.isMentioned }
-        }
-
-        BackHandler(enabled = isSelectionMode || selectedMessageForMenu != null) {
-            if (isSelectionMode) {
+        BackHandler(enabled = isEmojiPickerOpen || isSelectionMode || selectedMessageForMenu != null) {
+            if (isEmojiPickerOpen) {
+                isEmojiPickerOpen = false
+            } else if (isSelectionMode) {
                 isSelectionMode = false
                 selectedMessageIds.clear()
             } else {
@@ -312,9 +289,9 @@ fun GroupChatScreen(
                     SelectionTopBar(
                         selectedCount = selectedMessageIds.size,
                         actions = listOf(
-                            MessageAction("copy", "Copy", Icons.Rounded.ContentCopy),
-                            MessageAction("forward", "Forward", Icons.AutoMirrored.Rounded.Forward),
-                            MessageAction("delete", "Delete", Icons.Rounded.DeleteOutline, destructive = true)
+                            MessageAction("copy", "Copy", { ChatIconCopy(tint = colors.text) }),
+                            MessageAction("forward", "Forward", { ChatIconForward(tint = colors.text) }),
+                            MessageAction("delete", "Delete", { ChatIconTrash(tint = colors.danger) }, destructive = true)
                         ),
                         onAction = { actionId ->
                             when (actionId) {
@@ -327,9 +304,7 @@ fun GroupChatScreen(
                                     Toast.makeText(context, "Forward ${selectedMessageIds.size} messages", Toast.LENGTH_SHORT).show()
                                 }
                                 "delete" -> {
-                                    coroutineScope.launch {
-                                        GroupChatRepository.clearGroupChatLocally(group.id)
-                                    }
+                                    Toast.makeText(context, "Delete ${selectedMessageIds.size} messages", Toast.LENGTH_SHORT).show()
                                 }
                             }
                             isSelectionMode = false
@@ -342,8 +317,8 @@ fun GroupChatScreen(
                     )
                 } else {
                     Surface(
-                        color = colors.wallpaper,
-                        shadowElevation = 0.5.dp,
+                        color = colors.surface,
+                        shadowElevation = 1.dp,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
@@ -354,66 +329,61 @@ fun GroupChatScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             IconButton(onClick = onBack) {
-                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back", tint = colors.text)
+                                ChatIconBack(tint = colors.text, modifier = Modifier.size(24.dp))
                             }
 
-                            Row(
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(colors.accentIn.copy(alpha = 0.15f))
+                                    .clickable(onClick = onNavigateToInfo),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (group.avatarUrl.isNotBlank()) {
+                                    AsyncImage(
+                                        model = group.avatarUrl,
+                                        contentDescription = "Group Avatar",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Text(
+                                        text = group.name.take(1).uppercase(),
+                                        color = colors.accentIn,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 17.sp
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(10.dp))
+
+                            Column(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(8.dp))
                                     .clickable(onClick = onNavigateToInfo)
-                                    .padding(vertical = 4.dp, horizontal = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .clip(CircleShape)
-                                        .background(colors.accentIn.copy(alpha = 0.15f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (group.avatarUrl.isNotBlank()) {
-                                        AsyncImage(
-                                            model = group.avatarUrl,
-                                            contentDescription = "Avatar",
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentScale = ContentScale.Crop
-                                        )
-                                    } else {
-                                        Text(
-                                            text = group.name.take(1).uppercase(),
-                                            color = colors.accentIn,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 16.sp
-                                        )
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.width(10.dp))
-
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = group.name,
-                                        color = colors.text,
-                                        fontSize = 16f.chatSp(),
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = "${group.memberCount} members",
-                                        color = colors.textSecondary,
-                                        fontSize = 12f.chatSp()
-                                    )
-                                }
+                                Text(
+                                    text = group.name,
+                                    color = colors.text,
+                                    fontSize = 16f.chatSp(),
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "${group.memberCount} members",
+                                    color = colors.textSecondary,
+                                    fontSize = 12f.chatSp()
+                                )
                             }
 
                             IconButton(onClick = { onNavigateToManageMembers(true) }) {
-                                Icon(Icons.Rounded.PersonAdd, contentDescription = "Add member", tint = colors.textSecondary)
+                                ChatIconAddUser(tint = colors.text, modifier = Modifier.size(22.dp))
                             }
-
                             IconButton(onClick = onNavigateToSettings) {
-                                Icon(Icons.Rounded.Settings, contentDescription = "Group Settings", tint = colors.textSecondary)
+                                ChatIconSettings(tint = colors.text, modifier = Modifier.size(22.dp))
                             }
                         }
                     }
@@ -423,18 +393,24 @@ fun GroupChatScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(colors.wallpaper)
+                        .background(colors.surface)
                         .imePadding()
                 ) {
                     ChatInputBar(
                         text = inputText,
-                        onTextChange = { inputText = it },
+                        onTextChange = {
+                            inputText = it
+                            if (isEmojiPickerOpen && it.isNotEmpty()) {
+                                isEmojiPickerOpen = false
+                            }
+                        },
                         onSend = {
                             if (inputText.isNotBlank()) {
                                 val reply = replyingToMessage
                                 val textToSend = inputText
                                 inputText = ""
                                 replyingToMessage = null
+                                isEmojiPickerOpen = false
                                 coroutineScope.launch {
                                     GroupChatRepository.sendGroupMessage(
                                         context = context,
@@ -448,10 +424,16 @@ fun GroupChatScreen(
                                 }
                             }
                         },
-                        onAttach = { showAttachmentSheet = true },
-                        onEmoji = {
-                            inputText += " 😊"
+                        onAttach = {
+                            isEmojiPickerOpen = false
+                            photoPickerLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
                         },
+                        onEmojiToggle = {
+                            isEmojiPickerOpen = !isEmojiPickerOpen
+                        },
+                        isEmojiOpen = isEmojiPickerOpen,
                         showAiButton = isAiConsentGranted,
                         onAi = { showAiAssistSheet = true },
                         topSlot = if (replyingToMessage != null) {
@@ -470,34 +452,78 @@ fun GroupChatScreen(
                                     amplitudes = voiceRecorder.liveAmplitudes.toList(),
                                     slideProgress = 0f,
                                     locked = false,
-                                    onCancel = { voiceRecorder.cancel() }
+                                    onCancel = { voiceRecorder.cancel() },
+                                    onSend = {
+                                        val result = voiceRecorder.stop()
+                                        if (result != null && result.bytes.isNotEmpty()) {
+                                            coroutineScope.launch {
+                                                GroupChatRepository.sendGroupMediaMessage(
+                                                    context = context,
+                                                    groupId = group.id,
+                                                    rawBytes = result.bytes,
+                                                    messageType = "voice",
+                                                    mimeType = "audio/aac"
+                                                )
+                                                if (timelineItems.isNotEmpty()) {
+                                                    listState.animateScrollToItem(timelineItems.size - 1)
+                                                }
+                                            }
+                                        }
+                                    }
                                 )
                             }
                         } else null,
                         micButton = {
                             MicHoldButton(
                                 isRecording = voiceRecorder.isRecording,
-                                onStart = {
-                                    voiceRecorder.start()
-                                },
-                                onMove = { dx, dy -> },
-                                onEnd = { cancelled, locked ->
-                                    val result = voiceRecorder.stop()
-                                    if (!cancelled && result != null && result.bytes.isNotEmpty()) {
-                                        coroutineScope.launch {
-                                            GroupChatRepository.sendGroupMediaMessage(
-                                                context = context,
-                                                groupId = group.id,
-                                                rawBytes = result.bytes,
-                                                mimeType = "audio/aac",
-                                                messageType = "voice"
-                                            )
+                                onClick = {
+                                    val hasPermission = ContextCompat.checkSelfPermission(
+                                        context,
+                                        Manifest.permission.RECORD_AUDIO
+                                    ) == PackageManager.PERMISSION_GRANTED
+                                    if (!voiceRecorder.isRecording) {
+                                        if (hasPermission) {
+                                            voiceRecorder.start()
+                                        } else {
+                                            recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                        }
+                                    } else {
+                                        val result = voiceRecorder.stop()
+                                        if (result != null && result.bytes.isNotEmpty()) {
+                                            coroutineScope.launch {
+                                                GroupChatRepository.sendGroupMediaMessage(
+                                                    context = context,
+                                                    groupId = group.id,
+                                                    rawBytes = result.bytes,
+                                                    messageType = "voice",
+                                                    mimeType = "audio/aac"
+                                                )
+                                            }
                                         }
                                     }
                                 }
                             )
                         }
                     )
+
+                    // Fluent Emoji Picker Drawer
+                    AnimatedVisibility(
+                        visible = isEmojiPickerOpen,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
+                        FluentEmojiPicker(
+                            onEmojiSelect = { emoji ->
+                                inputText += emoji
+                            },
+                            onBackspace = {
+                                if (inputText.isNotEmpty()) {
+                                    val lastCharCount = Character.charCount(inputText.codePointBefore(inputText.length))
+                                    inputText = inputText.dropLast(lastCharCount)
+                                }
+                            }
+                        )
+                    }
                 }
             },
             containerColor = colors.wallpaper
@@ -529,7 +555,7 @@ fun GroupChatScreen(
                             }
                             is GroupTimelineItem.MessageItem -> {
                                 val msg = item.message
-                                val isOutgoing = msg.isOutgoing
+                                val isOutgoing = msg.senderId == currentUserId
                                 val flashAlpha = flashAnimatables[msg.id]?.value ?: 0f
                                 val isSelected = selectedMessageIds.contains(msg.id)
 
@@ -538,7 +564,8 @@ fun GroupChatScreen(
                                     else -> MessageStatus.Read
                                 }
 
-                                val isOnlyEmojis = emojiOnlyCount(msg.text.trim())
+                                val rawText = msg.text
+                                val isOnlyEmojis = emojiOnlyCount(rawText.trim())
 
                                 Row(
                                     modifier = Modifier
@@ -571,8 +598,8 @@ fun GroupChatScreen(
                                                     )
                                                 } else {
                                                     Text(
-                                                        text = msg.senderName.take(1).uppercase().ifBlank { "?" },
-                                                        fontSize = 11.sp,
+                                                        text = msg.senderName.take(1).uppercase(),
+                                                        fontSize = 12.sp,
                                                         fontWeight = FontWeight.Bold,
                                                         color = colors.senderColor(msg.senderId)
                                                     )
@@ -587,7 +614,7 @@ fun GroupChatScreen(
                                     Column(
                                         horizontalAlignment = if (isOutgoing) Alignment.End else Alignment.Start
                                     ) {
-                                        // Sender name on first incoming message of group with 8-color hashing
+                                        // Sender name on first incoming message of group
                                         if (!isOutgoing && (item.position == GroupPosition.Single || item.position == GroupPosition.First)) {
                                             SenderName(
                                                 name = msg.senderName,
@@ -597,9 +624,6 @@ fun GroupChatScreen(
                                         }
 
                                         val bubbleModifier = Modifier
-                                            .swipeToReply {
-                                                replyingToMessage = msg
-                                            }
                                             .pointerInput(msg.id) {
                                                 detectTapGestures(
                                                     onLongPress = {
@@ -618,7 +642,7 @@ fun GroupChatScreen(
 
                                         if (isOnlyEmojis in 1..3) {
                                             EmojiOnlyMessage(
-                                                emoji = msg.text.trim(),
+                                                emoji = rawText.trim(),
                                                 count = isOnlyEmojis,
                                                 time = formatChatTime(msg.timestamp),
                                                 outgoing = isOutgoing,
@@ -634,37 +658,36 @@ fun GroupChatScreen(
                                                 modifier = bubbleModifier
                                             ) {
                                                 // Reply quote
-                                                if (!msg.replyToPreview.isNullOrBlank()) {
+                                                if (!msg.replyToMessageId.isNullOrBlank()) {
                                                     ReplyQuote(
                                                         sender = msg.replyToSenderName ?: "Reply",
-                                                        preview = msg.replyToPreview,
+                                                        preview = msg.replyToPreview ?: "Message",
                                                         outgoing = isOutgoing,
                                                         onClick = {
-                                                            val targetId = msg.replyToMessageId
-                                                            if (targetId != null) {
-                                                                val targetIdx = timelineItems.indexOfFirst {
-                                                                    it is GroupTimelineItem.MessageItem && it.message.id == targetId
-                                                                }
-                                                                if (targetIdx != -1) {
-                                                                    coroutineScope.launch {
-                                                                        listState.animateScrollToItem(targetIdx)
-                                                                        flashMessage(targetId)
-                                                                    }
+                                                            val targetIdx = timelineItems.indexOfFirst {
+                                                                it is GroupTimelineItem.MessageItem && it.message.id == msg.replyToMessageId
+                                                            }
+                                                            if (targetIdx != -1) {
+                                                                val found = timelineItems[targetIdx] as GroupTimelineItem.MessageItem
+                                                                coroutineScope.launch {
+                                                                    listState.animateScrollToItem(targetIdx)
+                                                                    flashMessage(found.message.id)
                                                                 }
                                                             }
                                                         }
                                                     )
                                                 }
 
-                                                when (msg.messageType) {
-                                                    "voice" -> {
-                                                        val path = msg.localMediaPath ?: msg.storagePath.orEmpty()
+                                                when {
+                                                    msg.messageType == "voice" || rawText.startsWith("[voice]") -> {
+                                                        val path = msg.localMediaPath ?: rawText.removePrefix("[voice]").substringBefore("|")
+                                                        val durationSec = rawText.substringAfter("|", "0").toIntOrNull() ?: 0
                                                         val isPlayingThis = voicePlayer.currentPlayingId == msg.id && voicePlayer.isPlaying
 
                                                         VoiceNoteContent(
                                                             outgoing = isOutgoing,
-                                                            amplitudes = remember(msg.id) { List(48) { (40 + (it * 11) % 180) } },
-                                                            durationMs = 8000L,
+                                                            amplitudes = remember(msg.id) { List(48) { (40 + (it * 7) % 180) } },
+                                                            durationMs = durationSec * 1000L,
                                                             positionMs = if (voicePlayer.currentPlayingId == msg.id) voicePlayer.positionMs else 0L,
                                                             isPlaying = isPlayingThis,
                                                             isLoading = voicePlayer.currentPlayingId == msg.id && voicePlayer.isLoading,
@@ -674,7 +697,7 @@ fun GroupChatScreen(
                                                                 voicePlayer.playOrPause(
                                                                     messageId = msg.id,
                                                                     audioSource = path,
-                                                                    fallbackDurationMs = 8000L,
+                                                                    fallbackDurationMs = durationSec * 1000L,
                                                                     onError = { err ->
                                                                         Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
                                                                     }
@@ -689,8 +712,8 @@ fun GroupChatScreen(
                                                         )
                                                     }
 
-                                                    "image" -> {
-                                                        val url = msg.localMediaPath ?: msg.storagePath.orEmpty()
+                                                    msg.messageType == "image" || rawText.startsWith("[img]") || rawText.startsWith("[imgs]") -> {
+                                                        val url = msg.localMediaPath ?: rawText.removePrefix("[img]").removePrefix("[imgs]").substringBefore("|")
                                                         MediaFrame(
                                                             aspectRatio = 1.25f,
                                                             content = {
@@ -724,8 +747,8 @@ fun GroupChatScreen(
 
                                                     else -> {
                                                         val annotated = buildMessageText(
-                                                            raw = msg.text,
-                                                            mentionNames = listOf("all", "admin", currentUserId.take(6)),
+                                                            raw = rawText,
+                                                            mentionNames = rawMessages.map { it.senderName }.distinct(),
                                                             accent = colors.accentIn
                                                         )
                                                         MessageText(
@@ -733,54 +756,48 @@ fun GroupChatScreen(
                                                             time = formatChatTime(msg.timestamp),
                                                             outgoing = isOutgoing,
                                                             status = status,
+                                                            onLongPress = {
+                                                                if (!isSelectionMode) {
+                                                                    selectedMessageForMenu = msg
+                                                                }
+                                                            },
                                                             onWordClick = { word ->
                                                                 activeWordLookup = WordLookupState(
                                                                     word = word,
-                                                                    fullSentence = msg.text,
+                                                                    fullSentence = rawText,
                                                                     isLoading = true
                                                                 )
                                                                 coroutineScope.launch {
                                                                     val res = CloudAiManager.translateMessage(context, "word_${word.hashCode()}", word, "English")
-                                                                    activeWordLookup = activeWordLookup?.copy(
-                                                                        translation = res.getOrNull()?.text ?: "Could not translate",
-                                                                        isLoading = false
-                                                                    )
+                                                                    res.onSuccess { aiResult ->
+                                                                        activeWordLookup = activeWordLookup?.copy(
+                                                                            translation = aiResult.text,
+                                                                            isLoading = false
+                                                                        )
+                                                                    }.onFailure {
+                                                                        activeWordLookup = activeWordLookup?.copy(
+                                                                            translation = "Could not translate word",
+                                                                            isLoading = false
+                                                                        )
+                                                                    }
                                                                 }
                                                             }
                                                         )
-
-                                                        val trans = translatedMessages[msg.id]
-                                                        if (!trans.isNullOrBlank()) {
-                                                            TranslationStrip(
-                                                                translated = trans,
-                                                                languageLabel = "English",
-                                                                outgoing = isOutgoing,
-                                                                viaCloud = true,
-                                                                onListen = {
-                                                                    tts?.speak(trans, TextToSpeech.QUEUE_FLUSH, null, "tts_${msg.id}")
-                                                                }
-                                                            )
-                                                        }
                                                     }
                                                 }
                                             }
                                         }
 
-                                        // Reactions
+                                        // Reaction Row
                                         if (item.reactions.isNotEmpty()) {
-                                            Spacer(modifier = Modifier.height(2.dp))
                                             ReactionRow(
                                                 reactions = item.reactions,
                                                 onClick = { emoji ->
                                                     coroutineScope.launch {
-                                                        GroupChatRepository.sendGroupReaction(
-                                                            context = context,
-                                                            groupId = group.id,
-                                                            targetMessageId = msg.id,
-                                                            emoji = emoji
-                                                        )
+                                                        GroupChatRepository.sendGroupReaction(context, group.id, msg.id, emoji)
                                                     }
-                                                }
+                                                },
+                                                modifier = Modifier.padding(top = 2.dp)
                                             )
                                         }
                                     }
@@ -790,33 +807,13 @@ fun GroupChatScreen(
                     }
                 }
 
-                // Mention FAB & Scroll to bottom FAB
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(end = 12.dp, bottom = 12.dp),
-                    horizontalAlignment = Alignment.End,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    if (unreadMentionCount > 0) {
-                        MentionFab(
-                            unreadMentions = unreadMentionCount,
-                            onClick = {
-                                val nextMentionIdx = timelineItems.indexOfFirst {
-                                    it is GroupTimelineItem.MessageItem && it.message.isMentioned
-                                }
-                                if (nextMentionIdx != -1) {
-                                    val item = timelineItems[nextMentionIdx] as GroupTimelineItem.MessageItem
-                                    coroutineScope.launch {
-                                        listState.animateScrollToItem(nextMentionIdx)
-                                        flashMessage(item.message.id)
-                                    }
-                                }
-                            }
-                        )
-                    }
-
-                    if (unreadCount > 0) {
+                // Scroll to bottom button
+                if (listState.canScrollForward) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 16.dp, bottom = 16.dp)
+                    ) {
                         ScrollToBottomFab(
                             unread = unreadCount,
                             onClick = {
@@ -829,88 +826,80 @@ fun GroupChatScreen(
                         )
                     }
                 }
-
-                // Long press message overlay
-                selectedMessageForMenu?.let { selectedMsg ->
-                    MessageLongPressOverlay(
-                        myReaction = null,
-                        actions = listOf(
-                            MessageAction("reply", "Reply", Icons.AutoMirrored.Rounded.Reply),
-                            MessageAction("copy", "Copy", Icons.Rounded.ContentCopy),
-                            MessageAction("translate", "Translate", Icons.Rounded.Translate),
-                            MessageAction("listen", "Listen", Icons.AutoMirrored.Rounded.VolumeUp),
-                            MessageAction("select", "Select", Icons.Rounded.CheckCircleOutline),
-                            MessageAction("delete", "Delete", Icons.Rounded.DeleteOutline, destructive = true)
-                        ),
-                        onPickEmoji = { emoji ->
-                            coroutineScope.launch {
-                                GroupChatRepository.sendGroupReaction(
-                                    context = context,
-                                    groupId = group.id,
-                                    targetMessageId = selectedMsg.id,
-                                    emoji = emoji
-                                )
-                            }
-                        },
-                        onMoreEmoji = {},
-                        onAction = { actionId ->
-                            when (actionId) {
-                                "reply" -> replyingToMessage = selectedMsg
-                                "copy" -> {
-                                    clipboardManager.setText(AnnotatedString(selectedMsg.text))
-                                    Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
-                                }
-                                "translate" -> {
-                                    coroutineScope.launch {
-                                        val res = CloudAiManager.translateMessage(context, selectedMsg.id, selectedMsg.text, "English")
-                                        res.onSuccess {
-                                            translatedMessages[selectedMsg.id] = it.text
-                                        }.onFailure {
-                                            Toast.makeText(context, "Translation failed", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                }
-                                "listen" -> {
-                                    tts?.speak(selectedMsg.text, TextToSpeech.QUEUE_FLUSH, null, "tts_${selectedMsg.id}")
-                                }
-                                "select" -> {
-                                    isSelectionMode = true
-                                    selectedMessageIds.add(selectedMsg.id)
-                                }
-                                "delete" -> {
-                                    coroutineScope.launch {
-                                        GroupChatRepository.clearGroupChatLocally(group.id)
-                                    }
-                                }
-                            }
-                        },
-                        onDismiss = { selectedMessageForMenu = null }
-                    )
-                }
             }
         }
 
-        // Telephoto Fullscreen Media Viewer
-        activeMediaViewerIndex?.let { initialIdx ->
-            TelephotoMediaViewerDialog(
-                mediaList = allMediaItems,
-                initialIndex = initialIdx,
-                onDismiss = { activeMediaViewerIndex = null },
-                onSave = { item ->
-                    Toast.makeText(context, "Saved photo to gallery", Toast.LENGTH_SHORT).show()
-                },
-                onShare = { item ->
-                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                        putExtra(Intent.EXTRA_TEXT, item.url)
-                        type = "text/plain"
+        // Long-Press Action Overlay Menu
+        if (selectedMessageForMenu != null) {
+            val selectedMsg = selectedMessageForMenu!!
+            MessageLongPressOverlay(
+                myReaction = rawReactions.find { it.targetMessageId == selectedMsg.id && it.senderId == currentUserId }?.emoji,
+                actions = listOf(
+                    MessageAction("reply", "Reply", { ChatIconReply(tint = colors.text) }),
+                    MessageAction("copy", "Copy Text", { ChatIconCopy(tint = colors.text) }),
+                    MessageAction("translate", "Translate", { ChatIconTranslate(tint = colors.text) }),
+                    MessageAction("listen", "Listen", { ChatIconVolume(tint = colors.text) }),
+                    MessageAction("forward", "Forward", { ChatIconForward(tint = colors.text) }),
+                    MessageAction("select", "Select", { ChatIconCheck(tint = colors.text) }),
+                    MessageAction("delete", "Delete", { ChatIconTrash(tint = colors.danger) }, destructive = true)
+                ),
+                onPickEmoji = { emoji ->
+                    coroutineScope.launch {
+                        GroupChatRepository.sendGroupReaction(context, group.id, selectedMsg.id, emoji)
                     }
-                    context.startActivity(Intent.createChooser(sendIntent, "Share media"))
-                }
+                },
+                onMoreEmoji = {
+                    isEmojiPickerOpen = true
+                },
+                onAction = { actionId ->
+                    when (actionId) {
+                        "reply" -> replyingToMessage = selectedMsg
+                        "copy" -> {
+                            clipboardManager.setText(AnnotatedString(selectedMsg.text))
+                            Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                        }
+                        "translate" -> {
+                            coroutineScope.launch {
+                                val res = CloudAiManager.translateMessage(context, selectedMsg.id, selectedMsg.text, "English")
+                                res.onSuccess {
+                                    Toast.makeText(context, "Translation: ${it.text}", Toast.LENGTH_LONG).show()
+                                }.onFailure {
+                                    Toast.makeText(context, "Translation failed: ${it.message}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                        "listen" -> {
+                            ttsEngine?.speak(selectedMsg.text, TextToSpeech.QUEUE_FLUSH, null, "msg_${selectedMsg.id}")
+                        }
+                        "forward" -> {
+                            Toast.makeText(context, "Forwarding message", Toast.LENGTH_SHORT).show()
+                        }
+                        "select" -> {
+                            isSelectionMode = true
+                            selectedMessageIds.add(selectedMsg.id)
+                        }
+                        "delete" -> {
+                            Toast.makeText(context, "Message deleted", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    selectedMessageForMenu = null
+                },
+                onDismiss = { selectedMessageForMenu = null }
             )
         }
 
-        // Word lookup bottom sheet
-        activeWordLookup?.let { lookup ->
+        // Telephoto Full-Screen Media Viewer
+        if (activeMediaViewerIndex != null && allMediaItems.isNotEmpty()) {
+            TelephotoMediaViewerDialog(
+                mediaItems = allMediaItems,
+                initialIndex = activeMediaViewerIndex!!.coerceIn(0, allMediaItems.size - 1),
+                onDismiss = { activeMediaViewerIndex = null }
+            )
+        }
+
+        // Word Lookup Bottom Sheet
+        if (activeWordLookup != null) {
+            val lookup = activeWordLookup!!
             ModalBottomSheet(
                 onDismissRequest = { activeWordLookup = null },
                 containerColor = colors.surface,
@@ -920,12 +909,11 @@ fun GroupChatScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp)
-                        .padding(bottom = 28.dp),
+                        .padding(horizontal = 24.dp, vertical = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Rounded.Translate, contentDescription = null, tint = colors.accentIn)
+                        ChatIconTranslate(tint = colors.accentIn, modifier = Modifier.size(24.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(lookup.word, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = colors.text)
                     }
@@ -944,7 +932,7 @@ fun GroupChatScreen(
                         colors = ButtonDefaults.buttonColors(containerColor = colors.brand, contentColor = colors.onBrand),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Save to Vocabulary")
+                        Text("Save to Vocabulary", fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -960,55 +948,6 @@ fun GroupChatScreen(
                 },
                 onDismiss = { showAiAssistSheet = false }
             )
-        }
-
-        // Attachment Sheet
-        if (showAttachmentSheet) {
-            ModalBottomSheet(
-                onDismissRequest = { showAttachmentSheet = false },
-                containerColor = colors.surface,
-                contentColor = colors.text,
-                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text("Attach", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = colors.text)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                showAttachmentSheet = false
-                                photoPickerLauncher.launch(
-                                    androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
-                                )
-                            }
-                            .padding(vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Rounded.PhotoLibrary, contentDescription = null, tint = colors.accentIn, modifier = Modifier.size(26.dp))
-                        Spacer(modifier = Modifier.width(14.dp))
-                        Text("Photo & Video", fontSize = 16.sp, color = colors.text)
-                    }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                showAttachmentSheet = false
-                                docPickerLauncher.launch(arrayOf("*/*"))
-                            }
-                            .padding(vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Rounded.InsertDriveFile, contentDescription = null, tint = colors.accentIn, modifier = Modifier.size(26.dp))
-                        Spacer(modifier = Modifier.width(14.dp))
-                        Text("Document / File", fontSize = 16.sp, color = colors.text)
-                    }
-                }
-            }
         }
     }
 }
