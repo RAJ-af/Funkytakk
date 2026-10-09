@@ -8,6 +8,7 @@ import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
 import coil.decode.SvgDecoder
 import com.example.service.PresenceManager
+import com.example.service.PushNotificationManager
 import okhttp3.OkHttpClient
 
 class FunkyTalkApplication : Application(), ImageLoaderFactory {
@@ -20,6 +21,7 @@ class FunkyTalkApplication : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         appContext = applicationContext
+        PushNotificationManager.initialize(this)
         PresenceManager.initialize(this)
     }
 

@@ -29,13 +29,13 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Create System Notification Channels
+        // Create System Notification Channels (including channel ID "messages" with importance HIGH)
+        com.example.service.PushNotificationManager.initialize(applicationContext)
+        com.example.service.PushNotificationManager.createNotificationChannels(applicationContext)
         com.example.util.SystemNotificationHelper.createNotificationChannels(applicationContext)
 
         handleDeepLinkIntent(intent)
-        intent?.getStringExtra("navigate_to")?.let {
-            pendingNavigateTo = it
-        }
+        handlePushNotificationIntent(intent)
         authViewModel.initializeFirebaseIfNeeded(applicationContext)
         setContent {
             // Request Notification permission on Android 13+
@@ -44,6 +44,9 @@ class MainActivity : FragmentActivity() {
                     contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
                 ) { isGranted ->
                     android.util.Log.d("MainActivity", "POST_NOTIFICATIONS granted: $isGranted")
+                    if (isGranted && SupabaseSessionManager.getUserId(applicationContext) != null) {
+                        com.example.service.PushNotificationManager.onUserLoggedIn(applicationContext)
+                    }
                 }
                 LaunchedEffect(Unit) {
                     if (!com.example.util.SystemNotificationHelper.hasNotificationPermission(applicationContext)) {
@@ -61,18 +64,24 @@ class MainActivity : FragmentActivity() {
                     LaunchedEffect(pendingNavigateTo) {
                         pendingNavigateTo?.let { target ->
                             pendingNavigateTo = null
-                            if (target == "voice_room") {
-                                authViewModel.verifyAndNavigateToRoom(
-                                    context = applicationContext,
-                                    onRoomActive = {
-                                        currentScreen = "voice_room"
-                                    },
-                                    onRoomEnded = {
-                                        android.widget.Toast.makeText(applicationContext, "This room has ended.", android.widget.Toast.LENGTH_SHORT).show()
-                                    }
-                                )
-                            } else {
-                                currentScreen = target
+                            when (target) {
+                                "voice_room" -> {
+                                    authViewModel.verifyAndNavigateToRoom(
+                                        context = applicationContext,
+                                        onRoomActive = {
+                                            currentScreen = "voice_room"
+                                        },
+                                        onRoomEnded = {
+                                            android.widget.Toast.makeText(applicationContext, "This room has ended.", android.widget.Toast.LENGTH_SHORT).show()
+                                        }
+                                    )
+                                }
+                                "direct_chat" -> {
+                                    currentScreen = "home"
+                                }
+                                else -> {
+                                    currentScreen = target
+                                }
                             }
                         }
                     }
@@ -80,13 +89,14 @@ class MainActivity : FragmentActivity() {
                     val authState by authViewModel.authState.collectAsState()
                     val myModerationStatus by authViewModel.myModerationStatus.collectAsState()
 
-                    // Lifecycle observer: refresh moderation status and sync group events when app enters foreground / resumes
+                    // Lifecycle observer: refresh moderation status, register push token, and sync group events when app enters foreground / resumes
                     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
                     DisposableEffect(lifecycleOwner) {
                         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
                             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
                                 authViewModel.refreshModerationStatus(applicationContext)
-                                if (SupabaseSessionManager.getUserId(applicationContext) != null) {
+                                if (SupabaseSessionManager.getUserId(applicationContext) != null || authState is AuthState.Success) {
+                                    com.example.service.PushNotificationManager.onUserLoggedIn(applicationContext)
                                     com.example.repository.GroupChatRepository.onAppResumed(applicationContext)
                                 }
                             }
@@ -172,9 +182,10 @@ class MainActivity : FragmentActivity() {
                                 }
                             }
 
-                            // Initialize E2EE identity keys and encrypted repository
+                            // Initialize E2EE identity keys, encrypted repository, and register push token right after login / startup
                             com.example.crypto.E2EEManager.ensureIdentityKeyInitialized(applicationContext)
                             com.example.repository.EncryptedChatRepository.init(applicationContext)
+                            com.example.service.PushNotificationManager.registerCurrentToken(applicationContext)
                         }
                     }
 
@@ -479,8 +490,57 @@ class MainActivity : FragmentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleDeepLinkIntent(intent)
-        intent.getStringExtra("navigate_to")?.let {
-            pendingNavigateTo = it
+        handlePushNotificationIntent(intent)
+    }
+
+    private fun handlePushNotificationIntent(intent: Intent?) {
+        if (intent == null) return
+
+        val fromPush = intent.getBooleanExtra("from_push", false) ||
+            intent.getStringExtra("from_push")?.equals("true", ignoreCase = true) == true
+        val kind = intent.getStringExtra("kind")?.takeIf { it.isNotBlank() }
+        val conversationId = intent.getStringExtra("conversation_id")?.takeIf { it.isNotBlank() }
+        val groupId = intent.getStringExtra("group_id")?.takeIf { it.isNotBlank() }
+        val senderId = intent.getStringExtra("sender_id")?.takeIf { it.isNotBlank() }
+        val partnerUserId = intent.getStringExtra("partnerUserId")?.takeIf { it.isNotBlank() }
+        val navigateTo = intent.getStringExtra("navigate_to")?.takeIf { it.isNotBlank() }
+
+        val hasChatExtras = !kind.isNullOrBlank() ||
+            !conversationId.isNullOrBlank() ||
+            !groupId.isNullOrBlank() ||
+            !senderId.isNullOrBlank() ||
+            !partnerUserId.isNullOrBlank()
+
+        if (fromPush || hasChatExtras || navigateTo == "direct_chat") {
+            pendingNavigateTo = "home"
+            com.example.service.PushNotificationManager.triggerInboxDrainOnTap(applicationContext)
+
+            if (hasChatExtras) {
+                val resolvedKind = kind ?: when {
+                    !groupId.isNullOrBlank() -> "group"
+                    else -> "dm"
+                }
+                com.example.service.PushNotificationManager.setPendingChatNavigation(
+                    com.example.service.PendingChatNavigationTarget(
+                        kind = resolvedKind,
+                        conversationId = conversationId,
+                        groupId = groupId,
+                        senderId = senderId,
+                        partnerUserId = partnerUserId ?: senderId
+                    )
+                )
+            }
+
+            intent.removeExtra("from_push")
+            intent.removeExtra("kind")
+            intent.removeExtra("conversation_id")
+            intent.removeExtra("group_id")
+            intent.removeExtra("sender_id")
+            intent.removeExtra("partnerUserId")
+            intent.removeExtra("navigate_to")
+        } else if (!navigateTo.isNullOrBlank()) {
+            pendingNavigateTo = navigateTo
+            intent.removeExtra("navigate_to")
         }
     }
 

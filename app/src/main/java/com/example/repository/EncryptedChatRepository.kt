@@ -300,13 +300,25 @@ object EncryptedChatRepository {
                         // Notify only when someone reacts to MY message!
                         val targetMsg = db.messageDao().getMessage(targetId)
                         val myUserId = SupabaseSessionManager.getUserId(context)
-                        if (targetMsg?.isOutgoing == true && senderId != myUserId) {
+                        if (targetMsg?.isOutgoing == true && senderId != myUserId &&
+                            !com.example.service.PushNotificationManager.isChatOpenInForeground(
+                                conversationId = convId,
+                                partnerUserId = senderId
+                            )
+                        ) {
                             val senderName = fetchSenderDisplayName(context, senderId)
                             com.example.util.SystemNotificationHelper.showSystemNotification(
                                 context = context,
                                 title = "FunkyTalk Reaction",
                                 message = "$senderName reacted $emoji to your message",
                                 partnerUserId = senderId,
+                                conversationId = convId,
+                                senderId = senderId,
+                                kind = "dm",
+                                notificationId = com.example.service.PushNotificationManager.notificationIdForChat(
+                                    conversationId = convId,
+                                    fallbackPartnerId = senderId
+                                ),
                                 channelId = com.example.util.SystemNotificationHelper.CHANNEL_MESSAGES_ID
                             )
                         }
@@ -701,6 +713,11 @@ object EncryptedChatRepository {
         )
         db.messageDao().insertMessage(localMsg)
 
+        val isChatOpen = com.example.service.PushNotificationManager.isChatOpenInForeground(
+            conversationId = conversationId,
+            partnerUserId = senderId
+        )
+
         // Find or create conversation
         val existingConv = db.conversationDao().getConversation(conversationId)
         if (existingConv != null) {
@@ -708,7 +725,7 @@ object EncryptedChatRepository {
                 conversationId = conversationId,
                 text = plaintext,
                 time = timestamp,
-                unreadDelta = 1
+                unreadDelta = if (isChatOpen) 0 else 1
             )
         } else {
             // Fetch sender profile details if available
@@ -719,15 +736,15 @@ object EncryptedChatRepository {
                 otherUserName = senderName,
                 lastMessageText = plaintext,
                 lastMessageTime = timestamp,
-                unreadCount = 1,
+                unreadCount = if (isChatOpen) 0 else 1,
                 createdAt = timestamp
             )
             db.conversationDao().insertOrUpdate(newConv)
         }
 
-        // Trigger Android System Push Notification for incoming messages
+        // Trigger Android System Push Notification for incoming messages (de-duplicated with PushNotificationManager by conversationId)
         val myUserId = SupabaseSessionManager.getUserId(context)
-        if (!myUserId.isNullOrBlank() && senderId != myUserId) {
+        if (!myUserId.isNullOrBlank() && senderId != myUserId && !isChatOpen) {
             val conv = db.conversationDao().getConversation(conversationId)
             val senderTitle = conv?.otherUserName?.ifBlank { "FunkyTalk Chat" } ?: "New Message"
             val displayPreview = when {
@@ -740,6 +757,13 @@ object EncryptedChatRepository {
                 title = senderTitle,
                 message = displayPreview,
                 partnerUserId = senderId,
+                conversationId = conversationId,
+                senderId = senderId,
+                kind = "dm",
+                notificationId = com.example.service.PushNotificationManager.notificationIdForChat(
+                    conversationId = conversationId,
+                    fallbackPartnerId = senderId
+                ),
                 channelId = com.example.util.SystemNotificationHelper.CHANNEL_MESSAGES_ID
             )
         }

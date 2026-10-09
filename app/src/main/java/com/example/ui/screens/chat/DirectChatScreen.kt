@@ -243,11 +243,27 @@ fun DirectChatScreen(
     }
 
     // Setup DM conversation and observers
+    DisposableEffect(partnerUserId, conversationId) {
+        com.example.service.PushNotificationManager.setActiveOpenDm(
+            conversationId = conversationId,
+            partnerUserId = partnerUserId
+        )
+        com.example.service.PushNotificationManager.cancelNotificationForChat(
+            context = context,
+            conversationId = conversationId,
+            partnerUserId = partnerUserId
+        )
+        onDispose {
+            com.example.service.PushNotificationManager.setActiveOpenDm(null, null)
+        }
+    }
+
     LaunchedEffect(partnerUserId) {
         try {
             currentUserId = SupabaseSessionManager.getUserId(context) ?: ""
             val conv = EncryptedChatRepository.getOrCreateLocalConversation(context, partnerUserId, partnerName, partnerAvatarUrl)
             conversationId = conv.id
+            EncryptedChatRepository.markConversationRead(conv.id)
         } catch (e: Exception) {
             android.util.Log.e("DirectChatScreen", "Error resolving conversation", e)
         }

@@ -180,6 +180,7 @@ fun GroupChatScreen(
 
     // Observe messages and reactions
     LaunchedEffect(group.id) {
+        com.example.service.PushNotificationManager.cancelNotificationForChat(context, groupId = group.id)
         currentUserId = SupabaseSessionManager.getUserId(context) ?: ""
         launch {
             GroupChatRepository.getGroupMessagesFlow(group.id).collect { msgs ->

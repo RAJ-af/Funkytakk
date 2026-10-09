@@ -2190,7 +2190,8 @@ object GroupChatRepository {
                                 )
 
                                 // Notify only when someone reacts to MY message, respecting mute and notify_level (only 'all')
-                                if (!isFromMe && targetMsg.senderId == myUserId && activeOpenGroupId != groupId) {
+                                val isGroupOpenInFg = com.example.service.PushNotificationManager.isChatOpenInForeground(groupId = groupId)
+                                if (!isFromMe && targetMsg.senderId == myUserId && !isGroupOpenInFg && activeOpenGroupId != groupId) {
                                     val freshGroup = db.groupConversationDao().getGroup(groupId) ?: localGroup
                                     val mutedUntil = freshGroup?.mutedUntil ?: 0L
                                     val isMuted = mutedUntil > System.currentTimeMillis()
@@ -2203,7 +2204,10 @@ object GroupChatRepository {
                                             context = context,
                                             title = notifTitle,
                                             message = notifBody,
-                                            notificationId = (groupId + "_reaction").hashCode()
+                                            groupId = groupId,
+                                            senderId = senderId,
+                                            kind = "group",
+                                            notificationId = com.example.service.PushNotificationManager.notificationIdForChat(groupId = groupId)
                                         )
                                     }
                                 }
@@ -2290,7 +2294,7 @@ object GroupChatRepository {
                 replyToPreview = replyToPreview
             )
             db.groupMessageDao().insertMessage(localMsg)
-            val isGroupOpen = activeOpenGroupId == groupId
+            val isGroupOpen = com.example.service.PushNotificationManager.isChatOpenInForeground(groupId = groupId) || activeOpenGroupId == groupId
             db.groupConversationDao().updateLastMessage(
                 groupId = groupId,
                 text = displayText,
@@ -2322,7 +2326,10 @@ object GroupChatRepository {
                         context = context,
                         title = notifTitle,
                         message = notifBody,
-                        notificationId = groupId.hashCode()
+                        groupId = groupId,
+                        senderId = senderId,
+                        kind = "group",
+                        notificationId = com.example.service.PushNotificationManager.notificationIdForChat(groupId = groupId)
                     )
                 }
             }

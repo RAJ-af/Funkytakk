@@ -17,7 +17,16 @@ object GoogleServicesConfig {
     const val FALLBACK_WEB_CLIENT_ID = "1093102729820-7dbvqkqf7uall5go8aasmsvs89keesq6.apps.googleusercontent.com"
     const val FALLBACK_API_KEY = "AIzaSyAZi997wGgWE7WJ-N5NO9kOWL2agpijq-8"
     const val FALLBACK_PROJECT_ID = "funkytalk-f1aae"
-    const val FALLBACK_APP_ID = "1:1093102729820:android:adf5504386d9f6f184c499"
+    const val FALLBACK_APP_ID = "1:1093102729820:android:6dda4c8c8c1369a984c499"
+    const val FALLBACK_GCM_SENDER_ID = "1093102729820"
+
+    fun getGcmSenderId(context: Context): String {
+        return readProperty(context) { json ->
+            val projectInfo = json.optJSONObject("project_info")
+            val num = projectInfo?.optString("project_number")
+            if (!num.isNullOrBlank()) num else null
+        } ?: FALLBACK_GCM_SENDER_ID
+    }
 
     fun getWebClientId(context: Context): String {
         return readProperty(context) { json ->

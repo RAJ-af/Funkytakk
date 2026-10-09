@@ -12,21 +12,24 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.example.MainActivity
+import com.example.R
+import com.example.crypto.VaultSecurityManager
+import com.example.service.PushNotificationManager
 
 object SystemNotificationHelper {
     private const val TAG = "SystemNotificationHelper"
 
-    const val CHANNEL_MESSAGES_ID = "funkytalk_messages_channel"
+    const val CHANNEL_MESSAGES_ID = "messages"
     const val CHANNEL_UPDATES_ID = "funkytalk_updates_channel"
 
-    private const val CHANNEL_MESSAGES_NAME = "Messages & Direct Chats"
+    private const val CHANNEL_MESSAGES_NAME = "Messages & Chats"
     private const val CHANNEL_UPDATES_NAME = "System Updates & Alerts"
 
     @Volatile
     private var channelsCreated = false
 
     fun createNotificationChannels(context: Context) {
-        if (channelsCreated || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
 
         try {
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
@@ -38,10 +41,11 @@ object SystemNotificationHelper {
                 CHANNEL_MESSAGES_NAME,
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Incoming E2EE chat messages, voice notes, and direct replies."
+                description = "High priority notifications for direct and group chat messages"
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 250, 250, 250)
                 setShowBadge(true)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
             }
 
             // 2. System updates channel
@@ -52,12 +56,15 @@ object SystemNotificationHelper {
             ).apply {
                 description = "System updates, room invites, and profile activity."
                 setShowBadge(true)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
             }
 
             notificationManager.createNotificationChannel(messagesChannel)
             notificationManager.createNotificationChannel(updatesChannel)
-            channelsCreated = true
-            Log.d(TAG, "Notification channels created successfully.")
+            if (!channelsCreated) {
+                channelsCreated = true
+                Log.d(TAG, "Notification channels created successfully.")
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to create notification channels", e)
         }
@@ -79,7 +86,11 @@ object SystemNotificationHelper {
         title: String,
         message: String,
         partnerUserId: String? = null,
-        notificationId: Int = (System.currentTimeMillis() % 100000).toInt(),
+        conversationId: String? = null,
+        groupId: String? = null,
+        senderId: String? = null,
+        kind: String? = null,
+        notificationId: Int? = null,
         channelId: String = CHANNEL_MESSAGES_ID
     ) {
         createNotificationChannels(context)
@@ -89,12 +100,54 @@ object SystemNotificationHelper {
             return
         }
 
+        val effectivePartnerId = partnerUserId?.takeIf { it.isNotBlank() } ?: senderId?.takeIf { it.isNotBlank() }
+        val isChatNotification = !conversationId.isNullOrBlank() ||
+            !groupId.isNullOrBlank() ||
+            !effectivePartnerId.isNullOrBlank() ||
+            !kind.isNullOrBlank()
+
+        // Suppress notifications for the conversation that is currently open in the foreground
+        if (isChatNotification && PushNotificationManager.isChatOpenInForeground(
+                conversationId = conversationId,
+                groupId = groupId,
+                partnerUserId = effectivePartnerId
+            )
+        ) {
+            Log.d(TAG, "Suppressing system notification for active foreground conversation")
+            return
+        }
+
+        val resolvedNotificationId = notificationId ?: if (isChatNotification) {
+            PushNotificationManager.notificationIdForChat(
+                conversationId = conversationId,
+                groupId = groupId,
+                fallbackPartnerId = effectivePartnerId
+            )
+        } else {
+            (System.currentTimeMillis() % 100000).toInt()
+        }
+
+        val isVaultLocked = isChatNotification && VaultSecurityManager.isVaultLocked()
+        val displayTitle = if (isVaultLocked) "FunkyTalk" else title
+        val displayMessage = if (isVaultLocked) "New encrypted message received • Tap to unlock" else message
+
         try {
+            val resolvedKind = kind?.takeIf { it.isNotBlank() } ?: when {
+                !groupId.isNullOrBlank() -> "group"
+                !conversationId.isNullOrBlank() || !effectivePartnerId.isNullOrBlank() -> "dm"
+                else -> null
+            }
+
             val intent = Intent(context, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                if (!partnerUserId.isNullOrBlank()) {
-                    putExtra("partnerUserId", partnerUserId)
-                    putExtra("navigate_to", "direct_chat")
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                if (isChatNotification) {
+                    putExtra("from_push", true)
+                    putExtra("navigate_to", "home")
+                    if (!resolvedKind.isNullOrBlank()) putExtra("kind", resolvedKind)
+                    if (!conversationId.isNullOrBlank()) putExtra("conversation_id", conversationId)
+                    if (!groupId.isNullOrBlank()) putExtra("group_id", groupId)
+                    if (!senderId.isNullOrBlank()) putExtra("sender_id", senderId)
+                    if (!effectivePartnerId.isNullOrBlank()) putExtra("partnerUserId", effectivePartnerId)
                 } else {
                     putExtra("navigate_to", "notifications")
                 }
@@ -102,26 +155,34 @@ object SystemNotificationHelper {
 
             val pendingIntent = PendingIntent.getActivity(
                 context,
-                notificationId,
+                resolvedNotificationId,
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
-            val builder = NotificationCompat.Builder(context, channelId)
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setContentTitle(title)
-                .setContentText(message)
-                .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            val publicNotification = NotificationCompat.Builder(context, channelId)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle("FunkyTalk")
+                .setContentText("New message")
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setDefaults(NotificationCompat.DEFAULT_ALL)
-                .setVibrate(longArrayOf(0, 250, 250, 250))
+                .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                .build()
+
+            val builder = NotificationCompat.Builder(context, channelId)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle(displayTitle)
+                .setContentText(displayMessage)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(displayMessage))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                .setPublicVersion(publicNotification)
+                .setOnlyAlertOnce(true)
                 .setAutoCancel(true)
                 .setContentIntent(pendingIntent)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
 
             val notificationManager = NotificationManagerCompat.from(context)
-            notificationManager.notify(notificationId, builder.build())
-            Log.d(TAG, "System Notification posted successfully: $title - $message")
+            notificationManager.notify(resolvedNotificationId, builder.build())
         } catch (e: SecurityException) {
             Log.e(TAG, "SecurityException posting notification", e)
         } catch (e: Exception) {

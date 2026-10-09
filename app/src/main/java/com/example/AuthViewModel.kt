@@ -1252,11 +1252,13 @@ class AuthViewModel : ViewModel() {
                 val apiKey = GoogleServicesConfig.getApiKey(context)
                 val appId = GoogleServicesConfig.getApplicationId(context)
                 val projectId = GoogleServicesConfig.getProjectId(context)
+                val gcmSenderId = GoogleServicesConfig.getGcmSenderId(context)
 
                 val options = com.google.firebase.FirebaseOptions.Builder()
                     .setApiKey(apiKey)
                     .setApplicationId(appId)
                     .setProjectId(projectId)
+                    .setGcmSenderId(gcmSenderId)
                     .build()
                 FirebaseApp.initializeApp(context.applicationContext, options)
             } else {
@@ -1878,6 +1880,7 @@ class AuthViewModel : ViewModel() {
         val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
         prefs.edit().putString("active_session_id_${uid}", newSessionId).apply()
         Log.d("AuthViewModel", "Registered active session: $newSessionId")
+        com.example.service.PushNotificationManager.onUserLoggedIn(context)
     }
 
     fun startSessionListener(context: Context, uid: String) {
@@ -1885,6 +1888,8 @@ class AuthViewModel : ViewModel() {
         val localSessionId = prefs.getString("active_session_id_${uid}", null)
         if (localSessionId == null) {
             registerAndStartSession(context, uid)
+        } else {
+            com.example.service.PushNotificationManager.onUserLoggedIn(context)
         }
     }
 
@@ -2182,30 +2187,19 @@ class AuthViewModel : ViewModel() {
         val supabaseUid = if (context != null) SupabaseSessionManager.getUserId(context) else null
         val currentProfileUid = (_authState.value as? AuthState.Success)?.user?.uid
         val effectiveUid = supabaseUid ?: currentProfileUid ?: firebaseAuth?.currentUser?.uid.orEmpty()
-        
-        firebaseAuth?.signOut()
+
         _authState.value = AuthState.Idle
-        
+
         if (context != null) {
-            SupabaseSessionManager.clearSession(context)
-            if (effectiveUid.isNotEmpty()) {
-                val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
-                prefs.edit().remove("active_session_id_${effectiveUid}").apply()
-            }
-            com.example.util.ChatBackupPreferencesManager.clearAll(context)
-            try {
-                androidx.work.WorkManager.getInstance(context).cancelUniqueWork(com.example.service.ChatBackupWorker.WORK_NAME)
-            } catch (e: Exception) {
-                Log.w("AuthViewModel", "Error cancelling backup work on logout", e)
-            }
+            com.example.service.PushNotificationManager.launchApplicationLogoutCleanup(
+                context = context.applicationContext,
+                effectiveUid = effectiveUid,
+                firebaseAuth = firebaseAuth
+            )
+        } else {
+            com.example.service.PushNotificationManager.cancelInFlightRegistration()
+            firebaseAuth?.signOut()
             com.example.crypto.VaultSecurityManager.lock()
-            viewModelScope.launch(Dispatchers.IO) {
-                try {
-                    com.example.util.GoogleDriveBackupHelper.signOut(context)
-                } catch (e: Exception) {
-                    Log.w("AuthViewModel", "Error signing out Drive account on logout", e)
-                }
-            }
         }
     }
 

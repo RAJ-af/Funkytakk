@@ -202,16 +202,31 @@ object SupabaseSessionManager {
             return@withContext existingUid
         }
 
-        val firebaseUser = FirebaseAuth.getInstance().currentUser
+        return@withContext refreshSessionFromFirebase(context, forceFirebaseRefresh = false)
+    }
+
+    /**
+     * Force-refreshes the Supabase session from Firebase (e.g., on HTTP 401 or before logout when expired).
+     * Aborts without writing the session if FirebaseAuth.currentUser becomes null while in flight.
+     */
+    suspend fun forceRefreshSession(context: Context): String? = withContext(Dispatchers.IO) {
+        return@withContext refreshSessionFromFirebase(context, forceFirebaseRefresh = true)
+    }
+
+    private suspend fun refreshSessionFromFirebase(
+        context: Context,
+        forceFirebaseRefresh: Boolean
+    ): String? = withContext(Dispatchers.IO) {
+        val firebaseUser = try { FirebaseAuth.getInstance().currentUser } catch (_: Exception) { null }
         if (firebaseUser == null) {
             Log.w(TAG, "ensureActiveSession: No Firebase user logged in")
             return@withContext null
         }
 
         try {
-            Log.d(TAG, "ensureActiveSession: Refreshing Supabase session from Firebase token...")
+            Log.d(TAG, "ensureActiveSession: Refreshing Supabase session from Firebase token (force=$forceFirebaseRefresh)...")
             val idToken = withTimeoutOrNull(12000L) {
-                firebaseUser.getIdToken(false).await()?.token
+                firebaseUser.getIdToken(forceFirebaseRefresh).await()?.token
             }
 
             if (idToken.isNullOrBlank()) {
@@ -225,6 +240,13 @@ object SupabaseSessionManager {
                     firebaseIdToken = idToken
                 )
             )
+
+            // Abort without writing the session if FirebaseAuth.currentUser is now null (e.g., user logged out while verifyFirebaseToken was in flight)
+            val currentFirebaseUser = try { FirebaseAuth.getInstance().currentUser } catch (_: Exception) { null }
+            if (currentFirebaseUser == null || currentFirebaseUser.uid != firebaseUser.uid) {
+                Log.w(TAG, "ensureActiveSession: FirebaseAuth.currentUser is now null or changed after verifyFirebaseToken; aborting without writing session")
+                return@withContext null
+            }
 
             if (verifyRes.isSuccessful && verifyRes.body() != null) {
                 val body = verifyRes.body()!!
@@ -248,6 +270,11 @@ object SupabaseSessionManager {
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "ensureActiveSession: Exception refreshing session", e)
+        }
+
+        val postCheckFirebaseUser = try { FirebaseAuth.getInstance().currentUser } catch (_: Exception) { null }
+        if (postCheckFirebaseUser == null) {
+            return@withContext null
         }
 
         val activeToken = getAccessToken(context)

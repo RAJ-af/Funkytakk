@@ -372,6 +372,71 @@ fun ChatAppearanceBottomSheet(
                     }
                 )
             }
+
+            if (com.example.BuildConfig.DEBUG) {
+                val pushDebugState by com.example.service.PushNotificationManager.debugState.collectAsState()
+                val permAndChannelLine = remember(pushDebugState) {
+                    com.example.service.PushNotificationManager.getPermissionAndChannelDebugLine(context)
+                }
+                HorizontalDivider(color = colors.hairline)
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "About (Debug)",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.text
+                    )
+                    Text(
+                        text = pushDebugState.summaryLine,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = if (pushDebugState.isRegistered) Color(0xFF059669) else Color(0xFFDC2626)
+                    )
+                    Text(
+                        text = pushDebugState.httpStatusLine,
+                        fontSize = 11.sp,
+                        color = if (!pushDebugState.lastError.isNullOrBlank() && !pushDebugState.isRegistered) {
+                            Color(0xFFB91C1C)
+                        } else {
+                            colors.textSecondary
+                        }
+                    )
+                    Text(
+                        text = permAndChannelLine,
+                        fontSize = 11.sp,
+                        color = colors.textSecondary
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                val ok = com.example.service.PushNotificationManager.forceReregisterPush(context)
+                                Toast.makeText(
+                                    context,
+                                    if (ok) "Push token re-registered!" else "Re-register push failed",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        },
+                        enabled = !pushDebugState.isReRegistering,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (pushDebugState.isReRegistering) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Re-registering…", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        } else {
+                            Text("Re-register push", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
         }
     }
 

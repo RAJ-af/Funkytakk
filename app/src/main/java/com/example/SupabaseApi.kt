@@ -1066,7 +1066,7 @@ interface SupabaseApi {
     suspend fun registerPushToken(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String,
-        @Body body: PushTokenRequest
+        @Body body: RegisterPushTokenRequest
     ): Response<ResponseBody>
 
     @POST("rest/v1/rpc/unregister_push_token")
@@ -1786,6 +1786,12 @@ data class GiftTransactionItem(
 // ----------------------------------------------------
 // GROUP CHAT MODELS
 // ----------------------------------------------------
+@JsonClass(generateAdapter = true)
+data class RegisterPushTokenRequest(
+    val p_token: String,
+    val p_platform: String = "android"
+)
+
 @JsonClass(generateAdapter = true)
 data class PushTokenRequest(
     val p_token: String

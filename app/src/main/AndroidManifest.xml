@@ -88,6 +88,10 @@
             android:exported="false"
             android:foregroundServiceType="microphone|mediaPlayback" />
 
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="messages" />
+
         <service
             android:name=".service.FunkyFirebaseMessagingService"
             android:exported="false">

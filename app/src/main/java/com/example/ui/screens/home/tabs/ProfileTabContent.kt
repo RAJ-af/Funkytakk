@@ -16,8 +16,10 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -1421,6 +1423,7 @@ fun ProfileTabContent(
 
     // Options Bottom Sheet (Triggered by 3 dots on top right)
     if (showOptionsMenuSheet) {
+        val pushDebugState by com.example.service.PushNotificationManager.debugState.collectAsState()
         ModalBottomSheet(
             onDismissRequest = { showOptionsMenuSheet = false },
             containerColor = Color.White,
@@ -1429,6 +1432,7 @@ fun ProfileTabContent(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = 24.dp, vertical = 12.dp)
                     .padding(bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -1618,34 +1622,107 @@ fun ProfileTabContent(
                     }
                 }
 
-                // 8. App Version & Credits (Long-press opens hidden ChatKitGallery debug screen)
-                Column(
+                // 8. Settings > About (Long-press version opens hidden ChatKitGallery debug screen)
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0xFFF8FAFC),
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 6.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .combinedClickable(
-                            onClick = {},
-                            onLongClick = {
-                                showOptionsMenuSheet = false
-                                showChatKitGalleryDebug = true
-                            }
-                        )
-                        .padding(vertical = 8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .padding(top = 4.dp)
                 ) {
-                    Text(
-                        text = "FunkyTalk v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
-                        fontSize = 12.sp,
-                        color = Color(0xFF94A3B8),
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "Animated emoji by Google, licensed CC BY 4.0",
-                        fontSize = 10.5.sp,
-                        color = Color(0xFF94A3B8)
-                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .combinedClickable(
+                                onClick = {},
+                                onLongClick = {
+                                    showOptionsMenuSheet = false
+                                    showChatKitGalleryDebug = true
+                                }
+                            )
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "About",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF0F172A)
+                        )
+                        Text(
+                            text = "FunkyTalk v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                            fontSize = 12.sp,
+                            color = Color(0xFF64748B),
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = "Animated emoji by Google, licensed CC BY 4.0",
+                            fontSize = 11.sp,
+                            color = Color(0xFF94A3B8)
+                        )
+
+                        if (BuildConfig.DEBUG) {
+                            val permAndChannelLine = remember(pushDebugState) {
+                                com.example.service.PushNotificationManager.getPermissionAndChannelDebugLine(context)
+                            }
+                            HorizontalDivider(
+                                modifier = Modifier.padding(vertical = 4.dp),
+                                color = Color(0xFFE2E8F0)
+                            )
+                            Text(
+                                text = pushDebugState.summaryLine,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (pushDebugState.isRegistered) Color(0xFF059669) else Color(0xFFDC2626),
+                                modifier = Modifier.testTag("push_debug_status_text")
+                            )
+                            Text(
+                                text = pushDebugState.httpStatusLine,
+                                fontSize = 11.sp,
+                                color = if (!pushDebugState.lastError.isNullOrBlank() && !pushDebugState.isRegistered) {
+                                    Color(0xFFB91C1C)
+                                } else {
+                                    Color(0xFF475569)
+                                },
+                                modifier = Modifier.testTag("push_debug_http_status_text")
+                            )
+                            Text(
+                                text = permAndChannelLine,
+                                fontSize = 11.sp,
+                                color = Color(0xFF475569),
+                                modifier = Modifier.testTag("push_debug_perm_channel_text")
+                            )
+                            OutlinedButton(
+                                onClick = {
+                                    coroutineScope.launch {
+                                        val ok = com.example.service.PushNotificationManager.forceReregisterPush(context)
+                                        Toast.makeText(
+                                            context,
+                                            if (ok) "Push token re-registered!" else "Re-register push failed",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                },
+                                enabled = !pushDebugState.isReRegistering,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("reregister_push_button")
+                            ) {
+                                if (pushDebugState.isReRegistering) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Re-registering…", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                } else {
+                                    Text("Re-register push", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

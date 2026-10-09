@@ -384,6 +384,99 @@ fun HomeScreen(
     val dynamicInitiatedChats = remember { mutableStateListOf<DirectChat>() }
     var activeGroupChat by remember { mutableStateOf<com.example.db.LocalGroupConversation?>(null) }
 
+    val pendingChatTarget by com.example.service.PushNotificationManager.pendingChatNavigation.collectAsState()
+    val vaultStatus by com.example.crypto.VaultSecurityManager.vaultStatus.collectAsState()
+
+    // Handle push notification tap routing to DM or Group chat (with Vault unlock gate & inbox drain)
+    LaunchedEffect(pendingChatTarget, vaultStatus) {
+        val target = pendingChatTarget ?: return@LaunchedEffect
+
+        // Always switch to the Chats tab first
+        activeTab = "chats"
+
+        // If the vault is locked (or not configured), keep chat overlays closed so the Vault unlock screen is displayed first
+        if (com.example.crypto.VaultSecurityManager.isVaultLocked() ||
+            vaultStatus != com.example.crypto.VaultStatus.UNLOCKED
+        ) {
+            activeChatWindowContact = null
+            activeGroupChat = null
+            return@LaunchedEffect
+        }
+
+        // Vault is unlocked -> ensure repositories are initialized and drain inbox before resolving target chat
+        try {
+            com.example.repository.EncryptedChatRepository.init(context)
+            com.example.repository.GroupChatRepository.init(context)
+            com.example.repository.EncryptedChatRepository.drainPendingDmMessages(context)
+            com.example.repository.GroupChatRepository.drainPendingGroupMessages(context)
+        } catch (e: Exception) {
+            Log.w("HomeScreen", "Error draining inbox during push navigation: ${e.message}")
+        }
+
+        val isGroupTarget = target.kind.equals("group", ignoreCase = true) || !target.groupId.isNullOrBlank()
+        if (isGroupTarget) {
+            val gid = target.groupId
+            if (!gid.isNullOrBlank()) {
+                val joinedGroups = com.example.repository.GroupChatRepository.joinedGroups.value
+                val allGroups = com.example.repository.GroupChatRepository.allMyGroups.value
+                val resolvedGroup = joinedGroups.find { it.id == gid }
+                    ?: allGroups.find { it.id == gid }
+                    ?: com.example.db.LocalGroupConversation(
+                        id = gid,
+                        name = "Group Chat",
+                        myRole = "member",
+                        myStatus = "joined"
+                    )
+                activeChatWindowContact = null
+                activeGroupChat = resolvedGroup
+                com.example.service.PushNotificationManager.cancelNotificationForChat(context, groupId = gid)
+            }
+            com.example.service.PushNotificationManager.clearPendingChatNavigation()
+        } else {
+            val dbConvs = com.example.repository.EncryptedChatRepository.conversations.value
+            val convByConvId = target.conversationId?.takeIf { it.isNotBlank() }?.let { cid ->
+                dbConvs.find { it.id == cid }
+            }
+            val partnerId = (target.partnerUserId ?: target.senderId ?: convByConvId?.otherUserId)?.takeIf { it.isNotBlank() }
+            if (!partnerId.isNullOrBlank()) {
+                val conv = convByConvId ?: dbConvs.find { it.otherUserId == partnerId }
+                val supaPartner = supabaseProfiles.find { it.uid == partnerId }
+                val partnerName = conv?.otherUserName?.takeIf { it.isNotBlank() }
+                    ?: supaPartner?.displayName?.takeIf { it.isNotBlank() }
+                    ?: supaPartner?.username?.takeIf { it.isNotBlank() }
+                    ?: "Chat"
+                val partnerAvatar = conv?.otherUserAvatar?.takeIf { it.isNotBlank() }
+                    ?: supaPartner?.avatar?.takeIf { it.isNotBlank() }
+                    ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200"
+                val partnerLang = conv?.otherUserFlag?.takeIf { it.isNotBlank() }
+                    ?: supaPartner?.countryCode?.takeIf { it.isNotBlank() }
+                    ?: "English"
+
+                val directChat = DirectChat(
+                    id = partnerId,
+                    name = partnerName,
+                    avatar = partnerAvatar,
+                    lastMsg = conv?.lastMessageText?.ifBlank { "🔒 Encrypted conversation" } ?: "🔒 Encrypted conversation",
+                    time = "Just now",
+                    unreadCount = 0,
+                    onlineStatus = "online",
+                    isNativeLanguage = partnerLang
+                )
+                if (dynamicInitiatedChats.none { it.id == directChat.id }) {
+                    dynamicInitiatedChats.add(0, directChat)
+                }
+                activeGroupChat = null
+                activeChatWindowContact = directChat
+                com.example.service.PushNotificationManager.cancelNotificationForChat(
+                    context = context,
+                    conversationId = target.conversationId ?: conv?.id,
+                    partnerUserId = partnerId
+                )
+            }
+            com.example.service.PushNotificationManager.clearPendingChatNavigation()
+        }
+    }
+
     // Dialogs
     if (showLogoutDialog) {
         LogoutConfirmDialog(
