@@ -6,10 +6,19 @@ on:
   pull_request:
     branches: [ "main", "master" ]
   workflow_dispatch:
+    inputs:
+      upload_actions_artifacts:
+        description: 'Also upload to GitHub Actions artifacts storage (consumes account quota)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
   actions: write
+
+env:
+  UPLOAD_ACTIONS_ARTIFACTS: ${{ github.event.inputs.upload_actions_artifacts || secrets.UPLOAD_ACTIONS_ARTIFACTS || 'false' }}
 
 jobs:
   build-apk:
@@ -20,8 +29,36 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Cleanup Old Workflow Artifacts to Free Storage Quota
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Cleaning up older workflow artifacts to free GitHub Actions storage quota..."
+          python3 -c '
+          import os, subprocess, json
+          token = os.environ.get("GH_TOKEN")
+          repo = os.environ.get("GITHUB_REPOSITORY")
+          if not token or not repo:
+              exit(0)
+          try:
+              res = subprocess.run(["gh", "api", f"repos/{repo}/actions/artifacts?per_page=100"], capture_output=True, text=True)
+              if res.returncode == 0:
+                  data = json.loads(res.stdout)
+                  artifacts = data.get("artifacts", [])
+                  print(f"Found {len(artifacts)} old artifacts in {repo}. Cleaning up...")
+                  for a in artifacts:
+                      aid = a.get("id")
+                      name = a.get("name", "unknown")
+                      print(f"Deleting artifact ID {aid} ({name})...")
+                      subprocess.run(["gh", "api", "--method", "DELETE", f"repos/{repo}/actions/artifacts/{aid}"], capture_output=True)
+                  print("Artifact cleanup completed.")
+          except Exception as e:
+              print(f"Artifact cleanup note: {e}")
+          ' || true
+        continue-on-error: true
+
       - name: Set up Java JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '21'
@@ -173,20 +210,20 @@ jobs:
       - name: Build Debug APK with Gradle
         run: gradle :app:assembleDebug --no-daemon --stacktrace
 
-      - name: Cleanup Old Workflow Artifacts to Free Storage Quota
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Add Build Status to Summary
+        if: (!cancelled()) && hashFiles('app/build/outputs/apk/debug/*.apk') != ''
         run: |
-          echo "Checking and removing older workflow artifacts to free quota..."
-          gh api "repos/${{ github.repository }}/actions/artifacts" --jq '.artifacts[] | .id' 2>/dev/null | head -n 30 | while read -r art_id; do
-            if [ -n "$art_id" ]; then
-              echo "Deleting old artifact ID: $art_id"
-              gh api --method DELETE "repos/${{ github.repository }}/actions/artifacts/$art_id" 2>/dev/null || true
-            fi
-          done || true
-        continue-on-error: true
+          cat << 'EOF' >> $GITHUB_STEP_SUMMARY
 
-      - name: Upload APK Artifact
+          ## 🚀 FunkyTalk APK Build Completed!
+          
+          - **Status**: ✅ Succeeded
+          - **File**: `app-debug.apk`
+          - **Download**: You can download the APK directly from the [Releases](https://github.com/${{ github.repository }}/releases) section below!
+          EOF
+
+      - name: Upload APK Artifact (Optional Actions Storage)
+        if: env.UPLOAD_ACTIONS_ARTIFACTS == 'true'
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
@@ -194,7 +231,8 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 1
 
-      - name: Upload Keystore and SHA Artifacts
+      - name: Upload Keystore and SHA Artifacts (Optional Actions Storage)
+        if: env.UPLOAD_ACTIONS_ARTIFACTS == 'true'
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
@@ -202,8 +240,8 @@ jobs:
           path: keystore-artifacts/*
           retention-days: 1
 
-      - name: Create GitHub Release
-        if: (!cancelled()) && (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+      - name: Create GitHub Release (Direct APK & Keystore Download)
+        if: (!cancelled()) && hashFiles('app/build/outputs/apk/debug/*.apk') != ''
         uses: softprops/action-gh-release@v2
         with:
           tag_name: release-build-${{ github.run_number }}
