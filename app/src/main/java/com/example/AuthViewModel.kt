@@ -1640,6 +1640,7 @@ class AuthViewModel : ViewModel() {
                                                     loadUserProfileFromSpOrFirestore(context, userId) { finalProfile ->
                                                         val finalProfileWithVerified = finalProfile.copy(isEmailVerified = isCustomVerified)
                                                         _authState.value = AuthState.Success(finalProfileWithVerified)
+                                                        com.example.service.PushNotificationManager.onUserLoggedIn(context)
 
                                                         if (isCustomVerified) {
                                                             registerAndStartSession(context, userId)
@@ -1800,6 +1801,7 @@ class AuthViewModel : ViewModel() {
                 loadUserProfileFromSpOrFirestore(context, supabaseUserId) { finalProfile ->
                     _authState.value = AuthState.Success(finalProfile.copy(isEmailVerified = isVerifiedRemote))
                     if (isVerifiedRemote) {
+                        registerAndStartSession(context, supabaseUserId)
                         Toast.makeText(context, "Email is verified!", Toast.LENGTH_SHORT).show()
                         onVerified()
                     } else {

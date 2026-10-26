@@ -42,6 +42,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -116,6 +117,8 @@ object PushNotificationManager : DefaultLifecycleObserver {
 
     @Volatile
     private var isObserverInitialized = false
+
+    private val coldStartTriggered = java.util.concurrent.atomic.AtomicBoolean(false)
 
     @Volatile
     private var appContext: Context? = null
@@ -283,8 +286,27 @@ object PushNotificationManager : DefaultLifecycleObserver {
         val appCtx = context.applicationContext
         appContext = appCtx
         createNotificationChannels(appCtx)
+        Log.d(TAG, "[AUTH_LOGIN] onUserLoggedIn triggered -> launching registerCurrentToken(force=true)")
         scope.launch {
-            registerCurrentToken(appCtx)
+            registerCurrentToken(appCtx, force = true)
+        }
+    }
+
+    fun onColdStart(context: Context) {
+        val appCtx = context.applicationContext
+        appContext = appCtx
+        createNotificationChannels(appCtx)
+        if (!coldStartTriggered.compareAndSet(false, true)) {
+            Log.d(TAG, "[COLD_START] onColdStart already triggered for this process lifecycle; skipping duplicate")
+            return
+        }
+        if (!isUserLoggedIn(appCtx)) {
+            Log.d(TAG, "[COLD_START] User not logged in on cold start; skipping token registration until login")
+            return
+        }
+        Log.d(TAG, "[COLD_START] onColdStart triggered for logged-in user -> launching registerCurrentToken(force=false)")
+        scope.launch {
+            registerCurrentToken(appCtx, force = false)
         }
     }
 
@@ -475,16 +497,42 @@ object PushNotificationManager : DefaultLifecycleObserver {
             try {
                 ensureFirebaseInitialized(appCtx)
 
-                // 1. Await FCM token if not explicitly provided
+                // 1. Await FCM token if not explicitly provided, with graceful fallback to cached token
+                var fetchThrottled = false
                 val token = if (!explicitToken.isNullOrBlank()) {
                     explicitToken.trim()
                 } else {
-                    FirebaseMessaging.getInstance().token.await()?.trim()
+                    val freshToken = try {
+                        withTimeoutOrNull(10000L) {
+                            FirebaseMessaging.getInstance().token.await()?.trim()
+                        }
+                    } catch (e: Exception) {
+                        val errMsg = e.message ?: ""
+                        fetchThrottled = errMsg.contains("TOO_MANY_REGISTRATIONS", ignoreCase = true)
+                        if (fetchThrottled) {
+                            Log.w(TAG, "FCM returned TOO_MANY_REGISTRATIONS from Google Play Services; falling back to cached token if available.")
+                        } else {
+                            Log.w(TAG, "Failed retrieving fresh FCM token (${e.javaClass.simpleName}: $errMsg); falling back to cached token.")
+                        }
+                        null
+                    }
+                    val resolvedToken = freshToken?.takeIf { it.isNotBlank() } ?: getSavedToken(appCtx)
+                    if (resolvedToken.isNullOrBlank() && fetchThrottled) {
+                        try {
+                            com.google.firebase.installations.FirebaseInstallations.getInstance().delete().await()
+                            Log.w(TAG, "Reset FirebaseInstallation after TOO_MANY_REGISTRATIONS")
+                        } catch (_: Exception) {}
+                        val msg = "FCM token throttled (TOO_MANY_REGISTRATIONS) and no cached token available yet"
+                        Log.w(TAG, "Push token registration postponed: $msg")
+                        updateDebugState(appCtx, isRegistered = false, lastHttpStatus = "Throttled", lastError = msg)
+                        return false
+                    }
+                    resolvedToken
                 }
 
                 if (token.isNullOrBlank()) {
-                    val msg = "FirebaseMessaging.getInstance().token returned null or blank"
-                    Log.e(TAG, "Attempt $attempt/$MAX_RETRY_ATTEMPTS failed: $msg")
+                    val msg = "FirebaseMessaging token unavailable (fresh fetch failed/timed out and no cached token)"
+                    Log.w(TAG, "Attempt $attempt/$MAX_RETRY_ATTEMPTS: $msg")
                     updateDebugState(appCtx, isRegistered = false, lastHttpStatus = "Token Empty", lastError = msg)
                     continue
                 }
@@ -502,9 +550,9 @@ object PushNotificationManager : DefaultLifecycleObserver {
 
                 if (authToken.isNullOrBlank() || currentUserId.isNullOrBlank()) {
                     val msg = "No authenticated Supabase session token available (user not logged in yet)"
-                    Log.e(TAG, "Attempt $attempt/$MAX_RETRY_ATTEMPTS failed: $msg")
+                    Log.d(TAG, "Push token registration skipped: $msg")
                     updateDebugState(appCtx, isRegistered = false, lastToken = token, lastHttpStatus = "No Session", lastError = msg)
-                    continue
+                    return false
                 }
 
                 // 3. Debounce check: skip if the same token was registered for the same user in the last 60 seconds unless forced
@@ -539,6 +587,11 @@ object PushNotificationManager : DefaultLifecycleObserver {
                 }
 
                 // 5. Call RPC register_push_token(p_token = token, p_platform = 'android')
+                Log.e(
+                    TAG,
+                    "[PUSH_RPC_CALL] >> BEFORE calling register_push_token: attempt=$attempt/$MAX_RETRY_ATTEMPTS, user=$currentUserId, tokenSuffix=${token.takeLast(6)}, authHeaderLength=${authToken.length}"
+                )
+
                 val resp = SupabaseClient.api.registerPushToken(
                     apiKey = BuildConfig.SUPABASE_ANON_KEY,
                     auth = authToken,
@@ -549,6 +602,14 @@ object PushNotificationManager : DefaultLifecycleObserver {
                 )
 
                 val httpStatusText = "HTTP ${resp.code()} ${resp.message()}".trim()
+                val errBody = if (!resp.isSuccessful) {
+                    try { resp.errorBody()?.string() } catch (_: Exception) { null }
+                } else null
+
+                Log.e(
+                    TAG,
+                    "[PUSH_RPC_CALL] << AFTER calling register_push_token: code=${resp.code()}, isSuccess=${resp.isSuccessful}, msg=${resp.message()}, errorBody=$errBody"
+                )
 
                 if (resp.isSuccessful) {
                     val now = System.currentTimeMillis()
@@ -564,7 +625,6 @@ object PushNotificationManager : DefaultLifecycleObserver {
                     Log.d(TAG, "Successfully registered push token on attempt $attempt/$MAX_RETRY_ATTEMPTS (last6=${token.takeLast(6)})")
                     return true
                 } else {
-                    val errBody = try { resp.errorBody()?.string() } catch (_: Exception) { null }
                     val errMsg = httpStatusText + (if (!errBody.isNullOrBlank()) " - $errBody" else "")
                     Log.e(TAG, "Attempt $attempt/$MAX_RETRY_ATTEMPTS register_push_token RPC failed: $errMsg")
                     updateDebugState(
@@ -595,7 +655,7 @@ object PushNotificationManager : DefaultLifecycleObserver {
             }
         }
 
-        Log.e(TAG, "Push token registration failed after all $MAX_RETRY_ATTEMPTS attempts. Last error: ${_debugState.value.lastError}")
+        Log.w(TAG, "Push token registration completed with status: ${_debugState.value.lastHttpStatus}, error: ${_debugState.value.lastError}")
         return false
     }
 

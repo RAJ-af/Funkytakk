@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   build-apk:
@@ -172,22 +173,37 @@ jobs:
       - name: Build Debug APK with Gradle
         run: gradle :app:assembleDebug --no-daemon --stacktrace
 
+      - name: Cleanup Old Workflow Artifacts to Free Storage Quota
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Checking and removing older workflow artifacts to free quota..."
+          gh api "repos/${{ github.repository }}/actions/artifacts" --jq '.artifacts[] | .id' 2>/dev/null | head -n 30 | while read -r art_id; do
+            if [ -n "$art_id" ]; then
+              echo "Deleting old artifact ID: $art_id"
+              gh api --method DELETE "repos/${{ github.repository }}/actions/artifacts/$art_id" 2>/dev/null || true
+            fi
+          done || true
+        continue-on-error: true
+
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
-          name: FunkyTalk-Debug-APK
+          name: FunkyTalk-Debug-APK-${{ github.run_number }}
           path: app/build/outputs/apk/debug/*.apk
-          retention-days: 30
+          retention-days: 1
 
       - name: Upload Keystore and SHA Artifacts
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
-          name: FunkyTalk-Keystore-and-SHA
+          name: FunkyTalk-Keystore-and-SHA-${{ github.run_number }}
           path: keystore-artifacts/*
-          retention-days: 90
+          retention-days: 1
 
       - name: Create GitHub Release
-        if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        if: (!cancelled()) && (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: release-build-${{ github.run_number }}

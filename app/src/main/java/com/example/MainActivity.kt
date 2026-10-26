@@ -37,6 +37,7 @@ class MainActivity : FragmentActivity() {
         handleDeepLinkIntent(intent)
         handlePushNotificationIntent(intent)
         authViewModel.initializeFirebaseIfNeeded(applicationContext)
+        com.example.service.PushNotificationManager.onColdStart(applicationContext)
         setContent {
             // Request Notification permission on Android 13+
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
@@ -185,7 +186,7 @@ class MainActivity : FragmentActivity() {
                             // Initialize E2EE identity keys, encrypted repository, and register push token right after login / startup
                             com.example.crypto.E2EEManager.ensureIdentityKeyInitialized(applicationContext)
                             com.example.repository.EncryptedChatRepository.init(applicationContext)
-                            com.example.service.PushNotificationManager.registerCurrentToken(applicationContext)
+                            com.example.service.PushNotificationManager.registerCurrentToken(applicationContext, force = true)
                         }
                     }
 
