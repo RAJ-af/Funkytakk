@@ -37,7 +37,7 @@ object LocationDetector {
         return gps || net
     }
 
-    suspend fun detectCurrentLocation(context: Context): DetectedLocation = withContext(Dispatchers.IO) {
+    suspend fun detectCurrentLocation(context: Context): DetectedLocation? = withContext(Dispatchers.IO) {
         try {
             if (hasLocationPermission(context)) {
                 val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
@@ -65,7 +65,7 @@ object LocationDetector {
 
                     if (bestLocation != null) {
                         val geocoder = Geocoder(context, Locale.getDefault())
-                        val resolved = kotlinx.coroutines.withTimeoutOrNull(2500L) {
+                        val resolved = kotlinx.coroutines.withTimeoutOrNull(4000L) {
                             resolveGeocoder(geocoder, bestLocation)
                         }
                         if (resolved != null) {
@@ -78,51 +78,7 @@ object LocationDetector {
             Log.e(TAG, "Error in detectCurrentLocation", e)
         }
 
-        // Clean locale and timezone-aware default if GPS hardware coordinates are unavailable
-        val defaultLocale = Locale.getDefault()
-        val tzId = java.util.TimeZone.getDefault().id.lowercase()
-        val detectedCountryCode = when {
-            defaultLocale.country.isNotBlank() -> defaultLocale.country.lowercase()
-            tzId.contains("calcutta") || tzId.contains("kolkata") || tzId.contains("india") -> "in"
-            tzId.contains("new_york") || tzId.contains("los_angeles") || tzId.contains("chicago") -> "us"
-            tzId.contains("london") -> "gb"
-            tzId.contains("dubai") -> "ae"
-            tzId.contains("tokyo") -> "jp"
-            tzId.contains("seoul") -> "kr"
-            tzId.contains("dhaka") -> "bd"
-            tzId.contains("karachi") -> "pk"
-            tzId.contains("madrid") -> "es"
-            tzId.contains("berlin") -> "de"
-            tzId.contains("paris") -> "fr"
-            tzId.contains("kuala_lumpur") -> "my"
-            else -> "in"
-        }
-
-        val (city, country) = when (detectedCountryCode) {
-            "in" -> "New Delhi" to "India"
-            "us" -> "New York" to "United States"
-            "gb" -> "London" to "United Kingdom"
-            "ae" -> "Dubai" to "United Arab Emirates"
-            "jp" -> "Tokyo" to "Japan"
-            "kr" -> "Seoul" to "South Korea"
-            "es" -> "Madrid" to "Spain"
-            "de" -> "Berlin" to "Germany"
-            "fr" -> "Paris" to "France"
-            "pk" -> "Islamabad" to "Pakistan"
-            "bd" -> "Dhaka" to "Bangladesh"
-            "my" -> "Kuala Lumpur" to "Malaysia"
-            "sg" -> "Singapore" to "Singapore"
-            "ca" -> "Toronto" to "Canada"
-            "au" -> "Sydney" to "Australia"
-            else -> "New Delhi" to "India"
-        }
-
-        return@withContext DetectedLocation(
-            city = city,
-            country = country,
-            countryCode = detectedCountryCode,
-            fullString = "$city, $country"
-        )
+        return@withContext null
     }
 
     private suspend fun resolveGeocoder(geocoder: Geocoder, location: Location): DetectedLocation? {

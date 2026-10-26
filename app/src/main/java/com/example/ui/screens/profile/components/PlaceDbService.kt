@@ -138,19 +138,18 @@ object PlaceDbService {
 
     fun getPopularCities(countryCode: String?): List<PlaceSettlement> {
         val code = countryCode?.lowercase()?.trim().orEmpty()
+        if (code.isBlank()) return emptyList()
         val countryPopular = settlements.filter { it.countryCode == code && it.isPopular }
         if (countryPopular.isNotEmpty()) return countryPopular
 
         val allOfCountry = settlements.filter { it.countryCode == code }
-        if (allOfCountry.isNotEmpty()) return allOfCountry.take(6)
-
-        return settlements.filter { it.countryCode == "in" && it.isPopular }
+        return allOfCountry.take(6)
     }
 
     fun getCitiesForCountry(countryCode: String?): List<PlaceSettlement> {
         val code = countryCode?.lowercase()?.trim().orEmpty()
-        val list = settlements.filter { it.countryCode == code }
-        return if (list.isNotEmpty()) list else settlements.filter { it.countryCode == "in" }
+        if (code.isBlank()) return emptyList()
+        return settlements.filter { it.countryCode == code }
     }
 
     fun searchSettlements(query: String, countryCode: String?): List<PlaceSettlement> {
@@ -161,19 +160,10 @@ object PlaceDbService {
             return getCitiesForCountry(code)
         }
 
-        val inCountry = settlements.filter {
+        return settlements.filter {
             (code.isBlank() || it.countryCode == code) &&
                 (it.name.lowercase().contains(q) || it.adminRegion.lowercase().contains(q))
         }
-
-        val otherCountry = if (code.isNotBlank()) {
-            settlements.filter {
-                it.countryCode != code &&
-                    (it.name.lowercase().contains(q) || it.adminRegion.lowercase().contains(q) || it.countryName.lowercase().contains(q))
-            }
-        } else emptyList()
-
-        return inCountry + otherCountry
     }
 
     @SuppressLint("MissingPermission")
@@ -196,27 +186,23 @@ object PlaceDbService {
                 val addresses = geocoder.getFromLocation(bestLocation.latitude, bestLocation.longitude, 1)
                 val addr = addresses?.firstOrNull()
                 if (addr != null) {
-                    val city = addr.locality ?: addr.subAdminArea ?: addr.adminArea ?: "Ghaziabad"
-                    val state = addr.adminArea ?: ""
-                    val countryCode = addr.countryCode?.lowercase() ?: "in"
-                    val countryName = addr.countryName ?: "India"
-                    return@withContext PlaceSettlement(
-                        name = city,
-                        adminRegion = state,
-                        countryCode = countryCode,
-                        countryName = countryName,
-                        isPopular = false
-                    )
+                    val city = addr.locality ?: addr.subAdminArea ?: addr.adminArea
+                    if (city != null) {
+                        val state = addr.adminArea ?: ""
+                        val countryCode = addr.countryCode?.lowercase() ?: ""
+                        val countryName = addr.countryName ?: ""
+                        return@withContext PlaceSettlement(
+                            name = city,
+                            adminRegion = state,
+                            countryCode = countryCode,
+                            countryName = countryName,
+                            isPopular = false
+                        )
+                    }
                 }
             }
         } catch (_: Exception) {}
 
-        return@withContext PlaceSettlement(
-            name = "Ghaziabad",
-            adminRegion = "Uttar Pradesh",
-            countryCode = "in",
-            countryName = "India",
-            isPopular = false
-        )
+        return@withContext null
     }
 }

@@ -29,6 +29,11 @@ import androidx.compose.ui.unit.sp
 import com.example.ui.components.CircleFlag
 import kotlinx.coroutines.launch
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.example.ui.components.LocationConsentDialog
+import com.example.util.LocationDetector
+
 private val TextPrimary = Color(0xFF111827)
 private val TextSecondary = Color(0xFF4B5563)
 private val TextPlaceholder = Color(0xFF9CA3AF)
@@ -50,12 +55,79 @@ fun ChooseCitySheet(
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedCityName by remember { mutableStateOf(currentCity) }
-    var detectedCity by remember { mutableStateOf("Ghaziabad, Uttar Pradesh") }
+    var detectedCitySubtext by remember { mutableStateOf("Tap to detect device location") }
     var isDetectingLocation by remember { mutableStateOf(false) }
+    var showConsentDialog by remember { mutableStateOf(false) }
 
     // Dialog state for manual city input
     var showManualInputDialog by remember { mutableStateOf(false) }
     var manualCityInput by remember { mutableStateOf("") }
+
+    // Location Permission Launcher
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val fineGranted = permissions[android.Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val coarseGranted = permissions[android.Manifest.permission.ACCESS_COARSE_LOCATION] == true
+
+        if (fineGranted || coarseGranted) {
+            if (!LocationDetector.isGpsEnabled(context)) {
+                Toast.makeText(context, "Location services (GPS) disabled on device", Toast.LENGTH_SHORT).show()
+                detectedCitySubtext = "GPS disabled in settings"
+                return@rememberLauncherForActivityResult
+            }
+
+            coroutineScope.launch {
+                isDetectingLocation = true
+                detectedCitySubtext = "Detecting GPS location..."
+                val detected = LocationDetector.detectCurrentLocation(context)
+                isDetectingLocation = false
+
+                if (detected != null && detected.city.isNotBlank()) {
+                    selectedCityName = detected.city
+                    detectedCitySubtext = "${detected.city}, ${detected.country}"
+                    onCitySelected(detected.city)
+                    Toast.makeText(context, "Detected: ${detected.city}, ${detected.country}", Toast.LENGTH_SHORT).show()
+                    onDismiss()
+                } else {
+                    detectedCitySubtext = "Could not resolve GPS location"
+                    Toast.makeText(context, "Could not resolve location. Please select city manually.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        } else {
+            detectedCitySubtext = "Permission denied"
+            Toast.makeText(context, "Location permission denied. Please select city manually.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun triggerLocationDetection() {
+        if (!LocationDetector.hasLocationPermission(context)) {
+            showConsentDialog = true
+        } else {
+            if (!LocationDetector.isGpsEnabled(context)) {
+                Toast.makeText(context, "Location services (GPS) disabled on device", Toast.LENGTH_SHORT).show()
+                return
+            }
+
+            coroutineScope.launch {
+                isDetectingLocation = true
+                detectedCitySubtext = "Detecting GPS location..."
+                val detected = LocationDetector.detectCurrentLocation(context)
+                isDetectingLocation = false
+
+                if (detected != null && detected.city.isNotBlank()) {
+                    selectedCityName = detected.city
+                    detectedCitySubtext = "${detected.city}, ${detected.country}"
+                    onCitySelected(detected.city)
+                    Toast.makeText(context, "Detected: ${detected.city}, ${detected.country}", Toast.LENGTH_SHORT).show()
+                    onDismiss()
+                } else {
+                    detectedCitySubtext = "Could not resolve GPS location"
+                    Toast.makeText(context, "Could not resolve location. Please select city manually.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
 
     // Popular cities filtered strictly for active country
     val popularCities = remember(currentCountryCode) {
@@ -67,18 +139,11 @@ fun ChooseCitySheet(
         PlaceDbService.searchSettlements(searchQuery, currentCountryCode)
     }
 
-    // Auto-detect current location on first open
-    LaunchedEffect(Unit) {
-        coroutineScope.launch {
-            val detected = PlaceDbService.detectCurrentLocation(context)
-            if (detected != null) {
-                detectedCity = "${detected.name}, ${detected.adminRegion}"
-            }
-        }
-    }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        sheetState = sheetState,
         containerColor = Color.White,
         dragHandle = {
             Box(
@@ -96,6 +161,7 @@ fun ChooseCitySheet(
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
                 .navigationBarsPadding()
+                .imePadding()
         ) {
             // Header: Title, Country dropdown pill, Done button
             Row(
@@ -243,17 +309,7 @@ fun ChooseCitySheet(
                             .background(Color(0xFFFFFBEB))
                             .border(1.dp, Color(0xFFFEF3C7), RoundedCornerShape(14.dp))
                             .clickable {
-                                coroutineScope.launch {
-                                    isDetectingLocation = true
-                                    val loc = PlaceDbService.detectCurrentLocation(context)
-                                    isDetectingLocation = false
-                                    if (loc != null) {
-                                        selectedCityName = loc.name
-                                        onCitySelected(loc.name)
-                                        Toast.makeText(context, "Location detected: ${loc.name}", Toast.LENGTH_SHORT).show()
-                                        onDismiss()
-                                    }
-                                }
+                                triggerLocationDetection()
                             }
                             .padding(14.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -285,7 +341,7 @@ fun ChooseCitySheet(
                                     color = TextPrimary
                                 )
                                 Text(
-                                    text = detectedCity,
+                                    text = detectedCitySubtext,
                                     fontSize = 12.sp,
                                     color = TextSecondary
                                 )
@@ -575,6 +631,21 @@ fun ChooseCitySheet(
                 TextButton(onClick = { showManualInputDialog = false }) {
                     Text("Cancel", color = TextSecondary)
                 }
+            }
+        )
+    }
+
+    if (showConsentDialog) {
+        LocationConsentDialog(
+            onDismiss = { showConsentDialog = false },
+            onConfirmConsent = {
+                showConsentDialog = false
+                locationPermissionLauncher.launch(
+                    arrayOf(
+                        android.Manifest.permission.ACCESS_FINE_LOCATION,
+                        android.Manifest.permission.ACCESS_COARSE_LOCATION
+                    )
+                )
             }
         )
     }

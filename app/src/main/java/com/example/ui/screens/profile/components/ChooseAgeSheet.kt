@@ -38,8 +38,11 @@ fun ChooseAgeSheet(
 
     val quickPicks = listOf(18, 21, 25, 28, 32)
 
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        sheetState = sheetState,
         containerColor = Color.White,
         dragHandle = {
             Box(
@@ -56,7 +59,8 @@ fun ChooseAgeSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp)
-                .navigationBarsPadding(),
+                .navigationBarsPadding()
+                .imePadding(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Title

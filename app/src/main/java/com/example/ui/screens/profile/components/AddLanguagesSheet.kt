@@ -24,6 +24,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.components.getLanguageBadgeStyle
 import com.example.ui.screens.Language
 import com.example.ui.screens.LanguageData
 
@@ -74,36 +75,11 @@ fun AddLanguagesSheet(
         }
     }
 
-    fun getBadgeBgColor(name: String): Color {
-        return when (name.lowercase()) {
-            "japanese" -> Color(0xFFFFE4E6)
-            "french" -> Color(0xFFE0F2FE)
-            "german" -> Color(0xFFFEF3C7)
-            "russian" -> Color(0xFFF3E8FF)
-            "hindi" -> Color(0xFFFED7AA)
-            "chinese" -> Color(0xFFFFEDD5)
-            "spanish" -> Color(0xFFDCFCE7)
-            "english" -> Color(0xFFE0E7FF)
-            else -> Color(0xFFF3F4F6)
-        }
-    }
-
-    fun getBadgeTextColor(name: String): Color {
-        return when (name.lowercase()) {
-            "japanese" -> Color(0xFFBE123C)
-            "french" -> Color(0xFF0369A1)
-            "german" -> Color(0xFFB45309)
-            "russian" -> Color(0xFF7E22CE)
-            "hindi" -> Color(0xFFC2410C)
-            "chinese" -> Color(0xFFC2410C)
-            "spanish" -> Color(0xFF15803D)
-            "english" -> Color(0xFF4338CA)
-            else -> TextPrimary
-        }
-    }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        sheetState = sheetState,
         containerColor = Color.White,
         dragHandle = {
             Box(
@@ -121,6 +97,7 @@ fun AddLanguagesSheet(
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
                 .navigationBarsPadding()
+                .imePadding()
         ) {
             Text(
                 text = "Add languages",
@@ -221,18 +198,19 @@ fun AddLanguagesSheet(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
+                                val badgeStyle = getLanguageBadgeStyle(lang.name)
                                 Box(
                                     modifier = Modifier
                                         .size(38.dp)
                                         .clip(CircleShape)
-                                        .background(getBadgeBgColor(lang.name)),
+                                        .background(badgeStyle.bgColor),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         text = lang.initials,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = getBadgeTextColor(lang.name)
+                                        color = badgeStyle.textColor
                                     )
                                 }
 

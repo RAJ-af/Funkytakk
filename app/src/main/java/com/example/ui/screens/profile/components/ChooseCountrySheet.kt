@@ -60,8 +60,11 @@ fun ChooseCountrySheet(
         }
     }
 
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        sheetState = sheetState,
         containerColor = Color.White,
         dragHandle = {
             Box(
@@ -79,6 +82,7 @@ fun ChooseCountrySheet(
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
                 .navigationBarsPadding()
+                .imePadding()
         ) {
             // Header: Title & Done Button
             Row(

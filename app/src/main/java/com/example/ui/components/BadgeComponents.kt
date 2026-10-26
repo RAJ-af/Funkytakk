@@ -288,3 +288,40 @@ fun BadgeDetailDialog(
         }
     }
 }
+
+/**
+ * Tasteful pastel color generator for all language badges
+ */
+data class LanguageBadgeStyle(val bgColor: Color, val textColor: Color)
+
+fun getLanguageBadgeStyle(languageName: String): LanguageBadgeStyle {
+    val clean = languageName.substringBefore("(").trim().lowercase()
+    return when (clean) {
+        "japanese" -> LanguageBadgeStyle(Color(0xFFFFE4E6), Color(0xFFBE123C))
+        "french" -> LanguageBadgeStyle(Color(0xFFE0F2FE), Color(0xFF0369A1))
+        "german" -> LanguageBadgeStyle(Color(0xFFFEF3C7), Color(0xFFB45309))
+        "russian" -> LanguageBadgeStyle(Color(0xFFF3E8FF), Color(0xFF7E22CE))
+        "hindi" -> LanguageBadgeStyle(Color(0xFFFED7AA), Color(0xFFC2410C))
+        "chinese" -> LanguageBadgeStyle(Color(0xFFFFEDD5), Color(0xFF9A3412))
+        "spanish" -> LanguageBadgeStyle(Color(0xFFDCFCE7), Color(0xFF15803D))
+        "english" -> LanguageBadgeStyle(Color(0xFFE0E7FF), Color(0xFF4338CA))
+        "arabic" -> LanguageBadgeStyle(Color(0xFFCCFBF1), Color(0xFF0F766E))
+        "korean" -> LanguageBadgeStyle(Color(0xFFFCE7F3), Color(0xFFBE185D))
+        "italian" -> LanguageBadgeStyle(Color(0xFFD1FAE5), Color(0xFF047857))
+        "portuguese" -> LanguageBadgeStyle(Color(0xFFFEF9C3), Color(0xFFA16207))
+        else -> {
+            val hash = kotlin.math.abs(clean.hashCode())
+            val palettes = listOf(
+                LanguageBadgeStyle(Color(0xFFE0F2FE), Color(0xFF0369A1)),
+                LanguageBadgeStyle(Color(0xFFF3E8FF), Color(0xFF7E22CE)),
+                LanguageBadgeStyle(Color(0xFFFED7AA), Color(0xFFC2410C)),
+                LanguageBadgeStyle(Color(0xFFDCFCE7), Color(0xFF15803D)),
+                LanguageBadgeStyle(Color(0xFFE0E7FF), Color(0xFF4338CA)),
+                LanguageBadgeStyle(Color(0xFFCCFBF1), Color(0xFF0F766E)),
+                LanguageBadgeStyle(Color(0xFFFCE7F3), Color(0xFFBE185D)),
+                LanguageBadgeStyle(Color(0xFFFEF3C7), Color(0xFFB45309))
+            )
+            palettes[hash % palettes.size]
+        }
+    }
+}

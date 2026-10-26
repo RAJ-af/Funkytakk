@@ -36,8 +36,11 @@ fun SelectGenderSheet(
 ) {
     var selectedGender by remember { mutableStateOf(if (initialGender.equals("Female", ignoreCase = true)) "Female" else "Male") }
 
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        sheetState = sheetState,
         containerColor = Color.White,
         dragHandle = {
             Box(
@@ -54,7 +57,8 @@ fun SelectGenderSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp)
-                .navigationBarsPadding(),
+                .navigationBarsPadding()
+                .imePadding(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Title

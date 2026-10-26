@@ -93,7 +93,7 @@ fun EditProfileScreen(
     var editGender by remember { mutableStateOf(currentUserProfile.gender ?: "Male") }
     var editCountry by remember { mutableStateOf(currentUserProfile.country ?: "India") }
     var editCountryCode by remember { mutableStateOf(currentUserProfile.countryCode ?: "in") }
-    var editCity by remember { mutableStateOf(currentUserProfile.city ?: savedCity ?: "Ghaziabad") }
+    var editCity by remember { mutableStateOf(currentUserProfile.city ?: savedCity ?: "") }
 
     // Formatted Languages List e.g. ["Hindi (Advanced)", "English (Advanced)"]
     val userLanguages = remember { mutableStateListOf<String>() }
@@ -179,6 +179,14 @@ fun EditProfileScreen(
     ) { uri ->
         if (uri != null) {
             editAvatar = uri.toString()
+        }
+    }
+
+    val coverPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            editCover = uri.toString()
         }
     }
 
@@ -366,20 +374,115 @@ fun EditProfileScreen(
             ) {
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Avatar with Camera Badge Overlay
+                // Cover Banner & Avatar Header Box
                 Box(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentAlignment = Alignment.Center
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp)
                 ) {
-                    Box(modifier = Modifier.size(104.dp)) {
+                    // Cover Banner Preview
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(130.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(
+                                androidx.compose.ui.graphics.Brush.linearGradient(
+                                    listOf(Color(0xFFFEF3C7), Color(0xFFFDE68A), Color(0xFFF8C63D))
+                                )
+                            )
+                            .border(1.dp, Color(0xFFE5E7DE), RoundedCornerShape(16.dp))
+                            .clickable {
+                                coverPickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            }
+                    ) {
+                        if (editCover.isNotBlank()) {
+                            AsyncImage(
+                                model = editCover,
+                                contentDescription = "Profile Banner",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier
+                                        .background(Color.Black.copy(alpha = 0.25f), RoundedCornerShape(20.dp))
+                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.AddPhotoAlternate,
+                                        contentDescription = "Add Cover",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = "Add Profile Banner",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color.White
+                                    )
+                                }
+                            }
+                        }
+
+                        // Change Banner badge on top-end
+                        Box(
+                            modifier = Modifier
+                                .padding(10.dp)
+                                .align(Alignment.TopEnd)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color.Black.copy(alpha = 0.55f))
+                                .clickable {
+                                    coverPickerLauncher.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                    )
+                                }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PhotoCamera,
+                                    contentDescription = "Change Cover",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "Banner",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                        }
+                    }
+
+                    // Avatar overlapping bottom center
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .offset(y = 38.dp)
+                            .size(92.dp)
+                    ) {
                         AsyncImage(
                             model = resolveAvatarModel(editAvatar),
                             contentDescription = "User Avatar",
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
-                                .size(104.dp)
+                                .size(92.dp)
                                 .clip(CircleShape)
-                                .border(2.5.dp, Color(0xFFE5E7EB), CircleShape)
+                                .border(3.dp, Color.White, CircleShape)
                                 .clickable {
                                     avatarPickerLauncher.launch(
                                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
@@ -390,7 +493,7 @@ fun EditProfileScreen(
                         // Camera overlay badge
                         Box(
                             modifier = Modifier
-                                .size(34.dp)
+                                .size(30.dp)
                                 .align(Alignment.BottomEnd)
                                 .clip(CircleShape)
                                 .background(Color(0xFF1F2937))
@@ -406,13 +509,13 @@ fun EditProfileScreen(
                                 imageVector = Icons.Default.PhotoCamera,
                                 contentDescription = "Change Avatar",
                                 tint = Color.White,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(15.dp)
                             )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(44.dp))
 
                 // Display Name Field Card
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -823,12 +926,13 @@ fun EditProfileScreen(
                 ) {
                     userLanguages.forEach { langItem ->
                         val flagCode = getFlagForLanguage(langItem)
+                        val badgeStyle = com.example.ui.components.getLanguageBadgeStyle(langItem)
 
                         Row(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(20.dp))
-                                .background(Color(0xFFF3F4ED))
-                                .border(1.dp, Color(0xFFE5E7DE), RoundedCornerShape(20.dp))
+                                .background(badgeStyle.bgColor)
+                                .border(1.dp, badgeStyle.textColor.copy(alpha = 0.25f), RoundedCornerShape(20.dp))
                                 .padding(horizontal = 10.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -848,8 +952,8 @@ fun EditProfileScreen(
                             Text(
                                 text = langItem,
                                 fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = TextPrimary
+                                fontWeight = FontWeight.SemiBold,
+                                color = badgeStyle.textColor
                             )
 
                             Spacer(modifier = Modifier.width(8.dp))

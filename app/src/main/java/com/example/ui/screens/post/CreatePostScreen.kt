@@ -113,9 +113,14 @@ fun CreatePostScreen(
             isDetectingLocation = true
             selectedLocation = "Detecting Location..."
             val loc = LocationDetector.detectCurrentLocation(context)
-            selectedLocation = loc.fullString
+            if (loc != null) {
+                selectedLocation = loc.fullString
+                Toast.makeText(context, "Location tagged: ${loc.fullString}", Toast.LENGTH_SHORT).show()
+            } else {
+                selectedLocation = ""
+                Toast.makeText(context, "Could not detect GPS location", Toast.LENGTH_SHORT).show()
+            }
             isDetectingLocation = false
-            Toast.makeText(context, "Location tagged: ${loc.fullString}", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -792,9 +797,14 @@ fun CreatePostScreen(
                                                 isDetectingLocation = true
                                                 selectedLocation = "Detecting Location..."
                                                 val loc = LocationDetector.detectCurrentLocation(context)
-                                                selectedLocation = loc.fullString
+                                                if (loc != null) {
+                                                    selectedLocation = loc.fullString
+                                                    Toast.makeText(context, "Location tagged: ${loc.fullString}", Toast.LENGTH_SHORT).show()
+                                                } else {
+                                                    selectedLocation = ""
+                                                    Toast.makeText(context, "Could not detect GPS location", Toast.LENGTH_SHORT).show()
+                                                }
                                                 isDetectingLocation = false
-                                                Toast.makeText(context, "Location tagged: ${loc.fullString}", Toast.LENGTH_SHORT).show()
                                             }
                                         } else {
                                             showLocationConsentDialog = true
@@ -1023,9 +1033,14 @@ fun CreatePostScreen(
                             isDetectingLocation = true
                             selectedLocation = "Detecting Location..."
                             val loc = LocationDetector.detectCurrentLocation(context)
-                            selectedLocation = loc.fullString
+                            if (loc != null) {
+                                selectedLocation = loc.fullString
+                                Toast.makeText(context, "Location tagged: ${loc.fullString}", Toast.LENGTH_SHORT).show()
+                            } else {
+                                selectedLocation = ""
+                                Toast.makeText(context, "Could not detect GPS location", Toast.LENGTH_SHORT).show()
+                            }
                             isDetectingLocation = false
-                            Toast.makeText(context, "Location tagged: ${loc.fullString}", Toast.LENGTH_SHORT).show()
                         }
                     } else {
                         locationPermissionLauncher.launch(
