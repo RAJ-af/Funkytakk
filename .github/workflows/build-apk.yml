@@ -210,35 +210,42 @@ jobs:
       - name: Build Debug APK with Gradle
         run: gradle :app:assembleDebug --no-daemon --stacktrace
 
-      - name: Add Build Status to Summary
+      - name: Add Build Status & Direct Download Links to Summary
         if: (!cancelled()) && hashFiles('app/build/outputs/apk/debug/*.apk') != ''
         run: |
           cat << 'EOF' >> $GITHUB_STEP_SUMMARY
 
-          ## 🚀 FunkyTalk APK Build Completed!
+          ---
+
+          ## 📦 Direct APK Download Links
+
+          | Asset | Direct Link |
+          | :--- | :--- |
+          | 📱 **FunkyTalk Debug APK** | ⬇️ **[Click Here to Download app-debug.apk](https://github.com/${{ github.repository }}/releases/download/release-build-${{ github.run_number }}/app-debug.apk)** |
+          | 📦 **GitHub Release Page** | 🔗 **[Open Release Build #${{ github.run_number }}](https://github.com/${{ github.repository }}/releases/tag/release-build-${{ github.run_number }})** |
+
+          > 💡 **How to Install**:
+          > 1. Click **[Click Here to Download app-debug.apk](https://github.com/${{ github.repository }}/releases/download/release-build-${{ github.run_number }}/app-debug.apk)** to save the APK to your phone or PC.
+          > 2. You can also download the `app-debug-apk-build-${{ github.run_number }}` file from the **Artifacts** section on this Summary page.
           
-          - **Status**: ✅ Succeeded
-          - **File**: `app-debug.apk`
-          - **Download**: You can download the APK directly from the [Releases](https://github.com/${{ github.repository }}/releases) section below!
           EOF
 
-      - name: Upload APK Artifact (Optional Actions Storage)
-        if: env.UPLOAD_ACTIONS_ARTIFACTS == 'true'
+      - name: Upload APK Artifact to GitHub Summary
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
-          name: FunkyTalk-Debug-APK-${{ github.run_number }}
+          name: app-debug-apk-build-${{ github.run_number }}
           path: app/build/outputs/apk/debug/*.apk
-          retention-days: 1
+          retention-days: 3
 
-      - name: Upload Keystore and SHA Artifacts (Optional Actions Storage)
+      - name: Upload Keystore and SHA Artifacts
         if: env.UPLOAD_ACTIONS_ARTIFACTS == 'true'
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
           name: FunkyTalk-Keystore-and-SHA-${{ github.run_number }}
           path: keystore-artifacts/*
-          retention-days: 1
+          retention-days: 3
 
       - name: Create GitHub Release (Direct APK & Keystore Download)
         if: (!cancelled()) && hashFiles('app/build/outputs/apk/debug/*.apk') != ''
