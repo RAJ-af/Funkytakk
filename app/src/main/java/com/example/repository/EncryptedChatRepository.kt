@@ -148,6 +148,11 @@ object EncryptedChatRepository {
      * decrypts each message, stores it in Room, and immediately deletes it from server.
      */
     suspend fun fetchAndProcessPendingInbox(context: Context) = withContext(Dispatchers.IO) {
+        var fetchedCount = 0
+        var savedCount = 0
+        var failedCount = 0
+        var lastError: String? = null
+
         try {
             val myUserId = SupabaseSessionManager.getUserId(context) ?: return@withContext
             val token = SupabaseSessionManager.getBearerToken(context)
@@ -160,17 +165,23 @@ object EncryptedChatRepository {
             )
 
             if (!resp.isSuccessful) {
-                Log.w(TAG, "fetchAndProcessPendingInbox failed: ${resp.code()} ${resp.message()}")
+                lastError = "HTTP ${resp.code()}: ${resp.message()}"
+                Log.w(TAG, "fetchAndProcessPendingInbox failed: $lastError")
+                InboxDrainTracker.recordDrainResult(0, 0, 0, lastError)
                 return@withContext
             }
 
             val list = resp.body() ?: emptyList()
-            if (list.isEmpty()) return@withContext
+            fetchedCount = list.size
+            if (list.isEmpty()) {
+                InboxDrainTracker.recordDrainResult(0, 0, 0, null)
+                return@withContext
+            }
 
-            Log.d(TAG, "Found ${list.size} pending encrypted messages in mailbox")
+            Log.d(TAG, "Found $fetchedCount pending encrypted DM messages in mailbox")
             for (msg in list) {
                 try {
-                    processIncomingDmMessage(
+                    val ok = processIncomingDmMessage(
                         context = context,
                         token = token,
                         msgId = msg.id,
@@ -182,12 +193,18 @@ object EncryptedChatRepository {
                         storagePath = msg.storage_path,
                         createdAtIso = msg.created_at
                     )
+                    if (ok) savedCount++ else failedCount++
                 } catch (e: Exception) {
+                    failedCount++
+                    lastError = e.message
                     Log.w(TAG, "Failed to decrypt and process message ${msg.id}: ${e.message}")
                 }
             }
         } catch (e: Exception) {
+            lastError = e.message
             Log.w(TAG, "Error in fetchAndProcessPendingInbox: ${e.message}")
+        } finally {
+            InboxDrainTracker.recordDrainResult(fetchedCount, savedCount, failedCount, lastError)
         }
     }
 
@@ -234,24 +251,23 @@ object EncryptedChatRepository {
         messageType: String = "text",
         storagePath: String? = null,
         createdAtIso: String? = null
-    ) {
-        if (msgId.isBlank() || ciphertext.isBlank()) return
-
-        // Deduplication: prevent processing duplicate messages
-        if (processedMessageIds.contains(msgId)) {
-            Log.d(TAG, "Message $msgId already processed in session; skipping duplicate")
-            deleteMessageFromServer(context, token, msgId)
-            return
-        }
+    ): Boolean {
+        if (msgId.isBlank() || ciphertext.isBlank()) return false
 
         val db = database
-        if (db != null && db.messageDao().messageExists(msgId)) {
-            Log.d(TAG, "Message $msgId already exists in local DB; skipping duplicate")
+        if (db == null) {
+            Log.w(TAG, "Vault locked or database null; skipping message $msgId")
+            return false
+        }
+
+        // Deduplication
+        if (processedMessageIds.contains(msgId) || db.messageDao().messageExists(msgId)) {
+            Log.d(TAG, "Message $msgId already processed or exists in local DB; acknowledging server row")
             processedMessageIds.add(msgId)
             deleteMessageFromServer(context, token, msgId)
-            return
+            db.inboxFailureDao().deleteFailure(msgId)
+            return true
         }
-        processedMessageIds.add(msgId)
 
         val timestamp = parseTimestampToEpoch(createdAtIso)
 
@@ -260,10 +276,17 @@ object EncryptedChatRepository {
             E2EEManager.decryptMessage(context, ciphertext)
         } catch (e: Exception) {
             Log.w(TAG, "Failed to decrypt DM message $msgId: ${e.message}")
-            return
+            db.inboxFailureDao().insertFailure(
+                com.example.db.InboxFailureEntity(
+                    messageId = msgId,
+                    type = "DM",
+                    reason = "Decrypt failed: ${e.message ?: "Invalid key material"}"
+                )
+            )
+            return false
         }
 
-        // 2. Safely check if decryptedText is a reaction or 2-layer E2EE media descriptor JSON
+        // 2. Check Reaction
         val trimmed = decryptedText.trim()
         val isReaction = messageType == "reaction" || (trimmed.startsWith("{") && trimmed.endsWith("}") && (trimmed.contains("\"t\":\"reaction\"") || trimmed.contains("\"reaction\"")))
         val reactionJson = if (isReaction) {
@@ -281,8 +304,7 @@ object EncryptedChatRepository {
             val op = reactionJson.optString("op", "set")
             val rxTs = reactionJson.optLong("ts", timestamp)
 
-            if (targetId.isNotBlank() && db != null) {
-                // Ignore reactions whose target message isn't in the local DB
+            if (targetId.isNotBlank()) {
                 if (db.messageDao().messageExists(targetId)) {
                     if (op == "remove") {
                         db.dmMessageReactionDao().deleteReaction(targetId, senderId)
@@ -296,8 +318,6 @@ object EncryptedChatRepository {
                                 ts = rxTs
                             )
                         )
-                        // Reaction messages never create a chat bubble, never count as unread, make no sound.
-                        // Notify only when someone reacts to MY message!
                         val targetMsg = db.messageDao().getMessage(targetId)
                         val myUserId = SupabaseSessionManager.getUserId(context)
                         if (targetMsg?.isOutgoing == true && senderId != myUserId &&
@@ -325,10 +345,13 @@ object EncryptedChatRepository {
                     }
                 }
             }
+            processedMessageIds.add(msgId)
             deleteMessageFromServer(context, token, msgId)
-            return
+            db.inboxFailureDao().deleteFailure(msgId)
+            return true
         }
 
+        // 3. Media or Text
         val mediaDescriptorJson = if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
             try {
                 val json = JSONObject(trimmed)
@@ -336,26 +359,23 @@ object EncryptedChatRepository {
             } catch (_: Exception) {
                 null
             }
-        } else {
-            null
-        }
+        } else null
 
-        if (mediaDescriptorJson != null) {
-            processIncomingMediaDescriptor(
-                context = context,
-                token = token,
-                msgId = msgId,
-                convId = convId,
-                senderId = senderId,
-                recipientId = recipientId,
-                descriptorJson = mediaDescriptorJson,
-                messageType = messageType.ifBlank { "image" },
-                storagePath = storagePath ?: "",
-                timestamp = timestamp
-            )
-        } else {
-            // Text or legacy plaintext message (e.g. "[imgs]...", "[img]...", plain text)
-            try {
+        return try {
+            if (mediaDescriptorJson != null) {
+                processIncomingMediaDescriptor(
+                    context = context,
+                    token = token,
+                    msgId = msgId,
+                    convId = convId,
+                    senderId = senderId,
+                    recipientId = recipientId,
+                    descriptorJson = mediaDescriptorJson,
+                    messageType = messageType.ifBlank { "image" },
+                    storagePath = storagePath ?: "",
+                    timestamp = timestamp
+                )
+            } else {
                 saveDecryptedMessageLocally(
                     context = context,
                     messageId = msgId,
@@ -366,9 +386,20 @@ object EncryptedChatRepository {
                     timestamp = timestamp
                 )
                 deleteMessageFromServer(context, token, msgId)
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to save decrypted text message $msgId locally: ${e.message}")
             }
+            processedMessageIds.add(msgId)
+            db.inboxFailureDao().deleteFailure(msgId)
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to save decrypted text message $msgId locally: ${e.message}")
+            db.inboxFailureDao().insertFailure(
+                com.example.db.InboxFailureEntity(
+                    messageId = msgId,
+                    type = "DM",
+                    reason = "Save failed: ${e.message}"
+                )
+            )
+            false
         }
     }
 
@@ -549,70 +580,75 @@ object EncryptedChatRepository {
     ) {
         val rawPath = descriptorJson.optString("storage_path").ifBlank { storagePath }
         val cleanPath = cleanStoragePath(rawPath).ifBlank { "$convId/$msgId" }
+        val keyBase64 = descriptorJson.optString("media_key")
+        val nonceBase64 = descriptorJson.optString("media_nonce")
+        val mimeType = descriptorJson.optString("mime_type", if (messageType == "image") "image/jpeg" else "audio/aac")
+        val durationSecs = descriptorJson.optInt("duration_seconds", 0)
 
-        try {
-            val keyBase64 = descriptorJson.optString("media_key")
-            val nonceBase64 = descriptorJson.optString("media_nonce")
-            val mimeType = descriptorJson.optString("mime_type", if (messageType == "image") "image/jpeg" else "audio/aac")
-            val durationSecs = descriptorJson.optInt("duration_seconds", 0)
+        val initialPlaceholder = if (messageType == "image") "[img]downloading..." else "[voice]downloading...|$durationSecs"
 
-            if (keyBase64.isBlank() || nonceBase64.isBlank()) {
-                throw IllegalStateException("Missing media_key or media_nonce in descriptor")
+        // 1. Save local message record in Room FIRST (Strict Order of Operations)
+        saveDecryptedMessageLocally(
+            context = context,
+            messageId = msgId,
+            conversationId = convId,
+            senderId = senderId,
+            recipientId = recipientId,
+            plaintext = initialPlaceholder,
+            timestamp = timestamp
+        )
+
+        // 2. Acknowledge server row ONLY after local record is written
+        deleteMessageFromServer(context, token, msgId)
+
+        // 3. Download & decrypt media payload in background with retries
+        scope.launch(Dispatchers.IO) {
+            try {
+                if (keyBase64.isBlank() || nonceBase64.isBlank()) return@launch
+                val keyBytes = Base64.decode(keyBase64, Base64.DEFAULT)
+                val nonceBytes = Base64.decode(nonceBase64, Base64.DEFAULT)
+
+                SupabaseSessionManager.ensureActiveSession(context)
+                val authToken = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                    ?: (SupabaseSessionManager.getAccessToken(context)?.let { "Bearer $it" })
+                    ?: token
+
+                val encryptedBlobBytes = downloadDmMediaBlob(
+                    context = context,
+                    authToken = authToken,
+                    rawPath = rawPath,
+                    cleanPath = cleanPath,
+                    convId = convId,
+                    msgId = msgId
+                )
+
+                if (encryptedBlobBytes != null) {
+                    val rawBytes = E2EEMediaManager.decryptMediaPayload(encryptedBlobBytes, keyBytes, nonceBytes)
+                    val localFile = saveLocalMediaFile(context, msgId, rawBytes, mimeType)
+                    val localText = if (messageType == "image") {
+                        "[img]file://${localFile.absolutePath}"
+                    } else {
+                        "[voice]file://${localFile.absolutePath}|$durationSecs"
+                    }
+
+                    saveDecryptedMessageLocally(
+                        context = context,
+                        messageId = msgId,
+                        conversationId = convId,
+                        senderId = senderId,
+                        recipientId = recipientId,
+                        plaintext = localText,
+                        timestamp = timestamp
+                    )
+
+                    deleteStorageObjectFromServer(context, authToken, cleanPath)
+                    Log.d(TAG, "Successfully downloaded, decrypted and updated media message $msgId")
+                } else {
+                    Log.w(TAG, "Media blob download returned null for $msgId; placeholder remains")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Background media processing failed for $msgId: ${e.message}")
             }
-
-            val keyBytes = Base64.decode(keyBase64, Base64.DEFAULT)
-            val nonceBytes = Base64.decode(nonceBase64, Base64.DEFAULT)
-
-            // Ensure active session & authenticated token
-            SupabaseSessionManager.ensureActiveSession(context)
-            val authToken = SupabaseSessionManager.getAuthenticatedBearerToken(context)
-                ?: (SupabaseSessionManager.getAccessToken(context)?.let { "Bearer $it" })
-                ?: token
-
-            val encryptedBlobBytes = downloadDmMediaBlob(
-                context = context,
-                authToken = authToken,
-                rawPath = rawPath,
-                cleanPath = cleanPath,
-                convId = convId,
-                msgId = msgId
-            )
-            if (encryptedBlobBytes == null) {
-                Log.w(TAG, "Media blob unavailable at path $cleanPath; rendering placeholder in message bubble")
-                saveLocalPlaceholderAndCleanup(context, authToken, msgId, convId, senderId, recipientId, cleanPath, timestamp)
-                return
-            }
-
-            // Decrypt raw bytes with AES-256-GCM using media_key + media_nonce
-            val rawBytes = E2EEMediaManager.decryptMediaPayload(encryptedBlobBytes, keyBytes, nonceBytes)
-
-            // Save file into local encrypted vault directory
-            val localFile = saveLocalMediaFile(context, msgId, rawBytes, mimeType)
-            val localText = if (messageType == "image") {
-                "[img]file://${localFile.absolutePath}"
-            } else {
-                "[voice]file://${localFile.absolutePath}|$durationSecs"
-            }
-
-            saveDecryptedMessageLocally(
-                context = context,
-                messageId = msgId,
-                conversationId = convId,
-                senderId = senderId,
-                recipientId = recipientId,
-                plaintext = localText,
-                timestamp = timestamp
-            )
-
-            // Purge server copy: delete dm_messages row AND Storage object
-            deleteMessageFromServer(context, authToken, msgId)
-            deleteStorageObjectFromServer(context, authToken, cleanPath)
-
-            Log.d(TAG, "Successfully processed and purged 2-layer encrypted media message $msgId")
-
-        } catch (e: Exception) {
-            Log.w(TAG, "Error processing encrypted media message $msgId: ${e.message}", e)
-            saveLocalPlaceholderAndCleanup(context, token, msgId, convId, senderId, recipientId, cleanPath, timestamp)
         }
     }
 

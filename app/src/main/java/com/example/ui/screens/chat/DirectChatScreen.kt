@@ -339,6 +339,12 @@ fun DirectChatScreen(
             items
         }
 
+        LaunchedEffect(timelineItems.size) {
+            if (timelineItems.isNotEmpty()) {
+                listState.scrollToItem(timelineItems.size - 1)
+            }
+        }
+
         val allMediaItems = remember(rawMessages) {
             rawMessages.filter { it.text.startsWith("[img]") || it.text.startsWith("[imgs]") }
                 .map { msg ->

@@ -2077,6 +2077,11 @@ object GroupChatRepository {
     suspend fun drainPendingGroupMessages(context: Context) = fetchAndProcessPendingGroupMessages(context)
 
     suspend fun fetchAndProcessPendingGroupMessages(context: Context) = withContext(Dispatchers.IO) {
+        var fetchedCount = 0
+        var savedCount = 0
+        var failedCount = 0
+        var lastError: String? = null
+
         try {
             val myUserId = SupabaseSessionManager.getUserId(context) ?: return@withContext
             val token = SupabaseSessionManager.getAuthenticatedBearerToken(context) ?: return@withContext
@@ -2087,15 +2092,36 @@ object GroupChatRepository {
                 recipientIdFilter = "eq.$myUserId"
             )
 
-            if (!resp.isSuccessful || resp.body().isNullOrEmpty()) return@withContext
-            val pendingList = resp.body()!!
+            if (!resp.isSuccessful) {
+                lastError = "HTTP ${resp.code()}: ${resp.message()}"
+                Log.w(TAG, "fetchAndProcessPendingGroupMessages failed: $lastError")
+                InboxDrainTracker.recordDrainResult(0, 0, 0, lastError)
+                return@withContext
+            }
 
-            Log.d(TAG, "Draining ${pendingList.size} pending group_message_recipients rows")
+            val pendingList = resp.body() ?: emptyList()
+            fetchedCount = pendingList.size
+            if (pendingList.isEmpty()) {
+                InboxDrainTracker.recordDrainResult(0, 0, 0, null)
+                return@withContext
+            }
+
+            Log.d(TAG, "Draining $fetchedCount pending group_message_recipients rows")
             for (row in pendingList) {
-                processSingleRecipientRow(context, token, myUserId, row)
+                try {
+                    val ok = processSingleRecipientRow(context, token, myUserId, row)
+                    if (ok) savedCount++ else failedCount++
+                } catch (e: Exception) {
+                    failedCount++
+                    lastError = e.message
+                    Log.w(TAG, "Exception processing group recipient row ${row.id}: ${e.message}")
+                }
             }
         } catch (e: Exception) {
+            lastError = e.message
             Log.e(TAG, "Error in fetchAndProcessPendingGroupMessages", e)
+        } finally {
+            InboxDrainTracker.recordDrainResult(fetchedCount, savedCount, failedCount, lastError)
         }
     }
 
@@ -2104,172 +2130,173 @@ object GroupChatRepository {
         token: String,
         myUserId: String,
         row: SupabaseGroupRecipientRow
-    ) {
-        if (row.id.isNotBlank() && processedRecipientIds.contains(row.id)) {
-            deleteRecipientRow(token, row.id)
-            return
+    ): Boolean {
+        val rowId = row.id
+        val groupId = row.group_id?.trim().orEmpty()
+        val senderId = row.sender_id?.trim().orEmpty()
+        val rowMessageType = row.message_type?.trim()?.ifBlank { "text" } ?: "text"
+        val msgId = row.message_id.ifBlank { rowId }
+
+        if (rowId.isNotBlank() && processedRecipientIds.contains(rowId)) {
+            Log.d(TAG, "[GroupInbox] id=$rowId, message_type=$rowMessageType, group_id=$groupId, result=saved, error=already processed")
+            deleteRecipientRow(token, rowId)
+            database?.inboxFailureDao()?.deleteFailure(rowId)
+            return true
         }
 
-        try {
-            val groupId = row.group_id?.trim().orEmpty()
-            val senderId = row.sender_id?.trim().orEmpty()
-            val rowMessageType = row.message_type?.trim()?.ifBlank { "text" } ?: "text"
-            val msgId = row.message_id.ifBlank { row.id }
+        if (groupId.isBlank()) {
+            Log.w(TAG, "[GroupInbox] id=$rowId, message_type=$rowMessageType, group_id=blank, result=other, error=Group ID is blank")
+            deleteRecipientRow(token, rowId)
+            return true
+        }
 
-            if (groupId.isBlank()) {
-                deleteRecipientRow(token, row.id)
-                return
+        val db = database
+        if (db == null) {
+            Log.w(TAG, "[GroupInbox] id=$rowId, message_type=$rowMessageType, group_id=$groupId, result=other, error=Database not unlocked")
+            return false
+        }
+
+        // Deduplication: if message already exists locally
+        val isFromMe = senderId == myUserId
+        if (db.groupMessageDao().messageExists(msgId)) {
+            Log.d(TAG, "[GroupInbox] id=$rowId, message_type=$rowMessageType, group_id=$groupId, result=saved, error=message exists locally")
+            processedRecipientIds.add(rowId)
+            deleteRecipientRow(token, rowId)
+            db.inboxFailureDao().deleteFailure(rowId)
+            return true
+        }
+
+        // Auto-fetch unknown groups using get_my_groups RPC
+        var localGroup = db.groupConversationDao().getGroup(groupId)
+        if (localGroup == null) {
+            Log.d(TAG, "[GroupInbox] Group $groupId not found locally; auto-fetching user groups via get_my_groups")
+            syncUserGroups(context)
+            localGroup = db.groupConversationDao().getGroup(groupId)
+            if (localGroup == null) {
+                val errMsg = "Group $groupId not found after sync"
+                Log.w(TAG, "[GroupInbox] id=$rowId, message_type=$rowMessageType, group_id=$groupId, result=unknown_group, error=$errMsg")
+                db.inboxFailureDao().insertFailure(
+                    com.example.db.InboxFailureEntity(
+                        messageId = rowId,
+                        type = "GROUP",
+                        reason = "Unknown group: $groupId"
+                    )
+                )
+                return false
             }
+        }
 
-            val db = database ?: return
+        // Decrypt ciphertext
+        val plaintext = try {
+            E2EEManager.decryptMessage(context, row.ciphertext)
+        } catch (e: Exception) {
+            val errMsg = e.message ?: "Decryption failed"
+            Log.w(TAG, "[GroupInbox] id=$rowId, message_type=$rowMessageType, group_id=$groupId, result=decrypt_failed, error=$errMsg")
+            db.inboxFailureDao().insertFailure(
+                com.example.db.InboxFailureEntity(
+                    messageId = rowId,
+                    type = "GROUP",
+                    reason = "Decrypt failed: $errMsg"
+                )
+            )
+            return false
+        }
 
-            // If sent by self and already saved locally during sendGroupMessage, just delete the inbox row
-            val isFromMe = senderId == myUserId
-            if (db.groupMessageDao().messageExists(msgId)) {
-                processedRecipientIds.add(row.id)
-                deleteRecipientRow(token, row.id)
-                return
-            }
+        val autoDownload = localGroup.mediaAutoDownload
+        val disSec = localGroup.disappearingSeconds
+        val now = System.currentTimeMillis()
+        val expiresAt = if (disSec > 0) now + disSec * 1000L else null
 
-            // Decrypt ciphertext using local Tink private key
-            val plaintext = E2EEManager.decryptMessage(context, row.ciphertext)
+        var displayText = plaintext
+        var localMediaPath: String? = null
+        var resolvedType = rowMessageType
+        var savedKey: String? = null
+        var savedNonce: String? = null
+        var savedMime: String? = null
+        var savedStoragePath: String? = row.storage_path
+        val mentionsList = mutableListOf<String>()
+        var replyToId: String? = null
+        var replyToSenderId: String? = null
+        var replyToSenderName: String? = null
+        var replyToPreview: String? = null
 
-            val localGroup = db.groupConversationDao().getGroup(groupId)
-            val autoDownload = localGroup?.mediaAutoDownload ?: true
-            val disSec = localGroup?.disappearingSeconds ?: 0
-            val now = System.currentTimeMillis()
-            val expiresAt = if (disSec > 0) now + disSec * 1000L else null
+        val trimmed = plaintext.trim()
+        val jsonEnvelope = if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+            try { JSONObject(trimmed) } catch (_: Exception) { null }
+        } else null
 
-            var displayText = plaintext
-            var localMediaPath: String? = null
-            var resolvedType = rowMessageType
-            var savedKey: String? = null
-            var savedNonce: String? = null
-            var savedMime: String? = null
-            var savedStoragePath: String? = row.storage_path
-            val mentionsList = mutableListOf<String>()
-            var replyToId: String? = null
-            var replyToSenderId: String? = null
-            var replyToSenderName: String? = null
-            var replyToPreview: String? = null
+        // Reaction Messages
+        val isReactionType = rowMessageType.equals("reaction", ignoreCase = true) ||
+                (jsonEnvelope != null && jsonEnvelope.optString("t").equals("reaction", ignoreCase = true))
 
-            val trimmed = plaintext.trim()
-            val jsonEnvelope = if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-                try { JSONObject(trimmed) } catch (_: Exception) { null }
-            } else null
+        if (isReactionType && jsonEnvelope != null) {
+            val targetMessageId = jsonEnvelope.optString("target").trim()
+            val reactionEmoji = jsonEnvelope.optString("emoji").trim()
+            val op = jsonEnvelope.optString("op", "set").trim().lowercase()
+            val reactionTs = jsonEnvelope.optLong("ts", now)
 
-            // ====================================================================
-            // Handle PART A: Reaction Messages (never creates a bubble, no unread, no sound)
-            // Payload: {"t":"reaction","target":"<server msg id>","emoji":"👍","op":"set"|"remove","ts":<epoch ms>}
-            // ====================================================================
-            val isReactionType = rowMessageType.equals("reaction", ignoreCase = true) ||
-                    (jsonEnvelope != null && jsonEnvelope.optString("t").equals("reaction", ignoreCase = true))
-
-            if (isReactionType && jsonEnvelope != null) {
-                val targetMessageId = jsonEnvelope.optString("target").trim()
-                val reactionEmoji = jsonEnvelope.optString("emoji").trim()
-                val op = jsonEnvelope.optString("op", "set").trim().lowercase()
-                val reactionTs = jsonEnvelope.optLong("ts", now)
-
-                if (targetMessageId.isNotBlank()) {
-                    val targetMsg = db.groupMessageDao().getMessageById(targetMessageId)
-                    if (targetMsg != null) {
-                        val existingReaction = db.messageReactionDao().getReaction(targetMessageId, senderId)
-                        if (existingReaction == null || existingReaction.ts <= reactionTs) {
-                            if (op == "remove") {
-                                db.messageReactionDao().deleteReaction(targetMessageId, senderId)
-                            } else if (reactionEmoji.isNotBlank()) {
-                                db.messageReactionDao().insertOrUpdateReaction(
-                                    LocalMessageReaction(
-                                        groupId = groupId,
-                                        targetMessageId = targetMessageId,
-                                        senderId = senderId,
-                                        emoji = reactionEmoji,
-                                        ts = reactionTs
-                                    )
+            if (targetMessageId.isNotBlank()) {
+                val targetMsg = db.groupMessageDao().getMessageById(targetMessageId)
+                if (targetMsg != null) {
+                    val existingReaction = db.messageReactionDao().getReaction(targetMessageId, senderId)
+                    if (existingReaction == null || existingReaction.ts <= reactionTs) {
+                        if (op == "remove") {
+                            db.messageReactionDao().deleteReaction(targetMessageId, senderId)
+                        } else if (reactionEmoji.isNotBlank()) {
+                            db.messageReactionDao().insertOrUpdateReaction(
+                                LocalMessageReaction(
+                                    groupId = groupId,
+                                    targetMessageId = targetMessageId,
+                                    senderId = senderId,
+                                    emoji = reactionEmoji,
+                                    ts = reactionTs
                                 )
-
-                                // Notify only when someone reacts to MY message, respecting mute and notify_level (only 'all')
-                                val isGroupOpenInFg = com.example.service.PushNotificationManager.isChatOpenInForeground(groupId = groupId)
-                                if (!isFromMe && targetMsg.senderId == myUserId && !isGroupOpenInFg && activeOpenGroupId != groupId) {
-                                    val freshGroup = db.groupConversationDao().getGroup(groupId) ?: localGroup
-                                    val mutedUntil = freshGroup?.mutedUntil ?: 0L
-                                    val isMuted = mutedUntil > System.currentTimeMillis()
-                                    val notifyLevel = (freshGroup?.notifyLevel ?: "all").lowercase()
-                                    if (!isMuted && notifyLevel == "all") {
-                                        val senderName = resolveSenderName(context, token, senderId, groupId)
-                                        val notifTitle = freshGroup?.name ?: "Group Chat"
-                                        val notifBody = "$senderName reacted $reactionEmoji to your message"
-                                        com.example.util.SystemNotificationHelper.showSystemNotification(
-                                            context = context,
-                                            title = notifTitle,
-                                            message = notifBody,
-                                            groupId = groupId,
-                                            senderId = senderId,
-                                            kind = "group",
-                                            notificationId = com.example.service.PushNotificationManager.notificationIdForChat(groupId = groupId)
-                                        )
-                                    }
-                                }
-                            }
+                            )
                         }
                     }
                 }
-                processedRecipientIds.add(row.id)
-                deleteRecipientRow(token, row.id)
-                return
             }
+            Log.d(TAG, "[GroupInbox] id=$rowId, message_type=reaction, group_id=$groupId, result=saved, error=none")
+            processedRecipientIds.add(rowId)
+            deleteRecipientRow(token, rowId)
+            db.inboxFailureDao().deleteFailure(rowId)
+            return true
+        }
 
-            if (jsonEnvelope != null && jsonEnvelope.has("media_key")) {
-                savedKey = jsonEnvelope.optString("media_key")
-                savedNonce = jsonEnvelope.optString("media_nonce")
-                savedMime = jsonEnvelope.optString("mime_type", "image/jpeg")
-                savedStoragePath = jsonEnvelope.optString("storage_path").ifBlank { row.storage_path.orEmpty() }
-                val descType = jsonEnvelope.optString("message_type")
-                resolvedType = when {
-                    descType == "voice" || rowMessageType == "voice" || savedMime.contains("audio") -> "voice"
-                    else -> "image"
-                }
-                displayText = if (resolvedType == "voice") "Voice message" else "Photo"
-                jsonEnvelope.optJSONArray("mentions")?.let { arr ->
-                    for (i in 0 until arr.length()) {
-                        arr.optString(i)?.takeIf { it.isNotBlank() }?.let { mentionsList.add(it) }
-                    }
-                }
-
-                if (autoDownload && !savedKey.isNullOrBlank() && !savedNonce.isNullOrBlank() && !savedStoragePath.isNullOrBlank()) {
-                    localMediaPath = downloadAndDecryptGroupMediaBlob(
-                        context = context,
-                        token = token,
-                        messageId = msgId,
-                        storagePath = savedStoragePath,
-                        keyBase64 = savedKey,
-                        nonceBase64 = savedNonce,
-                        isVoice = resolvedType == "voice"
-                    )
-                }
-            } else if (jsonEnvelope != null && (jsonEnvelope.optBoolean("__e2ee_v2", false) || jsonEnvelope.has("mentions"))) {
-                displayText = jsonEnvelope.optString("text", plaintext)
-                jsonEnvelope.optJSONArray("mentions")?.let { arr ->
-                    for (i in 0 until arr.length()) {
-                        arr.optString(i)?.takeIf { it.isNotBlank() }?.let { mentionsList.add(it) }
-                    }
-                }
-                replyToId = jsonEnvelope.optString("reply_to_id").takeIf { it.isNotBlank() && it != "null" }
-                replyToSenderId = jsonEnvelope.optString("reply_to_sender_id").takeIf { it.isNotBlank() && it != "null" }
-                replyToSenderName = jsonEnvelope.optString("reply_to_sender_name").takeIf { it.isNotBlank() && it != "null" }
-                replyToPreview = jsonEnvelope.optString("reply_to_text").takeIf { it.isNotBlank() && it != "null" }
+        if (jsonEnvelope != null && jsonEnvelope.has("media_key")) {
+            savedKey = jsonEnvelope.optString("media_key")
+            savedNonce = jsonEnvelope.optString("media_nonce")
+            savedMime = jsonEnvelope.optString("mime_type", "image/jpeg")
+            savedStoragePath = jsonEnvelope.optString("storage_path").ifBlank { row.storage_path.orEmpty() }
+            val descType = jsonEnvelope.optString("message_type")
+            resolvedType = when {
+                descType == "voice" || rowMessageType == "voice" || savedMime.contains("audio") -> "voice"
+                else -> "image"
             }
+            displayText = if (resolvedType == "voice") "Voice message" else "Photo"
+        } else if (jsonEnvelope != null && (jsonEnvelope.optBoolean("__e2ee_v2", false) || jsonEnvelope.has("mentions"))) {
+            displayText = jsonEnvelope.optString("text", plaintext)
+            jsonEnvelope.optJSONArray("mentions")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    arr.optString(i)?.takeIf { it.isNotBlank() }?.let { mentionsList.add(it) }
+                }
+            }
+            replyToId = jsonEnvelope.optString("reply_to_id").takeIf { it.isNotBlank() && it != "null" }
+            replyToSenderId = jsonEnvelope.optString("reply_to_sender_id").takeIf { it.isNotBlank() && it != "null" }
+            replyToSenderName = jsonEnvelope.optString("reply_to_sender_name").takeIf { it.isNotBlank() && it != "null" }
+            replyToPreview = jsonEnvelope.optString("reply_to_text").takeIf { it.isNotBlank() && it != "null" }
+        }
 
-            val senderName = if (isFromMe) "You" else resolveSenderName(context, token, senderId, groupId)
-            val senderAvatar = if (isFromMe) null else resolveSenderAvatar(context, token, senderId)
+        val senderName = if (isFromMe) "You" else resolveSenderName(context, token, senderId, groupId)
+        val senderAvatar = if (isFromMe) null else resolveSenderAvatar(context, token, senderId)
 
-            val isReplyToMe = !isFromMe && (
-                replyToSenderId == myUserId ||
-                    (!replyToId.isNullOrBlank() && db.groupMessageDao().getMessageById(replyToId)?.senderId == myUserId)
-                )
-            val isMentioned = !isFromMe && (mentionsList.contains(myUserId) || isReplyToMe)
+        val isReplyToMe = !isFromMe && (
+            replyToSenderId == myUserId ||
+                (!replyToId.isNullOrBlank() && db.groupMessageDao().getMessageById(replyToId)?.senderId == myUserId)
+            )
+        val isMentioned = !isFromMe && (mentionsList.contains(myUserId) || isReplyToMe)
 
+        try {
             val localMsg = LocalGroupMessage(
                 id = msgId,
                 groupId = groupId,
@@ -2293,7 +2320,10 @@ object GroupChatRepository {
                 replyToSenderName = replyToSenderName,
                 replyToPreview = replyToPreview
             )
+
+            // Step 1: Save local message record FIRST
             db.groupMessageDao().insertMessage(localMsg)
+
             val isGroupOpen = com.example.service.PushNotificationManager.isChatOpenInForeground(groupId = groupId) || activeOpenGroupId == groupId
             db.groupConversationDao().updateLastMessage(
                 groupId = groupId,
@@ -2306,20 +2336,19 @@ object GroupChatRepository {
                 db.groupConversationDao().setHasUnreadMention(groupId, true)
             }
 
-            // Notification rules from my group prefs:
-            // notify_level 'all' = every message; 'mentions' = only if isMentioned; 'none' = never. Respect muted_until.
+            // Notifications
             if (!isFromMe && !isGroupOpen) {
                 val freshGroup = db.groupConversationDao().getGroup(groupId) ?: localGroup
-                val mutedUntil = freshGroup?.mutedUntil ?: 0L
+                val mutedUntil = freshGroup.mutedUntil ?: 0L
                 val isMuted = mutedUntil > System.currentTimeMillis()
-                val notifyLevel = (freshGroup?.notifyLevel ?: "all").lowercase()
+                val notifyLevel = freshGroup.notifyLevel.lowercase()
                 val shouldNotify = !isMuted && when (notifyLevel) {
                     "none" -> false
                     "mentions" -> isMentioned
                     else -> true
                 }
                 if (shouldNotify) {
-                    val groupTitle = freshGroup?.name ?: "Group Chat"
+                    val groupTitle = freshGroup.name.ifBlank { "Group Chat" }
                     val notifTitle = if (isMentioned) "$groupTitle · Mentioned you" else groupTitle
                     val notifBody = "$senderName: $displayText"
                     com.example.util.SystemNotificationHelper.showSystemNotification(
@@ -2334,11 +2363,42 @@ object GroupChatRepository {
                 }
             }
 
-            processedRecipientIds.add(row.id)
-            deleteRecipientRow(token, row.id)
+            // Step 2: Acknowledge server row ONLY AFTER successful local save
+            processedRecipientIds.add(rowId)
+            deleteRecipientRow(token, rowId)
+            db.inboxFailureDao().deleteFailure(rowId)
+
+            Log.d(TAG, "[GroupInbox] id=$rowId, message_type=$resolvedType, group_id=$groupId, result=saved, error=none")
+
+            // Step 3: Trigger background media download if media key exists
+            if (autoDownload && !savedKey.isNullOrBlank() && !savedNonce.isNullOrBlank() && !savedStoragePath.isNullOrBlank()) {
+                scope.launch(Dispatchers.IO) {
+                    val mediaPath = downloadAndDecryptGroupMediaBlob(
+                        context = context,
+                        token = token,
+                        messageId = msgId,
+                        storagePath = savedStoragePath,
+                        keyBase64 = savedKey,
+                        nonceBase64 = savedNonce,
+                        isVoice = resolvedType == "voice"
+                    )
+                    if (!mediaPath.isNullOrBlank()) {
+                        db.groupMessageDao().updateLocalMediaPath(msgId, mediaPath)
+                    }
+                }
+            }
+            return true
         } catch (e: Exception) {
-            Log.w(TAG, "Failed decrypting group message row ${row.id}: ${e.message}")
-            deleteRecipientRow(token, row.id)
+            val errMsg = e.message ?: "Failed saving group message locally"
+            Log.w(TAG, "[GroupInbox] id=$rowId, message_type=$resolvedType, group_id=$groupId, result=other, error=$errMsg")
+            db.inboxFailureDao().insertFailure(
+                com.example.db.InboxFailureEntity(
+                    messageId = rowId,
+                    type = "GROUP",
+                    reason = "Save failed: $errMsg"
+                )
+            )
+            return false
         }
     }
 

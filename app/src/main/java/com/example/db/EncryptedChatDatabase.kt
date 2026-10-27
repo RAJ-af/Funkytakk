@@ -15,9 +15,10 @@ import net.sqlcipher.database.SupportFactory
         LocalGroupConversation::class,
         LocalGroupMessage::class,
         LocalMessageReaction::class,
-        LocalMessageTranslation::class
+        LocalMessageTranslation::class,
+        InboxFailureEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 abstract class EncryptedChatDatabase : RoomDatabase() {
@@ -28,6 +29,7 @@ abstract class EncryptedChatDatabase : RoomDatabase() {
     abstract fun groupMessageDao(): GroupMessageDao
     abstract fun messageReactionDao(): MessageReactionDao
     abstract fun messageTranslationDao(): MessageTranslationDao
+    abstract fun inboxFailureDao(): InboxFailureDao
 
     companion object {
         const val DB_NAME = "encrypted_dm_chat_vault.db"

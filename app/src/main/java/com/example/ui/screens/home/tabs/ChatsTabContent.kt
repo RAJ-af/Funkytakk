@@ -89,6 +89,7 @@ fun ChatsTabContent(
     var showClearAllConfirmDialog by remember { mutableStateOf(false) }
 
     val isMinimalistMode by ChatPreferencesManager.isMinimalistMode.collectAsState()
+    val failureStats by com.example.repository.InboxDrainTracker.stats.collectAsState()
 
     val supportPreview by SupportChatManager.latestMessagePreview.collectAsState()
     val supportTime by SupportChatManager.latestMessageTime.collectAsState()
@@ -626,6 +627,28 @@ fun ChatsTabContent(
                             color = Color(0xFFFFC529),
                             modifier = Modifier.size(16.dp)
                         )
+                    }
+
+                    if (failureStats.failedCount > 0) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFFFEF2F2),
+                            border = BorderStroke(1.dp, Color(0xFFFCA5A5)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "⚠️ ${failureStats.failedCount} ${if (failureStats.failedCount == 1) "message" else "messages"} could not be opened",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color(0xFF991B1B)
+                                )
+                            }
+                        }
                     }
                 }
             }

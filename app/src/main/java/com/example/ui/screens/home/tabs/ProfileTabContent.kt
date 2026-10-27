@@ -1666,6 +1666,38 @@ fun ProfileTabContent(
                             val permAndChannelLine = remember(pushDebugState) {
                                 com.example.service.PushNotificationManager.getPermissionAndChannelDebugLine(context)
                             }
+                            val inboxStats by com.example.repository.InboxDrainTracker.stats.collectAsState()
+                            val formattedDrainTime = remember(inboxStats.lastDrainTime) {
+                                if (inboxStats.lastDrainTime > 0) {
+                                    java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(inboxStats.lastDrainTime))
+                                } else "Never"
+                            }
+
+                            HorizontalDivider(
+                                modifier = Modifier.padding(vertical = 4.dp),
+                                color = Color(0xFFE2E8F0)
+                            )
+                            Text(
+                                text = "Inbox: fetched ${inboxStats.fetchedCount}, saved ${inboxStats.savedCount}, failed ${inboxStats.failedCount}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A),
+                                modifier = Modifier.testTag("inbox_drain_debug_stats")
+                            )
+                            Text(
+                                text = "Last drain: $formattedDrainTime",
+                                fontSize = 11.sp,
+                                color = Color(0xFF475569),
+                                modifier = Modifier.testTag("inbox_drain_debug_time")
+                            )
+                            if (!inboxStats.lastFailureReason.isNullOrBlank()) {
+                                Text(
+                                    text = "Last failure: ${inboxStats.lastFailureReason}",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFFDC2626),
+                                    modifier = Modifier.testTag("inbox_drain_debug_error")
+                                )
+                            }
                             HorizontalDivider(
                                 modifier = Modifier.padding(vertical = 4.dp),
                                 color = Color(0xFFE2E8F0)

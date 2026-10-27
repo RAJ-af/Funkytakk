@@ -254,6 +254,12 @@ fun GroupChatScreen(
             items
         }
 
+        LaunchedEffect(timelineItems.size) {
+            if (timelineItems.isNotEmpty()) {
+                listState.scrollToItem(timelineItems.size - 1)
+            }
+        }
+
         val allMediaItems = remember(rawMessages) {
             rawMessages.filter { it.messageType == "image" || it.messageType == "video" || it.text.startsWith("[img]") }
                 .map { msg ->
