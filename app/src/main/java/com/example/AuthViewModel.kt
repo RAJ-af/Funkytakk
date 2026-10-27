@@ -15,6 +15,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -109,6 +110,12 @@ class AuthViewModel : ViewModel() {
 
     private val _myModerationStatus = MutableStateFlow<MyModerationStatus?>(null)
     val myModerationStatus: StateFlow<MyModerationStatus?> = _myModerationStatus
+
+    private val _lastRoomTokenRole = MutableStateFlow<String?>(null)
+    val lastRoomTokenRole: StateFlow<String?> = _lastRoomTokenRole.asStateFlow()
+
+    private val _lastRoomTokenCanPublish = MutableStateFlow<Boolean>(false)
+    val lastRoomTokenCanPublish: StateFlow<Boolean> = _lastRoomTokenCanPublish.asStateFlow()
 
     fun refreshModerationStatus(context: Context) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -655,6 +662,212 @@ class AuthViewModel : ViewModel() {
                 Log.e("AuthViewModel", "Error creating speaker request", e)
                 withContext(Dispatchers.Main) {
                     onResult?.invoke(false, "Error submitting speaker request. Please try again.")
+                }
+            }
+        }
+    }
+
+    fun fetchRoomToken(
+        roomId: String,
+        context: Context? = null,
+        onResult: ((Boolean, GetRoomTokenResponse?, String?) -> Unit)? = null
+    ) {
+        val ctx = context ?: FunkyTalkApplication.appContext
+        val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (ctx != null) {
+                    SupabaseSessionManager.ensureActiveSession(ctx)
+                }
+                val req = GetRoomTokenRequest(room_id = roomId)
+                val res = SupabaseClient.api.getRoomToken(auth = token, body = req)
+                if (res.isSuccessful && res.body() != null) {
+                    val body = res.body()!!
+                    val role = body.role ?: (if (body.can_publish) "publisher" else "audience")
+                    val canPublish = body.can_publish
+                    val rtcToken = body.token ?: body.rtc_token
+
+                    withContext(Dispatchers.Main) {
+                        _lastRoomTokenRole.value = role
+                        _lastRoomTokenCanPublish.value = canPublish
+                        if (!rtcToken.isNullOrBlank()) {
+                            com.example.realtime.AgoraVoiceManager.renewToken(rtcToken)
+                        }
+                        if (canPublish) {
+                            com.example.realtime.AgoraVoiceManager.setClientRole(com.example.realtime.AgoraVoiceManager.CLIENT_ROLE_BROADCASTER)
+                            com.example.realtime.AgoraVoiceManager.enableLocalAudio(true)
+                            com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(!_isMicEnabled.value)
+                        } else {
+                            com.example.realtime.AgoraVoiceManager.setClientRole(com.example.realtime.AgoraVoiceManager.CLIENT_ROLE_AUDIENCE)
+                            com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(true)
+                        }
+                        onResult?.invoke(true, body, null)
+                    }
+                } else {
+                    val errCode = res.code()
+                    val errBodyStr = res.errorBody()?.string() ?: ""
+                    val errorMsg = when (errCode) {
+                        401 -> "Session expired. Please sign in again."
+                        403 -> "Account suspended or restricted from speaking."
+                        404 -> "Voice room not found."
+                        410 -> "This voice room has ended."
+                        503 -> "All voice room servers are busy. Please try again later."
+                        else -> {
+                            if (errBodyStr.contains("seats_full", ignoreCase = true)) {
+                                "All speaker seats are full (max 4 speakers)."
+                            } else {
+                                "Failed to fetch room token (code $errCode)."
+                            }
+                        }
+                    }
+                    Log.e("AuthViewModel", "getRoomToken error $errCode: $errBodyStr")
+                    withContext(Dispatchers.Main) {
+                        onResult?.invoke(false, null, errorMsg)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("AuthViewModel", "Error fetching room token", e)
+                withContext(Dispatchers.Main) {
+                    onResult?.invoke(false, null, e.localizedMessage ?: "Error fetching room token")
+                }
+            }
+        }
+    }
+
+    fun inviteToSpeakerSeat(
+        roomId: String,
+        targetUserId: String,
+        context: Context? = null,
+        onResult: ((Boolean, String?) -> Unit)? = null
+    ) {
+        val ctx = context ?: FunkyTalkApplication.appContext
+        val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val res = SupabaseClient.api.inviteToSpeakerSeat(
+                    auth = token,
+                    body = mapOf("p_room_id" to roomId, "p_user_id" to targetUserId)
+                )
+                if (res.isSuccessful) {
+                    withContext(Dispatchers.Main) {
+                        onResult?.invoke(true, "Speaker invitation sent!")
+                    }
+                } else {
+                    val errStr = res.errorBody()?.string() ?: res.message()
+                    val msg = if (errStr.contains("seats_full", ignoreCase = true)) {
+                        "All speaker seats are full (max 4 speakers)."
+                    } else {
+                        "Failed to send invite: $errStr"
+                    }
+                    withContext(Dispatchers.Main) {
+                        onResult?.invoke(false, msg)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("AuthViewModel", "Error in inviteToSpeakerSeat", e)
+                withContext(Dispatchers.Main) {
+                    onResult?.invoke(false, e.localizedMessage ?: "Failed to send invitation")
+                }
+            }
+        }
+    }
+
+    fun respondToSpeakerInvite(
+        requestId: String,
+        accept: Boolean,
+        roomId: String,
+        context: Context? = null,
+        onResult: ((Boolean, String?) -> Unit)? = null
+    ) {
+        val ctx = context ?: FunkyTalkApplication.appContext
+        val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val res = SupabaseClient.api.respondToSpeakerInvite(
+                    auth = token,
+                    body = mapOf("p_request_id" to requestId, "p_accept" to accept)
+                )
+                if (res.isSuccessful) {
+                    withContext(Dispatchers.Main) {
+                        if (accept) {
+                            fetchRoomToken(roomId, ctx)
+                            _mySpeakerRequestStatus.value = "accepted"
+                            _isMicEnabled.value = true
+                            onResult?.invoke(true, "You are now a speaker!")
+                        } else {
+                            _mySpeakerRequestStatus.value = null
+                            onResult?.invoke(true, "Invitation declined.")
+                        }
+                    }
+                } else {
+                    val errStr = res.errorBody()?.string() ?: res.message()
+                    val msg = if (errStr.contains("seats_full", ignoreCase = true)) {
+                        "All speaker seats are full (max 4 speakers)."
+                    } else {
+                        "Failed to respond to invite: $errStr"
+                    }
+                    withContext(Dispatchers.Main) {
+                        onResult?.invoke(false, msg)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("AuthViewModel", "Error in respondToSpeakerInvite", e)
+                withContext(Dispatchers.Main) {
+                    onResult?.invoke(false, e.localizedMessage ?: "Error responding to invite")
+                }
+            }
+        }
+    }
+
+    fun demoteSpeaker(
+        roomId: String,
+        targetUserId: String? = null,
+        context: Context? = null,
+        onResult: ((Boolean, String?) -> Unit)? = null
+    ) {
+        val ctx = context ?: FunkyTalkApplication.appContext
+        val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+        val myUid = ctx?.let { SupabaseSessionManager.getUserId(it) }
+            ?: (authState.value as? AuthState.Success)?.user?.uid
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val map = mutableMapOf<String, Any?>("p_room_id" to roomId)
+                if (!targetUserId.isNullOrBlank()) {
+                    map["p_user_id"] = targetUserId
+                }
+                val res = SupabaseClient.api.demoteSpeaker(
+                    auth = token,
+                    body = map
+                )
+                if (res.isSuccessful) {
+                    val isSelfDemotion = targetUserId.isNullOrBlank() || targetUserId == myUid
+                    withContext(Dispatchers.Main) {
+                        if (isSelfDemotion) {
+                            fetchRoomToken(roomId, ctx)
+                            _isMicEnabled.value = false
+                            _mySpeakerRequestStatus.value = null
+                            com.example.realtime.AgoraVoiceManager.setClientRole(com.example.realtime.AgoraVoiceManager.CLIENT_ROLE_AUDIENCE)
+                            com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(true)
+                            onResult?.invoke(true, "You stepped down to listener.")
+                        } else {
+                            refreshActiveRoomSpeakers(roomId, ctx)
+                            onResult?.invoke(true, "Speaker moved to listeners.")
+                        }
+                    }
+                } else {
+                    val errStr = res.errorBody()?.string() ?: res.message()
+                    withContext(Dispatchers.Main) {
+                        onResult?.invoke(false, "Failed to demote speaker: $errStr")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("AuthViewModel", "Error in demoteSpeaker", e)
+                withContext(Dispatchers.Main) {
+                    onResult?.invoke(false, e.localizedMessage ?: "Error demoting speaker")
                 }
             }
         }

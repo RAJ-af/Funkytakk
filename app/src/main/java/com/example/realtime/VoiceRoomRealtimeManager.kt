@@ -48,7 +48,9 @@ sealed class RealtimeTableEvent {
         val roomId: String?,
         val userId: String?,
         val status: String?,
-        val requestId: String?
+        val requestId: String?,
+        val kind: String? = null,
+        val invitedBy: String? = null
     ) : RealtimeTableEvent()
     data class ModerationActionEnforced(
         val roomId: String,
@@ -664,6 +666,8 @@ object VoiceRoomRealtimeManager {
                     val userId = record?.optString("user_id")
                     val status = record?.optString("status")
                     val reqId = record?.optString("id")
+                    val kind = record?.optString("kind")?.takeIf { it.isNotBlank() }
+                    val invitedBy = record?.optString("invited_by")?.takeIf { it.isNotBlank() }
                     _events.tryEmit(
                         RealtimeTableEvent.SpeakerRequestChanged(
                             eventType = eventType,
@@ -671,7 +675,9 @@ object VoiceRoomRealtimeManager {
                             roomId = roomId,
                             userId = userId,
                             status = status,
-                            requestId = reqId
+                            requestId = reqId,
+                            kind = kind,
+                            invitedBy = invitedBy
                         )
                     )
                 } else if (table == "notifications" || topic.contains("notifications")) {

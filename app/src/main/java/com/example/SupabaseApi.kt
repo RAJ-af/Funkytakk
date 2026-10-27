@@ -130,7 +130,9 @@ data class SupabaseSpeakerRequest(
     val id: String,
     val room_id: String,
     val user_id: String,
-    val status: String = "pending",
+    val status: String = "pending", // 'pending' | 'accepted' | 'declined'
+    val kind: String = "request", // 'request' | 'invite'
+    val invited_by: String? = null,
     val created_at: String? = null
 )
 
@@ -138,6 +140,25 @@ data class SupabaseSpeakerRequest(
 data class RespondSpeakerRequestBody(
     val request_id: String,
     val accept: Boolean
+)
+
+@JsonClass(generateAdapter = true)
+data class GetRoomTokenRequest(
+    val room_id: String
+)
+
+@JsonClass(generateAdapter = true)
+data class GetRoomTokenResponse(
+    val token: String? = null,
+    val rtc_token: String? = null,
+    val role: String? = null, // "publisher" | "audience"
+    val can_publish: Boolean = false,
+    val provider: String? = null, // "agora" | "zego" | "daily"
+    val channel: String? = null,
+    val app_id: String? = null,
+    val uid: Any? = null,
+    val max_speakers: Int? = 4,
+    val error: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -756,6 +777,44 @@ interface SupabaseApi {
         @Header("Authorization") auth: String,
         @Body body: RespondSpeakerRequestBody
     ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/invite_to_speaker_seat")
+    suspend fun inviteToSpeakerSeat(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> // {"p_room_id": roomId, "p_user_id": userId}
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/respond_to_speaker_invite")
+    suspend fun respondToSpeakerInvite(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, @JvmSuppressWildcards Any> // {"p_request_id": requestId, "p_accept": accept}
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/demote_speaker")
+    suspend fun demoteSpeaker(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, @JvmSuppressWildcards Any?> // {"p_room_id": roomId, "p_user_id": userId} (userId null = demote self)
+    ): Response<ResponseBody>
+
+    @POST("functions/v1/get-room-token")
+    suspend fun getRoomToken(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: GetRoomTokenRequest
+    ): Response<GetRoomTokenResponse>
+
+    @GET("rest/v1/speaker_requests?select=*")
+    suspend fun getSpeakerRequests(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("room_id") roomIdEq: String, // e.g. "eq.<uuid>"
+        @Query("user_id") userIdEq: String? = null, // e.g. "eq.<uuid>"
+        @Query("kind") kindEq: String? = null, // e.g. "eq.invite"
+        @Query("status") statusEq: String? = null // e.g. "eq.pending"
+    ): Response<List<SupabaseSpeakerRequest>>
 
     @POST("rest/v1/rpc/execute_moderator_action")
     suspend fun executeModeratorAction(

@@ -469,6 +469,11 @@ fun VoiceRoomScreen(
     }
     val scope = rememberCoroutineScope()
     var isMicOn by remember { mutableStateOf(true) }
+    val lastTokenRole by viewModel?.lastRoomTokenRole?.collectAsState(null) ?: remember { mutableStateOf(null) }
+    val lastCanPublish by viewModel?.lastRoomTokenCanPublish?.collectAsState(false) ?: remember { mutableStateOf(false) }
+    var pendingInviteState by remember { mutableStateOf<com.example.SupabaseSpeakerRequest?>(null) }
+    var latestReqKind by remember { mutableStateOf<String?>(null) }
+    var latestReqStatus by remember { mutableStateOf<String?>(null) }
     val messages = remember { mutableStateListOf<ChillRoomMessage>() }
     var renderedMessageCount by remember { mutableStateOf(30) }
     val renderedMessages = remember(messages, renderedMessageCount) {
@@ -655,6 +660,26 @@ fun VoiceRoomScreen(
                     roomCountryCode = roomObj.language_code.orEmpty().ifBlank { roomObj.country_code.orEmpty() }.ifBlank { LanguageData.getFlagCodeForLanguage(roomLanguage) }
                     isPrivateRoomState = roomObj.is_private ?: false
                     joinCodeState = roomObj.join_code ?: ""
+                }
+                if (currentUserId.isNotBlank()) {
+                    try {
+                        val token = SupabaseSessionManager.getBearerToken(context)
+                        val invRes = SupabaseClient.api.getSpeakerRequests(
+                            auth = token,
+                            roomIdEq = "eq.$activeRoomId",
+                            userIdEq = "eq.$currentUserId",
+                            kindEq = "eq.invite",
+                            statusEq = "eq.pending"
+                        )
+                        if (invRes.isSuccessful) {
+                            val invList = invRes.body() ?: emptyList()
+                            if (invList.isNotEmpty()) {
+                                withContext(Dispatchers.Main) {
+                                    pendingInviteState = invList.first()
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
                 }
                 val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
                 val dbList = if (partsRes.isSuccessful) partsRes.body() ?: emptyList() else emptyList()
@@ -1070,18 +1095,34 @@ fun VoiceRoomScreen(
                         val reqStatus = event.status ?: event.eventType
                         val isHost = (currentUserId.isNotBlank() && roomHostId != null && currentUserId.equals(roomHostId, ignoreCase = true))
 
+                        withContext(Dispatchers.Main) {
+                            latestReqKind = event.kind
+                            latestReqStatus = reqStatus
+                        }
+
                         if (isHost) {
                             viewModel?.checkPendingSpeakerRequestsForHost(activeRoomId, context)
                         }
 
                         if (targetUid.isNotBlank() && targetUid == currentUserId) {
-                            if (reqStatus == "accepted") {
+                            val reqKind = event.kind
+                            if (reqKind == "invite" && (reqStatus == "pending" || event.eventType == "INSERT")) {
                                 withContext(Dispatchers.Main) {
-                                    Toast.makeText(context, "Your request to speak was accepted!", Toast.LENGTH_SHORT).show()
+                                    pendingInviteState = com.example.SupabaseSpeakerRequest(
+                                        id = event.requestId ?: "inv_${System.currentTimeMillis()}",
+                                        room_id = activeRoomId,
+                                        user_id = currentUserId,
+                                        status = "pending",
+                                        kind = "invite",
+                                        invited_by = event.invitedBy
+                                    )
+                                }
+                            } else if (reqStatus == "accepted") {
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(context, "You are now a speaker!", Toast.LENGTH_SHORT).show()
                                     isSpeakerRequestPending = false
                                     isMicOn = true
-                                    com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(false)
-                                    viewModel?.setMicEnabled(true, context)
+                                    viewModel?.fetchRoomToken(activeRoomId, context)
                                 }
                                 scope.launch(Dispatchers.IO) {
                                     try {
@@ -1096,7 +1137,7 @@ fun VoiceRoomScreen(
                                 }
                             } else if (reqStatus == "declined") {
                                 withContext(Dispatchers.Main) {
-                                    Toast.makeText(context, "Your request to speak was declined.", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Host declined your request.", Toast.LENGTH_SHORT).show()
                                     isSpeakerRequestPending = false
                                 }
                                 viewModel?.checkMySpeakerRequest(activeRoomId, context)
@@ -2803,6 +2844,16 @@ fun VoiceRoomScreen(
                 onRespondToSpeakerRequest = { reqId, accept ->
                     viewModel?.respondToSpeakerRequest(reqId, accept, context)
                 },
+                onInviteToSpeakerSeat = { targetUserId ->
+                    viewModel?.inviteToSpeakerSeat(activeRoomId, targetUserId, context) { ok, msg ->
+                        Toast.makeText(context, msg ?: (if (ok) "Invitation sent!" else "Failed to send invitation"), Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onDemoteSpeaker = { targetUserId ->
+                    viewModel?.demoteSpeaker(activeRoomId, targetUserId, context) { ok, msg ->
+                        Toast.makeText(context, msg ?: (if (ok) "Speaker moved to listeners." else "Failed to demote speaker"), Toast.LENGTH_SHORT).show()
+                    }
+                },
                 onUserClick = { chatUser ->
                     oneToOneChatUser = chatUser
                     showOneToOneChatSheet = true
@@ -3280,6 +3331,83 @@ fun VoiceRoomScreen(
             shape = RoundedCornerShape(20.dp),
             containerColor = if (isRoomDarkMode) Color(0xFF0F172A) else Color.White
         )
+    }
+
+    // Speaker Seat Invitation Dialog
+    pendingInviteState?.let { invite ->
+        AlertDialog(
+            onDismissRequest = { pendingInviteState = null },
+            icon = {
+                Text("🎙️", fontSize = 28.sp)
+            },
+            title = {
+                Text(
+                    text = "Invitation to Speak",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = if (isRoomDarkMode) Color.White else Color.Black
+                )
+            },
+            text = {
+                Text(
+                    text = "The room host invited you to join the stage as a speaker.",
+                    fontSize = 14.sp,
+                    color = if (isRoomDarkMode) Color.White.copy(alpha = 0.8f) else Color(0xFF475569)
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val invId = invite.id
+                        pendingInviteState = null
+                        viewModel?.respondToSpeakerInvite(invId, true, activeRoomId, context) { ok, msg ->
+                            Toast.makeText(context, msg ?: (if (ok) "You are now a speaker!" else "Failed to accept invite"), Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = roomThemes[selectedThemeIndex].themeColor,
+                        contentColor = Color.Black
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Accept", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        val invId = invite.id
+                        pendingInviteState = null
+                        viewModel?.respondToSpeakerInvite(invId, false, activeRoomId, context) { _, _ -> }
+                    },
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Decline")
+                }
+            },
+            shape = RoundedCornerShape(20.dp),
+            containerColor = if (isRoomDarkMode) Color(0xFF1E1F2E) else Color.White
+        )
+    }
+
+    if (BuildConfig.DEBUG) {
+        val myRole = if (currentUserId == roomHostId) "host" else (participantsData.find { it.user_id == currentUserId }?.role ?: "listener")
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = 80.dp, start = 12.dp),
+            contentAlignment = Alignment.TopStart
+        ) {
+            Text(
+                text = "Role: $myRole | Req: ${latestReqKind ?: "none"}/${latestReqStatus ?: "none"} | Token: ${lastTokenRole ?: "none"} (pub=$lastCanPublish)",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.Yellow,
+                modifier = Modifier
+                    .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            )
+        }
     }
 
     // 2) Report Room Bottom Sheet container

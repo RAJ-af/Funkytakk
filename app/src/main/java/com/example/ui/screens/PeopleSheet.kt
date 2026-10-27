@@ -36,6 +36,8 @@ fun PeopleBottomSheetContent(
     onRespondToSpeakerRequest: (requestId: String, accept: Boolean) -> Unit = { _, _ -> },
     onUserClick: (PrivateChatItem) -> Unit = {},
     onInviteClick: () -> Unit = {},
+    onInviteToSpeakerSeat: (targetUserId: String) -> Unit = {},
+    onDemoteSpeaker: (targetUserId: String) -> Unit = {},
     onModeratorAction: (targetUserId: String, targetUserName: String, actionType: String) -> Unit = { _, _, _ -> },
     onDismiss: () -> Unit
 ) {
@@ -423,10 +425,19 @@ fun PeopleBottomSheetContent(
             ModerationActionDialog(
                 target = target,
                 isDark = isDark,
+                speakerSeatsCount = speakerSeats.size,
                 onDismiss = { selectedUserForAction = null },
                 onMessage = {
                     val uid = target.userId.ifBlank { target.name.hashCode().toString() }
                     onUserClick(PrivateChatItem(uid, target.name, target.imageUrl, target.flagCode, "", "Now", 0, true, false))
+                    selectedUserForAction = null
+                },
+                onInviteToSeat = {
+                    onInviteToSpeakerSeat(target.userId)
+                    selectedUserForAction = null
+                },
+                onMoveToListeners = {
+                    onDemoteSpeaker(target.userId)
                     selectedUserForAction = null
                 },
                 onMute = {
@@ -458,8 +469,11 @@ data class ModerationTargetUser(
 fun ModerationActionDialog(
     target: ModerationTargetUser,
     isDark: Boolean,
+    speakerSeatsCount: Int = 0,
     onDismiss: () -> Unit,
     onMessage: () -> Unit,
+    onInviteToSeat: () -> Unit,
+    onMoveToListeners: () -> Unit,
     onMute: () -> Unit,
     onKick: () -> Unit,
     onBan: () -> Unit
@@ -514,7 +528,30 @@ fun ModerationActionDialog(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // 2. Mute Microphone
+            // Speaker seat invite/demote options
+            if (target.role == "listener") {
+                val areSeatsFull = speakerSeatsCount >= 4
+                ModerationActionButton(
+                    label = if (areSeatsFull) "All seats are full (4/4)" else "Invite to Speaker Seat",
+                    iconText = "🎙️",
+                    containerColor = if (areSeatsFull) (if (isDark) Color.White.copy(alpha = 0.05f) else Color(0xFFE2E8F0)) else (if (isDark) Color(0xFF16382B) else Color(0xFFD1FAE5)),
+                    textColor = if (areSeatsFull) Color.Gray else Color(0xFF059669),
+                    enabled = !areSeatsFull,
+                    onClick = onInviteToSeat
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            } else if (target.role == "speaker") {
+                ModerationActionButton(
+                    label = "Move to Listeners",
+                    iconText = "🎧",
+                    containerColor = if (isDark) Color(0xFF332A1E) else Color(0xFFFEF3C7),
+                    textColor = Color(0xFFD97706),
+                    onClick = onMoveToListeners
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            // Mute Microphone for Speaker
             if (target.role == "speaker") {
                 ModerationActionButton(
                     label = "Mute Microphone",
@@ -526,7 +563,7 @@ fun ModerationActionDialog(
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
-            // 3. Kick from Room
+            // Kick from Room
             ModerationActionButton(
                 label = "Kick from Room",
                 iconText = "🚪",
@@ -537,7 +574,7 @@ fun ModerationActionDialog(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // 4. Ban User
+            // Ban User
             ModerationActionButton(
                 label = "Ban User",
                 iconText = "🚫",
@@ -569,6 +606,7 @@ fun ModerationActionButton(
     iconText: String,
     containerColor: Color,
     textColor: Color,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
     Row(
@@ -577,7 +615,7 @@ fun ModerationActionButton(
             .height(48.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(containerColor)
-            .clickable { onClick() }
+            .then(if (enabled) Modifier.clickable { onClick() } else Modifier)
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Start
