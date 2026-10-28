@@ -58,7 +58,7 @@ jobs:
         continue-on-error: true
 
       - name: Set up Java JDK 21
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
@@ -208,10 +208,22 @@ jobs:
         run: python3 .github/scripts/setup_keystore.py
 
       - name: Build Debug APK with Gradle
-        run: gradle :app:assembleDebug --no-daemon --stacktrace
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Check APK Output
+        id: check_apk
+        run: |
+          if compgen -G "app/build/outputs/apk/debug/*.apk" > /dev/null; then
+            echo "apk_exists=true" >> "$GITHUB_OUTPUT"
+            echo "Found APK:"
+            ls -lh app/build/outputs/apk/debug/*.apk
+          else
+            echo "apk_exists=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No APK file found in app/build/outputs/apk/debug/"
+          fi
 
       - name: Add Build Status & Direct Download Links to Summary
-        if: (!cancelled()) && hashFiles('app/build/outputs/apk/debug/*.apk') != ''
+        if: (!cancelled()) && steps.check_apk.outputs.apk_exists == 'true'
         run: |
           cat << 'EOF' >> $GITHUB_STEP_SUMMARY
 
@@ -231,6 +243,7 @@ jobs:
           EOF
 
       - name: Upload APK Artifact to GitHub Summary
+        if: (!cancelled()) && steps.check_apk.outputs.apk_exists == 'true'
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
@@ -248,7 +261,7 @@ jobs:
           retention-days: 3
 
       - name: Create GitHub Release (Direct APK & Keystore Download)
-        if: (!cancelled()) && hashFiles('app/build/outputs/apk/debug/*.apk') != ''
+        if: (!cancelled()) && steps.check_apk.outputs.apk_exists == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: release-build-${{ github.run_number }}
