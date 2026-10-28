@@ -1,0 +1,347 @@
+-- Voice rooms: (A) end-of-room summary so the app can show a "Room ended" screen instead of
+-- throwing everyone out, (B) invite people you follow into a room.
+
+-- ---------------------------------------------------------------------------
+-- A) Room end summary
+-- ---------------------------------------------------------------------------
+alter table public.voice_rooms
+  add column if not exists ended_reason text,
+  add column if not exists total_joins integer not null default 0,
+  add column if not exists peak_participants integer not null default 0;
+
+-- Counters: total unique-ish joins and the highest number of people in the room at once.
+create or replace function public.bump_room_join_stats()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'pg_catalog', 'public'
+as $$
+begin
+  update public.voice_rooms
+     set total_joins = total_joins + 1,
+         peak_participants = greatest(
+           peak_participants,
+           (select count(*)::integer from public.room_participants where room_id = new.room_id)
+         )
+   where id = new.room_id;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_bump_room_join_stats on public.room_participants;
+create trigger trg_bump_room_join_stats
+  after insert on public.room_participants
+  for each row execute function public.bump_room_join_stats();
+
+-- The summary outlives the voice_rooms row (a cron job deletes empty rooms after a few minutes).
+create table if not exists public.room_end_summaries (
+  room_id uuid primary key,
+  title text,
+  host_id uuid,
+  host_username text,
+  host_avatar_url text,
+  started_at timestamptz,
+  ended_at timestamptz not null default now(),
+  duration_seconds integer,
+  total_joins integer,
+  peak_participants integer,
+  ended_reason text not null,
+  created_at timestamptz not null default now()
+);
+alter table public.room_end_summaries enable row level security;
+drop policy if exists "authenticated can read room end summaries" on public.room_end_summaries;
+create policy "authenticated can read room end summaries"
+  on public.room_end_summaries for select to authenticated using (true);
+-- no insert/update/delete policies: only the SECURITY DEFINER function below writes here
+
+create or replace function private.finalize_room(p_room_id uuid, p_reason text)
+returns void
+language plpgsql
+security definer
+set search_path to 'pg_catalog', 'public'
+as $$
+declare
+  r record;
+  h record;
+  v_end timestamptz;
+begin
+  select * into r from public.voice_rooms where id = p_room_id;
+  if not found then
+    return;
+  end if;
+  select username, avatar_url into h from public.profiles where auth_user_id = r.host_id;
+  v_end := coalesce(r.ended_at, now());
+
+  insert into public.room_end_summaries
+    (room_id, title, host_id, host_username, host_avatar_url, started_at, ended_at,
+     duration_seconds, total_joins, peak_participants, ended_reason)
+  values
+    (r.id, r.title, r.host_id, h.username, h.avatar_url,
+     (r.created_at at time zone 'UTC'), v_end,
+     greatest(0, extract(epoch from (v_end - (r.created_at at time zone 'UTC')))::integer),
+     r.total_joins, r.peak_participants, p_reason)
+  on conflict (room_id) do nothing;
+end;
+$$;
+revoke all on function private.finalize_room(uuid, text) from public, anon, authenticated;
+
+-- Host (or moderator) ends the room: now also records why + the summary
+create or replace function public.end_voice_room(p_room_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'pg_catalog', 'public'
+as $$
+declare
+  caller_id uuid := auth.uid();
+  v_host_id uuid;
+  caller_role text;
+  v_reason text;
+begin
+  select host_id into v_host_id from public.voice_rooms where id = p_room_id;
+  if not found then
+    return jsonb_build_object('success', false, 'error', 'Room not found');
+  end if;
+
+  select role into caller_role from public.user_roles where user_id = caller_id::text;
+
+  if caller_id != v_host_id and coalesce(caller_role, '') not in ('moderator', 'admin', 'superadmin') then
+    raise exception 'Unauthorized: Only the host or moderator can end the room.';
+  end if;
+
+  v_reason := case when caller_id = v_host_id then 'host_ended' else 'moderation' end;
+
+  update public.voice_rooms
+     set is_live = false, status = 'ended', ended_at = now(),
+         host_left_at = null, ended_reason = v_reason
+   where id = p_room_id;
+
+  perform private.finalize_room(p_room_id, v_reason);
+
+  delete from public.room_participants where room_id = p_room_id;
+  delete from public.speaker_requests where room_id = p_room_id and status = 'pending';
+
+  return jsonb_build_object('success', true, 'room_id', p_room_id, 'status', 'ended', 'ended_reason', v_reason);
+end;
+$$;
+
+-- Cron (every minute): host away for more than 3 minutes -> room ends (with a summary)
+create or replace function public.check_and_cleanup_ended_rooms()
+returns void
+language plpgsql
+security definer
+set search_path to 'pg_catalog', 'public'
+as $$
+declare
+  ids uuid[];
+  rid uuid;
+begin
+  with u as (
+    update public.voice_rooms
+       set is_live = false, status = 'ended', ended_at = now(), ended_reason = 'host_timeout'
+     where is_live = true
+       and status = 'active'
+       and host_left_at is not null
+       and host_left_at < (now() - interval '3 minutes')
+    returning id
+  )
+  select array_agg(id) into ids from u;
+
+  if ids is not null then
+    foreach rid in array ids loop
+      perform private.finalize_room(rid, 'host_timeout');
+    end loop;
+  end if;
+
+  delete from public.room_participants
+   where room_id in (select id from public.voice_rooms where is_live = false or status = 'ended');
+end;
+$$;
+
+-- keep summaries for 2 days only
+select cron.schedule(
+  'purge-room-end-summaries',
+  '20 3 * * *',
+  $$delete from public.room_end_summaries where ended_at < now() - interval '2 days'$$
+);
+
+-- ---------------------------------------------------------------------------
+-- B) Invite people you follow into a room
+-- ---------------------------------------------------------------------------
+alter table public.notifications
+  add column if not exists room_id uuid references public.voice_rooms(id) on delete cascade;
+
+create table if not exists public.room_invites (
+  id uuid primary key default gen_random_uuid(),
+  room_id uuid not null references public.voice_rooms(id) on delete cascade,
+  inviter_id uuid not null,
+  invitee_id uuid not null,
+  status text not null default 'pending' check (status in ('pending', 'accepted', 'declined', 'expired')),
+  created_at timestamptz not null default now(),
+  unique (room_id, invitee_id)
+);
+create index if not exists room_invites_invitee_idx on public.room_invites (invitee_id, status);
+alter table public.room_invites enable row level security;
+drop policy if exists "inviter or invitee can read room invites" on public.room_invites;
+create policy "inviter or invitee can read room invites"
+  on public.room_invites for select to authenticated
+  using (inviter_id = (select auth.uid()) or invitee_id = (select auth.uid()));
+-- no write policies: all writes go through the RPCs below
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'room_invites'
+  ) then
+    alter publication supabase_realtime add table public.room_invites;
+  end if;
+end $$;
+
+-- A person inside a live room invites someone they FOLLOW
+create or replace function public.send_room_invite(p_room_id uuid, p_user_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'pg_catalog', 'public'
+as $$
+declare
+  caller uuid := auth.uid();
+  v_title text;
+  v_live boolean;
+  v_name text;
+  v_existing record;
+  v_id uuid;
+begin
+  if caller is null then
+    raise exception 'not_authenticated' using errcode = '28000';
+  end if;
+
+  select title, (is_live and status = 'active') into v_title, v_live
+    from public.voice_rooms where id = p_room_id;
+  if not found then
+    return jsonb_build_object('success', false, 'error', 'room_not_found');
+  end if;
+  if not coalesce(v_live, false) then
+    return jsonb_build_object('success', false, 'error', 'room_not_live');
+  end if;
+
+  if not exists (select 1 from public.room_participants where room_id = p_room_id and user_id = caller) then
+    return jsonb_build_object('success', false, 'error', 'not_in_room');
+  end if;
+  if p_user_id = caller then
+    return jsonb_build_object('success', false, 'error', 'cannot_invite_self');
+  end if;
+  if not exists (select 1 from public.followers where follower_id = caller and following_id = p_user_id) then
+    return jsonb_build_object('success', false, 'error', 'not_following');
+  end if;
+  if exists (select 1 from public.room_participants where room_id = p_room_id and user_id = p_user_id) then
+    return jsonb_build_object('success', false, 'error', 'already_in_room');
+  end if;
+
+  if (select count(*) from public.room_invites
+       where inviter_id = caller and created_at > now() - interval '1 hour') >= 30 then
+    return jsonb_build_object('success', false, 'error', 'rate_limited');
+  end if;
+
+  select * into v_existing from public.room_invites
+   where room_id = p_room_id and invitee_id = p_user_id;
+  if found and v_existing.status = 'pending' and v_existing.created_at > now() - interval '60 seconds' then
+    return jsonb_build_object('success', false, 'error', 'already_invited', 'invite_id', v_existing.id);
+  end if;
+
+  insert into public.room_invites (room_id, inviter_id, invitee_id, status, created_at)
+  values (p_room_id, caller, p_user_id, 'pending', now())
+  on conflict (room_id, invitee_id)
+  do update set inviter_id = excluded.inviter_id, status = 'pending', created_at = now()
+  returning id into v_id;
+
+  select username into v_name from public.profiles where auth_user_id = caller;
+
+  insert into public.notifications (user_id, type, title, message, room_id)
+  values (p_user_id, 'room_invite',
+          coalesce(v_name, 'Someone') || ' invited you to a voice room',
+          coalesce(v_title, 'Voice room'), p_room_id);
+
+  return jsonb_build_object('success', true, 'invite_id', v_id, 'room_id', p_room_id, 'user_id', p_user_id);
+end;
+$$;
+
+-- The invited person taps Accept / Decline. On accept the APP then joins the room as usual.
+create or replace function public.respond_to_room_invite(p_invite_id uuid, p_accept boolean)
+returns jsonb
+language plpgsql
+security definer
+set search_path to 'pg_catalog', 'public'
+as $$
+declare
+  caller uuid := auth.uid();
+  inv record;
+  v_live boolean;
+begin
+  if caller is null then
+    raise exception 'not_authenticated' using errcode = '28000';
+  end if;
+
+  select * into inv from public.room_invites where id = p_invite_id;
+  if not found or inv.invitee_id <> caller then
+    raise exception 'Unauthorized: this invite is not for you.' using errcode = '42501';
+  end if;
+  if inv.status <> 'pending' then
+    return jsonb_build_object('success', false, 'error', 'already_handled', 'status', inv.status);
+  end if;
+
+  if not p_accept then
+    update public.room_invites set status = 'declined' where id = inv.id;
+    return jsonb_build_object('success', true, 'action', 'declined', 'room_id', inv.room_id);
+  end if;
+
+  select (is_live and status = 'active') into v_live from public.voice_rooms where id = inv.room_id;
+  if not coalesce(v_live, false) then
+    update public.room_invites set status = 'expired' where id = inv.id;
+    return jsonb_build_object('success', false, 'error', 'room_not_live', 'room_id', inv.room_id);
+  end if;
+
+  update public.room_invites set status = 'accepted' where id = inv.id;
+  return jsonb_build_object('success', true, 'action', 'accepted', 'room_id', inv.room_id);
+end;
+$$;
+
+-- People I follow, for the "Invite friends" list inside a room
+create or replace function public.list_invitable_following(p_room_id uuid)
+returns table (
+  user_id uuid,
+  username text,
+  avatar_url text,
+  country_code text,
+  is_online boolean,
+  in_room boolean,
+  invite_status text
+)
+language sql
+stable
+security invoker
+set search_path to 'pg_catalog', 'public'
+as $$
+  select dp.auth_user_id,
+         dp.username,
+         dp.avatar_url,
+         dp.country_code,
+         coalesce(dp.is_online, false),
+         exists (select 1 from public.room_participants rp
+                  where rp.room_id = p_room_id and rp.user_id = dp.auth_user_id),
+         (select ri.status from public.room_invites ri
+           where ri.room_id = p_room_id and ri.invitee_id = dp.auth_user_id)
+    from public.followers f
+    join public.discoverable_profiles dp on dp.auth_user_id = f.following_id
+   where f.follower_id = auth.uid()
+   order by coalesce(dp.is_online, false) desc, dp.username
+   limit 100;
+$$;
+
+revoke all on function public.send_room_invite(uuid, uuid) from public, anon;
+revoke all on function public.respond_to_room_invite(uuid, boolean) from public, anon;
+revoke all on function public.list_invitable_following(uuid) from public, anon;
+grant execute on function public.send_room_invite(uuid, uuid) to authenticated;
+grant execute on function public.respond_to_room_invite(uuid, boolean) to authenticated;
+grant execute on function public.list_invitable_following(uuid) to authenticated;

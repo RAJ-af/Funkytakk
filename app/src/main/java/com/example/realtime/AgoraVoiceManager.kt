@@ -63,4 +63,16 @@ object AgoraVoiceManager {
             Log.e(TAG, "Error executing renewToken", e)
         }
     }
+
+    fun leaveChannel() {
+        Log.d(TAG, "leaveChannel called")
+        try {
+            rtcEngine?.let { engine ->
+                val method = engine.javaClass.getMethod("leaveChannel")
+                method.invoke(engine)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error executing leaveChannel", e)
+        }
+    }
 }

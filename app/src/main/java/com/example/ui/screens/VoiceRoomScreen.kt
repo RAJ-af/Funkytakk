@@ -19,6 +19,9 @@ import com.example.ModerationManager
 import com.example.MyModerationStatus
 import com.example.ReportMessageSnapshot
 import com.example.ReportSpeakerLogItem
+import com.example.RoomEndSummaryResponse
+import com.example.repository.EncryptedChatRepository
+import com.example.ui.screens.chat.DirectChatScreen
 import com.google.firebase.auth.FirebaseAuth
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
@@ -33,9 +36,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
@@ -372,7 +378,8 @@ data class DirectMessage(
 @Composable
 fun VoiceRoomScreen(
     viewModel: AuthViewModel? = null,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onRoomEnded: ((peopleJoinedCount: Int, durationMinutes: Int) -> Unit)? = null
 ) {
     val context = LocalContext.current
 
@@ -438,6 +445,32 @@ fun VoiceRoomScreen(
     }
     var participantsData by remember { mutableStateOf<List<SupabaseRoomParticipant>>(emptyList()) }
     var roomHostId by remember { mutableStateOf<String?>("") }
+
+    var isRoomEnded by remember { mutableStateOf(false) }
+    var roomEndSummary by remember { mutableStateOf<RoomEndSummaryResponse?>(null) }
+    var hostAwaySecondsLeft by remember { mutableStateOf<Int?>(null) }
+    var openDirectChatPartner by remember { mutableStateOf<PrivateChatItem?>(null) }
+
+    if (isRoomEnded) {
+        RoomEndedScreen(
+            roomTitle = roomEndSummary?.title ?: activeRoomTitle,
+            hostName = roomEndSummary?.host_username ?: "Host",
+            hostAvatarUrl = roomEndSummary?.host_avatar_url,
+            hostUserId = roomEndSummary?.host_id ?: roomHostId,
+            currentUserId = currentUserId,
+            endedReason = roomEndSummary?.ended_reason ?: "host_ended",
+            durationSeconds = roomEndSummary?.duration_seconds ?: 0,
+            totalJoins = roomEndSummary?.total_joins ?: participantsData.size.coerceAtLeast(1),
+            peakParticipants = roomEndSummary?.peak_participants ?: participantsData.size.coerceAtLeast(1),
+            onCreateAnotherRoom = {
+                onBack()
+            },
+            onBackToHome = {
+                onBack()
+            }
+        )
+        return
+    }
 
     val pendingSpeakerRequests by viewModel?.pendingSpeakerRequests?.collectAsState() ?: remember { mutableStateOf(emptyList()) }
     val mySpeakerRequestStatus by viewModel?.mySpeakerRequestStatus?.collectAsState() ?: remember { mutableStateOf<String?>(null) }
@@ -697,14 +730,6 @@ fun VoiceRoomScreen(
                 }
                 withContext(Dispatchers.Main) {
                     participantsData = combined
-                    val me = combined.find { it.user_id == currentUserId }
-                    if (me != null) {
-                        val newMicState = me.is_mic_enabled
-                        if (isMicOn != newMicState) {
-                            isMicOn = newMicState
-                            com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(!newMicState)
-                        }
-                    }
                 }
 
                 // Authoritative moderation status check from backend
@@ -866,12 +891,11 @@ fun VoiceRoomScreen(
                                         )
                                     }
                                     if (targetUid == currentUserId) {
-                                        if (effectiveRole == "speaker") {
+                                        val previousRole = participantsData.find { it.user_id == currentUserId }?.role ?: "listener"
+                                        if (previousRole != "speaker" && effectiveRole == "speaker") {
                                             isSpeakerRequestPending = false
-                                            viewModel?.setMicEnabled(targetMic, context)
-                                        }
-                                        if (isMicOn != targetMic) {
                                             isMicOn = targetMic
+                                            viewModel?.setMicEnabled(targetMic, context)
                                             com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(!targetMic)
                                         }
                                     }
@@ -1060,13 +1084,35 @@ fun VoiceRoomScreen(
                 is RealtimeTableEvent.RoomLifecycleEvent -> {
                     if (event.roomId == activeRoomId) {
                         if (event.action == "room_ended") {
+                            com.example.realtime.AgoraVoiceManager.leaveChannel()
+                            com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(true)
+                            viewModel?.setMicEnabled(false)
+                            if (com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
+                                com.example.service.VoiceRoomOverlayManager.stopService(context)
+                            }
+                            com.example.service.VoiceRoomOverlayManager.clear()
+
+                            var summary: RoomEndSummaryResponse? = null
+                            for (retry in 1..3) {
+                                try {
+                                    val summaryRes = SupabaseClient.api.getRoomEndSummary(roomIdEq = "eq.$activeRoomId")
+                                    if (summaryRes.isSuccessful && !summaryRes.body().isNullOrEmpty()) {
+                                        summary = summaryRes.body()!!.first()
+                                        break
+                                    }
+                                } catch (_: Exception) {}
+                                delay(500)
+                            }
                             withContext(Dispatchers.Main) {
-                                Toast.makeText(context, "This room has ended.", Toast.LENGTH_SHORT).show()
-                                if (com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
-                                    com.example.service.VoiceRoomOverlayManager.stopService(context)
-                                }
-                                com.example.service.VoiceRoomOverlayManager.clear()
-                                onBack()
+                                roomEndSummary = summary ?: RoomEndSummaryResponse(
+                                    room_id = activeRoomId,
+                                    title = activeRoomTitle,
+                                    ended_reason = "host_ended",
+                                    duration_seconds = 0,
+                                    total_joins = participantsData.size.coerceAtLeast(1),
+                                    peak_participants = participantsData.size.coerceAtLeast(1)
+                                )
+                                isRoomEnded = true
                             }
                         }
                     }
@@ -1078,13 +1124,35 @@ fun VoiceRoomScreen(
                         val isLive = record?.optBoolean("is_live", true) ?: true
                         val status = record?.optString("status") ?: "active"
                         if (!isLive || status == "ended" || event.eventType.equals("DELETE", ignoreCase = true)) {
+                            com.example.realtime.AgoraVoiceManager.leaveChannel()
+                            com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(true)
+                            viewModel?.setMicEnabled(false)
+                            if (com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
+                                com.example.service.VoiceRoomOverlayManager.stopService(context)
+                            }
+                            com.example.service.VoiceRoomOverlayManager.clear()
+
+                            var summary: RoomEndSummaryResponse? = null
+                            for (retry in 1..3) {
+                                try {
+                                    val summaryRes = SupabaseClient.api.getRoomEndSummary(roomIdEq = "eq.$activeRoomId")
+                                    if (summaryRes.isSuccessful && !summaryRes.body().isNullOrEmpty()) {
+                                        summary = summaryRes.body()!!.first()
+                                        break
+                                    }
+                                } catch (_: Exception) {}
+                                delay(500)
+                            }
                             withContext(Dispatchers.Main) {
-                                Toast.makeText(context, "This room has ended.", Toast.LENGTH_SHORT).show()
-                                if (com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
-                                    com.example.service.VoiceRoomOverlayManager.stopService(context)
-                                }
-                                com.example.service.VoiceRoomOverlayManager.clear()
-                                onBack()
+                                roomEndSummary = summary ?: RoomEndSummaryResponse(
+                                    room_id = activeRoomId,
+                                    title = activeRoomTitle,
+                                    ended_reason = "host_ended",
+                                    duration_seconds = 0,
+                                    total_joins = participantsData.size.coerceAtLeast(1),
+                                    peak_participants = participantsData.size.coerceAtLeast(1)
+                                )
+                                isRoomEnded = true
                             }
                         }
                     }
@@ -1196,9 +1264,31 @@ fun VoiceRoomScreen(
                     val roomObj = roomsRes.body()?.firstOrNull()
                     if (roomObj != null) {
                         if (roomObj.is_live == false || roomObj.status == "ended") {
+                            com.example.realtime.AgoraVoiceManager.leaveChannel()
+                            com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(true)
+                            viewModel?.setMicEnabled(false)
+
+                            var summary: RoomEndSummaryResponse? = null
+                            for (retry in 1..3) {
+                                try {
+                                    val summaryRes = SupabaseClient.api.getRoomEndSummary(roomIdEq = "eq.$activeRoomId")
+                                    if (summaryRes.isSuccessful && !summaryRes.body().isNullOrEmpty()) {
+                                        summary = summaryRes.body()!!.first()
+                                        break
+                                    }
+                                } catch (_: Exception) {}
+                                delay(500)
+                            }
                             withContext(Dispatchers.Main) {
-                                Toast.makeText(context, "This voice room has ended.", Toast.LENGTH_SHORT).show()
-                                onBack()
+                                roomEndSummary = summary ?: RoomEndSummaryResponse(
+                                    room_id = activeRoomId,
+                                    title = activeRoomTitle,
+                                    ended_reason = "host_ended",
+                                    duration_seconds = 0,
+                                    total_joins = participantsData.size.coerceAtLeast(1),
+                                    peak_participants = participantsData.size.coerceAtLeast(1)
+                                )
+                                isRoomEnded = true
                             }
                             break
                         } else {
@@ -1210,17 +1300,51 @@ fun VoiceRoomScreen(
                                     }.parse(hostLeftStr)?.time ?: 0L
                                 } catch (_: Exception) { 0L }
 
-                                if (leftEpoch > 0L && (System.currentTimeMillis() - leftEpoch) > 3 * 60 * 1000L) {
-                                    // 3-minute grace period expired without host return
-                                    val token = SupabaseSessionManager.getBearerToken(context)
-                                    try {
-                                        SupabaseClient.api.checkAndCleanupEndedRooms(auth = token)
-                                    } catch (_: Exception) {}
-                                    withContext(Dispatchers.Main) {
-                                        Toast.makeText(context, "Voice room ended (host was away for more than 3 minutes).", Toast.LENGTH_LONG).show()
-                                        onBack()
+                                if (leftEpoch > 0L) {
+                                    val elapsedSec = ((System.currentTimeMillis() - leftEpoch) / 1000).toInt()
+                                    val remaining = 180 - elapsedSec
+                                    if (remaining > 0) {
+                                        withContext(Dispatchers.Main) {
+                                            hostAwaySecondsLeft = remaining
+                                        }
+                                    } else {
+                                        // 3-minute grace period expired without host return
+                                        val token = SupabaseSessionManager.getBearerToken(context)
+                                        try {
+                                            SupabaseClient.api.checkAndCleanupEndedRooms(auth = token)
+                                        } catch (_: Exception) {}
+                                        com.example.realtime.AgoraVoiceManager.leaveChannel()
+                                        com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(true)
+                                        viewModel?.setMicEnabled(false)
+
+                                        var summary: RoomEndSummaryResponse? = null
+                                        for (retry in 1..3) {
+                                            try {
+                                                val summaryRes = SupabaseClient.api.getRoomEndSummary(roomIdEq = "eq.$activeRoomId")
+                                                if (summaryRes.isSuccessful && !summaryRes.body().isNullOrEmpty()) {
+                                                    summary = summaryRes.body()!!.first()
+                                                    break
+                                                }
+                                            } catch (_: Exception) {}
+                                            delay(500)
+                                        }
+                                        withContext(Dispatchers.Main) {
+                                            roomEndSummary = summary ?: RoomEndSummaryResponse(
+                                                room_id = activeRoomId,
+                                                title = activeRoomTitle,
+                                                ended_reason = "host_timeout",
+                                                duration_seconds = 180,
+                                                total_joins = participantsData.size.coerceAtLeast(1),
+                                                peak_participants = participantsData.size.coerceAtLeast(1)
+                                            )
+                                            isRoomEnded = true
+                                        }
+                                        break
                                     }
-                                    break
+                                }
+                            } else {
+                                withContext(Dispatchers.Main) {
+                                    hostAwaySecondsLeft = null
                                 }
                             }
                         }
@@ -1589,16 +1713,35 @@ fun VoiceRoomScreen(
     var selectedDarkBgIndex by remember { mutableStateOf(0) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     
-    val privateChats = remember {
-        listOf(
-            PrivateChatItem("1", "Sara", "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400", "in", "Typing...", "08:46 AM", 2, true, true),
-            PrivateChatItem("2", "Riya", "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400", "in", "Yaar tum online kab aoge?", "08:32 AM", 1, true, false),
-            PrivateChatItem("3", "Arjun", "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400", "in", "Let's catch up later", "Yesterday", 0, false, false),
-            PrivateChatItem("4", "Vihaan", "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400", "in", "Thanks! \uD83D\uDE4C", "Yesterday", 0, true, false),
-            PrivateChatItem("5", "Ananya", "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400", "in", "Photo", "06/12", 0, false, false),
-            PrivateChatItem("6", "Daisy", "https://images.unsplash.com/photo-1524250502761-1ac6f2e30d43?w=400", "in", "hey \uD83D\uDC4B", "06/09", 0, true, false),
-            PrivateChatItem("7", "Reymon", "https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=400", "in", "Invite to Join the Clan", "05/29", 0, false, false)
-        )
+    val dbConversations by EncryptedChatRepository.conversations.collectAsState()
+    val privateChats = remember(dbConversations) {
+        dbConversations.map { conv ->
+            val lastMsgPreview = when {
+                conv.lastMessageText.startsWith("📷") || conv.lastMessageText.contains("Photo", ignoreCase = true) -> "Photo"
+                conv.lastMessageText.startsWith("🎤") || conv.lastMessageText.contains("Voice message", ignoreCase = true) -> "Voice message"
+                conv.lastMessageText.isBlank() -> "Encrypted conversation"
+                else -> conv.lastMessageText
+            }
+            val formattedTime = if (conv.lastMessageTime > 0) {
+                val diff = System.currentTimeMillis() - conv.lastMessageTime
+                if (diff < 60_000) "Just now"
+                else if (diff < 3600_000) "${diff / 60_000}m"
+                else if (diff < 86400_000) "${diff / 3600_000}h"
+                else "Yesterday"
+            } else "Now"
+
+            PrivateChatItem(
+                id = conv.otherUserId,
+                name = conv.otherUserName.ifBlank { "User" },
+                imageUrl = conv.otherUserAvatar.orEmpty().ifBlank { "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400" },
+                flagCode = conv.otherUserFlag.orEmpty().ifBlank { "in" },
+                lastMessage = lastMsgPreview,
+                time = formattedTime,
+                unreadCount = conv.unreadCount,
+                isOnline = true,
+                isTyping = false
+            )
+        }
     }
 
     val fluentEmojis = listOf(
@@ -2138,6 +2281,35 @@ fun VoiceRoomScreen(
                 }
             }
 
+            if (hostAwaySecondsLeft != null && hostAwaySecondsLeft!! > 0) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF3C7)),
+                    border = BorderStroke(1.dp, Color(0xFFFDE68A))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("⏳", fontSize = 18.sp)
+                        Spacer(modifier = Modifier.width(10.dp))
+                        val mins = hostAwaySecondsLeft!! / 60
+                        val secs = hostAwaySecondsLeft!! % 60
+                        Text(
+                            text = "Host is away - room closes in ${String.format("%d:%02d", mins, secs)}",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFB45309)
+                        )
+                    }
+                }
+            }
+
             if (isPrivateRoomState) {
                 Card(
                     modifier = Modifier
@@ -2344,6 +2516,7 @@ fun VoiceRoomScreen(
             // 2. SPEAKERS VISUAL SYSTEM
             val currentParticipant = participantsData.find { it.user_id == currentUserId }
             val isCurrentUserSpeakerOrHost = (currentUserId == roomHostId || currentParticipant?.role == "speaker" || speakerSeats.any { it.userId == currentUserId })
+            val isHostOrModerator = (currentUserId == roomHostId || currentParticipant?.role == "host" || currentParticipant?.role == "moderator")
             SpeakerSeatsGrid(
                 hostSeat = hostSeat,
                 speakerSeats = speakerSeats,
@@ -2363,6 +2536,8 @@ fun VoiceRoomScreen(
                 },
                 isSpeakerRequestPending = isSpeakerRequestPending || mySpeakerRequestStatus == "pending",
                 isCurrentUserSpeakerOrHost = isCurrentUserSpeakerOrHost,
+                isCurrentUserHostOrModerator = isHostOrModerator,
+                onHostInviteSeatClick = { showPeopleSheet = true },
                 onRequestSpeakerSeat = handleRequestSpeakerSeat
             )
 
@@ -2799,10 +2974,22 @@ fun VoiceRoomScreen(
                 privateChats = privateChats,
                 selectedThemeIndex = selectedThemeIndex,
                 onChatClick = { chatUser ->
-                    oneToOneChatUser = chatUser
-                    showOneToOneChatSheet = true
+                    openDirectChatPartner = chatUser
                     showChatSheet = false
                 }
+            )
+        }
+    }
+
+    if (openDirectChatPartner != null) {
+        val partner = openDirectChatPartner!!
+        Box(modifier = Modifier.fillMaxSize()) {
+            DirectChatScreen(
+                partnerUserId = partner.id,
+                partnerName = partner.name,
+                partnerAvatarUrl = partner.imageUrl,
+                partnerCountryCode = partner.flagCode,
+                onBack = { openDirectChatPartner = null }
             )
         }
     }
@@ -3043,7 +3230,7 @@ fun VoiceRoomScreen(
                                 language = newLang,
                                 country_code = newCountryCode,
                                 language_code = newCountryCode,
-                                language_flag = "",
+                                language_flag = com.example.ui.components.getProgrammingIconUrl(newLang).ifBlank { newCountryCode },
                                 tag = newTag,
                                 is_private = newPrivate,
                                 join_code = if (newPrivate) newCode else null
@@ -3192,144 +3379,51 @@ fun VoiceRoomScreen(
 
     // 1b) Host Leave Room vs End Room Confirmation Dialog
     if (showHostLeaveDialog) {
-        AlertDialog(
-            onDismissRequest = { showHostLeaveDialog = false },
-            icon = {
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFFEF3C7)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("👑", fontSize = 24.sp)
+        HostLeaveRoomSheet(
+            onDismiss = { showHostLeaveDialog = false },
+            onLeaveOnly = {
+                showHostLeaveDialog = false
+                viewModel?.hostLeaveRoomOnly(context) {
+                    if (com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
+                        com.example.service.VoiceRoomOverlayManager.startServiceIfPermitted(context)
+                    }
+                    onBack()
                 }
             },
-            title = {
-                Text(
-                    text = "Leave Room?",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
-                    color = if (isRoomDarkMode) Color.White else Color(0xFF0F172A),
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            },
-            text = {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = "As the Host, you can leave temporarily or end the session completely for everyone.",
-                        fontSize = 13.sp,
-                        color = if (isRoomDarkMode) Color.White.copy(alpha = 0.7f) else Color(0xFF475569),
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Surface(
-                        color = if (isRoomDarkMode) Color(0xFF1E293B) else Color(0xFFF8FAFC),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Row(verticalAlignment = Alignment.Top) {
-                                Text("•", fontWeight = FontWeight.Bold, color = Color(0xFFF59E0B), fontSize = 16.sp)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Column {
-                                    Text(
-                                        text = "Leave Only",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp,
-                                        color = Color(0xFFF59E0B)
-                                    )
-                                    Text(
-                                        text = "Keeps room active with floating chat head. You have a 3-minute grace period to return.",
-                                        fontSize = 11.sp,
-                                        color = if (isRoomDarkMode) Color.White.copy(alpha = 0.8f) else Color(0xFF475569)
-                                    )
-                                }
-                            }
-                            Row(verticalAlignment = Alignment.Top) {
-                                Text("•", fontWeight = FontWeight.Bold, color = Color(0xFFEF4444), fontSize = 16.sp)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Column {
-                                    Text(
-                                        text = "End Room",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp,
-                                        color = Color(0xFFEF4444)
-                                    )
-                                    Text(
-                                        text = "Closes the room for all participants immediately and clears all seats.",
-                                        fontSize = 11.sp,
-                                        color = if (isRoomDarkMode) Color.White.copy(alpha = 0.8f) else Color(0xFF475569)
-                                    )
-                                }
-                            }
-                        }
+            onEndRoom = {
+                showHostLeaveDialog = false
+                val pCount = participantsData.size.coerceAtLeast(1)
+                scope.launch(Dispatchers.IO) {
+                    com.example.realtime.AgoraVoiceManager.leaveChannel()
+                    com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(true)
+                    viewModel?.setMicEnabled(false)
+                    viewModel?.endActiveVoiceRoom(context) {
+                        // End room RPC completed
                     }
-                }
-            },
-            confirmButton = {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = {
-                            showHostLeaveDialog = false
-                            viewModel?.hostLeaveRoomOnly(context) {
-                                if (com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
-                                    com.example.service.VoiceRoomOverlayManager.startServiceIfPermitted(context)
-                                }
-                                onBack()
+                    var summary: RoomEndSummaryResponse? = null
+                    for (retry in 1..3) {
+                        try {
+                            val summaryRes = SupabaseClient.api.getRoomEndSummary(roomIdEq = "eq.$activeRoomId")
+                            if (summaryRes.isSuccessful && !summaryRes.body().isNullOrEmpty()) {
+                                summary = summaryRes.body()!!.first()
+                                break
                             }
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFFF59E0B),
-                            contentColor = Color.Black
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(44.dp)
-                    ) {
-                        Text("Leave Only", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        } catch (_: Exception) {}
+                        delay(500)
                     }
-
-                    Button(
-                        onClick = {
-                            showHostLeaveDialog = false
-                            viewModel?.endActiveVoiceRoom(context) {
-                                onBack()
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFFDC2626),
-                            contentColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(44.dp)
-                    ) {
-                        Text("End Room", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    }
-
-                    TextButton(
-                        onClick = { showHostLeaveDialog = false },
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = "Cancel", 
-                            color = if (isRoomDarkMode) Color.White.copy(alpha = 0.7f) else Color(0xFF64748B),
-                            fontWeight = FontWeight.Medium
+                    withContext(Dispatchers.Main) {
+                        roomEndSummary = summary ?: RoomEndSummaryResponse(
+                            room_id = activeRoomId,
+                            title = activeRoomTitle,
+                            ended_reason = "host_ended",
+                            duration_seconds = 0,
+                            total_joins = pCount,
+                            peak_participants = pCount
                         )
+                        isRoomEnded = true
                     }
                 }
-            },
-            dismissButton = null,
-            shape = RoundedCornerShape(20.dp),
-            containerColor = if (isRoomDarkMode) Color(0xFF0F172A) else Color.White
+            }
         )
     }
 
@@ -3390,25 +3484,7 @@ fun VoiceRoomScreen(
         )
     }
 
-    if (BuildConfig.DEBUG) {
-        val myRole = if (currentUserId == roomHostId) "host" else (participantsData.find { it.user_id == currentUserId }?.role ?: "listener")
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(top = 80.dp, start = 12.dp),
-            contentAlignment = Alignment.TopStart
-        ) {
-            Text(
-                text = "Role: $myRole | Req: ${latestReqKind ?: "none"}/${latestReqStatus ?: "none"} | Token: ${lastTokenRole ?: "none"} (pub=$lastCanPublish)",
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.Yellow,
-                modifier = Modifier
-                    .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(6.dp))
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-            )
-        }
-    }
+
 
     // 2) Report Room Bottom Sheet container
     @OptIn(ExperimentalMaterial3Api::class)
@@ -6770,6 +6846,318 @@ fun MoreFeaturesBottomSheetContent(
                         color = if (isSel) textColor else (if (isDarkMode) Color.White.copy(alpha = 0.6f) else Color.Gray)
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun HostLeaveRoomSheet(
+    onDismiss: () -> Unit,
+    onLeaveOnly: () -> Unit,
+    onEndRoom: () -> Unit
+) {
+    var selectedOption by remember { mutableStateOf(0) } // 0 = Leave room, 1 = End room
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(32.dp))
+                .background(Color(0xFFFFFDF8))
+                .padding(20.dp)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Drag handle & Close button row
+                Box(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    // Drag Handle
+                    Box(
+                        modifier = Modifier
+                            .width(38.dp)
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(Color(0xFFE2E8F0))
+                            .align(Alignment.Center)
+                    )
+
+                    // Close Button X
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFF1F5F9))
+                            .clickable { onDismiss() }
+                            .align(Alignment.CenterEnd),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "✕",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF64748B)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Hero Mascot Graphic
+                Image(
+                    painter = painterResource(id = R.drawable.img_leave_room_mascot),
+                    contentDescription = "Leave Room Mascot",
+                    modifier = Modifier
+                        .fillMaxWidth(0.75f)
+                        .height(130.dp),
+                    contentScale = ContentScale.Fit
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(
+                    text = "Leave Room?",
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0F172A)
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = "As the Host, you can leave temporarily or end the session completely for everyone.",
+                    fontSize = 13.sp,
+                    color = Color(0xFF64748B),
+                    textAlign = TextAlign.Center,
+                    lineHeight = 18.sp,
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Option 1: Leave Room
+                val isOption0Selected = selectedOption == 0
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(if (isOption0Selected) Color(0xFFFFFBEB) else Color(0xFFFAF9F6))
+                        .border(
+                            width = if (isOption0Selected) 1.5.dp else 1.dp,
+                            color = if (isOption0Selected) Color(0xFFFFC107) else Color(0xFFE2E8F0),
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                        .clickable { selectedOption = 0 }
+                        .padding(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color(0xFFFEF3C7)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = null,
+                                tint = Color(0xFFD97706),
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(14.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Leave room",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A)
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Keeps room active with floating chat head. You have a 3-minute grace period to return.",
+                                fontSize = 11.sp,
+                                color = Color(0xFF64748B),
+                                lineHeight = 15.sp
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(10.dp))
+
+                        // Radio dot
+                        Box(
+                            modifier = Modifier
+                                .size(22.dp)
+                                .clip(CircleShape)
+                                .background(if (isOption0Selected) Color(0xFFFFC107) else Color.Transparent)
+                                .border(
+                                    width = if (isOption0Selected) 0.dp else 1.5.dp,
+                                    color = if (isOption0Selected) Color.Transparent else Color(0xFFCBD5E1),
+                                    shape = CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isOption0Selected) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.Black)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Option 2: End Room
+                val isOption1Selected = selectedOption == 1
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(if (isOption1Selected) Color(0xFFFEF2F2) else Color(0xFFFAF9F6))
+                        .border(
+                            width = if (isOption1Selected) 1.5.dp else 1.dp,
+                            color = if (isOption1Selected) Color(0xFFEF4444) else Color(0xFFFEE2E2),
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                        .clickable { selectedOption = 1 }
+                        .padding(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color(0xFFFEE2E2)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ExitToApp,
+                                contentDescription = null,
+                                tint = Color(0xFFEF4444),
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(14.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "End room",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A)
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Closes the room for all participants immediately and clears all seats.",
+                                fontSize = 11.sp,
+                                color = Color(0xFF64748B),
+                                lineHeight = 15.sp
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(10.dp))
+
+                        // Radio dot
+                        Box(
+                            modifier = Modifier
+                                .size(22.dp)
+                                .clip(CircleShape)
+                                .background(if (isOption1Selected) Color(0xFFEF4444) else Color.Transparent)
+                                .border(
+                                    width = if (isOption1Selected) 0.dp else 1.5.dp,
+                                    color = if (isOption1Selected) Color.Transparent else Color(0xFFCBD5E1),
+                                    shape = CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isOption1Selected) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.White)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(22.dp))
+
+                // Primary CTA: Continue
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp)
+                        .shadow(elevation = 4.dp, shape = RoundedCornerShape(27.dp), spotColor = Color(0xFFFFB800).copy(alpha = 0.4f))
+                        .clip(RoundedCornerShape(27.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                colors = listOf(Color(0xFFFFD000), Color(0xFFFFB800))
+                            )
+                        )
+                        .clickable {
+                            if (selectedOption == 0) {
+                                onLeaveOnly()
+                            } else {
+                                onEndRoom()
+                            }
+                        }
+                        .padding(horizontal = 20.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = "Continue",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Black
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = "Continue",
+                            tint = Color.Black,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Secondary CTA: Cancel
+                Text(
+                    text = "Cancel",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF64748B),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onDismiss() }
+                        .padding(horizontal = 24.dp, vertical = 6.dp)
+                )
             }
         }
     }

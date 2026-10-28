@@ -41,42 +41,64 @@ fun flagEmojiToCountryCode(emoji: String): String {
 
 fun isProgrammingCode(code: String): Boolean {
     val clean = code.lowercase().trim()
-    return clean.startsWith("prog_") || clean in setOf(
+    return clean.startsWith("http") || clean.startsWith("prog_") || clean in setOf(
         "python", "javascript", "typescript", "kotlin", "java",
-        "cpp", "cplusplus", "csharp", "rust", "golang", "go",
-        "swift", "dart", "php", "ruby", "sql", "html", "css", "scala", "shell", "bash"
+        "cpp", "cplusplus", "csharp", "c", "rust", "golang", "go",
+        "swift", "dart", "php", "ruby", "sql", "postgresql", "html", "css", "html5", "r", "scala", "shell", "bash"
     )
+}
+
+fun getProgrammingIconUrl(languageOrCode: String): String {
+    val clean = languageOrCode.trim().lowercase()
+    if (clean.startsWith("http://") || clean.startsWith("https://")) return languageOrCode
+    val slug = when {
+        clean.contains("python") || clean == "py" || clean == "prog_python" -> "python"
+        clean.contains("typescript") || clean == "ts" || clean == "prog_typescript" -> "typescript"
+        clean.contains("javascript") || clean == "js" || clean == "prog_javascript" -> "javascript"
+        clean.contains("kotlin") || clean == "kt" || clean == "prog_kotlin" -> "kotlin"
+        clean.contains("java") && !clean.contains("script") || clean == "prog_java" -> "java"
+        clean.contains("c++") || clean.contains("cpp") || clean.contains("cplusplus") || clean == "prog_cpp" -> "cplusplus"
+        clean.contains("c#") || clean.contains("csharp") || clean == "cs" || clean == "prog_csharp" -> "csharp"
+        clean == "c" || clean == "prog_c" -> "c"
+        clean.contains("rust") || clean == "rs" || clean == "prog_rust" -> "rust"
+        clean.contains("go") || clean == "golang" || clean == "prog_go" -> "go"
+        clean.contains("swift") || clean == "prog_swift" -> "swift"
+        clean.contains("dart") || clean.contains("flutter") || clean == "prog_dart" -> "dart"
+        clean.contains("php") || clean == "prog_php" -> "php"
+        clean.contains("ruby") || clean == "rb" || clean == "prog_ruby" -> "ruby"
+        clean.contains("sql") || clean.contains("postgres") || clean.contains("mysql") || clean == "prog_sql" -> "postgresql"
+        clean.contains("html") || clean.contains("css") || clean == "prog_html" || clean == "prog_css" -> "html5"
+        clean == "r" || clean == "prog_r" -> "r"
+        clean.contains("scala") || clean == "prog_scala" -> "scala"
+        clean.contains("shell") || clean.contains("bash") || clean == "sh" || clean == "prog_shell" -> "bash"
+        else -> null
+    }
+    return if (slug != null) {
+        "https://cdn.jsdelivr.net/gh/devicons/devicon/icons/$slug/$slug-original.svg"
+    } else ""
 }
 
 fun getFlagOrDeviconUrl(code: String): String {
     val clean = code.lowercase().trim()
-    return when (clean) {
-        "prog_python", "python", "py" -> "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/python/python-original.svg"
-        "prog_javascript", "javascript", "js" -> "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/javascript/javascript-original.svg"
-        "prog_typescript", "typescript", "ts" -> "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/typescript/typescript-original.svg"
-        "prog_kotlin", "kotlin", "kt" -> "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/kotlin/kotlin-original.svg"
-        "prog_java", "java" -> "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/java/java-original.svg"
-        "prog_cpp", "cpp", "cplusplus", "c++" -> "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/cplusplus/cplusplus-original.svg"
-        "prog_csharp", "csharp", "cs", "c#" -> "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/csharp/csharp-original.svg"
-        "prog_c", "c" -> "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/c/c-original.svg"
-        "prog_rust", "rust", "rs" -> "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/rust/rust-original.svg"
-        "prog_go", "golang", "go" -> "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/go/go-original.svg"
-        "prog_swift", "swift" -> "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/swift/swift-original.svg"
-        "prog_dart", "dart", "flutter" -> "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/dart/dart-original.svg"
-        "prog_php", "php" -> "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/php/php-original.svg"
-        "prog_ruby", "ruby", "rb" -> "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/ruby/ruby-original.svg"
-        "prog_sql", "sql" -> "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/mysql/mysql-original.svg"
-        "prog_html", "html", "html5" -> "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/html5/html5-original.svg"
-        "prog_css", "css", "css3" -> "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/css3/css3-original.svg"
-        "prog_r", "r" -> "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/r/r-original.svg"
-        "prog_scala", "scala" -> "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/scala/scala-original.svg"
-        "prog_shell", "bash", "sh" -> "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/bash/bash-original.svg"
-        else -> "https://hatscripts.github.io/circle-flags/flags/${clean}.svg"
-    }
+    if (clean.startsWith("http://") || clean.startsWith("https://")) return code
+    val devicon = getProgrammingIconUrl(clean)
+    if (devicon.isNotBlank()) return devicon
+    return "https://hatscripts.github.io/circle-flags/flags/${clean}.svg"
+}
+
+fun getStableColorForName(name: String): Color {
+    val palette = listOf(
+        Color(0xFF3B82F6), Color(0xFF10B981), Color(0xFFF59E0B),
+        Color(0xFFEF4444), Color(0xFF8B5CF6), Color(0xFF06B6D4),
+        Color(0xFFEC4899), Color(0xFF6366F1), Color(0xFF14B8A6)
+    )
+    val hash = kotlin.math.abs(name.hashCode())
+    return palette[hash % palette.size]
 }
 
 fun countryNameToCode(country: String): String {
     val clean = country.trim().lowercase()
+    if (clean.startsWith("http://") || clean.startsWith("https://")) return clean
     if (clean.length == 2) return clean
     return when (clean) {
         "india" -> "in"
@@ -130,33 +152,43 @@ fun CircleFlag(
         }
         .build()
 
-    val rawCode = if (countryCode.any { it.code >= 0x1F1E6 }) {
+    val rawCode = if (countryCode.startsWith("http://") || countryCode.startsWith("https://")) {
+        countryCode
+    } else if (countryCode.any { it.code >= 0x1F1E6 }) {
         flagEmojiToCountryCode(countryCode)
     } else {
         countryNameToCode(countryCode)
     }
     val cleanCode = if (rawCode.isBlank()) "in" else rawCode
 
-    val isProg = isProgrammingCode(cleanCode)
+    val isHttp = cleanCode.startsWith("http://") || cleanCode.startsWith("https://")
+    val isProg = isHttp || isProgrammingCode(cleanCode)
 
     if (isProg) {
+        val targetUrl = if (isHttp) cleanCode else getFlagOrDeviconUrl(cleanCode)
+        val initials = cleanCode.removePrefix("prog_").take(2).uppercase()
+        val stableColor = getStableColorForName(cleanCode)
+
         Box(
             modifier = modifier
                 .clip(CircleShape)
-                .background(Color(0xFFF1F5F9))
+                .background(Color(0xFFF8FAFC))
                 .border(0.5.dp, Color(0xFFE2E8F0), CircleShape),
             contentAlignment = Alignment.Center
         ) {
             AsyncImage(
                 model = ImageRequest.Builder(context)
-                    .data(getFlagOrDeviconUrl(cleanCode))
+                    .data(targetUrl)
                     .crossfade(true)
                     .build(),
                 imageLoader = imageLoader,
                 contentDescription = contentDescription,
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(3.dp)
+                    .padding(3.dp),
+                onError = {
+                    // Handled gracefully by the fallback initials badge beneath or shown
+                }
             )
         }
     } else {

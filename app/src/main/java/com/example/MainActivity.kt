@@ -99,6 +99,7 @@ class MainActivity : FragmentActivity() {
                                 if (SupabaseSessionManager.getUserId(applicationContext) != null || authState is AuthState.Success) {
                                     com.example.service.PushNotificationManager.onUserLoggedIn(applicationContext)
                                     com.example.repository.GroupChatRepository.onAppResumed(applicationContext)
+                                    com.example.ui.components.RoomInviteOverlayManager.checkAndShowPendingInvite(applicationContext)
                                 }
                             }
                         }
@@ -133,6 +134,8 @@ class MainActivity : FragmentActivity() {
                     var createRoomIsPrivate by rememberSaveable { mutableStateOf(false) }
                     var activeSupportReportId by rememberSaveable { mutableStateOf<String?>(null) }
                     var pendingBackupStatus by remember { mutableStateOf<ChatBackupStatusResponse?>(null) }
+                    var endedRoomPeopleCount by rememberSaveable { mutableStateOf(12) }
+                    var endedRoomTotalTime by rememberSaveable { mutableStateOf(28) }
 
                     LaunchedEffect(authState) {
                         if (authState is AuthState.Success) {
@@ -448,6 +451,22 @@ class MainActivity : FragmentActivity() {
                                 viewModel = authViewModel,
                                 onBack = {
                                     currentScreen = "home"
+                                },
+                                onRoomEnded = { peopleCount, durationMins ->
+                                    endedRoomPeopleCount = peopleCount
+                                    endedRoomTotalTime = durationMins
+                                    currentScreen = "room_ended"
+                                }
+                            )
+                            "room_ended" -> RoomEndedScreen(
+                                peopleJoinedCount = endedRoomPeopleCount,
+                                totalTimeMinutes = endedRoomTotalTime,
+                                onCreateAnotherRoom = {
+                                    createRoomIsPrivate = false
+                                    currentScreen = "create_language_room"
+                                },
+                                onBackToHome = {
+                                    currentScreen = "home"
                                 }
                             )
                         }
@@ -480,6 +499,20 @@ class MainActivity : FragmentActivity() {
                             }
                         )
                     }
+
+                    com.example.ui.components.PendingRoomInviteOverlay(
+                        onJoinRoom = { roomId ->
+                            authViewModel.verifyAndNavigateToRoom(
+                                context = applicationContext,
+                                onRoomActive = {
+                                    currentScreen = "voice_room"
+                                },
+                                onRoomEnded = {
+                                    android.widget.Toast.makeText(applicationContext, "This room has ended.", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            )
+                        }
+                    )
                 }
                 }
                 }

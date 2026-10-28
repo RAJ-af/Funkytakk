@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -13,6 +14,9 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Share
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -36,13 +40,42 @@ import com.example.util.RoomShareHelper
 fun InviteFriendBottomSheetContent(
     isDarkMode: Boolean,
     roomName: String = "FunkyTalk Room",
-    roomId: String = "FT5272",
+    roomId: String = "",
     inviteLink: String = RoomShareHelper.buildDefaultInviteLink(roomId),
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val textColor = if (isDarkMode) Color.White else Color.Black
     val bgColors = if (isDarkMode) Color(0xFF1F2937) else Color(0xFFF3F4F6)
+
+    var isLoading by remember { mutableStateOf(true) }
+    var invitableUsers by remember { mutableStateOf<List<com.example.InvitableUserResponse>>(emptyList()) }
+    val invitedUserIds = remember { mutableStateMapOf<String, Boolean>() }
+
+    LaunchedEffect(roomId) {
+        if (roomId.isNotBlank()) {
+            isLoading = true
+            try {
+                val token = com.example.SupabaseSessionManager.getBearerToken(context)
+                val res = com.example.SupabaseClient.api.listInvitableFollowing(
+                    auth = token,
+                    body = mapOf("p_room_id" to roomId)
+                )
+                if (res.isSuccessful && res.body() != null) {
+                    invitableUsers = res.body() ?: emptyList()
+                } else {
+                    android.util.Log.d("InviteFriendSheet", "Error listing invitable following: ${res.code()}")
+                }
+            } catch (e: Exception) {
+                android.util.Log.d("InviteFriendSheet", "Exception listing invitable following: ${e.message}")
+            } finally {
+                isLoading = false
+            }
+        } else {
+            isLoading = false
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -138,7 +171,7 @@ fun InviteFriendBottomSheetContent(
         Spacer(modifier = Modifier.height(24.dp))
 
         Text(
-            text = "Online Friends",
+            text = "Friends You Follow",
             fontSize = 16.sp,
             fontWeight = FontWeight.Bold,
             color = textColor
@@ -146,77 +179,156 @@ fun InviteFriendBottomSheetContent(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        val friends = listOf(
-            "Ananya" to "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400",
-            "Vihaan" to "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400",
-            "Meera" to "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400",
-            "Rahul" to "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400"
-        )
-        
-        Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-            friends.forEach { (name, img) ->
-                var isInvited by remember { mutableStateOf(false) }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(modifier = Modifier.size(48.dp)) {
-                            AsyncImage(
-                                model = img,
-                                contentDescription = name,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .clip(CircleShape)
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .offset(x = 2.dp, y = 2.dp)
-                                    .size(16.dp)
-                                    .background(if (isDarkMode) Color(0xFF1E293B) else Color.White, CircleShape)
-                                    .padding(1.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                val flagCodeOptional = when (name) {
-                                    "Ananya" -> "in"
-                                    "Vihaan" -> "jp"
-                                    "Meera" -> "us"
-                                    "Rahul" -> "gb"
-                                    else -> "in"
+        if (isLoading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                androidx.compose.material3.CircularProgressIndicator(
+                    color = Color(0xFFFFB800),
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+        } else if (invitableUsers.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Follow people to invite them to your room",
+                    fontSize = 14.sp,
+                    color = if (isDarkMode) Color.White.copy(alpha = 0.6f) else Color.Gray
+                )
+            }
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                invitableUsers.forEach { user ->
+                    val isPending = user.invite_status == "pending" || invitedUserIds[user.user_id] == true
+                    val isInRoom = user.in_room
+                    val username = user.username?.ifBlank { "User" } ?: "User"
+                    val avatarUrl = user.avatar_url?.ifBlank { null }
+                        ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400"
+                    val flagCode = user.country_code?.ifBlank { "in" } ?: "in"
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(modifier = Modifier.size(48.dp)) {
+                                AsyncImage(
+                                    model = avatarUrl,
+                                    contentDescription = username,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(CircleShape)
+                                )
+                                if (user.is_online) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .size(12.dp)
+                                            .background(Color(0xFF10B981), CircleShape)
+                                            .border(1.5.dp, Color.White, CircleShape)
+                                    )
                                 }
-                                CircleFlag(
-                                    countryCode = flagCodeOptional,
-                                    modifier = Modifier.fillMaxSize().clip(CircleShape)
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .offset(x = 2.dp, y = 2.dp)
+                                        .size(16.dp)
+                                        .background(if (isDarkMode) Color(0xFF1E293B) else Color.White, CircleShape)
+                                        .padding(1.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircleFlag(
+                                        countryCode = flagCode,
+                                        modifier = Modifier.fillMaxSize().clip(CircleShape)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column {
+                                Text(text = username, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = textColor)
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = if (isInRoom) "In room" else if (user.is_online) "Online" else "Offline",
+                                    fontSize = 12.sp,
+                                    color = if (isInRoom) Color(0xFF3B82F6) else if (user.is_online) Color(0xFF10B981) else Color.Gray
                                 )
                             }
                         }
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column {
-                            Text(text = name, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = textColor)
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(text = "Online", fontSize = 12.sp, color = Color(0xFF10B981))
+
+                        val buttonText = when {
+                            isInRoom -> "In room"
+                            isPending -> "Invited"
+                            else -> "Invite"
                         }
-                    }
-                    
-                    Button(
-                        onClick = { isInvited = true },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isInvited) bgColors else Color(0xFFFBBF24)
-                        ),
-                        shape = RoundedCornerShape(100.dp),
-                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)
-                    ) {
-                        Text(
-                            text = if (isInvited) "Invited" else "Invite",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isInvited) (if (isDarkMode) Color.White else Color.Gray) else Color(0xFF78350F)
-                        )
+                        val isButtonDisabled = isInRoom || isPending
+
+                        Button(
+                            onClick = {
+                                if (!isButtonDisabled) {
+                                    scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                        try {
+                                            val token = com.example.SupabaseSessionManager.getBearerToken(context)
+                                            val res = com.example.SupabaseClient.api.sendRoomInvite(
+                                                auth = token,
+                                                body = mapOf("p_room_id" to roomId, "p_user_id" to user.user_id)
+                                            )
+                                            if (res.isSuccessful) {
+                                                invitedUserIds[user.user_id] = true
+                                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                                    android.widget.Toast.makeText(context, "Invite sent to $username!", android.widget.Toast.LENGTH_SHORT).show()
+                                                }
+                                            } else {
+                                                val errBody = res.errorBody()?.string() ?: ""
+                                                val msg = when {
+                                                    errBody.contains("already_invited") -> "Already invited, try again in a minute"
+                                                    errBody.contains("rate_limited") -> "Too many invites, try later"
+                                                    errBody.contains("already_in_room") -> "Already in the room"
+                                                    errBody.contains("room_not_live") -> "This room has ended"
+                                                    else -> "Could not send invite"
+                                                }
+                                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        } catch (e: Exception) {
+                                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                                android.widget.Toast.makeText(context, "Error sending invite: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = !isButtonDisabled,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isButtonDisabled) bgColors else Color(0xFFFBBF24),
+                                disabledContainerColor = bgColors
+                            ),
+                            shape = RoundedCornerShape(100.dp),
+                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)
+                        ) {
+                            Text(
+                                text = buttonText,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isButtonDisabled) (if (isDarkMode) Color.White.copy(alpha = 0.5f) else Color.Gray) else Color(0xFF78350F)
+                            )
+                        }
                     }
                 }
             }

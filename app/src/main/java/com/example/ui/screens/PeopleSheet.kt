@@ -317,6 +317,96 @@ fun PeopleBottomSheetContent(
                         color = if (isDark) Color.White.copy(alpha = 0.5f) else Color.Gray
                     )
                 }
+            } else if (isCurrentUserHost) {
+                val areSeatsFull = speakerSeats.size >= 4
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    listenerSeats.forEachIndexed { index, (name, imageUrl, flagCode) ->
+                        val targetUserId = if (index < listenerUserIds.size) listenerUserIds[index] else ""
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(if (isDark) Color.White.copy(alpha = 0.05f) else Color.White)
+                                .clickable {
+                                    if (targetUserId.isNotBlank() && targetUserId != currentUserId) {
+                                        selectedUserForAction = ModerationTargetUser(
+                                            userId = targetUserId,
+                                            name = name,
+                                            imageUrl = imageUrl,
+                                            flagCode = flagCode,
+                                            role = "listener"
+                                        )
+                                    }
+                                }
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Box(modifier = Modifier.size(44.dp)) {
+                                    AsyncImage(
+                                        model = imageUrl,
+                                        contentDescription = name,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize().clip(CircleShape)
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.BottomEnd)
+                                            .offset(x = 2.dp, y = 2.dp)
+                                            .size(14.dp)
+                                            .background(if (isDark) Color(0xFF1E293B) else Color.White, CircleShape)
+                                            .padding(1.dp)
+                                    ) {
+                                        CircleFlag(
+                                            countryCode = mapFlagEmojiToCode(mapCountryCodeToFlagEmoji(flagCode)),
+                                            modifier = Modifier.fillMaxSize().clip(CircleShape)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = name,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isDark) Color.White else Color(0xFF0F172A),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "Listener",
+                                        fontSize = 11.sp,
+                                        color = if (isDark) Color.White.copy(alpha = 0.5f) else Color.Gray
+                                    )
+                                }
+                            }
+
+                            if (targetUserId.isNotBlank() && targetUserId != currentUserId) {
+                                androidx.compose.material3.Button(
+                                    onClick = { onInviteToSpeakerSeat(targetUserId) },
+                                    enabled = !areSeatsFull,
+                                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                        containerColor = if (areSeatsFull) (if (isDark) Color.White.copy(alpha = 0.05f) else Color(0xFFE2E8F0)) else (if (isDark) currentTheme.themeColor else ChillGoldIcon),
+                                        disabledContainerColor = if (isDark) Color.White.copy(alpha = 0.05f) else Color(0xFFE2E8F0)
+                                    ),
+                                    shape = RoundedCornerShape(100.dp),
+                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = if (areSeatsFull) "Seats full" else "Invite to seat",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (areSeatsFull) Color.Gray else Color.Black
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             } else {
                 val listenerRows = listenerSeats.chunked(4)
                 listenerRows.forEachIndexed { rowIndex, rowItems ->

@@ -816,6 +816,42 @@ interface SupabaseApi {
         @Query("status") statusEq: String? = null // e.g. "eq.pending"
     ): Response<List<SupabaseSpeakerRequest>>
 
+    @POST("rest/v1/rpc/send_room_invite")
+    suspend fun sendRoomInvite(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String>
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/respond_to_room_invite")
+    suspend fun respondToRoomInvite(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, @JvmSuppressWildcards Any>
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/list_invitable_following")
+    suspend fun listInvitableFollowing(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String>
+    ): Response<List<InvitableUserResponse>>
+
+    @GET("rest/v1/room_end_summaries?select=*")
+    suspend fun getRoomEndSummary(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
+        @Query("room_id") roomIdEq: String
+    ): Response<List<RoomEndSummaryResponse>>
+
+    @GET("rest/v1/room_invites?select=*")
+    suspend fun getPendingRoomInvites(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
+        @Query("invitee_id") inviteeIdEq: String,
+        @Query("status") statusEq: String = "eq.pending"
+    ): Response<List<RoomInviteItem>>
+
     @POST("rest/v1/rpc/execute_moderator_action")
     suspend fun executeModeratorAction(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
@@ -2203,6 +2239,42 @@ data class VerifiedOwnedItemRow(
     val item_id: Long,
     val item_type: String,
     val config: Map<String, Any?>? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class InvitableUserResponse(
+    val user_id: String,
+    val username: String? = null,
+    val avatar_url: String? = null,
+    val country_code: String? = null,
+    val is_online: Boolean = false,
+    val in_room: Boolean = false,
+    val invite_status: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class RoomEndSummaryResponse(
+    val room_id: String,
+    val title: String? = null,
+    val host_id: String? = null,
+    val host_username: String? = null,
+    val host_avatar_url: String? = null,
+    val started_at: String? = null,
+    val ended_at: String? = null,
+    val duration_seconds: Int? = null,
+    val total_joins: Int? = null,
+    val peak_participants: Int? = null,
+    val ended_reason: String = "unknown"
+)
+
+@JsonClass(generateAdapter = true)
+data class RoomInviteItem(
+    val id: String,
+    val room_id: String,
+    val inviter_id: String,
+    val invitee_id: String,
+    val status: String,
+    val created_at: String
 )
 
 

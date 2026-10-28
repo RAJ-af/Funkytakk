@@ -423,7 +423,13 @@ fun CreateLanguageRoomScreen(
                             host_is_vip = (hostIsVipLocal || isVipBadgeEnabled),
                             is_live = true,
                             language_code = selectedLanguage.flagCode,
-                            language_flag = "",
+                            language_flag = com.example.ui.components.getProgrammingIconUrl(selectedLanguage.name).ifBlank {
+                                if (selectedLanguage.flagCode.startsWith("prog_")) {
+                                    com.example.ui.components.getProgrammingIconUrl(selectedLanguage.flagCode)
+                                } else {
+                                    selectedLanguage.flagCode
+                                }
+                            },
                             level_tag = selectedLevel,
                             listening_count = 0,
                             speaking_count = 1,

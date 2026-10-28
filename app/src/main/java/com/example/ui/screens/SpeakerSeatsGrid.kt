@@ -51,6 +51,8 @@ fun SpeakerSeatsGrid(
     onSpeakerClick: (Int, ChillRoomSpeaker) -> Unit,
     isSpeakerRequestPending: Boolean = false,
     isCurrentUserSpeakerOrHost: Boolean = false,
+    isCurrentUserHostOrModerator: Boolean = false,
+    onHostInviteSeatClick: () -> Unit = {},
     onRequestSpeakerSeat: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -120,6 +122,8 @@ fun SpeakerSeatsGrid(
                     theme = currentTheme,
                     isSpeakerRequestPending = isSpeakerRequestPending,
                     isCurrentUserSpeakerOrHost = isCurrentUserSpeakerOrHost,
+                    isCurrentUserHostOrModerator = isCurrentUserHostOrModerator,
+                    onHostInviteSeatClick = onHostInviteSeatClick,
                     onRequestSlot = handleSlotRequest
                 )
             }
@@ -142,6 +146,8 @@ fun SpeakerSeatsGrid(
                     theme = currentTheme,
                     isSpeakerRequestPending = isSpeakerRequestPending,
                     isCurrentUserSpeakerOrHost = isCurrentUserSpeakerOrHost,
+                    isCurrentUserHostOrModerator = isCurrentUserHostOrModerator,
+                    onHostInviteSeatClick = onHostInviteSeatClick,
                     onRequestSlot = handleSlotRequest
                 )
             }
@@ -170,6 +176,8 @@ fun SpeakerSeatsGrid(
                     theme = currentTheme,
                     isSpeakerRequestPending = isSpeakerRequestPending,
                     isCurrentUserSpeakerOrHost = isCurrentUserSpeakerOrHost,
+                    isCurrentUserHostOrModerator = isCurrentUserHostOrModerator,
+                    onHostInviteSeatClick = onHostInviteSeatClick,
                     onRequestSlot = handleSlotRequest
                 )
             }
@@ -191,6 +199,8 @@ fun SpeakerSeatsGrid(
                     theme = currentTheme,
                     isSpeakerRequestPending = isSpeakerRequestPending,
                     isCurrentUserSpeakerOrHost = isCurrentUserSpeakerOrHost,
+                    isCurrentUserHostOrModerator = isCurrentUserHostOrModerator,
+                    onHostInviteSeatClick = onHostInviteSeatClick,
                     onRequestSlot = handleSlotRequest
                 )
             }
@@ -203,7 +213,9 @@ private fun EmptySpeakerSeatItem(
     theme: RoomTheme,
     isSpeakerRequestPending: Boolean,
     isCurrentUserSpeakerOrHost: Boolean,
-    onRequestSlot: () -> Unit
+    isCurrentUserHostOrModerator: Boolean = false,
+    onHostInviteSeatClick: () -> Unit = {},
+    onRequestSlot: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val accentColor = theme.accentColor
@@ -232,6 +244,9 @@ private fun EmptySpeakerSeatItem(
                 .clip(CircleShape)
                 .clickable {
                     when {
+                        isCurrentUserHostOrModerator -> {
+                            onHostInviteSeatClick()
+                        }
                         isCurrentUserSpeakerOrHost -> {
                             Toast.makeText(context, "You are already a speaker in this room.", Toast.LENGTH_SHORT).show()
                         }

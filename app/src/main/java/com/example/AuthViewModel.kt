@@ -306,20 +306,35 @@ class AuthViewModel : ViewModel() {
         _activeRoomHostId.value = hostId
     }
 
+    @Volatile
+    private var isMicToggleInFlight = false
+
     fun toggleMic(context: Context? = null) {
+        if (isMicToggleInFlight) return
+        isMicToggleInFlight = true
         val newState = !_isMicEnabled.value
-        setMicEnabled(newState, context)
+        setMicEnabled(newState, context) {
+            isMicToggleInFlight = false
+        }
     }
 
-    fun setMicEnabled(enabled: Boolean, context: Context? = null) {
+    fun setMicEnabled(enabled: Boolean, context: Context? = null, onComplete: ((Boolean) -> Unit)? = null) {
+        val previousState = _isMicEnabled.value
         _isMicEnabled.value = enabled
         com.example.service.VoiceRoomOverlayManager.setMicEnabled(enabled)
-        val roomId = _activeRoomId.value ?: return
-        val ctx = context
+        val roomId = _activeRoomId.value
+        if (roomId.isNullOrBlank()) {
+            onComplete?.invoke(true)
+            return
+        }
+        val ctx = context ?: FunkyTalkApplication.appContext
         val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
         val uid = ctx?.let { SupabaseSessionManager.getUserId(it) }
             ?: (authState.value as? AuthState.Success)?.user?.uid
-            ?: return
+        if (uid.isNullOrBlank()) {
+            onComplete?.invoke(true)
+            return
+        }
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -329,18 +344,35 @@ class AuthViewModel : ViewModel() {
                     userIdEq = "eq.$uid",
                     body = UpdateParticipantMicRequest(is_mic_enabled = enabled)
                 )
-                Log.d("AuthViewModel", "Participant mic updated: $enabled (code ${res.code()})")
-                try {
-                    VoiceRoomRealtimeManager.broadcastParticipantUpdate(
-                        roomId = roomId,
-                        userId = uid,
-                        action = "mic_toggled",
-                        role = if (_isMicEnabled.value) "speaker" else "listener",
-                        isMicEnabled = enabled
-                    )
-                } catch (_: Exception) {}
+                if (res.isSuccessful) {
+                    Log.d("AuthViewModel", "Participant mic updated: $enabled (code ${res.code()})")
+                    try {
+                        VoiceRoomRealtimeManager.broadcastParticipantUpdate(
+                            roomId = roomId,
+                            userId = uid,
+                            action = "mic_toggled",
+                            role = if (_isMicEnabled.value) "speaker" else "listener",
+                            isMicEnabled = enabled
+                        )
+                    } catch (_: Exception) {}
+                    withContext(Dispatchers.Main) { onComplete?.invoke(true) }
+                } else {
+                    Log.e("AuthViewModel", "Failed to update mic: code ${res.code()}")
+                    withContext(Dispatchers.Main) {
+                        _isMicEnabled.value = previousState
+                        com.example.service.VoiceRoomOverlayManager.setMicEnabled(previousState)
+                        Toast.makeText(ctx, "Failed to toggle mic", Toast.LENGTH_SHORT).show()
+                        onComplete?.invoke(false)
+                    }
+                }
             } catch (e: Exception) {
                 Log.e("AuthViewModel", "Error updating participant mic", e)
+                withContext(Dispatchers.Main) {
+                    _isMicEnabled.value = previousState
+                    com.example.service.VoiceRoomOverlayManager.setMicEnabled(previousState)
+                    Toast.makeText(ctx, "Error toggling mic: ${e.message}", Toast.LENGTH_SHORT).show()
+                    onComplete?.invoke(false)
+                }
             }
         }
     }
