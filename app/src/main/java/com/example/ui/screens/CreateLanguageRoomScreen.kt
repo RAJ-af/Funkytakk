@@ -41,6 +41,8 @@ import com.example.SupabaseClient
 import com.example.SupabaseSessionManager
 import com.example.SupabaseVoiceRoom
 import com.example.ui.components.CircleFlag
+import com.example.ui.components.LanguageIcon
+import com.example.ui.components.ProgrammingLanguagesRegistry
 import com.example.ui.components.RoomLanguageSelectionSheet
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -690,11 +692,9 @@ fun CreateLanguageRoomScreen(
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 // Circular flag representation
-                                CircleFlag(
-                                    countryCode = selectedLanguage.flagCode,
-                                    modifier = Modifier
-                                        .size(24.dp)
-                                        .clip(CircleShape)
+                                LanguageIcon(
+                                    language = selectedLanguage.flagCode.ifBlank { selectedLanguage.name },
+                                    modifier = Modifier.size(24.dp)
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Text(
@@ -1206,11 +1206,9 @@ fun CreateLanguageRoomScreen(
                                     .padding(horizontal = 12.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                CircleFlag(
-                                    countryCode = selectedLanguage.flagCode,
-                                    modifier = Modifier
-                                        .size(16.dp)
-                                        .clip(CircleShape)
+                                LanguageIcon(
+                                    language = selectedLanguage.flagCode.ifBlank { selectedLanguage.name },
+                                    modifier = Modifier.size(16.dp)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(

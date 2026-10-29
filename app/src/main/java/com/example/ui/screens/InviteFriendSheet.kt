@@ -52,23 +52,37 @@ fun InviteFriendBottomSheetContent(
     var isLoading by remember { mutableStateOf(true) }
     var invitableUsers by remember { mutableStateOf<List<com.example.InvitableUserResponse>>(emptyList()) }
     val invitedUserIds = remember { mutableStateMapOf<String, Boolean>() }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(roomId) {
         if (roomId.isNotBlank()) {
             isLoading = true
+            errorMessage = null
             try {
                 val token = com.example.SupabaseSessionManager.getBearerToken(context)
+                android.util.Log.d("InviteFriend", "Calling list_invitable_following for roomId=$roomId")
                 val res = com.example.SupabaseClient.api.listInvitableFollowing(
                     auth = token,
                     body = mapOf("p_room_id" to roomId)
                 )
                 if (res.isSuccessful && res.body() != null) {
-                    invitableUsers = res.body() ?: emptyList()
+                    val users = res.body() ?: emptyList()
+                    android.util.Log.d("InviteFriend", "list_invitable_following SUCCESS: received ${users.size} followed users: $users")
+                    invitableUsers = users
                 } else {
-                    android.util.Log.d("InviteFriendSheet", "Error listing invitable following: ${res.code()}")
+                    val err = res.errorBody()?.string() ?: res.message()
+                    android.util.Log.d("InviteFriend", "list_invitable_following ERROR code=${res.code()}: $err")
+                    errorMessage = "Error loading followed friends ($err)"
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        android.widget.Toast.makeText(context, "Could not load followings: $err", android.widget.Toast.LENGTH_SHORT).show()
+                    }
                 }
             } catch (e: Exception) {
-                android.util.Log.d("InviteFriendSheet", "Exception listing invitable following: ${e.message}")
+                android.util.Log.d("InviteFriend", "list_invitable_following EXCEPTION: ${e.message}")
+                errorMessage = e.message
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    android.widget.Toast.makeText(context, "Error loading friends: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                }
             } finally {
                 isLoading = false
             }
@@ -81,6 +95,7 @@ fun InviteFriendBottomSheetContent(
         modifier = Modifier
             .fillMaxWidth()
             .fillMaxHeight(0.85f)
+            .navigationBarsPadding()
             .padding(horizontal = 24.dp, vertical = 8.dp)
             .padding(bottom = 24.dp)
     ) {
@@ -294,13 +309,17 @@ fun InviteFriendBottomSheetContent(
                                                     android.widget.Toast.makeText(context, "Invite sent to $username!", android.widget.Toast.LENGTH_SHORT).show()
                                                 }
                                             } else {
-                                                val errBody = res.errorBody()?.string() ?: ""
+                                                val errBody = res.errorBody()?.string() ?: res.message()
+                                                android.util.Log.d("InviteFriend", "send_room_invite ERROR for user ${user.user_id}: $errBody")
                                                 val msg = when {
                                                     errBody.contains("already_invited") -> "Already invited, try again in a minute"
-                                                    errBody.contains("rate_limited") -> "Too many invites, try later"
-                                                    errBody.contains("already_in_room") -> "Already in the room"
+                                                    errBody.contains("not_following") -> "You can only invite people you follow"
+                                                    errBody.contains("already_in_room") -> "User is already in the room"
+                                                    errBody.contains("not_in_room") -> "You must be in the room to invite others"
                                                     errBody.contains("room_not_live") -> "This room has ended"
-                                                    else -> "Could not send invite"
+                                                    errBody.contains("rate_limited") -> "Too many invites, try later"
+                                                    errBody.contains("cannot_invite_self") -> "You cannot invite yourself"
+                                                    else -> "Could not send invite: $errBody"
                                                 }
                                                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                                                     android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()

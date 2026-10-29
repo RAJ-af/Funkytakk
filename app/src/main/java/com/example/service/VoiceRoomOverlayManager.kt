@@ -20,8 +20,7 @@ object VoiceRoomOverlayManager {
     private val _userAvatar = MutableStateFlow<String?>(null)
     val userAvatar: StateFlow<String?> = _userAvatar.asStateFlow()
 
-    private val _isMicEnabled = MutableStateFlow(true)
-    val isMicEnabled: StateFlow<Boolean> = _isMicEnabled.asStateFlow()
+    val isMicEnabled: StateFlow<Boolean> = com.example.realtime.RoomMicController.micOn
 
     private val _isSpeaking = MutableStateFlow(false)
     val isSpeaking: StateFlow<Boolean> = _isSpeaking.asStateFlow()
@@ -45,12 +44,11 @@ object VoiceRoomOverlayManager {
         _roomId.value = roomId
         _roomTitle.value = if (!roomTitle.isNullOrBlank()) roomTitle else "Voice Room"
         _userAvatar.value = avatarUrl
-        _isMicEnabled.value = isMicEnabled
         _isOverlayActive.value = (roomId != null)
     }
 
     fun setMicEnabled(enabled: Boolean) {
-        _isMicEnabled.value = enabled
+        com.example.realtime.RoomMicController.setMic(enabled, "OverlayManager")
     }
 
     fun setSpeaking(speaking: Boolean) {
@@ -61,7 +59,6 @@ object VoiceRoomOverlayManager {
         _roomId.value = null
         _roomTitle.value = "Voice Room"
         _userAvatar.value = null
-        _isMicEnabled.value = true
         _isSpeaking.value = false
         _isOverlayActive.value = false
     }

@@ -37,6 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.components.CircleFlag
+import com.example.ui.components.LanguageIcon
 import com.example.ui.components.RoomLanguageSelectionSheet
 
 @Composable
@@ -233,9 +234,9 @@ fun EditRoomBottomSheetContent(
                     contentAlignment = Alignment.Center
                 ) {
                     val activeFlag = roomCountryCode.ifBlank { LanguageData.getFlagCodeForLanguage(roomLanguage) }
-                    CircleFlag(
-                        countryCode = activeFlag,
-                        modifier = Modifier.size(24.dp).clip(CircleShape)
+                    LanguageIcon(
+                        language = activeFlag.ifBlank { roomLanguage },
+                        modifier = Modifier.size(24.dp)
                     )
                 }
                 Spacer(modifier = Modifier.width(12.dp))

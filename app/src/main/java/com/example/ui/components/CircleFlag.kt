@@ -162,35 +162,12 @@ fun CircleFlag(
     val cleanCode = if (rawCode.isBlank()) "in" else rawCode
 
     val isHttp = cleanCode.startsWith("http://") || cleanCode.startsWith("https://")
-    val isProg = isHttp || isProgrammingCode(cleanCode)
-
-    if (isProg) {
-        val targetUrl = if (isHttp) cleanCode else getFlagOrDeviconUrl(cleanCode)
-        val initials = cleanCode.removePrefix("prog_").take(2).uppercase()
-        val stableColor = getStableColorForName(cleanCode)
-
-        Box(
-            modifier = modifier
-                .clip(CircleShape)
-                .background(Color(0xFFF8FAFC))
-                .border(0.5.dp, Color(0xFFE2E8F0), CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            AsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(targetUrl)
-                    .crossfade(true)
-                    .build(),
-                imageLoader = imageLoader,
-                contentDescription = contentDescription,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(3.dp),
-                onError = {
-                    // Handled gracefully by the fallback initials badge beneath or shown
-                }
-            )
-        }
+    if (ProgrammingLanguagesRegistry.isProgramming(countryCode) || isProgrammingCode(countryCode)) {
+        LanguageIcon(
+            language = countryCode,
+            modifier = modifier,
+            contentDescription = contentDescription
+        )
     } else {
         AsyncImage(
             model = ImageRequest.Builder(context)

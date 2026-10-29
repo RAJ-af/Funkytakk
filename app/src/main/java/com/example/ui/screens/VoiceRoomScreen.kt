@@ -48,6 +48,8 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Star
@@ -55,6 +57,8 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Face
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import com.example.ui.components.Soft3DFloatingBubble
@@ -501,7 +505,7 @@ fun VoiceRoomScreen(
         }
     }
     val scope = rememberCoroutineScope()
-    var isMicOn by remember { mutableStateOf(true) }
+    val isMicOn by com.example.realtime.RoomMicController.micOn.collectAsState()
     val lastTokenRole by viewModel?.lastRoomTokenRole?.collectAsState(null) ?: remember { mutableStateOf(null) }
     val lastCanPublish by viewModel?.lastRoomTokenCanPublish?.collectAsState(false) ?: remember { mutableStateOf(false) }
     var pendingInviteState by remember { mutableStateOf<com.example.SupabaseSpeakerRequest?>(null) }
@@ -548,7 +552,7 @@ fun VoiceRoomScreen(
             name = name,
             imageUrl = avatar ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400",
             flagCode = flagCode,
-            isMuted = pHost?.let { !it.is_mic_enabled } ?: true,
+            isMuted = if (currentUserId == roomHostId) !isMicOn else (pHost?.let { !it.is_mic_enabled } ?: true),
             isCenter = true,
             gradientColors = listOf(Color(0xFFFFB800), Color(0xFFF59E0B), Color(0xFFFFB800)),
             isHost = true,
@@ -557,7 +561,7 @@ fun VoiceRoomScreen(
         )
     }
 
-    val allRoomSeats = remember(hostSeat, participantsData, supabaseProfiles, roomHostId) {
+    val allRoomSeats = remember(hostSeat, participantsData, supabaseProfiles, roomHostId, isMicOn) {
         if (participantsData.isEmpty()) {
             listOf(hostSeat)
         } else {
@@ -571,7 +575,7 @@ fun VoiceRoomScreen(
                     name = name,
                     imageUrl = avatar,
                     flagCode = flagCode,
-                    isMuted = !p.is_mic_enabled,
+                    isMuted = if (p.user_id == currentUserId) !isMicOn else !p.is_mic_enabled,
                     isCenter = isHost,
                     gradientColors = if (isHost) listOf(Color(0xFFFFB800), Color(0xFFF59E0B), Color(0xFFFFB800)) else listOf(Color(0xFF8B5CF6), Color(0xFFEC4899)),
                     isHost = isHost,
@@ -582,7 +586,7 @@ fun VoiceRoomScreen(
         }
     }
 
-    val speakerSeats = remember(participantsData, supabaseProfiles, roomHostId, hostSeat) {
+    val speakerSeats = remember(participantsData, supabaseProfiles, roomHostId, hostSeat, isMicOn) {
         participantsData.filter { p ->
             val isHost = (p.role == "host") || (p.user_id == roomHostId)
             !isHost && p.role == "speaker"
@@ -603,7 +607,7 @@ fun VoiceRoomScreen(
                 name = name,
                 imageUrl = avatar ?: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400",
                 flagCode = flagCode,
-                isMuted = !p.is_mic_enabled,
+                isMuted = if (p.user_id == currentUserId) !isMicOn else !p.is_mic_enabled,
                 isCenter = false,
                 gradientColors = listOf(Color(0xFF8B5CF6), Color(0xFFEC4899)),
                 isHost = false,
@@ -737,8 +741,7 @@ fun VoiceRoomScreen(
                 withContext(Dispatchers.Main) {
                     myModerationStatus = modStatus
                     if (modStatus?.action_type == "suspend" && ModerationManager.isActionActive(modStatus)) {
-                        isMicOn = false
-                        com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(true)
+                        com.example.realtime.RoomMicController.setMic(false, "MODERATION_SUSPEND", context)
                     }
                 }
 
@@ -894,9 +897,7 @@ fun VoiceRoomScreen(
                                         val previousRole = participantsData.find { it.user_id == currentUserId }?.role ?: "listener"
                                         if (previousRole != "speaker" && effectiveRole == "speaker") {
                                             isSpeakerRequestPending = false
-                                            isMicOn = targetMic
-                                            viewModel?.setMicEnabled(targetMic, context)
-                                            com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(!targetMic)
+                                            com.example.realtime.RoomMicController.onRoleChanged("speaker", targetMic)
                                         }
                                     }
                                 }
@@ -1068,8 +1069,7 @@ fun VoiceRoomScreen(
                         withContext(Dispatchers.Main) {
                             myModerationStatus = updated
                             if (event.actionType == "suspend") {
-                                isMicOn = false
-                                com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(true)
+                                com.example.realtime.RoomMicController.setMic(false, "MODERATION_SUSPEND_REALTIME", context)
                                 Toast.makeText(context, "Account suspended: ${event.reason ?: "Violation of guidelines"}", Toast.LENGTH_LONG).show()
                             } else if (event.actionType == "warning") {
                                 Toast.makeText(context, "Community Warning: Messaging disabled for 1 hour.", Toast.LENGTH_LONG).show()
@@ -1189,7 +1189,7 @@ fun VoiceRoomScreen(
                                 withContext(Dispatchers.Main) {
                                     Toast.makeText(context, "You are now a speaker!", Toast.LENGTH_SHORT).show()
                                     isSpeakerRequestPending = false
-                                    isMicOn = true
+                                    com.example.realtime.RoomMicController.onRoleChanged("speaker", true)
                                     viewModel?.fetchRoomToken(activeRoomId, context)
                                 }
                                 scope.launch(Dispatchers.IO) {
@@ -1372,10 +1372,6 @@ fun VoiceRoomScreen(
                 }
             } catch (_: Exception) {}
         }
-    }
-    val vmMicEnabled by viewModel?.isMicEnabled?.collectAsState() ?: remember { mutableStateOf(true) }
-    LaunchedEffect(vmMicEnabled) {
-        isMicOn = vmMicEnabled
     }
 
     LaunchedEffect(activeRoomId, roomHostId, currentUserId) {
@@ -2804,6 +2800,7 @@ fun VoiceRoomScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .navigationBarsPadding()
                     .padding(horizontal = 24.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
@@ -2890,11 +2887,7 @@ fun VoiceRoomScreen(
                                     if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                                         micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                     } else {
-                                        if (viewModel != null) {
-                                            viewModel.toggleMic(context)
-                                        } else {
-                                            isMicOn = !isMicOn
-                                        }
+                                        com.example.realtime.RoomMicController.toggleMic(context)
                                     }
                                 },
                             contentAlignment = Alignment.Center
@@ -2960,7 +2953,10 @@ fun VoiceRoomScreen(
     if (showChatSheet) {
         val currentTheme = roomThemes[selectedThemeIndex]
         ModalBottomSheet(
-            onDismissRequest = { showChatSheet = false },
+            onDismissRequest = {
+                showChatSheet = false
+                openDirectChatPartner = null
+            },
             sheetState = sheetState,
             containerColor = currentTheme.startColor,
             shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
@@ -2970,27 +2966,37 @@ fun VoiceRoomScreen(
                 )
             }
         ) {
-            ChatBottomSheetContent(
-                privateChats = privateChats,
-                selectedThemeIndex = selectedThemeIndex,
-                onChatClick = { chatUser ->
-                    openDirectChatPartner = chatUser
-                    showChatSheet = false
-                }
-            )
-        }
-    }
-
-    if (openDirectChatPartner != null) {
-        val partner = openDirectChatPartner!!
-        Box(modifier = Modifier.fillMaxSize()) {
-            DirectChatScreen(
-                partnerUserId = partner.id,
-                partnerName = partner.name,
-                partnerAvatarUrl = partner.imageUrl,
-                partnerCountryCode = partner.flagCode,
-                onBack = { openDirectChatPartner = null }
-            )
+            if (openDirectChatPartner != null) {
+                OneToOneChatBottomSheetContent(
+                    selectedThemeIndex = selectedThemeIndex,
+                    chatUser = openDirectChatPartner!!,
+                    messagesList = emptyList(),
+                    onSendMessage = { msg ->
+                        scope.launch {
+                            try {
+                                com.example.repository.EncryptedChatRepository.sendMessage(
+                                    context = context,
+                                    recipientUserId = openDirectChatPartner!!.id,
+                                    recipientName = openDirectChatPartner!!.name,
+                                    recipientAvatar = openDirectChatPartner!!.imageUrl,
+                                    text = msg
+                                )
+                            } catch (e: Exception) {
+                                Log.e("VoiceRoomScreen", "Failed to send chat: ${e.message}")
+                            }
+                        }
+                    },
+                    onBack = { openDirectChatPartner = null }
+                )
+            } else {
+                ChatBottomSheetContent(
+                    privateChats = privateChats,
+                    selectedThemeIndex = selectedThemeIndex,
+                    onChatClick = { chatUser ->
+                        openDirectChatPartner = chatUser
+                    }
+                )
+            }
         }
     }
 
@@ -3152,7 +3158,7 @@ fun VoiceRoomScreen(
             InviteFriendBottomSheetContent(
                 isDarkMode = currentTheme.isDark,
                 roomName = displayRoomName,
-                roomId = displayShortCode,
+                roomId = activeRoomId,
                 inviteLink = displayInviteLink,
                 onDismiss = { showInviteFriendSheet = false }
             )
@@ -3725,6 +3731,119 @@ fun VoiceRoomScreen(
 @Composable
 fun ChatBottomSheetContent(privateChats: List<PrivateChatItem>, selectedThemeIndex: Int, onChatClick: (PrivateChatItem) -> Unit) {
     val currentTheme = roomThemes[selectedThemeIndex]
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val vaultStatus by com.example.crypto.VaultSecurityManager.vaultStatus.collectAsState()
+
+    if (vaultStatus == com.example.crypto.VaultStatus.LOCKED) {
+        var password by remember { mutableStateOf("") }
+        var passwordVisible by remember { mutableStateOf(false) }
+        var isLoading by remember { mutableStateOf(false) }
+        var errorMessage by remember { mutableStateOf<String?>(null) }
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.85f)
+                .background(Brush.verticalGradient(listOf(currentTheme.startColor, currentTheme.endColor)))
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .background(Color(0xFFFEF3C7), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = "Locked",
+                    tint = Color(0xFFD97706),
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Unlock your chats",
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (currentTheme.isDark) Color.White else Color.Black
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Enter your Vault password to access direct conversations.",
+                fontSize = 13.sp,
+                color = if (currentTheme.isDark) Color.White.copy(alpha = 0.7f) else Color.Gray,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+            OutlinedTextField(
+                value = password,
+                onValueChange = {
+                    password = it
+                    errorMessage = null
+                },
+                placeholder = { Text("Enter Vault Password") },
+                singleLine = true,
+                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                        Icon(
+                            imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                            contentDescription = null,
+                            tint = if (currentTheme.isDark) Color.White.copy(alpha = 0.6f) else Color.Gray
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = if (currentTheme.isDark) Color.Black.copy(alpha = 0.3f) else Color.White,
+                    unfocusedContainerColor = if (currentTheme.isDark) Color.Black.copy(alpha = 0.3f) else Color.White,
+                    focusedTextColor = if (currentTheme.isDark) Color.White else Color.Black,
+                    unfocusedTextColor = if (currentTheme.isDark) Color.White else Color.Black
+                )
+            )
+            errorMessage?.let { err ->
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(text = err, fontSize = 12.sp, color = Color(0xFFEF4444), fontWeight = FontWeight.Medium)
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(
+                onClick = {
+                    if (password.isBlank()) {
+                        errorMessage = "Please enter your password"
+                        return@Button
+                    }
+                    isLoading = true
+                    scope.launch {
+                        val res = com.example.crypto.VaultSecurityManager.unlockWithPassword(context, password)
+                        isLoading = false
+                        res.onFailure { ex ->
+                            errorMessage = ex.message ?: "Incorrect password."
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp),
+                shape = RoundedCornerShape(25.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (currentTheme.isDark) currentTheme.themeColor else Color(0xFFF59E0B)
+                ),
+                enabled = !isLoading
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White)
+                } else {
+                    Text("Unlock", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White)
+                }
+            }
+        }
+        return
+    }
+
     var activeFilter by remember { mutableStateOf("All") }
     var searchQuery by remember { mutableStateOf("") }
     
@@ -6858,6 +6977,43 @@ fun HostLeaveRoomSheet(
     onEndRoom: () -> Unit
 ) {
     var selectedOption by remember { mutableStateOf(0) } // 0 = Leave room, 1 = End room
+    var showEndConfirmDialog by remember { mutableStateOf(false) }
+
+    if (showEndConfirmDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showEndConfirmDialog = false },
+            title = {
+                Text(text = "End room for everyone?", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            },
+            text = {
+                Text(
+                    text = "This will close the room immediately for all participants and clear all seats.",
+                    fontSize = 14.sp,
+                    color = Color(0xFF64748B)
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.Button(
+                    onClick = {
+                        showEndConfirmDialog = false
+                        onEndRoom()
+                    },
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFEF4444)
+                    )
+                ) {
+                    Text("End room", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = { showEndConfirmDialog = false }
+                ) {
+                    Text("Cancel", color = Color(0xFF64748B))
+                }
+            }
+        )
+    }
 
     androidx.compose.ui.window.Dialog(
         onDismissRequest = onDismiss
@@ -7118,7 +7274,7 @@ fun HostLeaveRoomSheet(
                             if (selectedOption == 0) {
                                 onLeaveOnly()
                             } else {
-                                onEndRoom()
+                                showEndConfirmDialog = true
                             }
                         }
                         .padding(horizontal = 20.dp),

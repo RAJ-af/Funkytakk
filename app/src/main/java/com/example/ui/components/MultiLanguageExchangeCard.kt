@@ -96,8 +96,8 @@ fun OverlappingFlagStack(
                     .clip(CircleShape)
                     .border(1.5.dp, Color.White, CircleShape)
             ) {
-                CircleFlag(
-                    countryCode = lang.flagCode,
+                LanguageIcon(
+                    language = lang.flagCode.ifBlank { lang.name },
                     modifier = Modifier.fillMaxSize()
                 )
             }

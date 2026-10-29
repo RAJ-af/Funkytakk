@@ -244,8 +244,8 @@ fun RoomLanguageSelectionSheet(
                                             .padding(8.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        CircleFlag(
-                                            countryCode = code,
+                                        LanguageIcon(
+                                            language = if (selectedCategory == "Programming") name else code,
                                             modifier = Modifier.fillMaxSize()
                                         )
                                     }
@@ -301,11 +301,11 @@ fun RoomLanguageSelectionSheet(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.weight(1f)
                             ) {
-                                CircleFlag(
-                                    countryCode = language.flagCode,
+                                LanguageIcon(
+                                    language = language.flagCode.ifBlank { language.name },
                                     modifier = Modifier
                                         .size(34.dp)
-                                        .clip(CircleShape)
+                                        .clip(RoundedCornerShape(8.dp))
                                 )
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {

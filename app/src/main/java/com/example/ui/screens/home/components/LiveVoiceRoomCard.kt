@@ -69,9 +69,9 @@ fun LiveVoiceRoomCard(
                             .background(Color.White)
                             .padding(horizontal = 10.dp, vertical = 4.dp)
                     ) {
-                        CircleFlag(
-                            countryCode = room.flagCode,
-                            modifier = Modifier.size(16.dp).clip(CircleShape)
+                        com.example.ui.components.LanguageIcon(
+                            language = room.flagCode.ifBlank { room.language },
+                            modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(

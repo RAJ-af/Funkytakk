@@ -1042,28 +1042,21 @@ object EncryptedChatRepository {
             // Step 4: Encrypt raw media bytes with random one-time AES-256-GCM key + 12-byte nonce
             val (encryptedMediaBytes, keyBytes, nonceBytes) = E2EEMediaManager.encryptMediaPayload(rawBytes)
 
-            // Step 5: Upload encrypted ciphertext blob to Appwrite Storage via upload-to-appwrite proxy
-            Log.d(TAG, "sendMediaMessage: uploading encrypted media blob via Appwrite proxy (conversationId='$conversationId', messageId='$messageId', size=${encryptedMediaBytes.size})...")
-            val uploadResult = AppwriteUploader.uploadWithToken(
-                token = token,
-                fileBytes = encryptedMediaBytes,
-                filename = "$messageId.bin",
-                mimeType = "application/octet-stream",
-                purpose = "dm-media",
-                folderSuffix = conversationId,
-                maxRetries = 1
+            // Step 5: Upload encrypted ciphertext blob directly to Supabase storage bucket dm-media
+            val objectPath = "$conversationId/$messageId.bin"
+            Log.d(TAG, "sendMediaMessage: uploading encrypted media blob to dm-media (path='$objectPath', size=${encryptedMediaBytes.size})...")
+            val reqBody = encryptedMediaBytes.toRequestBody("application/octet-stream".toMediaTypeOrNull())
+            val res = SupabaseClient.api.uploadDmMedia(
+                auth = token,
+                path = objectPath,
+                body = reqBody
             )
-
-            val finalResolvedPath = when (uploadResult) {
-                is AppwriteUploader.UploadResult.Success -> {
-                    Log.d(TAG, "sendMediaMessage: Appwrite upload success: url=${uploadResult.url}, fileId=${uploadResult.fileId}")
-                    uploadResult.url
-                }
-                is AppwriteUploader.UploadResult.Error -> {
-                    Log.e(TAG, "sendMediaMessage: Appwrite upload failed (${uploadResult.statusCode}): ${uploadResult.message}")
-                    return@withContext Result.failure(IllegalStateException(uploadResult.message))
-                }
+            if (!res.isSuccessful) {
+                val errBody = res.errorBody()?.string().orEmpty()
+                Log.e(TAG, "sendMediaMessage: Supabase upload failed HTTP ${res.code()}: $errBody")
+                return@withContext Result.failure(IllegalStateException("Storage upload failed HTTP ${res.code()}"))
             }
+            val finalResolvedPath = objectPath
 
             // Step 6: Build JSON descriptor & encrypt it with Tink HPKE (recipient's identity public key)
             val keyBase64 = Base64.encodeToString(keyBytes, Base64.NO_WRAP)

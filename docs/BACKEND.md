@@ -61,3 +61,20 @@
 ### Seat Grid & Constraints
 - **Total Capacity:** Exactly 1 Host Seat + 4 Speaker Seats = 5 Seats.
 - Server enforces `max_speakers = 4`. UI disables invites and shows "All seats are full (4/4)" when 4 speakers are seated.
+
+---
+
+## Room Ended & Participant Retention Contracts
+- `end_voice_room` and the cron `check_and_cleanup_ended_rooms` set `left_at` on participant rows (to book RTC minutes) rather than deleting them instantly when a room ends. The cron deletes leftover participant rows approximately 1 minute later.
+- Clients treat "room ended" signals (`voice_rooms` update/delete, `room_end_summaries` insert, or 5s polling fallback) as authoritative sources of truth, rather than relying solely on individual participant row disappearance.
+- `room_end_summaries` is included in the Realtime publication.
+
+---
+
+## Chat Media & Reactions Storage Policies
+- `dm_messages.message_type` allows `'text'`, `'image'`, `'voice'`, `'reaction'`. `notify_message_push` skips push notifications for reactions.
+- Storage policies (all path-scoped by first folder):
+  - `dm-media`: `<conversation_id>/...` (participants upload/read/delete).
+  - `group-media`: `<group_id>/...` (joined members upload/read, uploader deletes).
+  - `covers`: `<user_id>/...` (owner only).
+- Leftover media purge jobs execute every 4 days. Receiving client deletes the `dm-media` storage object after downloading, decrypting, and saving locally.

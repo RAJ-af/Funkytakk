@@ -93,8 +93,7 @@ class AuthViewModel : ViewModel() {
     private val _activeRoomHostId = MutableStateFlow<String?>(null)
     val activeRoomHostId: StateFlow<String?> = _activeRoomHostId
 
-    private val _isMicEnabled = MutableStateFlow<Boolean>(true)
-    val isMicEnabled: StateFlow<Boolean> = _isMicEnabled
+    val isMicEnabled: StateFlow<Boolean> = com.example.realtime.RoomMicController.micOn
 
     private val _activeRoomSpeakers = MutableStateFlow<List<UserProfile>>(emptyList())
     val activeRoomSpeakers: StateFlow<List<UserProfile>> = _activeRoomSpeakers
@@ -210,7 +209,7 @@ class AuthViewModel : ViewModel() {
                                     }
                                     "accepted" -> {
                                         _mySpeakerRequestStatus.value = "accepted"
-                                        _isMicEnabled.value = true
+                                        com.example.realtime.RoomMicController.onRoleChanged("speaker", true)
                                         refreshActiveRoomSpeakers(currentRoomId, appContext)
                                     }
                                     "declined" -> {
@@ -233,9 +232,17 @@ class AuthViewModel : ViewModel() {
                                 ?: (authState.value as? AuthState.Success)?.user?.uid
                             val role = event.role ?: event.record?.optString("role")
                             val mic = event.isMicEnabled ?: event.record?.optBoolean("is_mic_enabled", false)
-                            if (myUid != null && event.userId == myUid && role == "speaker") {
-                                _mySpeakerRequestStatus.value = "accepted"
-                                _isMicEnabled.value = mic ?: true
+                            if (myUid != null && event.userId == myUid) {
+                                if (role == "speaker") {
+                                    val wasAccepted = (_mySpeakerRequestStatus.value == "accepted")
+                                    _mySpeakerRequestStatus.value = "accepted"
+                                    if (!wasAccepted) {
+                                        com.example.realtime.RoomMicController.onRoleChanged("speaker", mic ?: true)
+                                    }
+                                } else if (role == "listener") {
+                                    _mySpeakerRequestStatus.value = null
+                                    com.example.realtime.RoomMicController.onRoleChanged("listener", false)
+                                }
                             }
                             refreshActiveRoomSpeakers(currentRoomId, appContext)
                         }
@@ -310,71 +317,12 @@ class AuthViewModel : ViewModel() {
     private var isMicToggleInFlight = false
 
     fun toggleMic(context: Context? = null) {
-        if (isMicToggleInFlight) return
-        isMicToggleInFlight = true
-        val newState = !_isMicEnabled.value
-        setMicEnabled(newState, context) {
-            isMicToggleInFlight = false
-        }
+        com.example.realtime.RoomMicController.toggleMic(context)
     }
 
     fun setMicEnabled(enabled: Boolean, context: Context? = null, onComplete: ((Boolean) -> Unit)? = null) {
-        val previousState = _isMicEnabled.value
-        _isMicEnabled.value = enabled
-        com.example.service.VoiceRoomOverlayManager.setMicEnabled(enabled)
-        val roomId = _activeRoomId.value
-        if (roomId.isNullOrBlank()) {
-            onComplete?.invoke(true)
-            return
-        }
-        val ctx = context ?: FunkyTalkApplication.appContext
-        val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
-        val uid = ctx?.let { SupabaseSessionManager.getUserId(it) }
-            ?: (authState.value as? AuthState.Success)?.user?.uid
-        if (uid.isNullOrBlank()) {
-            onComplete?.invoke(true)
-            return
-        }
-
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val res = SupabaseClient.api.updateRoomParticipantMic(
-                    auth = token,
-                    roomIdEq = "eq.$roomId",
-                    userIdEq = "eq.$uid",
-                    body = UpdateParticipantMicRequest(is_mic_enabled = enabled)
-                )
-                if (res.isSuccessful) {
-                    Log.d("AuthViewModel", "Participant mic updated: $enabled (code ${res.code()})")
-                    try {
-                        VoiceRoomRealtimeManager.broadcastParticipantUpdate(
-                            roomId = roomId,
-                            userId = uid,
-                            action = "mic_toggled",
-                            role = if (_isMicEnabled.value) "speaker" else "listener",
-                            isMicEnabled = enabled
-                        )
-                    } catch (_: Exception) {}
-                    withContext(Dispatchers.Main) { onComplete?.invoke(true) }
-                } else {
-                    Log.e("AuthViewModel", "Failed to update mic: code ${res.code()}")
-                    withContext(Dispatchers.Main) {
-                        _isMicEnabled.value = previousState
-                        com.example.service.VoiceRoomOverlayManager.setMicEnabled(previousState)
-                        Toast.makeText(ctx, "Failed to toggle mic", Toast.LENGTH_SHORT).show()
-                        onComplete?.invoke(false)
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("AuthViewModel", "Error updating participant mic", e)
-                withContext(Dispatchers.Main) {
-                    _isMicEnabled.value = previousState
-                    com.example.service.VoiceRoomOverlayManager.setMicEnabled(previousState)
-                    Toast.makeText(ctx, "Error toggling mic: ${e.message}", Toast.LENGTH_SHORT).show()
-                    onComplete?.invoke(false)
-                }
-            }
-        }
+        com.example.realtime.RoomMicController.setMic(enabled, "AuthViewModel_setMicEnabled", context)
+        onComplete?.invoke(true)
     }
 
     fun respondToSpeakerRequest(requestId: String, accept: Boolean, context: Context? = null) {
@@ -456,7 +404,7 @@ class AuthViewModel : ViewModel() {
                     val myUid = ctx?.let { SupabaseSessionManager.getUserId(it) }
                     if (myUid != null && speakerUserIds.contains(myUid)) {
                         _mySpeakerRequestStatus.value = "accepted"
-                        _isMicEnabled.value = true
+                        com.example.realtime.RoomMicController.onRoleChanged("speaker", true)
                     }
                 }
             } catch (e: Exception) {
@@ -729,7 +677,7 @@ class AuthViewModel : ViewModel() {
                         if (canPublish) {
                             com.example.realtime.AgoraVoiceManager.setClientRole(com.example.realtime.AgoraVoiceManager.CLIENT_ROLE_BROADCASTER)
                             com.example.realtime.AgoraVoiceManager.enableLocalAudio(true)
-                            com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(!_isMicEnabled.value)
+                            com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(!isMicEnabled.value)
                         } else {
                             com.example.realtime.AgoraVoiceManager.setClientRole(com.example.realtime.AgoraVoiceManager.CLIENT_ROLE_AUDIENCE)
                             com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(true)
@@ -827,7 +775,7 @@ class AuthViewModel : ViewModel() {
                         if (accept) {
                             fetchRoomToken(roomId, ctx)
                             _mySpeakerRequestStatus.value = "accepted"
-                            _isMicEnabled.value = true
+                            com.example.realtime.RoomMicController.onRoleChanged("speaker", true)
                             onResult?.invoke(true, "You are now a speaker!")
                         } else {
                             _mySpeakerRequestStatus.value = null
@@ -880,7 +828,7 @@ class AuthViewModel : ViewModel() {
                     withContext(Dispatchers.Main) {
                         if (isSelfDemotion) {
                             fetchRoomToken(roomId, ctx)
-                            _isMicEnabled.value = false
+                            com.example.realtime.RoomMicController.onRoleChanged("listener", false)
                             _mySpeakerRequestStatus.value = null
                             com.example.realtime.AgoraVoiceManager.setClientRole(com.example.realtime.AgoraVoiceManager.CLIENT_ROLE_AUDIENCE)
                             com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(true)
@@ -914,7 +862,6 @@ class AuthViewModel : ViewModel() {
     ) {
         _activeRoomId.value = roomId
         _activeRoomTitle.value = title
-        _isMicEnabled.value = (role == "speaker")
         if (hostId != null) {
             _activeRoomHostId.value = hostId
         }
@@ -924,6 +871,13 @@ class AuthViewModel : ViewModel() {
         val uid = ctx?.let { SupabaseSessionManager.getUserId(it) }
             ?: (authState.value as? AuthState.Success)?.user?.uid
             ?: return
+
+        com.example.realtime.RoomMicController.initRoom(
+            roomId = roomId,
+            userId = uid,
+            initialRole = role,
+            initialMic = (role == "host" || role == "speaker")
+        )
 
         refreshActiveRoomSpeakers(roomId, context)
         if (hostId == uid || _activeRoomHostId.value == uid) {
@@ -1048,6 +1002,7 @@ class AuthViewModel : ViewModel() {
         _pendingSpeakerRequest.value = null
         _mySpeakerRequestStatus.value = null
         _activeRoomSpeakers.value = emptyList()
+        com.example.realtime.RoomMicController.reset()
 
         if (ctx != null) {
             com.example.service.VoiceRoomOverlayManager.stopService(ctx)
@@ -1141,6 +1096,7 @@ class AuthViewModel : ViewModel() {
         _pendingSpeakerRequest.value = null
         _mySpeakerRequestStatus.value = null
         _activeRoomSpeakers.value = emptyList()
+        com.example.realtime.RoomMicController.reset()
 
         if (roomId != null && uid != null) {
             VoiceRoomRealtimeManager.removeLiveParticipant(roomId, uid)
