@@ -800,6 +800,33 @@ fun HomeScreen(
         )
     }
 
+    if (showFilterDialog) {
+        ModalBottomSheet(
+            onDismissRequest = { showFilterDialog = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = Color(0xFFFFFDF5),
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+        ) {
+            com.example.ui.screens.voiceroom.FilterRoomsSheetContent(
+                initialSortBy = selectedSortOption,
+                initialLanguage = selectedLanguageFilter,
+                initialLevel = filterByLevel,
+                onApply = { sortBy, lang, lvl ->
+                    selectedSortOption = sortBy
+                    selectedLanguageFilter = lang
+                    filterByLevel = lvl
+                    showFilterDialog = false
+                },
+                onReset = {
+                    selectedSortOption = "Popular"
+                    selectedLanguageFilter = "All"
+                    filterByLevel = "All Levels"
+                    showFilterDialog = false
+                }
+            )
+        }
+    }
+
     if (showJoinCodeDialog) {
         val coroutineScope = rememberCoroutineScope()
         JoinPrivateRoomDialog(
