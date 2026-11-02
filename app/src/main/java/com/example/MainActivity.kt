@@ -89,6 +89,15 @@ class MainActivity : FragmentActivity() {
 
                     val authState by authViewModel.authState.collectAsState()
                     val myModerationStatus by authViewModel.myModerationStatus.collectAsState()
+                    val deletionStatus by authViewModel.deletionStatus.collectAsState()
+                    val deletionReceipt by authViewModel.deletionReceipt.collectAsState()
+
+                    LaunchedEffect(Unit) {
+                        authViewModel.runPendingEraseLocalChatsIfNeeded(applicationContext)
+                        if (SupabaseSessionManager.hasValidAuthenticatedSession(applicationContext)) {
+                            authViewModel.checkDeletionStatus(applicationContext)
+                        }
+                    }
 
                     // Lifecycle observer: refresh moderation status, register push token, and sync group events when app enters foreground / resumes
                     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
@@ -97,6 +106,7 @@ class MainActivity : FragmentActivity() {
                             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
                                 authViewModel.refreshModerationStatus(applicationContext)
                                 if (SupabaseSessionManager.getUserId(applicationContext) != null || authState is AuthState.Success) {
+                                    authViewModel.checkDeletionStatus(applicationContext)
                                     com.example.service.PushNotificationManager.onUserLoggedIn(applicationContext)
                                     com.example.repository.GroupChatRepository.onAppResumed(applicationContext)
                                     com.example.ui.components.RoomInviteOverlayManager.checkAndShowPendingInvite(applicationContext)
@@ -109,9 +119,15 @@ class MainActivity : FragmentActivity() {
                         }
                     }
 
-                    // Check moderation on startup or auth state change
+                    // Check moderation and deletion status on auth state change
                     LaunchedEffect(authState) {
+                        if (authViewModel.deletionReceipt.value != null) {
+                            return@LaunchedEffect
+                        }
                         authViewModel.refreshModerationStatus(applicationContext)
+                        if (authState is AuthState.Success) {
+                            authViewModel.checkDeletionStatus(applicationContext)
+                        }
                     }
 
                     val isSuspended = remember(myModerationStatus) {
@@ -229,6 +245,23 @@ class MainActivity : FragmentActivity() {
                             moderationStatus = myModerationStatus,
                             onStatusRefreshed = {
                                 authViewModel.refreshModerationStatus(applicationContext)
+                            }
+                        )
+                    } else if (deletionReceipt != null) {
+                        com.example.ui.screens.profile.AccountDeletionReceiptScreen(
+                            receipt = deletionReceipt!!,
+                            authViewModel = authViewModel,
+                            onDone = {
+                                currentScreen = "welcome"
+                            }
+                        )
+                    } else if (deletionStatus is com.example.DeletionStatusState.Pending || deletionStatus is com.example.DeletionStatusState.Failed) {
+                        com.example.ui.screens.profile.AccountDeletionGateScreen(
+                            state = deletionStatus,
+                            authViewModel = authViewModel,
+                            onLogout = {
+                                authViewModel.logout(applicationContext)
+                                currentScreen = "welcome"
                             }
                         )
                     } else {
@@ -428,7 +461,15 @@ class MainActivity : FragmentActivity() {
                                 onOpenSupportChat = { reportId ->
                                     activeSupportReportId = reportId
                                     currentScreen = "support_chat"
+                                },
+                                onDeleteAccountClick = {
+                                    currentScreen = "account_deletion"
                                 }
+                            )
+                            "account_deletion" -> com.example.ui.screens.profile.AccountDeletionScreen(
+                                authViewModel = authViewModel,
+                                onBack = { currentScreen = "home" },
+                                onDeletionScheduled = { /* Receipt screen renders via deletionReceipt */ }
                             )
                             "notifications" -> NotificationsScreen(
                                 onBack = { currentScreen = "home" },

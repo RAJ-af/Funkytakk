@@ -10,6 +10,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -317,6 +323,17 @@ fun VoiceSpeakerItem(
     val primaryTextColor = theme?.primaryTextColor ?: (if (isDarkMode) Color.White else Color.Black)
     val micIconTint = theme?.accentColor ?: ChillPurpleAccent
     
+    val infiniteTransition = rememberInfiniteTransition(label = "speaker_ring")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.07f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 500, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse"
+    )
+
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
@@ -326,7 +343,19 @@ fun VoiceSpeakerItem(
         Box(contentAlignment = Alignment.Center) {
             Box(
                 modifier = Modifier
-                    .size(size)
+                    .size(if (speaker.isSpeaking) size + 6.dp else size)
+                    .then(
+                        if (speaker.isSpeaking) {
+                            Modifier
+                                .scale(pulseScale)
+                                .border(
+                                    width = 3.dp,
+                                    brush = Brush.sweepGradient(listOf(Color(0xFF22C55E), Color(0xFF10B981), Color(0xFF34D399), Color(0xFF22C55E))),
+                                    shape = CircleShape
+                                )
+                                .padding(3.dp)
+                        } else Modifier
+                    )
                     .clip(CircleShape)
                     .background(Brush.linearGradient(colors = speaker.gradientColors))
                     .padding(if (speaker.isCenter) 3.5.dp else 2.5.dp)

@@ -60,6 +60,21 @@ data class UserProfile(
     val city: String? = null
 )
 
+sealed class DeletionStatusState {
+    object Idle : DeletionStatusState()
+    object Checking : DeletionStatusState()
+    data class Pending(val info: DeletionStatusResponse) : DeletionStatusState()
+    data class Failed(val error: String) : DeletionStatusState()
+    object Clear : DeletionStatusState()
+}
+
+data class DeletionReceiptData(
+    val receiptId: String,
+    val scheduledFor: String,
+    val graceDays: Int,
+    val eraseLocalChats: Boolean
+)
+
 class AuthViewModel : ViewModel() {
 
     // Onboarding persistent state across configuration changes and navigation flow backstacks
@@ -115,6 +130,12 @@ class AuthViewModel : ViewModel() {
 
     private val _lastRoomTokenCanPublish = MutableStateFlow<Boolean>(false)
     val lastRoomTokenCanPublish: StateFlow<Boolean> = _lastRoomTokenCanPublish.asStateFlow()
+
+    private val _deletionStatus = MutableStateFlow<DeletionStatusState>(DeletionStatusState.Idle)
+    val deletionStatus: StateFlow<DeletionStatusState> = _deletionStatus.asStateFlow()
+
+    private val _deletionReceipt = MutableStateFlow<DeletionReceiptData?>(null)
+    val deletionReceipt: StateFlow<DeletionReceiptData?> = _deletionReceipt.asStateFlow()
 
     fun refreshModerationStatus(context: Context) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -647,6 +668,32 @@ class AuthViewModel : ViewModel() {
         }
     }
 
+    private val _roomVoiceSession = MutableStateFlow<com.example.voice.RoomVoiceSession?>(null)
+    val roomVoiceSession: StateFlow<com.example.voice.RoomVoiceSession?> = _roomVoiceSession.asStateFlow()
+
+    fun startVoiceSession(context: Context, roomId: String, userId: String, userName: String, initialRole: String) {
+        val current = _roomVoiceSession.value
+        if (current != null && current.roomId == roomId) {
+            Log.d("AuthViewModel", "RoomVoiceSession already running for roomId=$roomId")
+            return
+        }
+        current?.leave()
+        val session = com.example.voice.RoomVoiceSession(
+            context = context.applicationContext,
+            roomId = roomId,
+            userId = userId,
+            userName = userName,
+            scope = viewModelScope
+        )
+        _roomVoiceSession.value = session
+        session.start()
+    }
+
+    fun endVoiceSession() {
+        _roomVoiceSession.value?.leave()
+        _roomVoiceSession.value = null
+    }
+
     fun fetchRoomToken(
         roomId: String,
         context: Context? = null,
@@ -1003,6 +1050,7 @@ class AuthViewModel : ViewModel() {
         _mySpeakerRequestStatus.value = null
         _activeRoomSpeakers.value = emptyList()
         com.example.realtime.RoomMicController.reset()
+        endVoiceSession()
 
         if (ctx != null) {
             com.example.service.VoiceRoomOverlayManager.stopService(ctx)
@@ -1595,15 +1643,12 @@ class AuthViewModel : ViewModel() {
                     }
                     
                     withContext(Dispatchers.Main) {
-                        user.delete().addOnCompleteListener { task ->
-                            if (task.isSuccessful) {
-                                Toast.makeText(context, "Unverified account deleted automatically (2-hour limit). Please sign up again.", Toast.LENGTH_LONG).show()
-                            } else {
-                                Log.e("AuthViewModel", "Failed to delete Firebase user: ${task.exception?.message}")
-                            }
-                            _authState.value = AuthState.Error("Registration session expired (2 hours max). Please sign up again.")
-                            onCleaned()
-                        }
+                        try {
+                            FirebaseAuth.getInstance().signOut()
+                        } catch (_: Exception) {}
+                        Toast.makeText(context, "Registration session expired (2-hour limit). Please sign up again.", Toast.LENGTH_LONG).show()
+                        _authState.value = AuthState.Error("Registration session expired (2 hours max). Please sign up again.")
+                        onCleaned()
                     }
                 }
             }
@@ -3130,7 +3175,284 @@ class AuthViewModel : ViewModel() {
         }
     }
 
+    // --- Account Deletion Flow ---
+
+    fun checkDeletionStatus(context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _deletionStatus.value = DeletionStatusState.Checking
+            try {
+                val token = SupabaseSessionManager.getBearerToken(context)
+                if (token.isBlank() || token == "Bearer ${BuildConfig.SUPABASE_ANON_KEY}") {
+                    _deletionStatus.value = DeletionStatusState.Clear
+                    return@launch
+                }
+                val response = SupabaseClient.api.getMyDeletionStatus(
+                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                    auth = token,
+                    body = emptyMap()
+                )
+                if (response.isSuccessful) {
+                    val rawJson = response.body()?.string()?.trim().orEmpty()
+                    Log.d("AuthViewModel", "getMyDeletionStatus raw: $rawJson")
+                    val json = if (rawJson.startsWith("{")) org.json.JSONObject(rawJson) else org.json.JSONObject()
+                    val pending = json.optBoolean("pending", false)
+                    if (pending) {
+                        val statusResp = DeletionStatusResponse(
+                            pending = true,
+                            receipt_id = json.optString("receipt_id", null),
+                            status = json.optString("status", null),
+                            scheduled_for = json.optString("scheduled_for", null),
+                            can_cancel = if (json.has("can_cancel")) json.optBoolean("can_cancel", true) else true
+                        )
+                        _deletionStatus.value = DeletionStatusState.Pending(statusResp)
+                    } else {
+                        _deletionStatus.value = DeletionStatusState.Clear
+                    }
+                } else {
+                    val errBody = response.errorBody()?.string()?.trim().orEmpty()
+                    Log.e("AuthViewModel", "getMyDeletionStatus error ${response.code()}: $errBody")
+                    _deletionStatus.value = DeletionStatusState.Failed("Unable to verify account status (${response.code()})")
+                }
+            } catch (e: Exception) {
+                Log.e("AuthViewModel", "checkDeletionStatus exception", e)
+                _deletionStatus.value = DeletionStatusState.Failed(e.message ?: "Network error checking deletion status")
+            }
+        }
+    }
+
+    fun cancelAccountDeletion(context: Context, onResult: (Boolean, String?) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val token = SupabaseSessionManager.getBearerToken(context)
+                val response = SupabaseClient.api.cancelMyAccountDeletion(
+                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                    auth = token,
+                    body = emptyMap()
+                )
+                if (response.isSuccessful) {
+                    val rawJson = response.body()?.string()?.trim().orEmpty()
+                    val json = if (rawJson.startsWith("{")) org.json.JSONObject(rawJson) else org.json.JSONObject()
+                    val ok = json.optBoolean("success", true)
+                    withContext(Dispatchers.Main) {
+                        if (ok) {
+                            _deletionStatus.value = DeletionStatusState.Clear
+                            Toast.makeText(context, "Deletion cancelled", Toast.LENGTH_SHORT).show()
+                            val uid = SupabaseSessionManager.getUserId(context)
+                            if (uid != null) {
+                                loadUserProfileFromSpOrFirestore(context, uid) {}
+                            }
+                            onResult(true, null)
+                        } else {
+                            val err = json.optString("error", "Failed to cancel deletion")
+                            onResult(false, err)
+                        }
+                    }
+                } else {
+                    val errBody = response.errorBody()?.string()?.trim().orEmpty()
+                    val err = parseErrorJson(errBody) ?: "Server returned ${response.code()}"
+                    withContext(Dispatchers.Main) {
+                        onResult(false, err)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("AuthViewModel", "cancelAccountDeletion exception", e)
+                withContext(Dispatchers.Main) {
+                    onResult(false, e.message ?: "Failed to cancel account deletion")
+                }
+            }
+        }
+    }
+
+    fun requestAccountDeletion(
+        reason: String?,
+        eraseLocalChats: Boolean,
+        context: Context,
+        onReauthRequired: () -> Unit,
+        onSuccess: (DeletionReceiptData) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val fbUser = FirebaseAuth.getInstance().currentUser
+                if (fbUser == null) {
+                    withContext(Dispatchers.Main) { onReauthRequired() }
+                    return@launch
+                }
+
+                // Force a fresh ID token (server requires sign-in within last 5 minutes)
+                val tokenResult = try {
+                    com.google.android.gms.tasks.Tasks.await(fbUser.getIdToken(true))
+                } catch (e: Exception) {
+                    Log.d("AuthViewModel", "getIdToken failed: ${e.message}")
+                    withContext(Dispatchers.Main) { onReauthRequired() }
+                    return@launch
+                }
+
+                val freshToken = tokenResult.token
+                if (freshToken.isNullOrBlank()) {
+                    withContext(Dispatchers.Main) { onReauthRequired() }
+                    return@launch
+                }
+
+                val deviceId = com.example.util.DeviceInfoProvider.getDeviceId(context)
+                val deviceName = com.example.util.DeviceInfoProvider.getDeviceName()
+
+                // Persist eraseLocalChats choice immediately
+                context.getSharedPreferences("account_deletion_prefs", Context.MODE_PRIVATE)
+                    .edit()
+                    .putBoolean("pending_erase_local_chats", eraseLocalChats)
+                    .apply()
+
+                val req = RequestAccountDeletionRequest(
+                    firebase_token = freshToken,
+                    confirm = true,
+                    reason = reason?.take(300),
+                    device = DeviceDeletionInfo(device_id = deviceId, name = deviceName)
+                )
+
+                val response = SupabaseClient.api.requestAccountDeletion(
+                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                    request = req
+                )
+
+                Log.d("AuthViewModel", "requestAccountDeletion HTTP status: ${response.code()}")
+
+                if (response.isSuccessful) {
+                    val body = response.body()
+                    val receiptId = body?.receipt_id ?: "REC-${System.currentTimeMillis()}"
+                    val scheduledFor = body?.scheduled_for.orEmpty()
+                    val graceDays = body?.grace_days ?: 7
+
+                    val receipt = DeletionReceiptData(
+                        receiptId = receiptId,
+                        scheduledFor = scheduledFor,
+                        graceDays = graceDays,
+                        eraseLocalChats = eraseLocalChats
+                    )
+                    _deletionReceipt.value = receipt
+
+                    withContext(Dispatchers.Main) {
+                        onSuccess(receipt)
+                    }
+                } else {
+                    val rawErr = response.errorBody()?.string()?.trim().orEmpty()
+                    Log.d("AuthViewModel", "requestAccountDeletion error status ${response.code()}: $rawErr")
+                    val errCode = parseErrorJson(rawErr)
+
+                    withContext(Dispatchers.Main) {
+                        when {
+                            response.code() == 401 && (errCode == "reauth_required" || errCode == "invalid_or_expired_token") -> {
+                                onReauthRequired()
+                            }
+                            response.code() == 429 || errCode == "too_many_attempts" -> {
+                                onError("Too many attempts, try again later")
+                            }
+                            response.code() == 404 -> {
+                                onError("Account not found")
+                            }
+                            response.code() == 400 && errCode == "confirmation_required" -> {
+                                onError("Confirmation required")
+                            }
+                            else -> {
+                                onError(errCode ?: "Server error (${response.code()}). Please try again.")
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.d("AuthViewModel", "requestAccountDeletion exception: ${e.javaClass.simpleName}")
+                withContext(Dispatchers.Main) {
+                    onError(e.message ?: "Network error requesting account deletion")
+                }
+            }
+        }
+    }
+
+    fun finalizeDeletionAndSignOut(context: Context, onComplete: () -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val prefs = context.getSharedPreferences("account_deletion_prefs", Context.MODE_PRIVATE)
+            val shouldErase = prefs.getBoolean("pending_erase_local_chats", false)
+
+            // 1. Delete FCM token
+            try {
+                com.google.android.gms.tasks.Tasks.await(com.google.firebase.messaging.FirebaseMessaging.getInstance().deleteToken())
+                Log.d("AuthViewModel", "FCM token deleted")
+            } catch (e: Exception) {
+                Log.w("AuthViewModel", "FCM token delete failed", e)
+            }
+
+            // 2. Clear Coil/Image Cache
+            try {
+                coil.Coil.imageLoader(context).memoryCache?.clear()
+                coil.Coil.imageLoader(context).diskCache?.clear()
+            } catch (_: Exception) {}
+
+            // 3. Conditional Chat Vault / Tink Wipe
+            if (shouldErase) {
+                try {
+                    com.example.crypto.VaultSecurityManager.resetVault(context)
+                } catch (e: Exception) {
+                    Log.w("AuthViewModel", "Vault reset error", e)
+                }
+                try {
+                    context.getSharedPreferences("e2ee_tink_prefs", Context.MODE_PRIVATE).edit().clear().apply()
+                    val ks = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+                    if (ks.containsAlias("e2ee_hpke_master_key")) {
+                        ks.deleteEntry("e2ee_hpke_master_key")
+                    }
+                } catch (e: Exception) {
+                    Log.w("AuthViewModel", "Tink keyset wipe error", e)
+                }
+            }
+
+            // 4. Clear auth/session data (tokens, cached profile)
+            // Note: DeviceInfoProvider uses 'device_identity_prefs' so deviceId is untouched!
+            SupabaseSessionManager.clearSession(context)
+            try {
+                FirebaseAuth.getInstance().signOut()
+            } catch (_: Exception) {}
+
+            prefs.edit().clear().apply()
+
+            withContext(Dispatchers.Main) {
+                _deletionReceipt.value = null
+                _deletionStatus.value = DeletionStatusState.Idle
+                _authState.value = AuthState.Idle
+                onComplete()
+            }
+        }
+    }
+
+    fun runPendingEraseLocalChatsIfNeeded(context: Context) {
+        val prefs = context.getSharedPreferences("account_deletion_prefs", Context.MODE_PRIVATE)
+        if (prefs.getBoolean("pending_erase_local_chats", false)) {
+            try {
+                com.example.crypto.VaultSecurityManager.resetVault(context)
+                context.getSharedPreferences("e2ee_tink_prefs", Context.MODE_PRIVATE).edit().clear().apply()
+                val ks = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+                if (ks.containsAlias("e2ee_hpke_master_key")) {
+                    ks.deleteEntry("e2ee_hpke_master_key")
+                }
+            } catch (e: Exception) {
+                Log.w("AuthViewModel", "Error executing pending local erase", e)
+            } finally {
+                prefs.edit().clear().apply()
+            }
+        }
+    }
+
+    private fun parseErrorJson(raw: String): String? {
+        if (raw.isBlank()) return null
+        return try {
+            if (raw.startsWith("{")) {
+                val j = org.json.JSONObject(raw)
+                j.optString("error").ifBlank { j.optString("message").ifBlank { null } }
+            } else null
+        } catch (_: Exception) { null }
+    }
+
     override fun onCleared() {
+        endVoiceSession()
         super.onCleared()
     }
 }

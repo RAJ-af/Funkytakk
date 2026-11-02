@@ -1,0 +1,53 @@
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "jsr:@supabase/supabase-js@2";
+
+// Staff only (admin / superadmin). Finds the deletion proof record by receipt id, email, username
+// or the old user id. Emails are matched through the same HMAC that was stored, so the plain email
+// is never kept anywhere.
+// POST {"email": "..."} | {"receipt_id": "..."} | {"username": "..."} | {"user_id": "..."}
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const PEPPER = Deno.env.get("DELETION_PROOF_PEPPER") ?? SERVICE_ROLE_KEY;
+
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+
+async function hmacHex(key: string, msg: string): Promise<string> {
+  const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(key), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(msg)));
+  return Array.from(sig).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+Deno.serve(async (req: Request) => {
+  if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+
+  const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
+  });
+  const { data: userData, error: userErr } = await userClient.auth.getUser();
+  if (userErr || !userData?.user) return json({ error: "unauthenticated" }, 401);
+
+  const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { data: roleRow } = await admin.from("user_roles").select("role").eq("user_id", userData.user.id).limit(1).maybeSingle();
+  if (!["admin", "superadmin"].includes(roleRow?.role ?? "")) return json({ error: "forbidden" }, 403);
+
+  let body: { email?: string; receipt_id?: string; username?: string; user_id?: string };
+  try {
+    body = await req.json();
+  } catch {
+    return json({ error: "invalid_json" }, 400);
+  }
+
+  let q = admin.from("account_deletions").select("*").order("requested_at", { ascending: false }).limit(20);
+  if (body.receipt_id) q = q.eq("id", body.receipt_id);
+  else if (body.user_id) q = q.eq("supabase_user_id", body.user_id);
+  else if (body.username) q = q.ilike("username_snapshot", body.username);
+  else if (body.email) q = q.eq("email_hash", await hmacHex(PEPPER, body.email.trim().toLowerCase()));
+  else return json({ error: "give email, receipt_id, username or user_id" }, 400);
+
+  const { data, error } = await q;
+  if (error) return json({ error: "query_failed" }, 500);
+  return json({ count: data?.length ?? 0, records: data ?? [] });
+});

@@ -389,6 +389,26 @@ interface SupabaseApi {
         @Body request: VerifyFirebaseTokenRequest
     ): Response<VerifyFirebaseTokenResponse>
 
+    @POST("functions/v1/request-account-deletion")
+    suspend fun requestAccountDeletion(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Body request: RequestAccountDeletionRequest
+    ): Response<RequestAccountDeletionResponse>
+
+    @POST("rest/v1/rpc/get_my_deletion_status")
+    suspend fun getMyDeletionStatus(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> = emptyMap()
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/cancel_my_account_deletion")
+    suspend fun cancelMyAccountDeletion(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> = emptyMap()
+    ): Response<ResponseBody>
+
     @POST("functions/v1/get-cloudinary-signature")
     suspend fun getCloudinarySignature(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
@@ -2275,6 +2295,39 @@ data class RoomInviteItem(
     val invitee_id: String,
     val status: String,
     val created_at: String
+)
+
+@JsonClass(generateAdapter = true)
+data class DeviceDeletionInfo(
+    val device_id: String,
+    val name: String
+)
+
+@JsonClass(generateAdapter = true)
+data class RequestAccountDeletionRequest(
+    val firebase_token: String,
+    val confirm: Boolean = true,
+    val reason: String? = null,
+    val device: DeviceDeletionInfo
+)
+
+@JsonClass(generateAdapter = true)
+data class RequestAccountDeletionResponse(
+    val success: Boolean? = null,
+    val receipt_id: String? = null,
+    val scheduled_for: String? = null,
+    val grace_days: Int? = null,
+    val already_requested: Boolean? = null,
+    val error: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class DeletionStatusResponse(
+    val pending: Boolean = false,
+    val receipt_id: String? = null,
+    val status: String? = null,
+    val scheduled_for: String? = null,
+    val can_cancel: Boolean? = null
 )
 
 

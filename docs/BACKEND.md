@@ -78,3 +78,51 @@
   - `group-media`: `<group_id>/...` (joined members upload/read, uploader deletes).
   - `covers`: `<user_id>/...` (owner only).
 - Leftover media purge jobs execute every 4 days. Receiving client deletes the `dm-media` storage object after downloading, decrypting, and saving locally.
+
+---
+
+## Account Deletion Architecture (Backend Live)
+
+- **Tables:**
+  - `account_deletions`: Permanent proof record (receipt id, `supabase_user_id`, `firebase_uid`, `email_hash` = HMAC-SHA256 of the lower-case email, `username`, `account_created_at`, status `scheduled` | `cancelled` | `purging` | `completed` | `needs_review` | `failed`, request time/IP/country/user agent/device, `auth_provider` and `reauth_auth_time`, `was_banned`, `had_active_suspension`, `steps`, `deleted_counts`, `residue`, `attempts`, `last_error`, email flags).
+  - `media_files`: Inventory of Appwrite/Cloudinary files. Both tables have RLS enabled with service role access only.
+- **Flow:**
+  - `request-account-deletion`: Requires a Firebase ID token with `auth_time` within the last 5 minutes. On success, sets status to `scheduled`, hides profile immediately (`profiles.deletion_scheduled_at`, excluded from `discoverable_profiles`), revokes all user devices, and sends receipt email.
+  - After the grace period (default 7 days via `DELETION_GRACE_DAYS`, or 0 for instant testing), `process-account-deletions` cron worker runs (pg_cron every 10 min, header `x-push-secret`, same secret as send-push):
+    1. Media purge: Appwrite (tracked files + avatar/cover), Cloudinary (`moments/<uid>/`), and Supabase Storage.
+    2. Firebase Auth user deletion via Identity Toolkit (`accounts:delete`).
+    3. Database purge via `purge_user_data()`.
+    4. Supabase Auth user deletion via `auth.admin.deleteUser`.
+    5. Residue scan via `find_user_residue()` (must return `{}`; otherwise status becomes `needs_review`).
+    6. Sends completion confirmation email.
+  - Steps are idempotent and repeatable; failures set status to `failed` and are retried up to 10 attempts. Nothing is marked completed unless Firebase and the database are fully purged.
+- **Kept for Audit & Safety:**
+  - Gift history without sender/recipient identifiers.
+  - Reports without reporter/reported personal identity.
+  - Room end summaries without host personal identity.
+  - The minimal deletion proof record (`account_deletions`).
+- **Secrets Used:**
+  - `FCM_SERVICE_ACCOUNT_JSON`: Must be the Firebase Admin SDK service account of project `funkytalk-f1aae` with permission to delete Auth users (`Firebase Authentication Admin`).
+  - `BREVO_API_KEY`: For receipt and completion emails.
+  - `APPWRITE_*`: For file uploads and purges.
+  - `CLOUDINARY_*`: For Moments media purges.
+  - `DELETION_GRACE_DAYS`: Default 7 (0 for testing).
+  - `DELETION_PROOF_PEPPER`: Constant secret for HMAC-SHA256 email hash.
+- **Staff Lookup:**
+  - Edge Function `lookup-deletion-proof` (admin/superadmin JWT) with `{"email": "..."} | {"receipt_id": "..."} | {"username": "..."} | {"user_id": "..."}`.
+- **Client RPCs:**
+  - `get_my_deletion_status()`: Returns `{"pending": false}` or `{"pending": true, "receipt_id": "...", "status": "...", "scheduled_for": "...", "can_cancel": boolean}`.
+  - `cancel_my_account_deletion()`: Cancels scheduled deletion and unhides the profile.
+- **Chat Media in Appwrite:**
+  - Chat media, avatars, and covers live in Appwrite via Edge Function `upload-to-appwrite`. Files in Appwrite are public by URL (`read("any")`); only encrypted chat media (with one-time keys stored in end-to-end encrypted message payloads) is permitted. Chat media is purged by cron worker 4 days after upload.
+- **Known Limits:**
+  - `room_reports.message_snapshot` (JSON) may retain historic chat text of other participants; residue scan verifies text/UUID columns across tables.
+
+---
+
+## Voice RTC Providers Multi-Vendor Architecture (Agora, Zego, Daily)
+
+- `rtc_provider_settings` (provider, enabled, priority, monthly_limit) and `rtc_settings` (strategy 'priority' | 'balanced'). `assign_rtc_provider_for_room` picks among ENABLED providers below their limit. A room keeps its provider for its entire lifecycle.
+- Staff: `admin_set_rtc_provider(p_provider, p_enabled)`, `admin_set_rtc_strategy(p_strategy)`; `get_rtc_provider_minutes_status()` (service role).
+- `get-room-token` v22: Agora tokens last 1 hour (duration in seconds, not timestamp). Zego Token04 is server-generated; Daily `permissions.canSend` enforces publisher/listener rights.
+- Usage counters estimate time spent inside rooms (join to leave), not exact SDK minutes. Compare with provider dashboards.

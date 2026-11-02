@@ -57,7 +57,8 @@ fun HomeScreen(
     onCreateLanguageRoom: (isPrivate: Boolean) -> Unit = {},
     onRoomClick: () -> Unit = {},
     onOpenNotifications: () -> Unit = {},
-    onOpenSupportChat: (reportId: String?) -> Unit = {}
+    onOpenSupportChat: (reportId: String?) -> Unit = {},
+    onDeleteAccountClick: () -> Unit = {}
 ) {
     val authState by viewModel.authState.collectAsState()
     val supabaseProfiles by viewModel.supabaseProfiles.collectAsState()
@@ -111,6 +112,9 @@ fun HomeScreen(
     val chatMessagesStorage = remember { mutableStateMapOf<String, List<Pair<String, Boolean>>>() } // Pair: text, isMe
 
     LaunchedEffect(authState) {
+        if (viewModel.deletionReceipt.value != null) {
+            return@LaunchedEffect
+        }
         if (authState !is AuthState.Success) {
             onLogoutSuccess()
         }
@@ -659,7 +663,8 @@ fun HomeScreen(
                             currentUserProfile = currentUserProfile,
                             onLogoutClick = { showLogoutDialog = true },
                             viewModel = viewModel,
-                            onOpenSupportChat = onOpenSupportChat
+                            onOpenSupportChat = onOpenSupportChat,
+                            onDeleteAccountClick = onDeleteAccountClick
                         )
                     }
                 }

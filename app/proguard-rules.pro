@@ -26,3 +26,7 @@
     @com.google.firebase.firestore.* <fields>;
 }
 
+# Agora Voice SDK
+-keep class io.agora.** { *; }
+-dontwarn io.agora.**
+

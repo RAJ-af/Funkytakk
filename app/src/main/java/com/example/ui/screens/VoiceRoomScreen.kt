@@ -323,7 +323,8 @@ data class ChillRoomSpeaker(
     val gradientColors: List<Color>,
     val isHost: Boolean = false,
     val userId: String = "",
-    val isHostAway: Boolean = false
+    val isHostAway: Boolean = false,
+    val isSpeaking: Boolean = false
 )
 
 data class ChillRoomMessage(
@@ -419,6 +420,10 @@ fun VoiceRoomScreen(
     }
     var showOverlayBanner by remember { mutableStateOf(!hasOverlayPermission) }
 
+    val voiceSession by viewModel?.roomVoiceSession?.collectAsState() ?: remember { mutableStateOf(null) }
+    val voiceConnectionState by (voiceSession?.connectionState?.collectAsState() ?: remember { mutableStateOf(com.example.voice.VoiceConnectionState.Idle) })
+    val speakingUserIds by (voiceSession?.speakingUserIds?.collectAsState() ?: remember { mutableStateOf(emptySet()) })
+
     val micPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
@@ -427,12 +432,8 @@ fun VoiceRoomScreen(
             if (com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
                 com.example.service.VoiceRoomOverlayManager.startServiceIfPermitted(context)
             }
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        } else {
+            Toast.makeText(context, "Microphone permission is required to speak on stage. You can continue listening.", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -538,7 +539,35 @@ fun VoiceRoomScreen(
         participantsData.any { it.user_id == roomHostId && (it.role == "host" || it.role == "speaker") }
     }
 
-    val hostSeat = remember(participantsData, supabaseProfiles, roomHostId, isHostPresent, currentUserProfile, currentUserId) {
+    val myParticipant = participantsData.find { it.user_id == currentUserId }
+    val myRole = myParticipant?.role ?: if (isCurrentUserHost) "speaker" else "listener"
+
+    LaunchedEffect(activeRoomId, currentUserId) {
+        if (activeRoomId.isNotBlank() && currentUserId.isNotBlank()) {
+            val initialRole = if (currentUserId == roomHostId) "speaker" else "listener"
+            viewModel?.startVoiceSession(
+                context = context,
+                roomId = activeRoomId,
+                userId = currentUserId,
+                userName = currentUserName,
+                initialRole = initialRole
+            )
+            if (currentUserId == roomHostId && ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
+    }
+
+    LaunchedEffect(myRole) {
+        voiceSession?.onRoleChanged(myRole)
+        if (myRole == "speaker" || myRole == "host") {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
+    }
+
+    val hostSeat = remember(participantsData, supabaseProfiles, roomHostId, isHostPresent, currentUserProfile, currentUserId, speakingUserIds) {
         val hostProfile = supabaseProfiles.find { it.uid == roomHostId }
         val snippet = com.example.realtime.VoiceRoomRealtimeManager.getUserSnippet(roomHostId ?: "")
         val name = hostProfile?.displayName?.ifBlank { null }
@@ -550,6 +579,7 @@ fun VoiceRoomScreen(
             ?: if (currentUserId == roomHostId) currentUserProfile?.avatar else "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400"
         val flagCode = hostProfile?.countryCode ?: snippet?.countryCode ?: "in"
         val pHost = participantsData.find { it.user_id == roomHostId }
+        val hostUid = hostProfile?.uid ?: (roomHostId ?: "")
 
         ChillRoomSpeaker(
             name = name,
@@ -559,12 +589,13 @@ fun VoiceRoomScreen(
             isCenter = true,
             gradientColors = listOf(Color(0xFFFFB800), Color(0xFFF59E0B), Color(0xFFFFB800)),
             isHost = true,
-            userId = hostProfile?.uid ?: (roomHostId ?: ""),
-            isHostAway = !isHostPresent
+            userId = hostUid,
+            isHostAway = !isHostPresent,
+            isSpeaking = speakingUserIds.contains(hostUid)
         )
     }
 
-    val allRoomSeats = remember(hostSeat, participantsData, supabaseProfiles, roomHostId, isMicOn) {
+    val allRoomSeats = remember(hostSeat, participantsData, supabaseProfiles, roomHostId, isMicOn, speakingUserIds) {
         if (participantsData.isEmpty()) {
             listOf(hostSeat)
         } else {
@@ -583,13 +614,14 @@ fun VoiceRoomScreen(
                     gradientColors = if (isHost) listOf(Color(0xFFFFB800), Color(0xFFF59E0B), Color(0xFFFFB800)) else listOf(Color(0xFF8B5CF6), Color(0xFFEC4899)),
                     isHost = isHost,
                     userId = p.user_id,
-                    isHostAway = if (isHost) !isHostPresent else false
+                    isHostAway = if (isHost) !isHostPresent else false,
+                    isSpeaking = speakingUserIds.contains(p.user_id)
                 )
             }
         }
     }
 
-    val speakerSeats = remember(participantsData, supabaseProfiles, roomHostId, hostSeat, isMicOn) {
+    val speakerSeats = remember(participantsData, supabaseProfiles, roomHostId, hostSeat, isMicOn, speakingUserIds) {
         participantsData.filter { p ->
             val isHost = (p.role == "host") || (p.user_id == roomHostId)
             !isHost && p.role == "speaker"
@@ -614,7 +646,8 @@ fun VoiceRoomScreen(
                 isCenter = false,
                 gradientColors = listOf(Color(0xFF8B5CF6), Color(0xFFEC4899)),
                 isHost = false,
-                userId = p.user_id
+                userId = p.user_id,
+                isSpeaking = speakingUserIds.contains(p.user_id)
             )
         }
     }
@@ -2377,6 +2410,36 @@ fun VoiceRoomScreen(
                         }
                     }
                 }
+            }
+
+            // Voice Connection State Banner
+            when (val vState = voiceConnectionState) {
+                is com.example.voice.VoiceConnectionState.Connecting -> {
+                    VoiceConnectionBanner(
+                        text = "Connecting voice...",
+                        backgroundColor = Color(0xFF1E293B).copy(alpha = 0.9f),
+                        textColor = Color(0xFF94A3B8),
+                        isLoading = true
+                    )
+                }
+                is com.example.voice.VoiceConnectionState.Reconnecting -> {
+                    VoiceConnectionBanner(
+                        text = "Reconnecting voice...",
+                        backgroundColor = Color(0xFF78350F).copy(alpha = 0.9f),
+                        textColor = Color(0xFFFDE68A),
+                        isLoading = true
+                    )
+                }
+                is com.example.voice.VoiceConnectionState.Failed -> {
+                    VoiceConnectionBanner(
+                        text = vState.reason.ifBlank { "Voice connection failed, tap to retry" },
+                        backgroundColor = Color(0xFF7F1D1D).copy(alpha = 0.95f),
+                        textColor = Color(0xFFFECACA),
+                        showRetry = true,
+                        onRetry = { voiceSession?.retry() }
+                    )
+                }
+                else -> {}
             }
 
             // Host In-Room Pending Requests Banner
@@ -7274,6 +7337,57 @@ fun HostLeaveRoomSheet(
                         .clip(RoundedCornerShape(12.dp))
                         .clickable { onDismiss() }
                         .padding(horizontal = 24.dp, vertical = 6.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun VoiceConnectionBanner(
+    text: String,
+    backgroundColor: Color,
+    textColor: Color,
+    isLoading: Boolean = false,
+    showRetry: Boolean = false,
+    onRetry: () -> Unit = {}
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(backgroundColor)
+            .clickable(enabled = showRetry) { onRetry() }
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(12.dp),
+                    strokeWidth = 1.5.dp,
+                    color = textColor
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+            }
+            Text(
+                text = text,
+                color = textColor,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
+            )
+            if (showRetry) {
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Tap to retry",
+                    color = textColor,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
                 )
             }
         }

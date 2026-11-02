@@ -20,6 +20,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -82,7 +84,8 @@ fun ProfileTabContent(
     currentUserProfile: UserProfile,
     onLogoutClick: () -> Unit,
     viewModel: AuthViewModel? = null,
-    onOpenSupportChat: (reportId: String?) -> Unit = {}
+    onOpenSupportChat: (reportId: String?) -> Unit = {},
+    onDeleteAccountClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var selectedMainTab by remember { mutableStateOf(0) } // 0 = About Me, 1 = Feed
@@ -1602,7 +1605,36 @@ fun ProfileTabContent(
                     }
                 }
 
-                // 7. Logout
+                // 7. Delete Account (Red)
+                Surface(
+                    onClick = {
+                        showOptionsMenuSheet = false
+                        onDeleteAccountClick()
+                    },
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color(0xFFFEF2F2),
+                    border = BorderStroke(1.dp, Color(0xFFFCA5A5)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = "Delete Account",
+                            tint = Color(0xFFDC2626),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Column {
+                            Text("Delete Account", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFDC2626))
+                            Text("Permanently erase profile, chats and data", fontSize = 11.sp, color = Color(0xFF991B1B))
+                        }
+                    }
+                }
+
+                // 8. Logout
                 Surface(
                     onClick = {
                         showOptionsMenuSheet = false

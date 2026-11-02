@@ -1,0 +1,385 @@
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "jsr:@supabase/supabase-js@2";
+
+// Cron worker (every 10 minutes, called by pg_cron with the x-push-secret header).
+//  1) executes due account deletions, step by step and safely repeatable:
+//     media (Appwrite / Cloudinary / Supabase Storage) -> Firebase login -> database -> Supabase Auth -> residue check
+//  2) removes expired 1:1 / group media files (older than 4 days) from Appwrite.
+
+const FIREBASE_PROJECT_ID = "funkytalk-f1aae";
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const BREVO_API_KEY = Deno.env.get("BREVO_API_KEY") ?? "";
+const FCM_SA_JSON = Deno.env.get("FCM_SERVICE_ACCOUNT_JSON") ?? "";
+const APPWRITE_ENDPOINT = (Deno.env.get("APPWRITE_ENDPOINT") ?? "").replace(/\/$/, "");
+const APPWRITE_PROJECT_ID = Deno.env.get("APPWRITE_PROJECT_ID") ?? "";
+const APPWRITE_API_KEY = Deno.env.get("APPWRITE_API_KEY") ?? "";
+const APPWRITE_BUCKET_ID = Deno.env.get("APPWRITE_BUCKET_ID") ?? "";
+const CLD_CLOUD = Deno.env.get("CLOUDINARY_CLOUD_NAME") ?? "";
+const CLD_KEY = Deno.env.get("CLOUDINARY_API_KEY") ?? "";
+const CLD_SECRET = Deno.env.get("CLOUDINARY_API_SECRET") ?? "";
+
+const MAX_DELETIONS_PER_RUN = 2;
+const MAX_ATTEMPTS = 10;
+const MEDIA_RETENTION_DAYS = 4;
+
+const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+  auth: { autoRefreshToken: false, persistSession: false },
+});
+
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+
+const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 240);
+
+// ---------- Google token (service account) ----------
+function b64url(input: ArrayBuffer | string): string {
+  const bytes = typeof input === "string" ? new TextEncoder().encode(input) : new Uint8Array(input);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function pemToDer(pem: string): ArrayBuffer {
+  const b64 = pem.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\s/g, "");
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out.buffer;
+}
+
+async function googleAccessToken(sa: { client_email: string; private_key: string }): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  const header = b64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+  const claim = b64url(JSON.stringify({
+    iss: sa.client_email,
+    scope: "https://www.googleapis.com/auth/cloud-platform",
+    aud: "https://oauth2.googleapis.com/token",
+    iat: now,
+    exp: now + 3600,
+  }));
+  const key = await crypto.subtle.importKey(
+    "pkcs8", pemToDer(sa.private_key), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"],
+  );
+  const sig = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, new TextEncoder().encode(`${header}.${claim}`));
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion: `${header}.${claim}.${b64url(sig)}`,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.access_token) throw new Error("google_token_failed:" + res.status);
+  return data.access_token as string;
+}
+
+// ---------- Firebase Auth user ----------
+async function deleteFirebaseUser(firebaseUid: string): Promise<void> {
+  if (!FCM_SA_JSON) throw new Error("firebase_service_account_not_configured");
+  const sa = JSON.parse(FCM_SA_JSON);
+  if (sa.project_id !== FIREBASE_PROJECT_ID) throw new Error("service_account_project_mismatch:" + sa.project_id);
+  const token = await googleAccessToken(sa);
+  const res = await fetch(`https://identitytoolkit.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/accounts:delete`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ localId: firebaseUid }),
+  });
+  if (res.ok) return;
+  const txt = await res.text();
+  if (txt.includes("USER_NOT_FOUND")) return; // already gone
+  throw new Error(`firebase_delete_${res.status}:${txt.slice(0, 160)}`);
+}
+
+// ---------- Appwrite ----------
+const appwriteConfigured = () => Boolean(APPWRITE_ENDPOINT && APPWRITE_PROJECT_ID && APPWRITE_API_KEY && APPWRITE_BUCKET_ID);
+
+async function deleteAppwriteFile(fileId: string): Promise<void> {
+  const res = await fetch(
+    `${APPWRITE_ENDPOINT}/storage/buckets/${APPWRITE_BUCKET_ID}/files/${encodeURIComponent(fileId)}`,
+    { method: "DELETE", headers: { "X-Appwrite-Project": APPWRITE_PROJECT_ID, "X-Appwrite-Key": APPWRITE_API_KEY } },
+  );
+  if (res.ok || res.status === 404) return;
+  throw new Error(`appwrite_delete_${res.status}`);
+}
+
+// ---------- Cloudinary ----------
+const cloudinaryConfigured = () => Boolean(CLD_CLOUD && CLD_KEY && CLD_SECRET);
+const cldAuth = () => "Basic " + btoa(`${CLD_KEY}:${CLD_SECRET}`);
+
+async function deleteCloudinaryPrefix(prefix: string): Promise<void> {
+  for (const type of ["image", "video", "raw"]) {
+    for (let i = 0; i < 10; i++) {
+      const res = await fetch(
+        `https://api.cloudinary.com/v1_1/${CLD_CLOUD}/resources/${type}/upload?prefix=${encodeURIComponent(prefix)}`,
+        { method: "DELETE", headers: { Authorization: cldAuth() } },
+      );
+      if (!res.ok) throw new Error(`cloudinary_${type}_${res.status}`);
+      const j = await res.json().catch(() => ({}));
+      if (!j.partial) break;
+    }
+  }
+  // remove the (now empty) folder, best effort
+  await fetch(`https://api.cloudinary.com/v1_1/${CLD_CLOUD}/folders/${prefix.replace(/\/$/, "")}`, {
+    method: "DELETE",
+    headers: { Authorization: cldAuth() },
+  }).catch(() => {});
+}
+
+// ---------- Email ----------
+function esc(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+async function sendEmail(to: string, subject: string, html: string): Promise<boolean> {
+  if (!BREVO_API_KEY) return false;
+  const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: { "api-key": BREVO_API_KEY, "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({
+      sender: { name: "FunkyTalk", email: "noreply@funkytalk.jo3.org" },
+      to: [{ email: to }],
+      subject,
+      htmlContent: html,
+    }),
+  });
+  return res.ok;
+}
+
+// ---------- Step 1: media ----------
+async function deleteAllMedia(uid: string): Promise<{ blocked: boolean; detail: Record<string, string> }> {
+  const detail: Record<string, string> = {};
+  let blocked = false;
+  const nowIso = new Date().toISOString();
+
+  // Appwrite (tracked uploads + the current avatar/cover URLs, which may pre-date tracking)
+  const { data: tracked } = await admin.from("media_files").select("file_id")
+    .eq("user_id", uid).eq("provider", "appwrite").is("deleted_at", null);
+  const { data: prof } = await admin.from("profiles").select("avatar_url, cover_url").eq("auth_user_id", uid).maybeSingle();
+  const ids = new Set<string>((tracked ?? []).map((r) => r.file_id as string));
+  for (const u of [prof?.avatar_url, prof?.cover_url]) {
+    const m = typeof u === "string" ? u.match(/\/files\/([^/]+)\/view/) : null;
+    if (m) ids.add(m[1]);
+  }
+  if (ids.size === 0) {
+    detail.appwrite = "none";
+  } else if (!appwriteConfigured()) {
+    detail.appwrite = "not_configured";
+    blocked = true;
+  } else {
+    try {
+      for (const id of ids) await deleteAppwriteFile(id);
+      await admin.from("media_files").update({ deleted_at: nowIso }).eq("user_id", uid).eq("provider", "appwrite");
+      detail.appwrite = `deleted_${ids.size}`;
+    } catch (e) {
+      detail.appwrite = "error:" + errMsg(e);
+      blocked = true;
+    }
+  }
+
+  // Cloudinary (Moments)
+  const { data: moments } = await admin.from("moments").select("image_urls").eq("user_id", uid);
+  let urlCount = 0;
+  let outside = 0;
+  for (const m of moments ?? []) {
+    for (const u of (Array.isArray(m.image_urls) ? m.image_urls : []) as string[]) {
+      urlCount++;
+      if (!String(u).includes(`/moments/${uid}/`)) outside++;
+    }
+  }
+  const { count: cldTracked } = await admin.from("media_files").select("id", { count: "exact", head: true })
+    .eq("user_id", uid).eq("provider", "cloudinary").is("deleted_at", null);
+  if (urlCount === 0 && !cldTracked) {
+    detail.cloudinary = "none";
+  } else if (!cloudinaryConfigured()) {
+    detail.cloudinary = "not_configured";
+    blocked = true;
+  } else {
+    try {
+      await deleteCloudinaryPrefix(`moments/${uid}/`);
+      await admin.from("media_files").update({ deleted_at: nowIso }).eq("user_id", uid).eq("provider", "cloudinary");
+      detail.cloudinary = outside > 0 ? `deleted_folder_${outside}_urls_outside_folder_need_review` : "deleted_folder";
+    } catch (e) {
+      detail.cloudinary = "error:" + errMsg(e);
+      blocked = true;
+    }
+  }
+
+  // Supabase Storage (older avatars / report evidence / covers)
+  try {
+    const { data: objs, error } = await admin.rpc("list_user_storage_objects", { p_uid: uid });
+    if (error) throw error;
+    const byBucket = new Map<string, string[]>();
+    for (const o of (objs ?? []) as { bucket_id: string; name: string }[]) {
+      byBucket.set(o.bucket_id, [...(byBucket.get(o.bucket_id) ?? []), o.name]);
+    }
+    let total = 0;
+    for (const [bucket, paths] of byBucket) {
+      for (let i = 0; i < paths.length; i += 100) {
+        const chunk = paths.slice(i, i + 100);
+        const { error: rmErr } = await admin.storage.from(bucket).remove(chunk);
+        if (rmErr) throw rmErr;
+        total += chunk.length;
+      }
+    }
+    detail.supabase_storage = total === 0 ? "none" : `deleted_${total}`;
+  } catch (e) {
+    detail.supabase_storage = "error:" + errMsg(e);
+    blocked = true;
+  }
+
+  return { blocked, detail };
+}
+
+// ---------- One deletion ----------
+// deno-lint-ignore no-explicit-any
+async function processOne(d: any): Promise<string> {
+  const uid = d.supabase_user_id as string;
+  const steps: Record<string, unknown> = { ...(d.steps ?? {}) };
+  const save = (extra: Record<string, unknown> = {}) =>
+    admin.from("account_deletions").update({ steps, ...extra }).eq("id", d.id);
+
+  // Claim it (optimistic lock on status + attempts)
+  const { data: claimed } = await admin.from("account_deletions").update({
+    status: "purging",
+    started_at: d.started_at ?? new Date().toISOString(),
+    attempts: (d.attempts ?? 0) + 1,
+    last_error: null,
+  }).eq("id", d.id).eq("status", d.status).eq("attempts", d.attempts ?? 0).select("id");
+  if (!claimed || claimed.length !== 1) return "skipped_claimed_elsewhere";
+
+  // The email address, while the account still exists (only kept in memory)
+  const { data: au } = await admin.auth.admin.getUserById(uid);
+  const email: string | null = au?.user?.email ?? null;
+
+  const fail = async (step: string, message: string) => {
+    steps[step] = "error";
+    await save({ status: "failed", last_error: `${step}: ${message}`.slice(0, 500) });
+    return "failed_" + step;
+  };
+
+  // 1) media
+  if (steps.media !== "done") {
+    try {
+      const r = await deleteAllMedia(uid);
+      steps.media_detail = r.detail;
+      if (r.blocked) return await fail("media", JSON.stringify(r.detail));
+      steps.media = "done";
+      await save();
+    } catch (e) {
+      return await fail("media", errMsg(e));
+    }
+  }
+
+  // 2) Firebase login (before the database, so a failure never leaves a working login without data)
+  if (steps.firebase !== "done") {
+    try {
+      if (d.firebase_uid) await deleteFirebaseUser(d.firebase_uid as string);
+      steps.firebase = d.firebase_uid ? "done" : "done_no_uid_recorded";
+      await save();
+    } catch (e) {
+      return await fail("firebase", errMsg(e));
+    }
+  }
+
+  // 3) database
+  let counts: unknown = d.deleted_counts ?? null;
+  if (steps.database !== "done") {
+    const { data, error } = await admin.rpc("purge_user_data", { p_uid: uid, p_email: email });
+    if (error) return await fail("database", error.message);
+    counts = data;
+    steps.database = "done";
+    await save({ deleted_counts: counts });
+  }
+
+  // 4) Supabase Auth user
+  if (steps.supabase_auth !== "done") {
+    const { error } = await admin.auth.admin.deleteUser(uid);
+    if (error && !/not.?found/i.test(error.message)) return await fail("supabase_auth", error.message);
+    steps.supabase_auth = "done";
+    await save();
+  }
+
+  // 5) residue check: every public table must be free of the user id / email
+  const { data: residue, error: resErr } = await admin.rpc("find_user_residue", { p_uid: uid, p_email: email });
+  if (resErr) return await fail("residue_check", resErr.message);
+  const clean = !residue || Object.keys(residue as Record<string, unknown>).length === 0;
+  steps.residue_check = clean ? "clean" : "found_leftovers";
+
+  // 6) confirmation email (the address was only held in memory)
+  let completionSent = false;
+  if (email) {
+    const html = `<!DOCTYPE html><html><body style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f6f8fa;padding:20px;">
+<div style="background:#fff;border-radius:12px;max-width:500px;margin:0 auto;padding:32px;border:1px solid #e1e4e8;">
+<h2 style="color:#24292e;font-size:18px;margin:0 0 16px 0;">Your FunkyTalk account was deleted</h2>
+<p style="font-size:14px;color:#586069;line-height:1.6;">Your profile, photos, banner, chats, media, moments and login have been permanently deleted.</p>
+<p style="font-size:13px;color:#24292e;">Receipt number: <strong>${esc(d.id as string)}</strong></p>
+<p style="font-size:12px;color:#959da5;">Keep this number. It proves that the account was deleted on request.</p>
+</div></body></html>`;
+    completionSent = await sendEmail(email, "Your FunkyTalk account was deleted", html).catch(() => false);
+  }
+
+  await save({
+    status: clean ? "completed" : "needs_review",
+    completed_at: new Date().toISOString(),
+    residue: residue ?? {},
+    deleted_counts: counts,
+    completion_email_sent: completionSent,
+    last_error: null,
+  });
+  return clean ? "completed" : "needs_review";
+}
+
+// ---------- Expired 1:1 / group media in Appwrite ----------
+async function purgeExpiredMedia(): Promise<{ deleted: number; skipped?: string }> {
+  if (!appwriteConfigured()) return { deleted: 0, skipped: "appwrite_not_configured" };
+  const cutoff = new Date(Date.now() - MEDIA_RETENTION_DAYS * 24 * 3600 * 1000).toISOString();
+  const { data: rows } = await admin.from("media_files").select("id, file_id")
+    .in("purpose", ["dm-media", "group-media"]).is("deleted_at", null).lt("created_at", cutoff).limit(100);
+  let deleted = 0;
+  for (const r of rows ?? []) {
+    try {
+      await deleteAppwriteFile(r.file_id as string);
+      await admin.from("media_files").update({ deleted_at: new Date().toISOString() }).eq("id", r.id);
+      deleted++;
+    } catch (e) {
+      console.error("expired media delete failed", r.file_id, errMsg(e));
+    }
+  }
+  return { deleted };
+}
+
+Deno.serve(async (req: Request) => {
+  if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+
+  const secret = req.headers.get("x-push-secret") ?? "";
+  const { data: ok } = await admin.rpc("verify_push_secret", { p_secret: secret });
+  if (!ok) return json({ error: "unauthorized" }, 401);
+
+  const nowIso = new Date().toISOString();
+  const staleIso = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const { data: due, error } = await admin.from("account_deletions").select("*")
+    .or(`and(status.eq.scheduled,scheduled_for.lte.${nowIso}),status.eq.failed,and(status.eq.purging,started_at.lt.${staleIso})`)
+    .lt("attempts", MAX_ATTEMPTS)
+    .order("scheduled_for", { ascending: true })
+    .limit(MAX_DELETIONS_PER_RUN);
+  if (error) {
+    console.error("select due deletions failed", error);
+    return json({ error: "query_failed" }, 500);
+  }
+
+  const results: Record<string, string> = {};
+  for (const d of due ?? []) {
+    try {
+      results[d.id as string] = await processOne(d);
+    } catch (e) {
+      console.error("processOne crashed", d.id, e);
+      await admin.from("account_deletions").update({ status: "failed", last_error: "crash: " + errMsg(e) }).eq("id", d.id);
+      results[d.id as string] = "crashed";
+    }
+  }
+
+  const media = await purgeExpiredMedia().catch((e) => ({ deleted: 0, skipped: errMsg(e) }));
+  return json({ processed: results, expired_media: media });
+});

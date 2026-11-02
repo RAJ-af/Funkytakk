@@ -1,0 +1,157 @@
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "jsr:@supabase/supabase-js@2";
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+const APPWRITE_ENDPOINT = Deno.env.get("APPWRITE_ENDPOINT") ?? "";
+const APPWRITE_PROJECT_ID = Deno.env.get("APPWRITE_PROJECT_ID") ?? "";
+const APPWRITE_API_KEY = Deno.env.get("APPWRITE_API_KEY") ?? "";
+const APPWRITE_BUCKET_ID = Deno.env.get("APPWRITE_BUCKET_ID") ?? "";
+
+const ALLOWED_PURPOSES = ["avatar", "cover", "dm-media", "group-media"] as const;
+const MAX_BYTES = 26214400;
+
+const CORS_HEADERS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+  });
+}
+
+async function deleteAppwriteFile(fileId: string): Promise<void> {
+  const res = await fetch(
+    `${APPWRITE_ENDPOINT}/storage/buckets/${APPWRITE_BUCKET_ID}/files/${encodeURIComponent(fileId)}`,
+    { method: "DELETE", headers: { "X-Appwrite-Project": APPWRITE_PROJECT_ID, "X-Appwrite-Key": APPWRITE_API_KEY } },
+  );
+  if (res.ok || res.status === 404) return;
+  throw new Error(`appwrite_delete_${res.status}`);
+}
+
+Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
+  if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+
+  if (!APPWRITE_ENDPOINT || !APPWRITE_PROJECT_ID || !APPWRITE_API_KEY || !APPWRITE_BUCKET_ID) {
+    return json({ error: "appwrite_not_configured" }, 500);
+  }
+
+  const authHeader = req.headers.get("Authorization") ?? "";
+  const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    global: { headers: { Authorization: authHeader } },
+  });
+  const { data: userData, error: userErr } = await userClient.auth.getUser();
+  if (userErr || !userData?.user) {
+    return json({ error: "unauthenticated" }, 401);
+  }
+  const userId = userData.user.id;
+
+  const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+  const { data: activeSuspension } = await admin
+    .from("user_moderation_status")
+    .select("action_type, expires_at")
+    .eq("user_id", userId)
+    .eq("action_type", "suspend")
+    .gt("expires_at", new Date().toISOString())
+    .maybeSingle();
+  if (activeSuspension) {
+    return json({ error: "user_suspended", expires_at: activeSuspension.expires_at }, 403);
+  }
+
+  let incomingForm: FormData;
+  try {
+    incomingForm = await req.formData();
+  } catch {
+    return json({ error: "invalid_multipart_body" }, 400);
+  }
+
+  const purpose = String(incomingForm.get("purpose") ?? "");
+  const folderSuffix = String(incomingForm.get("folder_suffix") ?? "");
+  const file = incomingForm.get("file");
+
+  if (!ALLOWED_PURPOSES.includes(purpose as typeof ALLOWED_PURPOSES[number])) {
+    return json({ error: "invalid_purpose", allowed: ALLOWED_PURPOSES }, 400);
+  }
+  if (!(file instanceof File)) {
+    return json({ error: "file_field_required" }, 400);
+  }
+  if (file.size <= 0 || file.size > MAX_BYTES) {
+    return json({ error: "file_size_invalid", max_bytes: MAX_BYTES }, 400);
+  }
+  if ((purpose === "dm-media" || purpose === "group-media") && !folderSuffix) {
+    return json({ error: "folder_suffix_required_for_this_purpose" }, 400);
+  }
+
+  const folder = purpose === "avatar" || purpose === "cover"
+    ? `${purpose}/${userId}`
+    : `${purpose}/${folderSuffix}`;
+
+  // FIX: don't build our own long custom fileId (avatar_{uuid}_{uuid} exceeds Appwrite's 36-char
+  // limit for custom IDs and was getting silently truncated, causing the saved URL's file id to
+  // not match what Appwrite actually stored the file as). Let Appwrite generate a guaranteed-valid,
+  // guaranteed-unique id instead, and use whatever it returns as the source of truth. The `folder`
+  // param (set below) already gives us per-user/per-conversation organization, so the fileId itself
+  // doesn't need to be human-readable.
+  const appwriteForm = new FormData();
+  appwriteForm.append("fileId", "unique()");
+  appwriteForm.append("file", file, file.name || "upload");
+  appwriteForm.append("permissions[]", 'read("any")');
+  appwriteForm.append("folder", folder);
+
+  const appwriteRes = await fetch(
+    `${APPWRITE_ENDPOINT}/storage/buckets/${APPWRITE_BUCKET_ID}/files`,
+    {
+      method: "POST",
+      headers: {
+        "X-Appwrite-Project": APPWRITE_PROJECT_ID,
+        "X-Appwrite-Key": APPWRITE_API_KEY,
+      },
+      body: appwriteForm,
+    },
+  );
+
+  if (!appwriteRes.ok) {
+    const detail = await appwriteRes.text();
+    return json({ error: "appwrite_upload_failed", status: appwriteRes.status, detail }, 502);
+  }
+
+  const appwriteFile = await appwriteRes.json();
+  const viewUrl =
+    `${APPWRITE_ENDPOINT}/storage/buckets/${APPWRITE_BUCKET_ID}/files/${appwriteFile.$id}/view?project=${APPWRITE_PROJECT_ID}`;
+
+  // Track the file so it can be deleted later (account deletion, expiry of 1:1 / group media).
+  // A tracking failure never fails the upload.
+  const { error: trackErr } = await admin.from("media_files").insert({
+    user_id: userId,
+    provider: "appwrite",
+    purpose,
+    file_id: appwriteFile.$id,
+    ref: viewUrl,
+    size_bytes: file.size,
+  });
+  if (trackErr) console.error("media_files insert failed", trackErr.message);
+
+  // Avatar / cover: keep only the newest 2 files per user (current + previous), delete older ones
+  if (purpose === "avatar" || purpose === "cover") {
+    const { data: older } = await admin.from("media_files").select("id, file_id")
+      .eq("user_id", userId).eq("purpose", purpose).eq("provider", "appwrite").is("deleted_at", null)
+      .order("created_at", { ascending: false }).range(2, 50);
+    for (const row of older ?? []) {
+      try {
+        await deleteAppwriteFile(row.file_id as string);
+        await admin.from("media_files").update({ deleted_at: new Date().toISOString() }).eq("id", row.id);
+      } catch (e) {
+        console.error("old avatar/cover cleanup failed", row.file_id, e);
+      }
+    }
+  }
+
+  return json({ ok: true, file_id: appwriteFile.$id, url: viewUrl, folder });
+});
