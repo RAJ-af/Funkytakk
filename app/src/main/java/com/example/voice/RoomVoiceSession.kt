@@ -12,7 +12,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
 class RoomVoiceSession(
-    private val context: Context,
+    context: Context? = null,
     val roomId: String,
     val userId: String,
     val userName: String,
@@ -25,6 +25,10 @@ class RoomVoiceSession(
         private const val MAX_RECONNECT_ATTEMPTS = 3
     }
 
+    // Always use application context from FunkyTalkApplication
+    private val appContext: Context = context?.applicationContext
+        ?: com.example.FunkyTalkApplication.getSafeAppContext()
+
     private val _connectionState = MutableStateFlow<VoiceConnectionState>(VoiceConnectionState.Idle)
     val connectionState: StateFlow<VoiceConnectionState> = _connectionState.asStateFlow()
 
@@ -33,6 +37,9 @@ class RoomVoiceSession(
 
     private val _remoteUserIds = MutableStateFlow<Set<String>>(emptySet())
     val remoteUserIds: StateFlow<Set<String>> = _remoteUserIds.asStateFlow()
+
+    private val _errorEvents = MutableSharedFlow<String>(replay = 1, extraBufferCapacity = 16)
+    val errorEvents: SharedFlow<String> = _errorEvents.asSharedFlow()
 
     private var currentEngine: VoiceEngine? = null
     private var currentRole: String = "listener"
@@ -64,11 +71,13 @@ class RoomVoiceSession(
             val token = tokenResponse.token ?: tokenResponse.rtc_token ?: ""
             val canPublish = tokenResponse.can_publish
 
-            Log.d(TAG, "Token received: provider=$provider, canPublish=$canPublish, role=${tokenResponse.role}")
+            val isContextNull = (appContext == null)
+            val hasToken = !token.isNullOrBlank()
+            Log.d(TAG, "PRE-INIT CHECK: provider=$provider, isContextNull=$isContextNull, hasToken=$hasToken (tokenLength=${token.length}), canPublish=$canPublish, role=${tokenResponse.role}")
 
             val engine = VoiceEngineFactory.create(
                 provider = provider,
-                context = context,
+                context = appContext,
                 onTokenWillExpire = {
                     Log.d(TAG, "onTokenWillExpire triggered: renewing token")
                     renewToken()
@@ -101,6 +110,12 @@ class RoomVoiceSession(
                         _remoteUserIds.value = remotes
                     }
                 }
+                launch {
+                    engine.errorFlow.collect { err ->
+                        Log.e(TAG, "Voice engine error: $err")
+                        _errorEvents.tryEmit(err)
+                    }
+                }
             }
 
             // Bind RoomMicController to engine
@@ -129,15 +144,15 @@ class RoomVoiceSession(
             try {
                 engine.join(config)
             } catch (e: Exception) {
-                Log.e(TAG, "engine.join error: ${e.message}")
-                handleConnectionFailure(e.message ?: "Voice engine join failed")
+                Log.e(TAG, "engine.join error with full stack trace", e)
+                handleConnectionFailure("Voice connection failed, tap to retry")
             }
         }
     }
 
     private suspend fun fetchRoomToken(): GetRoomTokenResponse? {
         return try {
-            val bearerToken = SupabaseSessionManager.getBearerToken(context)
+            val bearerToken = SupabaseSessionManager.getBearerToken(appContext)
             val res = SupabaseClient.api.getRoomToken(
                 auth = bearerToken,
                 body = GetRoomTokenRequest(room_id = roomId)
@@ -151,7 +166,7 @@ class RoomVoiceSession(
                 null
             }
         } catch (e: Exception) {
-            Log.d(TAG, "fetchRoomToken exception: ${e.message}")
+            Log.e(TAG, "fetchRoomToken exception with stack trace", e)
             null
         }
     }

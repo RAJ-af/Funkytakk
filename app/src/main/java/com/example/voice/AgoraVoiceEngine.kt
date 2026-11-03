@@ -15,13 +15,16 @@ import io.agora.rtc2.IRtcEngineEventHandler
 import io.agora.rtc2.RtcEngine
 import io.agora.rtc2.RtcEngineConfig
 import io.agora.rtc2.UserInfo
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.ConcurrentHashMap
 
 class AgoraVoiceEngine(
-    private val context: Context,
+    context: Context? = null,
     private val onTokenWillExpireCallback: (() -> Unit)? = null
 ) : VoiceEngine {
 
@@ -29,6 +32,10 @@ class AgoraVoiceEngine(
         private const val TAG = "AgoraVoiceEngine"
         private const val VOLUME_THRESHOLD = 15
     }
+
+    // Always use application context from FunkyTalkApplication to avoid null or destroyed Activity references
+    private val appContext: Context = context?.applicationContext
+        ?: com.example.FunkyTalkApplication.getSafeAppContext()
 
     private val _connectionState = MutableStateFlow<VoiceConnectionState>(VoiceConnectionState.Idle)
     override val connectionState: StateFlow<VoiceConnectionState> = _connectionState.asStateFlow()
@@ -39,6 +46,9 @@ class AgoraVoiceEngine(
     private val _remoteUserIds = MutableStateFlow<Set<String>>(emptySet())
     override val remoteUserIds: StateFlow<Set<String>> = _remoteUserIds.asStateFlow()
 
+    private val _errorFlow = MutableSharedFlow<String>(replay = 1, extraBufferCapacity = 16)
+    override val errorFlow: Flow<String> = _errorFlow.asSharedFlow()
+
     private var rtcEngine: RtcEngine? = null
     private var joinConfig: VoiceJoinConfig? = null
     private var localUid: Int = 0
@@ -47,7 +57,7 @@ class AgoraVoiceEngine(
     private val uidToAccountMap = ConcurrentHashMap<Int, String>()
 
     // Audio Manager & Focus
-    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+    private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
     private var audioFocusRequest: AudioFocusRequest? = null
     private var isHeadsetPlugged = false
 
@@ -156,7 +166,9 @@ class AgoraVoiceEngine(
                     _connectionState.value = VoiceConnectionState.Reconnecting
                 }
                 Constants.CONNECTION_STATE_FAILED -> {
-                    _connectionState.value = VoiceConnectionState.Failed("Agora connection failed (reason=$reason)")
+                    val reasonStr = "Agora connection failed (reason=$reason)"
+                    _connectionState.value = VoiceConnectionState.Failed(reasonStr)
+                    _errorFlow.tryEmit(reasonStr)
                 }
                 Constants.CONNECTION_STATE_DISCONNECTED -> {
                     if (_connectionState.value != VoiceConnectionState.Idle) {
@@ -208,7 +220,11 @@ class AgoraVoiceEngine(
         override fun onError(err: Int) {
             Log.d(TAG, "Agora onError code=$err")
             if (err == Constants.ERR_TOKEN_EXPIRED || err == Constants.ERR_INVALID_TOKEN) {
-                _connectionState.value = VoiceConnectionState.Failed("Agora token invalid or expired (code=$err)")
+                val errStr = "Agora token invalid or expired (code=$err)"
+                _connectionState.value = VoiceConnectionState.Failed(errStr)
+                _errorFlow.tryEmit(errStr)
+            } else {
+                _errorFlow.tryEmit("Agora error code=$err")
             }
         }
 
@@ -220,24 +236,51 @@ class AgoraVoiceEngine(
         }
     }
 
+    override suspend fun join(
+        roomId: String,
+        token: String,
+        appId: String,
+        uid: String,
+        canPublish: Boolean
+    ) {
+        join(
+            VoiceJoinConfig(
+                roomId = roomId,
+                userId = uid,
+                userName = uid,
+                provider = "AGORA",
+                appId = appId,
+                token = token,
+                canPublish = canPublish
+            )
+        )
+    }
+
     override suspend fun join(cfg: VoiceJoinConfig) {
         joinConfig = cfg
         _connectionState.value = VoiceConnectionState.Connecting
         Log.d(TAG, "Joining Agora channel roomId=${cfg.roomId}, userId=${cfg.userId}, canPublish=${cfg.canPublish}")
+
+        val isContextNull = (appContext == null)
+        val hasToken = !cfg.token.isNullOrBlank()
+        Log.d(TAG, "PRE-INIT CHECK: provider=${cfg.provider}, isContextNull=$isContextNull, hasToken=$hasToken (tokenLength=${cfg.token.length}), appId=${cfg.appId.take(6)}..., channelName=${cfg.roomId}")
 
         requestAudioFocus()
         registerHeadsetReceiver()
 
         try {
             val rtcConfig = RtcEngineConfig().apply {
-                mContext = context.applicationContext
+                mContext = appContext
                 mAppId = cfg.appId
                 mChannelProfile = Constants.CHANNEL_PROFILE_LIVE_BROADCASTING
                 mEventHandler = rtcEventHandler
             }
             rtcEngine = RtcEngine.create(rtcConfig)
             val engine = rtcEngine ?: run {
-                _connectionState.value = VoiceConnectionState.Failed("Failed to instantiate Agora RtcEngine")
+                Log.e(TAG, "RtcEngine.create returned null")
+                val failMsg = "Voice connection failed, tap to retry"
+                _connectionState.value = VoiceConnectionState.Failed(failMsg)
+                _errorFlow.tryEmit(failMsg)
                 return
             }
 
@@ -265,11 +308,15 @@ class AgoraVoiceEngine(
             val joinRes = engine.joinChannelWithUserAccount(cfg.token, cfg.roomId, cfg.userId, options)
             Log.d(TAG, "joinChannelWithUserAccount result code=$joinRes")
             if (joinRes != 0) {
-                _connectionState.value = VoiceConnectionState.Failed("Agora joinChannel failed (code=$joinRes)")
+                val errStr = "Voice connection failed (code=$joinRes)"
+                _connectionState.value = VoiceConnectionState.Failed(errStr)
+                _errorFlow.tryEmit(errStr)
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Exception during Agora join", e)
-            _connectionState.value = VoiceConnectionState.Failed(e.localizedMessage ?: "Unknown join error")
+            Log.e(TAG, "Exception during Agora join with full stack trace", e)
+            val errStr = "Voice connection failed, tap to retry"
+            _connectionState.value = VoiceConnectionState.Failed(errStr)
+            _errorFlow.tryEmit(errStr)
         }
     }
 
@@ -372,16 +419,18 @@ class AgoraVoiceEngine(
                 addAction(Intent.ACTION_HEADSET_PLUG)
                 addAction(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
             }
-            context.registerReceiver(headsetReceiver, filter)
+            appContext.registerReceiver(headsetReceiver, filter)
         } catch (e: Exception) {
-            Log.d(TAG, "registerHeadsetReceiver error: ${e.message}")
+            Log.e(TAG, "registerHeadsetReceiver error", e)
         }
     }
 
     private fun unregisterHeadsetReceiver() {
         try {
-            context.unregisterReceiver(headsetReceiver)
-        } catch (_: Exception) {}
+            appContext.unregisterReceiver(headsetReceiver)
+        } catch (e: Exception) {
+            Log.e(TAG, "unregisterHeadsetReceiver error", e)
+        }
     }
 
     private fun requestAudioFocus() {

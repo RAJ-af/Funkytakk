@@ -671,15 +671,17 @@ class AuthViewModel : ViewModel() {
     private val _roomVoiceSession = MutableStateFlow<com.example.voice.RoomVoiceSession?>(null)
     val roomVoiceSession: StateFlow<com.example.voice.RoomVoiceSession?> = _roomVoiceSession.asStateFlow()
 
-    fun startVoiceSession(context: Context, roomId: String, userId: String, userName: String, initialRole: String) {
+    fun startVoiceSession(context: Context? = null, roomId: String, userId: String, userName: String, initialRole: String) {
         val current = _roomVoiceSession.value
         if (current != null && current.roomId == roomId) {
             Log.d("AuthViewModel", "RoomVoiceSession already running for roomId=$roomId")
             return
         }
         current?.leave()
+        val safeAppContext = context?.applicationContext 
+            ?: com.example.FunkyTalkApplication.getSafeAppContext()
         val session = com.example.voice.RoomVoiceSession(
-            context = context.applicationContext,
+            context = safeAppContext,
             roomId = roomId,
             userId = userId,
             userName = userName,

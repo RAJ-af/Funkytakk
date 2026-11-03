@@ -13,13 +13,25 @@ import okhttp3.OkHttpClient
 
 class FunkyTalkApplication : Application(), ImageLoaderFactory {
     companion object {
+        private var _instance: FunkyTalkApplication? = null
+        val instance: FunkyTalkApplication
+            get() = _instance ?: throw IllegalStateException("FunkyTalkApplication is not yet initialized")
+
         lateinit var appContext: android.content.Context
             private set
+
+        fun getSafeAppContext(): android.content.Context {
+            return _instance?.applicationContext
+                ?: (if (Companion::appContext.isInitialized) appContext else null)
+                ?: throw IllegalStateException("Application context is null - FunkyTalkApplication not initialized")
+        }
+
         const val APPWRITE_PROJECT_ID = "6abbbb060037fb0d8b82"
     }
 
     override fun onCreate() {
         super.onCreate()
+        _instance = this
         appContext = applicationContext
         PushNotificationManager.initialize(this)
         PresenceManager.initialize(this)

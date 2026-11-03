@@ -1,0 +1,190 @@
+================================================================================
+          FUNKYTALK ANDROID APP: RTC SDK, APK & AAB SIZE ANALYSIS REPORT
+================================================================================
+Generated: November 3, 2026
+Target App: com.funkytalk.app (v2.0)
+
+--------------------------------------------------------------------------------
+1. CURRENT RTC SDKS IN BUILD.GRADLE (AGORA / ZEGO / DAILY)
+--------------------------------------------------------------------------------
+Currently, only AGORA is installed in build.gradle.kts.
+Zego and Daily are intentionally kept as clean stub engines in the code 
+(StubVoiceEngine in com.example.voice.VoiceEngineFactory) to avoid SDK bloat 
+during Phase 1 of the multi-provider rollout.
+
+Active SDK Dependency Details:
+- SDK: Agora Voice SDK (audio-only)
+- Version: 4.4.1
+- Version Catalog (gradle/libs.versions.toml):
+    agoraVoice = "4.4.1"
+    agora-voice = { group = "io.agora.rtc", name = "voice-sdk", version.ref = "agoraVoice" }
+- App Gradle (app/build.gradle.kts, line 141):
+    implementation(libs.agora.voice)
+
+Status of other RTC SDKs:
+- ZEGO: Not added yet (Stub only). Ready for Prompt 2.
+- DAILY: Not added yet (Stub only). Ready for Prompt 3.
+
+
+--------------------------------------------------------------------------------
+2. APK SIZE BREAKDOWN (DEBUG vs. RELEASE) & NATIVE LIBRARIES (.SO) BY ABI
+--------------------------------------------------------------------------------
+Debug APK File Size: ~253.2 MB (app-debug.apk)
+Total Uncompressed Native Libraries (lib/): 133.37 MB
+
+Detailed Native Libraries (.so) Breakdown by CPU Architecture (ABI):
+
+[A] arm64-v8a (64-bit ARM - Used by 99% of modern Android smartphones)
+    Total for ABI: 39.97 MB (41,911,280 bytes)
+    - libagora-rtc-sdk.so: 17.10 MB (17,925,464 bytes)
+    - libagora_lip_sync_extension.so: 6.70 MB (7,023,560 bytes)
+    - libagora_spatial_audio_extension.so: 4.42 MB (4,638,800 bytes)
+    - libsqlcipher.so: 3.46 MB (3,625,392 bytes)
+    - libagora-ffmpeg.so: 2.78 MB (2,917,536 bytes)
+    - libagora_audio_beauty_extension.so: 1.95 MB (2,043,712 bytes)
+    - libagora_ai_echo_cancellation_extension.so: 0.73 MB (764,440 bytes)
+    - libagora_ai_echo_cancellation_ll_extension.so: 0.72 MB (756,888 bytes)
+    - libaosl.so: 0.52 MB (544,736 bytes)
+    - libagora-fdkaac.so: 0.47 MB (497,976 bytes)
+    - libagora_ai_noise_suppression_extension.so: 0.47 MB (493,664 bytes)
+    - libagora_ai_noise_suppression_ll_extension.so: 0.46 MB (481,792 bytes)
+    - libagora-soundtouch.so: 0.17 MB (182,112 bytes)
+    - libandroidx.graphics.path.so: 0.01 MB (10,096 bytes)
+    - libdatastore_shared_counter.so: 0.01 MB (7,112 bytes)
+
+[B] armeabi-v7a (32-bit ARM - Older phones)
+    Total for ABI: 28.85 MB (30,250,560 bytes)
+    - libagora-rtc-sdk.so: 11.05 MB (11,587,348 bytes)
+    - libagora_lip_sync_extension.so: 6.29 MB (6,591,320 bytes)
+    - libagora_spatial_audio_extension.so: 4.08 MB (4,281,724 bytes)
+    - libsqlcipher.so: 2.14 MB (2,240,372 bytes)
+    - libagora-ffmpeg.so: 2.01 MB (2,108,668 bytes)
+    - libagora_audio_beauty_extension.so: 1.59 MB (1,662,024 bytes)
+    - Other Agora audio AI extensions: 1.69 MB
+
+[C] x86 (32-bit Intel - Emulators)
+    Total for ABI: 31.89 MB (33,434,604 bytes)
+    - libagora-rtc-sdk.so: 17.62 MB (18,479,736 bytes)
+    - libagora_spatial_audio_extension.so: 4.18 MB (4,380,104 bytes)
+    - libsqlcipher.so: 3.35 MB (3,509,228 bytes)
+    - libagora-ffmpeg.so: 3.27 MB (3,431,672 bytes)
+    - libagora_audio_beauty_extension.so: 1.70 MB (1,780,880 bytes)
+    - Other Agora audio AI extensions: 1.77 MB
+
+[D] x86_64 (64-bit Intel - Modern Emulators)
+    Total for ABI: 32.67 MB (34,258,072 bytes)
+    - libagora-rtc-sdk.so: 17.79 MB (18,659,408 bytes)
+    - libagora_spatial_audio_extension.so: 4.20 MB (4,405,328 bytes)
+    - libsqlcipher.so: 3.84 MB (4,025,208 bytes)
+    - libagora-ffmpeg.so: 3.23 MB (3,384,496 bytes)
+    - libagora_audio_beauty_extension.so: 1.73 MB (1,810,408 bytes)
+    - Other Agora audio AI extensions: 1.88 MB
+
+Release APK File Size (with R8 minify and resource shrinking):
+- Estimated Universal Release APK: ~65 - 75 MB
+  (R8 shrinks DEX from ~95 MB down to ~14 MB, shrinks resources from 15.7 MB to ~7 MB,
+   while keeping all 4 ABIs).
+
+
+--------------------------------------------------------------------------------
+3. RELEASE AAB (ANDROID APP BUNDLE) & USER DOWNLOAD SIZE
+--------------------------------------------------------------------------------
+In an Android App Bundle (.aab), Google Play automatically delivers split APKs 
+tailored specifically to each user's device architecture:
+
+- Universal .aab File Size: ~48 - 55 MB
+- User Download Size on Play Store: ~22 - 28 MB!
+  (The user's device only receives their specific ABI, e.g., arm64-v8a (40 MB uncompressed,
+   ~14 MB compressed), along with minified classes.dex (~4.5 MB compressed) and 
+   shrunk resources (~3 MB compressed)).
+
+
+--------------------------------------------------------------------------------
+4. HOW TO KEEP ONLY arm64-v8a FOR TESTING APKS & ESTIMATED SIZE SAVINGS
+--------------------------------------------------------------------------------
+To generate a lightweight testing APK for real devices, add abiFilters to 
+app/build.gradle.kts inside defaultConfig or the debug build type:
+
+Option A: Global in defaultConfig (app/build.gradle.kts)
+```kotlin
+android {
+    defaultConfig {
+        ...
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
+    }
+}
+```
+
+Option B: Debug only (recommended so release builds can still support all devices)
+```kotlin
+android {
+    buildTypes {
+        debug {
+            ndk {
+                abiFilters += listOf("arm64-v8a")
+            }
+        }
+    }
+}
+```
+
+Size Savings Achieved:
+- armeabi-v7a eliminated: -28.85 MB
+- x86 eliminated:         -31.89 MB
+- x86_64 eliminated:      -32.67 MB
+----------------------------------------------------
+TOTAL NATIVE SAVINGS:     -93.41 MB uncompressed!
+
+This brings the uncompressed native footprint down from 133.37 MB to 39.97 MB, 
+cutting testing APK download size by more than 50% (down to ~40-50 MB).
+
+
+--------------------------------------------------------------------------------
+5. TOP 10 LARGEST COMPONENTS IN THE APP (EXPLAINING THE ~131MB+ BASE)
+--------------------------------------------------------------------------------
+The reason the base is >131 MB is because universal builds duplicate native C++ 
+binaries 4 times (for 4 CPU ABIs), combined with full multi-DEX debug code:
+
+1. Agora Core RTC SDK (libagora-rtc-sdk.so)
+   - Size: 17.1 MB per ABI x 4 ABIs = ~63.5 MB total
+   - Purpose: Real-time audio engine, packet transport, codec encoding/decoding.
+
+2. Multi-DEX Bytecode (classes.dex to classes18.dex in debug)
+   - Size: ~95.3 MB uncompressed
+   - Purpose: Jetpack Compose, Material 3, Firebase BOM, Coil, ExoPlayer, Room, Retrofit.
+   - Note: R8 minification in release reduces this by ~85%.
+
+3. Agora Lip-Sync & Acoustic Extensions (libagora_lip_sync_extension.so, AI Echo)
+   - Size: ~6.7 MB per ABI = ~22.5 MB total
+   - Purpose: Neural noise suppression and audio avatar lip-sync filters.
+
+4. Agora Spatial Audio Extension (libagora_spatial_audio_extension.so)
+   - Size: ~4.4 MB per ABI = ~16.9 MB total
+   - Purpose: 3D spatial directional audio processing.
+
+5. SQLCipher Database Security Engine (libsqlcipher.so)
+   - Size: ~3.5 MB per ABI = ~12.8 MB total
+   - Purpose: 256-bit AES encrypted SQLite database for secure local chats and vault.
+
+6. Agora Media Decoder Engine (libagora-ffmpeg.so)
+   - Size: ~2.8 - 3.3 MB per ABI = ~11.3 MB total
+   - Purpose: Audio codec transcoding support.
+
+7. Application Drawables & Graphic Resources (res/drawable*)
+   - Size: 15.75 MB uncompressed
+   - Purpose: Room themes, VIP badges, gift animations, custom avatar frames, and banners.
+
+8. Agora Audio Beauty Extension (libagora_audio_beauty_extension.so)
+   - Size: ~1.95 MB per ABI = ~7.0 MB total
+   - Purpose: Voice pitch modulation and beautification filters.
+
+9. Agora Audio Codec Libraries (libagora-fdkaac.so, libagora-soundtouch.so, libaosl.so)
+   - Size: ~1.6 MB per ABI = ~6.4 MB total
+   - Purpose: AAC hardware encoding/decoding and pitch/tempo manipulation.
+
+10. Compiled Resource Table (resources.arsc)
+    - Size: 1.01 MB
+    - Purpose: Resource indexing table for thousands of string IDs, styles, and color keys.
+================================================================================

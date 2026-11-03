@@ -546,7 +546,7 @@ fun VoiceRoomScreen(
         if (activeRoomId.isNotBlank() && currentUserId.isNotBlank()) {
             val initialRole = if (currentUserId == roomHostId) "speaker" else "listener"
             viewModel?.startVoiceSession(
-                context = context,
+                context = context.applicationContext,
                 roomId = activeRoomId,
                 userId = currentUserId,
                 userName = currentUserName,
