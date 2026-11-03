@@ -341,36 +341,13 @@ fun VoiceSpeakerItem(
             .clickable { onClick() }
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Box(
-                modifier = Modifier
-                    .size(if (speaker.isSpeaking) size + 6.dp else size)
-                    .then(
-                        if (speaker.isSpeaking) {
-                            Modifier
-                                .scale(pulseScale)
-                                .border(
-                                    width = 3.dp,
-                                    brush = Brush.sweepGradient(listOf(Color(0xFF22C55E), Color(0xFF10B981), Color(0xFF34D399), Color(0xFF22C55E))),
-                                    shape = CircleShape
-                                )
-                                .padding(3.dp)
-                        } else Modifier
-                    )
-                    .clip(CircleShape)
-                    .background(Brush.linearGradient(colors = speaker.gradientColors))
-                    .padding(if (speaker.isCenter) 3.5.dp else 2.5.dp)
-            ) {
-                AsyncImage(
-                    model = speaker.imageUrl,
-                    contentDescription = speaker.name,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(CircleShape)
-                        .background(Color.LightGray)
-                        .alpha(if (speaker.isHostAway) 0.75f else 1f)
-                )
-            }
+            com.example.ui.components.PresenceAvatar(
+                avatarUrl = speaker.imageUrl,
+                size = size,
+                isSpeaking = speaker.isSpeaking,
+                isOnline = !speaker.isHostAway,
+                countryCode = speaker.flagCode.ifBlank { null }
+            )
 
             // Host Badge / Crown
             if (speaker.isHost) {

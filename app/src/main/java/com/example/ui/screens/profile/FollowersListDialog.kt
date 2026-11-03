@@ -196,13 +196,12 @@ fun FollowersListBottomSheet(
                                 .padding(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // User Avatar
-                            AsyncImage(
-                                model = user.avatar_url ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500",
-                                contentDescription = "Avatar",
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .clip(CircleShape)
+                            com.example.ui.components.PresenceAvatar(
+                                avatarUrl = user.avatar_url,
+                                size = 46.dp,
+                                isSpeaking = false,
+                                isOnline = user.is_online ?: false,
+                                countryCode = user.country_code
                             )
 
                             Spacer(modifier = Modifier.width(12.dp))

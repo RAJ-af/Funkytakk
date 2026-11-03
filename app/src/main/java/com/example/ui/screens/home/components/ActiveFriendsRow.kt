@@ -221,125 +221,13 @@ fun ActiveFriendsRow(
                         }
                         .width(74.dp)
                 ) {
-                    Box(
-                        modifier = Modifier.size(68.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        // Speaking Pulse equalizer ring if actively speaking
-                        if (isOnlineUser && friend.isSpeaking) {
-                            val infiniteTransition = rememberInfiniteTransition(label = "speaking_pulse")
-                            val speakScale by infiniteTransition.animateFloat(
-                                initialValue = 1.0f,
-                                targetValue = 1.2f,
-                                animationSpec = infiniteRepeatable(
-                                    animation = tween(1000, easing = FastOutSlowInEasing),
-                                    repeatMode = RepeatMode.Reverse
-                                ),
-                                label = "pulseScale"
-                            )
-                            val speakAlpha by infiniteTransition.animateFloat(
-                                initialValue = 0.5f,
-                                targetValue = 0.0f,
-                                animationSpec = infiniteRepeatable(
-                                    animation = tween(1000, easing = FastOutSlowInEasing),
-                                    repeatMode = RepeatMode.Reverse
-                                ),
-                                label = "pulseAlpha"
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .size(56.dp)
-                                    .scale(speakScale)
-                                    .alpha(speakAlpha)
-                                    .border(
-                                        width = 2.dp,
-                                        color = GoldAccent,
-                                        shape = CircleShape
-                                    )
-                            )
-                        }
-
-                        // Avatar card with gold border if online, subtle border if offline
-                        Box(
-                            modifier = Modifier
-                                .size(56.dp)
-                                .border(
-                                    width = if (isOnlineUser) 1.8.dp else 1.2.dp,
-                                    color = when {
-                                        isOnlineUser && friend.isSpeaking -> GoldAccent
-                                        isOnlineUser -> Color(0xFF22C55E)
-                                        else -> Color(0xFFCBD5E1)
-                                    },
-                                    shape = CircleShape
-                                )
-                                .padding(2.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Box(modifier = Modifier.fillMaxSize()) {
-                                UserAvatarImage(
-                                    avatarUrl = friend.avatarUrl,
-                                    contentDescription = friend.name,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .clip(CircleShape)
-                                        .alpha(if (isOnlineUser) 1.0f else 0.85f)
-                                )
-
-                                // Waveform equalizer overlay if speaking
-                                if (isOnlineUser && friend.isSpeaking) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .clip(CircleShape)
-                                            .background(Color.Black.copy(alpha = 0.45f)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        SpeakingWaveform()
-                                    }
-                                }
-                            }
-                        }
-
-                        // Flag Badge at bottom-left or bottom-right
-                        Box(
-                            modifier = Modifier
-                                .size(19.dp)
-                                .align(Alignment.BottomStart)
-                                .border(1.5.dp, Color.White, CircleShape)
-                                .clip(CircleShape)
-                                .background(Color.White)
-                        ) {
-                            CircleFlag(
-                                countryCode = friend.flagCode,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
-
-                        // STATUS BADGE OVERLAY:
-                        // IF ACTIVE / ONLINE: Green Dot at top-right (NO moon!)
-                        // IF OFFLINE: MOON ICON at top-right over DP!
-                        if (isOnlineUser) {
-                            Box(
-                                modifier = Modifier
-                                    .size(14.dp)
-                                    .align(Alignment.TopEnd)
-                                    .offset(x = 2.dp, y = (-2).dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF22C55E))
-                                    .border(1.5.dp, Color.White, CircleShape)
-                            )
-                        } else {
-                            // MOON ICON on DP for offline users
-                            OfflineMoonBadge(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .offset(x = 2.dp, y = (-2).dp),
-                                badgeSize = 20.dp,
-                                moonSize = 11.dp
-                            )
-                        }
-                    }
+                    com.example.ui.components.PresenceAvatar(
+                        avatarUrl = friend.avatarUrl,
+                        size = 56.dp,
+                        isSpeaking = friend.isSpeaking,
+                        isOnline = isOnlineUser,
+                        countryCode = friend.flagCode
+                    )
 
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(

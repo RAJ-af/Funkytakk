@@ -1048,6 +1048,36 @@ object VoiceRoomRealtimeManager {
         }
     }
 
+    private fun sendJoinRoomVoiceRoomChannel(ws: WebSocket, roomId: String) {
+        try {
+            val token = currentAuthToken
+            val joinMsg = JSONObject().apply {
+                put("topic", "realtime:public:voice_rooms:id=eq.$roomId")
+                put("event", "phx_join")
+                put("payload", JSONObject().apply {
+                    if (!token.isNullOrBlank()) {
+                        put("access_token", token)
+                    }
+                    put("config", JSONObject().apply {
+                        put("postgres_changes", org.json.JSONArray().apply {
+                            put(JSONObject().apply {
+                                put("event", "*")
+                                put("schema", "public")
+                                put("table", "voice_rooms")
+                                put("filter", "id=eq.$roomId")
+                            })
+                        })
+                    })
+                })
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(joinMsg.toString())
+            Log.d(TAG, "Subscribed to postgres_changes voice_rooms for room:$roomId (id=eq.$roomId)")
+        } catch (e: Exception) {
+            Log.w(TAG, "Error sending join for voice_rooms room channel $roomId: ${e.message}")
+        }
+    }
+
     fun subscribeRoomSpeakerRequests(roomId: String) {
         if (roomId.isBlank()) return
         val ws = webSocket ?: return
@@ -1060,6 +1090,7 @@ object VoiceRoomRealtimeManager {
         val ws = webSocket ?: return
         sendJoinRoomChannel(ws, roomId)
         sendJoinRoomSpeakerRequestsChannel(ws, roomId)
+        sendJoinRoomVoiceRoomChannel(ws, roomId)
     }
 
     fun leaveRoomChannel(roomId: String) {
@@ -1078,6 +1109,24 @@ object VoiceRoomRealtimeManager {
         } catch (e: Exception) {
             Log.e(TAG, "Error sending leave for room channel $roomId", e)
         }
+        try {
+            val leaveVoiceRooms = JSONObject().apply {
+                put("topic", "realtime:public:voice_rooms:id=eq.$roomId")
+                put("event", "phx_leave")
+                put("payload", JSONObject())
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(leaveVoiceRooms.toString())
+        } catch (_: Exception) {}
+        try {
+            val leaveSpeakerReqs = JSONObject().apply {
+                put("topic", "realtime:public:speaker_requests:room_id=eq.$roomId")
+                put("event", "phx_leave")
+                put("payload", JSONObject())
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(leaveSpeakerReqs.toString())
+        } catch (_: Exception) {}
     }
 
     fun broadcastEmoji(roomId: String, emoji: String, userId: String) {

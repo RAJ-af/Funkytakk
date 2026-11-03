@@ -38,6 +38,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import com.example.ui.components.PresenceAvatar
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -1042,13 +1043,9 @@ fun ChatsTabContent(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Box(modifier = Modifier.size(if (isMinimalistMode) 40.dp else 56.dp)) {
-                                UserAvatarImage(
+                                PresenceAvatar(
                                     avatarUrl = chat.avatar,
-                                    contentDescription = chat.name,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .clip(CircleShape)
+                                    size = if (isMinimalistMode) 40.dp else 56.dp
                                 )
 
                                 if (isGroup) {

@@ -5,6 +5,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -14,10 +15,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,6 +30,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -51,33 +55,55 @@ fun RoomEndedScreen(
     isFollowingHost: Boolean = false,
     onFollowHost: ((String) -> Unit)? = null,
     onCreateAnotherRoom: () -> Unit = {},
+    onClose: () -> Unit = {},
     onBackToHome: () -> Unit
 ) {
+    // 1. Back button closes when user wants
     BackHandler {
+        onClose()
         onBackToHome()
     }
 
-    val effectivePeopleCount = if (peopleJoinedCount > 0) peopleJoinedCount else (if (totalJoins > 0) totalJoins else 12)
-    val effectiveMinutes = if (totalTimeMinutes > 0) totalTimeMinutes else (if (durationSeconds > 0) durationSeconds / 60 else 28)
+    val effectivePeopleCount = if (peopleJoinedCount > 0) peopleJoinedCount else (if (totalJoins > 0) totalJoins else 1)
+    val effectiveMinutes = if (totalTimeMinutes > 0) totalTimeMinutes else (if (durationSeconds > 0) durationSeconds / 60 else 0)
 
     val reasonTitle = when (endedReason.lowercase()) {
-        "host_ended" -> "Room ended successfully"
-        "host_timeout" -> "Host was away"
-        "moderation" -> "Room closed by moderator"
-        else -> "Room ended successfully"
+        "host_ended" -> "Host ने room बंद किया"
+        "host_timeout" -> "Host 3 मिनट से दूर था"
+        "moderation" -> "Moderator द्वारा room बंद किया गया"
+        else -> "Room समाप्त हो चुका है"
     }
 
     val reasonSubtitle = when (endedReason.lowercase()) {
-        "host_ended" -> "The host has ended this room. Everyone has been disconnected."
-        "host_timeout" -> "The host was away for more than 3 minutes. The session has ended."
+        "host_ended" -> "Host ended the room. All participants have been disconnected."
+        "host_timeout" -> "Host was inactive for more than 3 minutes. Room closed automatically."
         "moderation" -> "This room was closed due to community safety guidelines."
-        else -> "The host has ended this room. Everyone has been disconnected."
+        else -> "This voice room session has ended."
     }
+
+    var totalDragY by remember { mutableFloatStateOf(0f) }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFFFFFDF5))
+            // 2. Downward swipe gesture to close
+            .pointerInput(Unit) {
+                detectVerticalDragGestures(
+                    onDragStart = { totalDragY = 0f },
+                    onDragEnd = {
+                        if (totalDragY > 120f) {
+                            onClose()
+                            onBackToHome()
+                        }
+                        totalDragY = 0f
+                    },
+                    onVerticalDrag = { change, dragAmount ->
+                        change.consume()
+                        totalDragY += dragAmount
+                    }
+                )
+            }
     ) {
         Column(
             modifier = Modifier
@@ -85,7 +111,7 @@ fun RoomEndedScreen(
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top Mascot Banner
+            // Top Mascot Banner with Close button overlay
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -97,6 +123,40 @@ fun RoomEndedScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
                 )
+
+                // Top Floating Close Button (prominent pill)
+                Box(
+                    modifier = Modifier
+                        .statusBarsPadding()
+                        .padding(top = 16.dp, end = 16.dp)
+                        .align(Alignment.TopEnd)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .clickable {
+                                onClose()
+                                onBackToHome()
+                            }
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Close",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -161,16 +221,28 @@ fun RoomEndedScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
+            // Room Title display
+            Text(
+                text = roomTitle,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF1E293B),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 28.dp)
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
             Text(
                 text = "That was a lovely little gathering.\nSee you in the next one!",
-                fontSize = 15.sp,
+                fontSize = 14.sp,
                 color = Color(0xFF64748B),
                 textAlign = TextAlign.Center,
-                lineHeight = 22.sp,
+                lineHeight = 20.sp,
                 modifier = Modifier.padding(horizontal = 32.dp)
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             // Combined Stats Card (People joined & Total time)
             Box(
@@ -252,7 +324,7 @@ fun RoomEndedScreen(
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = "$effectiveMinutes min",
+                                text = if (effectiveMinutes > 0) "$effectiveMinutes min" else "${durationSeconds}s",
                                 fontSize = 20.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = Color(0xFF0F172A)
@@ -270,7 +342,7 @@ fun RoomEndedScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Status Card
+            // Reason Status Card
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -383,7 +455,10 @@ fun RoomEndedScreen(
                     .clip(RoundedCornerShape(27.dp))
                     .background(Color.White)
                     .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(27.dp))
-                    .clickable { onBackToHome() },
+                    .clickable {
+                        onClose()
+                        onBackToHome()
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 Row(

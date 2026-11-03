@@ -397,8 +397,22 @@ fun VoiceRoomScreen(
     val activeRoomId = viewModel?.activeRoomId?.collectAsState()?.value ?: ""
     val activeRoomTitle = viewModel?.activeRoomTitle?.collectAsState()?.value ?: "Voice Circle"
 
+    val roomEnteredAt = remember { System.currentTimeMillis() }
+    var isRoomEnded by remember { mutableStateOf(false) }
+    var roomEndSummary by remember { mutableStateOf<RoomEndSummaryResponse?>(null) }
+    var hasShownRoomEnded by remember { mutableStateOf(false) }
+    var cachedRoomId by remember { mutableStateOf(activeRoomId) }
+    var cachedRoomTitle by remember { mutableStateOf(activeRoomTitle) }
+
     LaunchedEffect(activeRoomId) {
-        if (activeRoomId.isBlank()) {
+        if (activeRoomId.isNotBlank()) {
+            cachedRoomId = activeRoomId
+            cachedRoomTitle = activeRoomTitle
+        }
+    }
+
+    LaunchedEffect(activeRoomId, isRoomEnded) {
+        if (activeRoomId.isBlank() && !isRoomEnded) {
             onBack()
         }
     }
@@ -454,14 +468,12 @@ fun VoiceRoomScreen(
         supabaseProfiles.find { it.uid == roomHostId }
     }
 
-    var isRoomEnded by remember { mutableStateOf(false) }
-    var roomEndSummary by remember { mutableStateOf<RoomEndSummaryResponse?>(null) }
     var hostAwaySecondsLeft by remember { mutableStateOf<Int?>(null) }
     var openDirectChatPartner by remember { mutableStateOf<PrivateChatItem?>(null) }
 
     if (isRoomEnded) {
         RoomEndedScreen(
-            roomTitle = roomEndSummary?.title ?: activeRoomTitle,
+            roomTitle = roomEndSummary?.title ?: cachedRoomTitle,
             hostName = roomEndSummary?.host_username ?: "Host",
             hostAvatarUrl = roomEndSummary?.host_avatar_url,
             hostUserId = roomEndSummary?.host_id ?: roomHostId,
@@ -471,6 +483,9 @@ fun VoiceRoomScreen(
             totalJoins = roomEndSummary?.total_joins ?: participantsData.size.coerceAtLeast(1),
             peakParticipants = roomEndSummary?.peak_participants ?: participantsData.size.coerceAtLeast(1),
             onCreateAnotherRoom = {
+                onBack()
+            },
+            onClose = {
                 onBack()
             },
             onBackToHome = {
@@ -509,6 +524,54 @@ fun VoiceRoomScreen(
         }
     }
     val scope = rememberCoroutineScope()
+
+    val triggerRoomEnded: (String, String) -> Unit = { reason, triggerDesc ->
+        if (!isRoomEnded && !hasShownRoomEnded) {
+            hasShownRoomEnded = true
+            val effectiveRoomId = activeRoomId.ifBlank { cachedRoomId }
+            val effectiveTitle = activeRoomTitle.ifBlank { cachedRoomTitle }
+            Log.i("VoiceRoomExit", "Room exit: roomId=$effectiveRoomId, reason='$reason', trigger='$triggerDesc'")
+
+            com.example.realtime.AgoraVoiceManager.leaveChannel()
+            com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(true)
+            viewModel?.setMicEnabled(false)
+            viewModel?.roomVoiceSession?.value?.leave()
+
+            if (com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
+                com.example.service.VoiceRoomOverlayManager.stopService(context)
+            }
+            com.example.service.VoiceRoomOverlayManager.clear()
+
+            scope.launch(Dispatchers.IO) {
+                var summary: RoomEndSummaryResponse? = null
+                if (effectiveRoomId.isNotBlank()) {
+                    for (retry in 1..3) {
+                        try {
+                            val summaryRes = SupabaseClient.api.getRoomEndSummary(roomIdEq = "eq.$effectiveRoomId")
+                            if (summaryRes.isSuccessful && !summaryRes.body().isNullOrEmpty()) {
+                                summary = summaryRes.body()!!.first()
+                                break
+                            }
+                        } catch (_: Exception) {}
+                        delay(500)
+                    }
+                }
+                val durationSec = ((System.currentTimeMillis() - roomEnteredAt) / 1000).toInt().coerceAtLeast(0)
+                val pCount = participantsData.size.coerceAtLeast(1)
+                withContext(Dispatchers.Main) {
+                    roomEndSummary = summary ?: RoomEndSummaryResponse(
+                        room_id = effectiveRoomId,
+                        title = effectiveTitle,
+                        ended_reason = reason,
+                        duration_seconds = durationSec,
+                        total_joins = pCount,
+                        peak_participants = pCount
+                    )
+                    isRoomEnded = true
+                }
+            }
+        }
+    }
     val isMicOn by com.example.realtime.RoomMicController.micOn.collectAsState()
     val lastTokenRole by viewModel?.lastRoomTokenRole?.collectAsState(null) ?: remember { mutableStateOf(null) }
     val lastCanPublish by viewModel?.lastRoomTokenCanPublish?.collectAsState(false) ?: remember { mutableStateOf(false) }
@@ -711,29 +774,38 @@ fun VoiceRoomScreen(
         withContext(Dispatchers.IO) {
             try {
                 val roomRes = SupabaseClient.api.getVoiceRoomById(idEq = "eq.$activeRoomId")
-                if (roomRes.isSuccessful) {
-                    val roomObj = roomRes.body()?.firstOrNull()
-                    if (roomObj == null || roomObj.is_live == false || roomObj.status == "ended") {
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(context, "This room has ended.", Toast.LENGTH_SHORT).show()
-                            if (com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
-                                com.example.service.VoiceRoomOverlayManager.stopService(context)
+                var roomObj = if (roomRes.isSuccessful) roomRes.body()?.firstOrNull() else null
+                if (roomObj == null || roomObj.is_live == false || roomObj.status == "ended") {
+                    // First 10s grace period: retry 3 times with 2s delay to prevent false room ended triggers on room creation
+                    for (retry in 1..3) {
+                        delay(2000)
+                        try {
+                            val retryRes = SupabaseClient.api.getVoiceRoomById(idEq = "eq.$activeRoomId")
+                            if (retryRes.isSuccessful) {
+                                val candidate = retryRes.body()?.firstOrNull()
+                                if (candidate != null && candidate.is_live == true && candidate.status != "ended") {
+                                    roomObj = candidate
+                                    break
+                                }
                             }
-                            com.example.service.VoiceRoomOverlayManager.clear()
-                            viewModel?.leaveRoom(context)
-                            onBack()
-                        }
-                        return@withContext
+                        } catch (_: Exception) {}
                     }
-                    roomHostId = roomObj.host_id ?: ""
-                    viewModel?.setActiveRoomHostId(roomHostId)
-                    roomTitle = roomObj.title ?: "Voice Circle"
-                    roomDescription = roomObj.description ?: ""
-                    roomLanguage = roomObj.language ?: ""
-                    roomCountryCode = roomObj.language_code.orEmpty().ifBlank { roomObj.country_code.orEmpty() }.ifBlank { LanguageData.getFlagCodeForLanguage(roomLanguage) }
-                    isPrivateRoomState = roomObj.is_private ?: false
-                    joinCodeState = roomObj.join_code ?: ""
                 }
+
+                if (roomObj == null || roomObj.is_live == false || roomObj.status == "ended") {
+                    withContext(Dispatchers.Main) {
+                        triggerRoomEnded("host_ended", "initial_fetch_room_not_found_after_retries")
+                    }
+                    return@withContext
+                }
+                roomHostId = roomObj.host_id ?: ""
+                viewModel?.setActiveRoomHostId(roomHostId)
+                roomTitle = roomObj.title ?: "Voice Circle"
+                roomDescription = roomObj.description ?: ""
+                roomLanguage = roomObj.language ?: ""
+                roomCountryCode = roomObj.language_code.orEmpty().ifBlank { roomObj.country_code.orEmpty() }.ifBlank { LanguageData.getFlagCodeForLanguage(roomLanguage) }
+                isPrivateRoomState = roomObj.is_private ?: false
+                joinCodeState = roomObj.join_code ?: ""
                 if (currentUserId.isNotBlank()) {
                     try {
                         val token = SupabaseSessionManager.getBearerToken(context)
@@ -1118,37 +1190,10 @@ fun VoiceRoomScreen(
                     }
                 }
                 is RealtimeTableEvent.RoomLifecycleEvent -> {
-                    if (event.roomId == activeRoomId) {
+                    if (!event.roomId.isNullOrBlank() && event.roomId == activeRoomId) {
                         if (event.action == "room_ended") {
-                            com.example.realtime.AgoraVoiceManager.leaveChannel()
-                            com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(true)
-                            viewModel?.setMicEnabled(false)
-                            if (com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
-                                com.example.service.VoiceRoomOverlayManager.stopService(context)
-                            }
-                            com.example.service.VoiceRoomOverlayManager.clear()
-
-                            var summary: RoomEndSummaryResponse? = null
-                            for (retry in 1..3) {
-                                try {
-                                    val summaryRes = SupabaseClient.api.getRoomEndSummary(roomIdEq = "eq.$activeRoomId")
-                                    if (summaryRes.isSuccessful && !summaryRes.body().isNullOrEmpty()) {
-                                        summary = summaryRes.body()!!.first()
-                                        break
-                                    }
-                                } catch (_: Exception) {}
-                                delay(500)
-                            }
                             withContext(Dispatchers.Main) {
-                                roomEndSummary = summary ?: RoomEndSummaryResponse(
-                                    room_id = activeRoomId,
-                                    title = activeRoomTitle,
-                                    ended_reason = "host_ended",
-                                    duration_seconds = 0,
-                                    total_joins = participantsData.size.coerceAtLeast(1),
-                                    peak_participants = participantsData.size.coerceAtLeast(1)
-                                )
-                                isRoomEnded = true
+                                triggerRoomEnded("host_ended", "realtime_room_lifecycle_ended")
                             }
                         }
                     }
@@ -1156,36 +1201,12 @@ fun VoiceRoomScreen(
                 is RealtimeTableEvent.VoiceRoomChanged -> {
                     val record = event.record
                     val rId = record?.optString("id")
-                    if (rId == activeRoomId || rId.isNullOrBlank()) {
+                    if (!rId.isNullOrBlank() && rId == activeRoomId) {
                         val isLive = record?.optBoolean("is_live", true) ?: true
                         val status = record?.optString("status") ?: "active"
                         if (!isLive || status == "ended" || event.eventType.equals("DELETE", ignoreCase = true)) {
                             withContext(Dispatchers.Main) {
-                                isRoomEnded = true
-                            }
-                            com.example.realtime.AgoraVoiceManager.leaveChannel()
-                            com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(true)
-                            viewModel?.setMicEnabled(false)
-                            if (com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
-                                com.example.service.VoiceRoomOverlayManager.stopService(context)
-                            }
-                            com.example.service.VoiceRoomOverlayManager.clear()
-
-                            var summary: RoomEndSummaryResponse? = null
-                            for (retry in 1..3) {
-                                try {
-                                    val summaryRes = SupabaseClient.api.getRoomEndSummary(roomIdEq = "eq.$activeRoomId")
-                                    if (summaryRes.isSuccessful && !summaryRes.body().isNullOrEmpty()) {
-                                        summary = summaryRes.body()!!.first()
-                                        break
-                                    }
-                                } catch (_: Exception) {}
-                                delay(500)
-                            }
-                            if (summary != null) {
-                                withContext(Dispatchers.Main) {
-                                    roomEndSummary = summary
-                                }
+                                triggerRoomEnded("host_ended", "realtime_voice_room_changed")
                             }
                         }
                     }
@@ -1294,91 +1315,57 @@ fun VoiceRoomScreen(
                 // 1. Fetch room status & enforce server-authoritative 3-minute grace period
                 val roomsRes = SupabaseClient.api.getVoiceRoomById(idEq = "eq.$activeRoomId")
                 if (roomsRes.isSuccessful) {
-                    val roomObj = roomsRes.body()?.firstOrNull()
-                    if (roomObj != null) {
-                        if (roomObj.is_live == false || roomObj.status == "ended") {
-                            com.example.realtime.AgoraVoiceManager.leaveChannel()
-                            com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(true)
-                            viewModel?.setMicEnabled(false)
+                    var roomObj = roomsRes.body()?.firstOrNull()
+                    if (roomObj == null && (System.currentTimeMillis() - roomEnteredAt) < 10_000L) {
+                        // 10s grace period: retry 3 times at 2s intervals before treating missing row as ended
+                        for (retry in 1..3) {
+                            delay(2000)
+                            try {
+                                val retryRes = SupabaseClient.api.getVoiceRoomById(idEq = "eq.$activeRoomId")
+                                if (retryRes.isSuccessful && !retryRes.body().isNullOrEmpty()) {
+                                    roomObj = retryRes.body()!!.first()
+                                    break
+                                }
+                            } catch (_: Exception) {}
+                        }
+                    }
 
-                            var summary: RoomEndSummaryResponse? = null
-                            for (retry in 1..3) {
-                                try {
-                                    val summaryRes = SupabaseClient.api.getRoomEndSummary(roomIdEq = "eq.$activeRoomId")
-                                    if (summaryRes.isSuccessful && !summaryRes.body().isNullOrEmpty()) {
-                                        summary = summaryRes.body()!!.first()
-                                        break
+                    if (roomObj == null || roomObj.is_live == false || roomObj.status == "ended") {
+                        withContext(Dispatchers.Main) {
+                            triggerRoomEnded("host_ended", "polling_room_status_ended")
+                        }
+                        break
+                    } else {
+                        val hostLeftStr = roomObj.host_left_at
+                        if (!hostLeftStr.isNullOrBlank()) {
+                            val leftEpoch = try {
+                                java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).apply {
+                                    timeZone = java.util.TimeZone.getTimeZone("UTC")
+                                }.parse(hostLeftStr)?.time ?: 0L
+                            } catch (_: Exception) { 0L }
+
+                            if (leftEpoch > 0L) {
+                                val elapsedSec = ((System.currentTimeMillis() - leftEpoch) / 1000).toInt()
+                                val remaining = 180 - elapsedSec
+                                if (remaining > 0) {
+                                    withContext(Dispatchers.Main) {
+                                        hostAwaySecondsLeft = remaining
                                     }
-                                } catch (_: Exception) {}
-                                delay(500)
+                                } else {
+                                    // 3-minute grace period expired without host return
+                                    val token = SupabaseSessionManager.getBearerToken(context)
+                                    try {
+                                        SupabaseClient.api.checkAndCleanupEndedRooms(auth = token)
+                                    } catch (_: Exception) {}
+                                    withContext(Dispatchers.Main) {
+                                        triggerRoomEnded("host_timeout", "polling_host_timeout_expired")
+                                    }
+                                    break
+                                }
                             }
-                            withContext(Dispatchers.Main) {
-                                roomEndSummary = summary ?: RoomEndSummaryResponse(
-                                    room_id = activeRoomId,
-                                    title = activeRoomTitle,
-                                    ended_reason = "host_ended",
-                                    duration_seconds = 0,
-                                    total_joins = participantsData.size.coerceAtLeast(1),
-                                    peak_participants = participantsData.size.coerceAtLeast(1)
-                                )
-                                isRoomEnded = true
-                            }
-                            break
                         } else {
-                            val hostLeftStr = roomObj.host_left_at
-                            if (!hostLeftStr.isNullOrBlank()) {
-                                val leftEpoch = try {
-                                    java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).apply {
-                                        timeZone = java.util.TimeZone.getTimeZone("UTC")
-                                    }.parse(hostLeftStr)?.time ?: 0L
-                                } catch (_: Exception) { 0L }
-
-                                if (leftEpoch > 0L) {
-                                    val elapsedSec = ((System.currentTimeMillis() - leftEpoch) / 1000).toInt()
-                                    val remaining = 180 - elapsedSec
-                                    if (remaining > 0) {
-                                        withContext(Dispatchers.Main) {
-                                            hostAwaySecondsLeft = remaining
-                                        }
-                                    } else {
-                                        // 3-minute grace period expired without host return
-                                        val token = SupabaseSessionManager.getBearerToken(context)
-                                        try {
-                                            SupabaseClient.api.checkAndCleanupEndedRooms(auth = token)
-                                        } catch (_: Exception) {}
-                                        com.example.realtime.AgoraVoiceManager.leaveChannel()
-                                        com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(true)
-                                        viewModel?.setMicEnabled(false)
-
-                                        var summary: RoomEndSummaryResponse? = null
-                                        for (retry in 1..3) {
-                                            try {
-                                                val summaryRes = SupabaseClient.api.getRoomEndSummary(roomIdEq = "eq.$activeRoomId")
-                                                if (summaryRes.isSuccessful && !summaryRes.body().isNullOrEmpty()) {
-                                                    summary = summaryRes.body()!!.first()
-                                                    break
-                                                }
-                                            } catch (_: Exception) {}
-                                            delay(500)
-                                        }
-                                        withContext(Dispatchers.Main) {
-                                            roomEndSummary = summary ?: RoomEndSummaryResponse(
-                                                room_id = activeRoomId,
-                                                title = activeRoomTitle,
-                                                ended_reason = "host_timeout",
-                                                duration_seconds = 180,
-                                                total_joins = participantsData.size.coerceAtLeast(1),
-                                                peak_participants = participantsData.size.coerceAtLeast(1)
-                                            )
-                                            isRoomEnded = true
-                                        }
-                                        break
-                                    }
-                                }
-                            } else {
-                                withContext(Dispatchers.Main) {
-                                    hostAwaySecondsLeft = null
-                                }
+                            withContext(Dispatchers.Main) {
+                                hostAwaySecondsLeft = null
                             }
                         }
                     }

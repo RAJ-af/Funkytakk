@@ -662,51 +662,13 @@ fun UserProfileFeedScreen(
                             .padding(start = 20.dp)
                             .size(102.dp)
                     ) {
-                        // Avatar Photo with White Border
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .border(width = 4.dp, color = Color.White, shape = CircleShape)
-                                .clip(CircleShape)
-                                .background(Color.White)
-                        ) {
-                            AsyncImage(
-                                model = ImageRequest.Builder(context)
-                                    .data(currentAvatarUrl)
-                                    .crossfade(true)
-                                    .build(),
-                                contentDescription = "Avatar",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
-
-                        // Top-Right Green Online Dot (only if online)
-                        if (isOnline) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .offset(x = (-6).dp, y = 6.dp)
-                                    .size(14.dp)
-                                    .background(Color(0xFF22C55E), CircleShape)
-                                    .border(2.dp, Color.White, CircleShape)
-                            )
-                        }
-
-                        // Bottom-Right Circle Country Flag with White border
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .offset(x = (-2).dp, y = (-2).dp)
-                        ) {
-                            CircleFlag(
-                                countryCode = currentCountryCode,
-                                modifier = Modifier
-                                    .size(26.dp)
-                                    .clip(CircleShape)
-                                    .border(2.dp, Color.White, CircleShape)
-                            )
-                        }
+                        com.example.ui.components.PresenceAvatar(
+                            avatarUrl = currentAvatarUrl,
+                            size = 80.dp,
+                            isSpeaking = false,
+                            isOnline = isOnline,
+                            countryCode = currentCountryCode
+                        )
                     }
                 }
             }

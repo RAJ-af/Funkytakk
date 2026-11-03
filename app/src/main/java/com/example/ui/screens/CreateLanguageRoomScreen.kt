@@ -293,6 +293,8 @@ fun CreateLanguageRoomScreen(
 
     // Private Room Flow States
     var isPrivateRoom by remember { mutableStateOf(initialIsPrivate) }
+    val scope = rememberCoroutineScope()
+    var isCreatingRoom by remember { mutableStateOf(false) }
     var joinCodeInput by remember { 
         mutableStateOf(if (initialIsPrivate) (100000..999999).random().toString() else "") 
     }
@@ -446,25 +448,32 @@ fun CreateLanguageRoomScreen(
                             join_code = if (isPrivateRoom) joinCodeInput else null
                         )
 
-                        CoroutineScope(Dispatchers.IO).launch {
+                        if (isCreatingRoom) return@Button
+                        isCreatingRoom = true
+
+                        scope.launch {
                             try {
-                                SupabaseClient.api.createVoiceRoom(
-                                    auth = bearerToken,
-                                    room = newRoom
-                                )
+                                kotlinx.coroutines.withContext(Dispatchers.IO) {
+                                    SupabaseClient.api.createVoiceRoom(
+                                        auth = bearerToken,
+                                        room = newRoom
+                                    )
+                                }
                             } catch (e: Exception) {
                                 android.util.Log.e("CreateRoom", "Failed to insert room to Supabase: ${e.message}")
                             }
-                        }
-                        viewModel.joinRoom(roomUuid, newRoom.title ?: "", context, role = "speaker", hostId = hostId)
 
-                        if (isPrivateRoom) {
-                            createdSuccessJoinCode = joinCodeInput
-                            createdSuccessRoomTitle = chosenTitle
-                            showCreatedSuccessDialog = true
-                        } else {
-                            Toast.makeText(context, "Voice Room Created Successfully!", Toast.LENGTH_SHORT).show()
-                            onCreate()
+                            viewModel.joinRoom(roomUuid, newRoom.title ?: "", context, role = "speaker", hostId = hostId)
+
+                            if (isPrivateRoom) {
+                                createdSuccessJoinCode = joinCodeInput
+                                createdSuccessRoomTitle = chosenTitle
+                                showCreatedSuccessDialog = true
+                            } else {
+                                Toast.makeText(context, "Voice Room Created Successfully!", Toast.LENGTH_SHORT).show()
+                                onCreate()
+                            }
+                            isCreatingRoom = false
                         }
                     },
                     modifier = Modifier

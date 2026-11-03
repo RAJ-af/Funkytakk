@@ -738,40 +738,13 @@ fun PeopleSheetSpeakerItem(
             .width(96.dp)
             .clickable { onClick() }
     ) {
-        Box(
-            modifier = Modifier.size(86.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(86.dp)
-                    .clip(CircleShape)
-                    .background(if (isHost) ChillGoldIcon else Color.Transparent)
-                    .padding(if (isHost) 3.dp else 0.dp)
-                    .clip(CircleShape)
-            ) {
-                AsyncImage(
-                    model = imageUrl,
-                    contentDescription = name,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .offset(x = (-4).dp, y = (-2).dp)
-                    .size(20.dp)
-                    .background(if (isDarkMode) Color(0xFF1E293B) else Color.White, CircleShape)
-                    .padding(1.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                CircleFlag(
-                    countryCode = mapFlagEmojiToCode(flagEmoji),
-                    modifier = Modifier.fillMaxSize().clip(CircleShape)
-                )
-            }
-        }
+        com.example.ui.components.PresenceAvatar(
+            avatarUrl = imageUrl,
+            size = 80.dp,
+            isSpeaking = false,
+            isOnline = true,
+            countryCode = mapFlagEmojiToCode(flagEmoji)
+        )
         
         Spacer(modifier = Modifier.height(10.dp))
         Text(
@@ -815,37 +788,13 @@ fun PeopleSheetListenerItem(
             .padding(vertical = 4.dp)
             .clickable { onClick() }
     ) {
-        Box(
-            modifier = Modifier.size(68.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(64.dp)
-                    .clip(CircleShape)
-            ) {
-                AsyncImage(
-                    model = imageUrl,
-                    contentDescription = name,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .offset(x = (-4).dp, y = (-2).dp)
-                    .size(16.dp)
-                    .background(if (isDarkMode) Color(0xFF1E293B) else Color.White, CircleShape)
-                    .padding(1.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                CircleFlag(
-                    countryCode = mapFlagEmojiToCode(flagEmoji),
-                    modifier = Modifier.fillMaxSize().clip(CircleShape)
-                )
-            }
-        }
+        com.example.ui.components.PresenceAvatar(
+            avatarUrl = imageUrl,
+            size = 64.dp,
+            isSpeaking = false,
+            isOnline = true,
+            countryCode = mapFlagEmojiToCode(flagEmoji)
+        )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = name,

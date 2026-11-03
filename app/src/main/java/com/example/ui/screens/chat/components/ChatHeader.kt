@@ -16,7 +16,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import com.example.ui.components.PresenceAvatar
 
 @Composable
 fun ChatHeader(
@@ -25,6 +25,7 @@ fun ChatHeader(
     partnerCountry: String = "Japan",
     partnerCountryCode: String = "jp",
     isOnline: Boolean = true,
+    isSpeaking: Boolean = false,
     onBackClick: () -> Unit,
     onMenuClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -54,20 +55,13 @@ fun ChatHeader(
 
         Spacer(modifier = Modifier.width(6.dp))
 
-        // Partner Circular Avatar
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .border(1.dp, Color(0xFFE5E7EB), CircleShape)
-        ) {
-            AsyncImage(
-                model = partnerAvatarUrl,
-                contentDescription = partnerName,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-        }
+        // Partner Circular Avatar with Presence
+        PresenceAvatar(
+            avatarUrl = partnerAvatarUrl,
+            isOnline = isOnline,
+            isSpeaking = isSpeaking,
+            size = 40.dp
+        )
 
         Spacer(modifier = Modifier.width(10.dp))
 

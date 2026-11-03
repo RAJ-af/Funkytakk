@@ -4,21 +4,21 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -26,15 +26,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import coil.compose.AsyncImage
-import com.example.ui.components.CircleFlag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.ui.components.PresenceAvatar
 import com.example.util.RoomShareHelper
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun InviteFriendBottomSheetContent(
@@ -42,7 +45,8 @@ fun InviteFriendBottomSheetContent(
     roomName: String = "FunkyTalk Room",
     roomId: String = "",
     inviteLink: String = RoomShareHelper.buildDefaultInviteLink(roomId),
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onDiscoverPeople: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -53,8 +57,9 @@ fun InviteFriendBottomSheetContent(
     var invitableUsers by remember { mutableStateOf<List<com.example.InvitableUserResponse>>(emptyList()) }
     val invitedUserIds = remember { mutableStateMapOf<String, Boolean>() }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var reloadTrigger by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(roomId) {
+    LaunchedEffect(roomId, reloadTrigger) {
         if (roomId.isNotBlank()) {
             isLoading = true
             errorMessage = null
@@ -67,22 +72,16 @@ fun InviteFriendBottomSheetContent(
                 )
                 if (res.isSuccessful && res.body() != null) {
                     val users = res.body() ?: emptyList()
-                    android.util.Log.d("InviteFriend", "list_invitable_following SUCCESS: received ${users.size} followed users: $users")
+                    android.util.Log.d("InviteFriend", "list_invitable_following SUCCESS: received ${users.size} followed users")
                     invitableUsers = users
                 } else {
                     val err = res.errorBody()?.string() ?: res.message()
                     android.util.Log.d("InviteFriend", "list_invitable_following ERROR code=${res.code()}: $err")
-                    errorMessage = "Error loading followed friends ($err)"
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                        android.widget.Toast.makeText(context, "Could not load followings: $err", android.widget.Toast.LENGTH_SHORT).show()
-                    }
+                    errorMessage = "Could not load followed friends"
                 }
             } catch (e: Exception) {
                 android.util.Log.d("InviteFriend", "list_invitable_following EXCEPTION: ${e.message}")
-                errorMessage = e.message
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                    android.widget.Toast.makeText(context, "Error loading friends: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
-                }
+                errorMessage = e.message ?: "Failed to connect"
             } finally {
                 isLoading = false
             }
@@ -96,9 +95,10 @@ fun InviteFriendBottomSheetContent(
             .fillMaxWidth()
             .fillMaxHeight(0.85f)
             .navigationBarsPadding()
-            .padding(horizontal = 24.dp, vertical = 8.dp)
-            .padding(bottom = 24.dp)
+            .padding(horizontal = 20.dp, vertical = 8.dp)
+            .padding(bottom = 16.dp)
     ) {
+        // Header Row
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -121,9 +121,9 @@ fun InviteFriendBottomSheetContent(
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        // Share Platforms
+        // Share Platforms Bar
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
@@ -163,9 +163,7 @@ fun InviteFriendBottomSheetContent(
                                     RoomShareHelper.shareMore(context, roomName, roomId, inviteLink)
                                     onDismiss()
                                 }
-                                else -> {
-                                    onDismiss()
-                                }
+                                else -> onDismiss()
                             }
                         }
                 ) {
@@ -177,13 +175,13 @@ fun InviteFriendBottomSheetContent(
                     ) {
                         Icon(imageVector = icon, contentDescription = name, tint = textColor, modifier = Modifier.size(24.dp))
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(text = name, fontSize = 12.sp, color = if (isDarkMode) Color.White.copy(alpha=0.7f) else Color.Gray)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(text = name, fontSize = 12.sp, color = if (isDarkMode) Color.White.copy(alpha = 0.7f) else Color.Gray)
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
         Text(
             text = "Friends You Follow",
@@ -192,161 +190,227 @@ fun InviteFriendBottomSheetContent(
             color = textColor
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-        if (isLoading) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                androidx.compose.material3.CircularProgressIndicator(
-                    color = Color(0xFFFFB800),
-                    modifier = Modifier.size(32.dp)
-                )
+        // Content Area: Loading / Error / Empty / LazyList
+        when {
+            isLoading -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = Color(0xFFFFB800), modifier = Modifier.size(36.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Loading followed friends...",
+                            fontSize = 13.sp,
+                            color = if (isDarkMode) Color.White.copy(alpha = 0.6f) else Color.Gray
+                        )
+                    }
+                }
             }
-        } else if (invitableUsers.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "Follow people to invite them to your room",
-                    fontSize = 14.sp,
-                    color = if (isDarkMode) Color.White.copy(alpha = 0.6f) else Color.Gray
-                )
-            }
-        } else {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-            ) {
-                invitableUsers.forEach { user ->
-                    val isPending = user.invite_status == "pending" || invitedUserIds[user.user_id] == true
-                    val isInRoom = user.in_room
-                    val username = user.username?.ifBlank { "User" } ?: "User"
-                    val avatarUrl = user.avatar_url?.ifBlank { null }
-                        ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400"
-                    val flagCode = user.country_code?.ifBlank { "in" } ?: "in"
 
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+            errorMessage != null -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(horizontal = 24.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(modifier = Modifier.size(48.dp)) {
-                                AsyncImage(
-                                    model = avatarUrl,
-                                    contentDescription = username,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .clip(CircleShape)
-                                )
-                                if (user.is_online) {
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .size(12.dp)
-                                            .background(Color(0xFF10B981), CircleShape)
-                                            .border(1.5.dp, Color.White, CircleShape)
-                                    )
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.BottomEnd)
-                                        .offset(x = 2.dp, y = 2.dp)
-                                        .size(16.dp)
-                                        .background(if (isDarkMode) Color(0xFF1E293B) else Color.White, CircleShape)
-                                        .padding(1.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    CircleFlag(
-                                        countryCode = flagCode,
-                                        modifier = Modifier.fillMaxSize().clip(CircleShape)
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Column {
-                                Text(text = username, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = textColor)
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = if (isInRoom) "In room" else if (user.is_online) "Online" else "Offline",
-                                    fontSize = 12.sp,
-                                    color = if (isInRoom) Color(0xFF3B82F6) else if (user.is_online) Color(0xFF10B981) else Color.Gray
-                                )
-                            }
+                        Text(
+                            text = "Failed to load followed friends.",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = textColor,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = errorMessage ?: "Unknown error occurred",
+                            fontSize = 12.sp,
+                            color = Color.Red.copy(alpha = 0.8f),
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(
+                            onClick = { reloadTrigger++ },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB800)),
+                            shape = RoundedCornerShape(20.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Retry", tint = Color.Black)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Retry", color = Color.Black, fontWeight = FontWeight.Bold)
                         }
+                    }
+                }
+            }
 
-                        val buttonText = when {
-                            isInRoom -> "In room"
-                            isPending -> "Invited"
-                            else -> "Invite"
-                        }
-                        val isButtonDisabled = isInRoom || isPending
-
+            invitableUsers.isEmpty() -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(horizontal = 24.dp)
+                    ) {
+                        Text(
+                            text = "आप अभी किसी को follow नहीं करते। Invite करने के लिए पहले लोगों को follow करें।",
+                            fontSize = 14.sp,
+                            color = if (isDarkMode) Color.White.copy(alpha = 0.8f) else Color(0xFF374151),
+                            textAlign = TextAlign.Center,
+                            lineHeight = 20.sp
+                        )
+                        Spacer(modifier = Modifier.height(18.dp))
                         Button(
                             onClick = {
-                                if (!isButtonDisabled) {
-                                    scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                                        try {
-                                            val token = com.example.SupabaseSessionManager.getBearerToken(context)
-                                            val res = com.example.SupabaseClient.api.sendRoomInvite(
-                                                auth = token,
-                                                body = mapOf("p_room_id" to roomId, "p_user_id" to user.user_id)
-                                            )
-                                            if (res.isSuccessful) {
-                                                invitedUserIds[user.user_id] = true
-                                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                                                    android.widget.Toast.makeText(context, "Invite sent to $username!", android.widget.Toast.LENGTH_SHORT).show()
+                                onDismiss()
+                                onDiscoverPeople?.invoke()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB800)),
+                            shape = RoundedCornerShape(20.dp),
+                            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 10.dp)
+                        ) {
+                            Icon(Icons.Default.Search, contentDescription = "Discover", tint = Color.Black)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Discover",
+                                color = Color.Black,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+
+            else -> {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                ) {
+                    items(
+                        items = invitableUsers,
+                        key = { it.user_id }
+                    ) { user ->
+                        val isPending = user.invite_status == "pending" || invitedUserIds[user.user_id] == true
+                        val isInRoom = user.in_room
+                        val username = user.username?.ifBlank { "Learner" } ?: "Learner"
+                        val flagCode = user.country_code?.ifBlank { null }
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                PresenceAvatar(
+                                    avatarUrl = user.avatar_url,
+                                    size = 46.dp,
+                                    isSpeaking = false,
+                                    isOnline = user.is_online,
+                                    countryCode = flagCode
+                                )
+
+                                Spacer(modifier = Modifier.width(14.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = username,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = textColor,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = if (isInRoom) "In room" else if (user.is_online) "Online" else "Offline",
+                                        fontSize = 12.sp,
+                                        color = if (isInRoom) Color(0xFF3B82F6) else if (user.is_online) Color(0xFF10B981) else Color.Gray
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            val buttonText = when {
+                                isInRoom -> "In room"
+                                isPending -> "Invited"
+                                else -> "Invite"
+                            }
+                            val isButtonDisabled = isInRoom || isPending
+
+                            Button(
+                                onClick = {
+                                    if (!isButtonDisabled) {
+                                        scope.launch(Dispatchers.IO) {
+                                            try {
+                                                val token = com.example.SupabaseSessionManager.getBearerToken(context)
+                                                val res = com.example.SupabaseClient.api.sendRoomInvite(
+                                                    auth = token,
+                                                    body = mapOf("p_room_id" to roomId, "p_user_id" to user.user_id)
+                                                )
+                                                if (res.isSuccessful) {
+                                                    invitedUserIds[user.user_id] = true
+                                                    withContext(Dispatchers.Main) {
+                                                        android.widget.Toast.makeText(context, "Invite sent to $username!", android.widget.Toast.LENGTH_SHORT).show()
+                                                    }
+                                                } else {
+                                                    val errBody = res.errorBody()?.string() ?: res.message()
+                                                    android.util.Log.d("InviteFriend", "send_room_invite ERROR for user ${user.user_id}: $errBody")
+                                                    val msg = when {
+                                                        errBody.contains("already_invited") -> "Already invited, try again in a minute"
+                                                        errBody.contains("not_following") -> "You can only invite people you follow"
+                                                        errBody.contains("already_in_room") -> "User is already in the room"
+                                                        errBody.contains("not_in_room") -> "You must be in the room to invite others"
+                                                        errBody.contains("room_not_live") -> "This room has ended"
+                                                        errBody.contains("rate_limited") -> "Too many invites, try later"
+                                                        errBody.contains("cannot_invite_self") -> "You cannot invite yourself"
+                                                        else -> "Could not send invite"
+                                                    }
+                                                    withContext(Dispatchers.Main) {
+                                                        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                                                    }
                                                 }
-                                            } else {
-                                                val errBody = res.errorBody()?.string() ?: res.message()
-                                                android.util.Log.d("InviteFriend", "send_room_invite ERROR for user ${user.user_id}: $errBody")
-                                                val msg = when {
-                                                    errBody.contains("already_invited") -> "Already invited, try again in a minute"
-                                                    errBody.contains("not_following") -> "You can only invite people you follow"
-                                                    errBody.contains("already_in_room") -> "User is already in the room"
-                                                    errBody.contains("not_in_room") -> "You must be in the room to invite others"
-                                                    errBody.contains("room_not_live") -> "This room has ended"
-                                                    errBody.contains("rate_limited") -> "Too many invites, try later"
-                                                    errBody.contains("cannot_invite_self") -> "You cannot invite yourself"
-                                                    else -> "Could not send invite: $errBody"
+                                            } catch (e: Exception) {
+                                                withContext(Dispatchers.Main) {
+                                                    android.widget.Toast.makeText(context, "Error sending invite", android.widget.Toast.LENGTH_SHORT).show()
                                                 }
-                                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                                                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
-                                                }
-                                            }
-                                        } catch (e: Exception) {
-                                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                                                android.widget.Toast.makeText(context, "Error sending invite: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
                                             }
                                         }
                                     }
-                                }
-                            },
-                            enabled = !isButtonDisabled,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isButtonDisabled) bgColors else Color(0xFFFBBF24),
-                                disabledContainerColor = bgColors
-                            ),
-                            shape = RoundedCornerShape(100.dp),
-                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)
-                        ) {
-                            Text(
-                                text = buttonText,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isButtonDisabled) (if (isDarkMode) Color.White.copy(alpha = 0.5f) else Color.Gray) else Color(0xFF78350F)
-                            )
+                                },
+                                enabled = !isButtonDisabled,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isButtonDisabled) bgColors else Color(0xFFFFB800),
+                                    disabledContainerColor = bgColors
+                                ),
+                                shape = RoundedCornerShape(100.dp),
+                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = buttonText,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isButtonDisabled) (if (isDarkMode) Color.White.copy(alpha = 0.5f) else Color.Gray) else Color.Black
+                                )
+                            }
                         }
                     }
                 }

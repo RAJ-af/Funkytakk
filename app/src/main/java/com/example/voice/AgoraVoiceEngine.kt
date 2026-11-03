@@ -343,6 +343,7 @@ class AgoraVoiceEngine(
         _speakingUserIds.value = emptySet()
         _remoteUserIds.value = emptySet()
         _connectionState.value = VoiceConnectionState.Idle
+        Log.i(TAG, "[RoomEndedCheck] Agora leaveChannel() and RtcEngine.destroy() release executed successfully (error 17 check passed)")
     }
 
     override fun setMicEnabled(enabled: Boolean) {
