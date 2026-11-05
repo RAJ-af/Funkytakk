@@ -763,12 +763,12 @@ fun DiscoverTabContent(
                     .navigationBarsPadding(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Avatar with flag
-                AvatarWithCircularFlag(
+                // Avatar with presence & flag
+                com.example.ui.components.PresenceAvatar(
                     avatarUrl = user.avatarUrl,
-                    countryCode = user.countryCode,
-                    avatarSize = 84.dp,
-                    flagSize = 28.dp
+                    size = 84.dp,
+                    isOnline = user.isOnline,
+                    countryCode = user.countryCode
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))

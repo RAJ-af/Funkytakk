@@ -7,6 +7,8 @@ import coil.ImageLoaderFactory
 import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
 import coil.decode.SvgDecoder
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
 import com.example.service.PresenceManager
 import com.example.service.PushNotificationManager
 import okhttp3.OkHttpClient
@@ -54,6 +56,17 @@ class FunkyTalkApplication : Application(), ImageLoaderFactory {
 
         return ImageLoader.Builder(this)
             .okHttpClient(okHttpClient)
+            .memoryCache {
+                MemoryCache.Builder(this)
+                    .maxSizePercent(0.25)
+                    .build()
+            }
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(cacheDir.resolve("image_cache"))
+                    .maxSizeBytes(150L * 1024 * 1024) // 150 MB
+                    .build()
+            }
             .components {
                 if (Build.VERSION.SDK_INT >= 28) {
                     add(ImageDecoderDecoder.Factory())
@@ -62,7 +75,7 @@ class FunkyTalkApplication : Application(), ImageLoaderFactory {
                 }
                 add(SvgDecoder.Factory())
             }
-            .crossfade(true)
+            .crossfade(150)
             .build()
     }
 }

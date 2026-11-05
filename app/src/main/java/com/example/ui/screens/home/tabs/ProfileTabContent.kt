@@ -1435,6 +1435,7 @@ fun ProfileTabContent(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .navigationBarsPadding()
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 24.dp, vertical = 12.dp)
                     .padding(bottom = 24.dp),

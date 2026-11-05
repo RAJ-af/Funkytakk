@@ -58,6 +58,7 @@ fun FilterRoomsSheetContent(
             .fillMaxWidth()
             .fillMaxHeight(0.88f)
             .background(Color(0xFFFFFDF5))
+            .navigationBarsPadding()
             .padding(horizontal = 20.dp, vertical = 12.dp)
             .verticalScroll(rememberScrollState())
     ) {

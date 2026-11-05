@@ -85,6 +85,7 @@ fun RoomLanguageSelectionSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(0.88f)
+                    .navigationBarsPadding()
                     .padding(horizontal = 20.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {

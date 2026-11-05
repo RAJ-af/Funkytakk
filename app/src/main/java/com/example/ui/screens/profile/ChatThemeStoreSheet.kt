@@ -139,6 +139,7 @@ fun ChatThemeStoreSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .navigationBarsPadding()
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 28.dp)
         ) {

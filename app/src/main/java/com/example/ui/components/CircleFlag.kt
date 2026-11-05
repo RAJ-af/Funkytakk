@@ -18,9 +18,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import coil.ImageLoader
 import coil.compose.AsyncImage
-import coil.decode.SvgDecoder
 import coil.request.ImageRequest
 
 fun flagEmojiToCountryCode(emoji: String): String {
@@ -146,11 +144,6 @@ fun CircleFlag(
     contentDescription: String? = null
 ) {
     val context = LocalContext.current
-    val imageLoader = ImageLoader.Builder(context)
-        .components {
-            add(SvgDecoder.Factory())
-        }
-        .build()
 
     val rawCode = if (countryCode.startsWith("http://") || countryCode.startsWith("https://")) {
         countryCode
@@ -174,7 +167,6 @@ fun CircleFlag(
                 .data("https://hatscripts.github.io/circle-flags/flags/${cleanCode}.svg")
                 .crossfade(true)
                 .build(),
-            imageLoader = imageLoader,
             contentDescription = contentDescription,
             modifier = modifier
         )
@@ -189,33 +181,13 @@ fun AvatarWithCircularFlag(
     avatarSize: androidx.compose.ui.unit.Dp = 48.dp,
     flagSize: androidx.compose.ui.unit.Dp = 18.dp
 ) {
-    Box(
-        modifier = modifier.size(avatarSize),
-        contentAlignment = Alignment.BottomEnd
-    ) {
-        val avatarModel = resolveAvatarModel(avatarUrl)
-        AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current)
-                .data(avatarModel)
-                .crossfade(true)
-                .placeholder(com.example.R.drawable.male_avatar_1781324792347)
-                .error(com.example.R.drawable.male_avatar_1781324792347)
-                .fallback(com.example.R.drawable.male_avatar_1781324792347)
-                .build(),
-            contentDescription = "Avatar",
-            modifier = Modifier
-                .size(avatarSize)
-                .clip(CircleShape)
-                .border(1.5.dp, Color.White, CircleShape)
-        )
-        CircleFlag(
-            countryCode = countryCode.trim().ifBlank { "in" },
-            modifier = Modifier
-                .size(flagSize)
-                .clip(CircleShape)
-                .border(1.5.dp, Color.White, CircleShape)
-        )
-    }
+    PresenceAvatar(
+        avatarUrl = avatarUrl,
+        size = avatarSize,
+        isOnline = true,
+        countryCode = countryCode,
+        modifier = modifier
+    )
 }
 
 @Composable

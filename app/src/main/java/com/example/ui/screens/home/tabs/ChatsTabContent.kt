@@ -1045,7 +1045,8 @@ fun ChatsTabContent(
                             Box(modifier = Modifier.size(if (isMinimalistMode) 40.dp else 56.dp)) {
                                 PresenceAvatar(
                                     avatarUrl = chat.avatar,
-                                    size = if (isMinimalistMode) 40.dp else 56.dp
+                                    size = if (isMinimalistMode) 40.dp else 56.dp,
+                                    countryCode = if (isGroup) null else flagCode
                                 )
 
                                 if (isGroup) {
@@ -1063,15 +1064,6 @@ fun ChatsTabContent(
                                             color = Color.Black
                                         )
                                     }
-                                } else {
-                                    CircleFlag(
-                                        countryCode = flagCode,
-                                        modifier = Modifier
-                                            .size(if (isMinimalistMode) 14.dp else 18.dp)
-                                            .align(Alignment.BottomEnd)
-                                            .clip(CircleShape)
-                                            .border(1.2.dp, Color.White, CircleShape)
-                                    )
                                 }
                             }
 

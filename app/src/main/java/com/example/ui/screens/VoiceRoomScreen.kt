@@ -6868,6 +6868,7 @@ fun MoreFeaturesBottomSheetContent(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .navigationBarsPadding()
             .padding(horizontal = 24.dp, vertical = 8.dp)
             .padding(bottom = 24.dp)
     ) {

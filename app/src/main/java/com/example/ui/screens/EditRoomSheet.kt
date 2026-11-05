@@ -76,6 +76,7 @@ fun EditRoomBottomSheetContent(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .navigationBarsPadding()
             .verticalScroll(scrollState)
             .padding(horizontal = 24.dp, vertical = 12.dp)
     ) {

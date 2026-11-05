@@ -385,28 +385,6 @@ fun VoiceSpeakerItem(
                 }
             }
 
-            // Circular Image Flag
-            if (speaker.flagCode.isNotBlank()) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .offset(x = 2.dp, y = 2.dp)
-                        .size(26.dp)
-                        .shadow(2.dp, CircleShape)
-                        .clip(CircleShape)
-                        .background(Color.White)
-                        .border(1.5.dp, Color.White, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    AsyncImage(
-                        model = "https://flagcdn.com/w40/${speaker.flagCode}.png",
-                        contentDescription = "Flag",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-            }
-
             // Speaker floating reactions overlay starting from avatar center and rising upward beautifully
             reactions.forEach { reaction ->
                 key(reaction.id) {

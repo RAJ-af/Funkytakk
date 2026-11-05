@@ -44,8 +44,6 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.foundation.BorderStroke
 import coil.compose.AsyncImage
-import coil.ImageLoader
-import coil.decode.SvgDecoder
 
 // --- CORE UTILITY DIALOGUE COLORS ---
 val GoldAccent = Color(0xFFFFC529)
@@ -1304,14 +1302,6 @@ fun OnboardingCountryScreen(
         filteredAll.groupBy { it.name.first().uppercaseChar() }.toSortedMap()
     }
 
-    val imageLoader = remember {
-        ImageLoader.Builder(context)
-            .components {
-                add(SvgDecoder.Factory())
-            }
-            .build()
-    }
-
     Scaffold(
         topBar = {
             OnboardingStepIndicator(
@@ -1451,7 +1441,6 @@ fun OnboardingCountryScreen(
                                     AsyncImage(
                                         model = "https://hatscripts.github.io/circle-flags/flags/${country.flagCode.lowercase()}.svg",
                                         contentDescription = "${country.name} Flag",
-                                        imageLoader = imageLoader,
                                         modifier = Modifier.size(36.dp)
                                     )
                                     Text(
@@ -1519,7 +1508,6 @@ fun OnboardingCountryScreen(
                                                 AsyncImage(
                                                     model = "https://hatscripts.github.io/circle-flags/flags/${country.flagCode.lowercase()}.svg",
                                                     contentDescription = "Flag",
-                                                    imageLoader = imageLoader,
                                                     modifier = Modifier.size(24.dp)
                                                 )
                                                 Text(
@@ -1589,7 +1577,6 @@ fun OnboardingCountryScreen(
                                     AsyncImage(
                                         model = "https://hatscripts.github.io/circle-flags/flags/${country.flagCode.lowercase()}.svg",
                                         contentDescription = "Flag",
-                                        imageLoader = imageLoader,
                                         modifier = Modifier.size(28.dp)
                                     )
                                     Text(
@@ -1729,14 +1716,6 @@ fun OnboardingLanguageScreenBase(
     // Dialog trigger state
     var languageForLevelSelect by remember { mutableStateOf<Language?>(null) }
     var tempSelectedLevelCode by remember { mutableStateOf("Native / Fluent") }
-
-    val imageLoader = remember {
-        ImageLoader.Builder(context)
-            .components {
-                add(SvgDecoder.Factory())
-            }
-            .build()
-    }
 
     val titleAnnotated = remember(title) {
         buildAnnotatedString {
@@ -2000,7 +1979,6 @@ fun OnboardingLanguageScreenBase(
                                                     AsyncImage(
                                                         model = "https://hatscripts.github.io/circle-flags/flags/${selected.language.flagCode.lowercase()}.svg",
                                                         contentDescription = "${selected.language.name} flag",
-                                                        imageLoader = imageLoader,
                                                         modifier = Modifier.size(24.dp)
                                                     )
                                                     Column {
@@ -2124,7 +2102,6 @@ fun OnboardingLanguageScreenBase(
                                                     AsyncImage(
                                                         model = "https://hatscripts.github.io/circle-flags/flags/${lang.flagCode.lowercase()}.svg",
                                                         contentDescription = "${lang.name} flag",
-                                                        imageLoader = imageLoader,
                                                         modifier = Modifier
                                                             .size(20.dp)
                                                             .clip(CircleShape)
@@ -2424,7 +2401,6 @@ fun OnboardingLanguageScreenBase(
                                                         AsyncImage(
                                                             model = "https://hatscripts.github.io/circle-flags/flags/${pLang.flagCode.lowercase()}.svg",
                                                             contentDescription = "${pLang.name} flag",
-                                                            imageLoader = imageLoader,
                                                             modifier = Modifier
                                                                 .size(20.dp)
                                                                 .clip(CircleShape)

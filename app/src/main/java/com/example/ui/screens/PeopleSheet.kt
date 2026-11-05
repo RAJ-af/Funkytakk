@@ -61,6 +61,7 @@ fun PeopleBottomSheetContent(
                         colors = listOf(currentTheme.startColor, currentTheme.endColor)
                     )
                 )
+                .navigationBarsPadding()
                 .padding(horizontal = 24.dp)
                 .verticalScroll(rememberScrollState())
         ) {
@@ -346,27 +347,12 @@ fun PeopleBottomSheetContent(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                Box(modifier = Modifier.size(44.dp)) {
-                                    AsyncImage(
-                                        model = imageUrl,
-                                        contentDescription = name,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.fillMaxSize().clip(CircleShape)
-                                    )
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.BottomEnd)
-                                            .offset(x = 2.dp, y = 2.dp)
-                                            .size(14.dp)
-                                            .background(if (isDark) Color(0xFF1E293B) else Color.White, CircleShape)
-                                            .padding(1.dp)
-                                    ) {
-                                        CircleFlag(
-                                            countryCode = mapFlagEmojiToCode(mapCountryCodeToFlagEmoji(flagCode)),
-                                            modifier = Modifier.fillMaxSize().clip(CircleShape)
-                                        )
-                                    }
-                                }
+                                com.example.ui.components.PresenceAvatar(
+                                    avatarUrl = imageUrl,
+                                    size = 44.dp,
+                                    isOnline = true,
+                                    countryCode = mapFlagEmojiToCode(mapCountryCodeToFlagEmoji(flagCode))
+                                )
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
                                     Text(

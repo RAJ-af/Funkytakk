@@ -17,9 +17,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.ImageLoader
 import coil.compose.AsyncImage
-import coil.decode.SvgDecoder
 import coil.request.ImageRequest
 
 data class ProgrammingBadgeSpec(
@@ -151,11 +149,6 @@ fun LanguageIcon(
 
     if (spec != null || isHttp) {
         val context = LocalContext.current
-        val imageLoader = remember(context) {
-            ImageLoader.Builder(context)
-                .components { add(SvgDecoder.Factory()) }
-                .build()
-        }
 
         val badgeSpec = spec ?: ProgrammingBadgeSpec(
             letters = clean.take(2).uppercase(),
@@ -181,7 +174,6 @@ fun LanguageIcon(
                         .data(deviconUrl)
                         .crossfade(true)
                         .build(),
-                    imageLoader = imageLoader,
                     contentDescription = contentDescription ?: clean,
                     modifier = Modifier.fillMaxSize(0.72f),
                     onError = {

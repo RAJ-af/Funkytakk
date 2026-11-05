@@ -577,10 +577,10 @@ object VoiceRoomRealtimeManager {
                         )
                     )
                 } else if (roomId.isNotBlank() && emoji.isNotBlank() && broadcastType != "chat_message") {
-                    Log.d(TAG, "Received broadcast emoji '$emoji' for room '$roomId' from '$userId'")
+                    if (BuildConfig.DEBUG) Log.d(TAG, "Received broadcast emoji '$emoji' for room '$roomId' from '$userId'")
                     _events.tryEmit(RealtimeTableEvent.RoomEmojiBroadcast(roomId, emoji, userId))
                 } else if (roomId.isNotBlank() && chatText.isNotBlank()) {
-                    Log.d(TAG, "Received broadcast chat message for room '$roomId' from '$userId': $chatText")
+                    if (BuildConfig.DEBUG) Log.d(TAG, "Received broadcast chat message for room '$roomId' from '$userId' (len=${chatText.length})")
                     if (userId.isNotBlank() && userId != "anon_user" && userId != "System") {
                         ensureLiveParticipant(roomId, userId, "listener", false, senderName, senderAvatar)
                     }
@@ -599,7 +599,7 @@ object VoiceRoomRealtimeManager {
                     val targetUid = innerPayload?.optString("target_user_id") ?: ""
                     val actType = innerPayload?.optString("action_type") ?: ""
                     val modReason = innerPayload?.optString("reason")
-                    Log.d(TAG, "Received broadcast moderation_action for target '$targetUid': $actType in room '$targetRoomId'")
+                    if (BuildConfig.DEBUG) Log.d(TAG, "Received broadcast moderation_action for target '$targetUid': $actType in room '$targetRoomId'")
                     if (targetUid.isNotBlank()) {
                         _events.tryEmit(
                             RealtimeTableEvent.ModerationActionEnforced(
@@ -614,7 +614,7 @@ object VoiceRoomRealtimeManager {
                     val targetRoomId = innerPayload?.optString("room_id")?.ifBlank { roomId } ?: roomId
                     val action = innerPayload?.optString("action") ?: broadcastType
                     val hostLeftAt = innerPayload?.optString("host_left_at")
-                    Log.d(TAG, "Received broadcast room_lifecycle: action=$action for room $targetRoomId")
+                    if (BuildConfig.DEBUG) Log.d(TAG, "Received broadcast room_lifecycle: action=$action for room $targetRoomId")
                     if (targetRoomId.isNotBlank()) {
                         _events.tryEmit(
                             RealtimeTableEvent.RoomLifecycleEvent(
@@ -634,8 +634,7 @@ object VoiceRoomRealtimeManager {
                 if (table == "room_messages" || topic.contains("room_messages")) {
                     val roomId = record?.optString("room_id")
                     val msgType = record?.optString("message_type")
-                    val textMsg = record?.optString("message")
-                    Log.d(TAG, "[Realtime] Received room_messages postgres_changes (type=$eventType): roomId=$roomId, message_type='$msgType', text='$textMsg', record=$record")
+                    if (BuildConfig.DEBUG) Log.d(TAG, "[Realtime] Received room_messages postgres_changes (type=$eventType): roomId=$roomId, message_type='$msgType'")
                     _events.tryEmit(RealtimeTableEvent.RoomMessageInserted(record, roomId))
                 } else if (table == "voice_rooms" || topic.contains("voice_rooms")) {
                     _events.tryEmit(RealtimeTableEvent.VoiceRoomChanged(eventType, record))
@@ -682,7 +681,7 @@ object VoiceRoomRealtimeManager {
                     )
                 } else if (table == "notifications" || topic.contains("notifications")) {
                     val userId = record?.optString("user_id")
-                    Log.d(TAG, "[Realtime] Received notifications event ($eventType) for user $userId: $record")
+                    if (BuildConfig.DEBUG) Log.d(TAG, "[Realtime] Received notifications event ($eventType) for user $userId")
                     _events.tryEmit(
                         RealtimeTableEvent.NotificationChanged(
                             eventType = eventType,
@@ -692,7 +691,7 @@ object VoiceRoomRealtimeManager {
                     )
                 } else if (table == "support_messages" || topic.contains("support_messages")) {
                     val conversationId = record?.optString("conversation_id")
-                    Log.d(TAG, "[Realtime] Received support_messages event ($eventType) for conversation $conversationId: $record")
+                    if (BuildConfig.DEBUG) Log.d(TAG, "[Realtime] Received support_messages event ($eventType) for conversation $conversationId")
                     _events.tryEmit(
                         RealtimeTableEvent.SupportMessageChanged(
                             eventType = eventType,
@@ -704,7 +703,7 @@ object VoiceRoomRealtimeManager {
                     val recipientId = record?.optString("recipient_id")
                     val senderId = record?.optString("sender_id")
                     val convId = record?.optString("conversation_id")
-                    Log.d(TAG, "[Realtime] Received dm_messages event ($eventType) for recipient $recipientId from $senderId")
+                    if (BuildConfig.DEBUG) Log.d(TAG, "[Realtime] Received dm_messages event ($eventType) for recipient $recipientId from $senderId")
                     _events.tryEmit(
                         RealtimeTableEvent.DmMessageReceived(
                             eventType = eventType,

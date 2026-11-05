@@ -248,18 +248,6 @@ fun CreateLanguageRoomScreen(
     onCreate: () -> Unit
 ) {
     val context = LocalContext.current
-    val bannerImageLoader = remember(context) {
-        coil.ImageLoader.Builder(context)
-            .components {
-                if (android.os.Build.VERSION.SDK_INT >= 28) {
-                    add(coil.decode.ImageDecoderDecoder.Factory())
-                } else {
-                    add(coil.decode.GifDecoder.Factory())
-                }
-                add(coil.decode.SvgDecoder.Factory())
-            }
-            .build()
-    }
     
     // Core room input state values
     var roomTitle by remember { mutableStateOf("") }
@@ -793,7 +781,6 @@ fun CreateLanguageRoomScreen(
                                         .data(appliedBannerUrl)
                                         .crossfade(true)
                                         .build(),
-                                    imageLoader = bannerImageLoader,
                                     contentDescription = "Room Banner Preview",
                                     modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Crop
@@ -1177,6 +1164,7 @@ fun CreateLanguageRoomScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .fillMaxHeight(0.85f)
+                            .navigationBarsPadding()
                             .padding(16.dp)
                     ) {
                             // Top close bar & header
@@ -1329,7 +1317,6 @@ fun CreateLanguageRoomScreen(
                                                     } else {
                                                         AsyncImage(
                                                             model = banner.url,
-                                                            imageLoader = bannerImageLoader,
                                                             contentDescription = banner.name,
                                                             modifier = Modifier.fillMaxSize(),
                                                             contentScale = ContentScale.Crop
@@ -1509,6 +1496,7 @@ fun CreateLanguageRoomScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .navigationBarsPadding()
                             .verticalScroll(rememberScrollState())
                             .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
