@@ -69,10 +69,9 @@ android {
     }
     debug {
       signingConfig = signingConfigs.getByName("debug")
-      // Testing/Debug optimization: keep only arm64-v8a to reduce testing APK size and speed up builds.
-      // Note: Debug builds with this filter will not run on 32-bit devices or x86/x86_64 emulators.
+      // Testing/Debug optimization: support 64-bit and 32-bit ARM physical test devices.
       ndk {
-        abiFilters.add("arm64-v8a")
+        abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a"))
       }
     }
   }
