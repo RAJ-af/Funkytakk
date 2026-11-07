@@ -22,11 +22,15 @@ import com.example.ReportSpeakerLogItem
 import com.example.RoomEndSummaryResponse
 import com.example.repository.EncryptedChatRepository
 import com.example.ui.screens.chat.DirectChatScreen
+import com.example.ui.screens.voiceroom.EntryAnimationData
+import com.example.ui.screens.voiceroom.EntryAnimationManager
+import com.example.ui.screens.voiceroom.EntryAnimationOverlay
 import com.example.ui.screens.voiceroom.GiftAnimationData
 import com.example.ui.screens.voiceroom.GiftAnimationManager
 import com.example.ui.screens.voiceroom.GiftAnimationOverlay
 import com.example.ui.screens.voiceroom.GiftReceiverUser
 import com.example.ui.screens.voiceroom.RoomGiftBottomSheet
+import com.example.ui.screens.voiceroom.parseEntryAnimationConfig
 import com.google.firebase.auth.FirebaseAuth
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
@@ -923,6 +927,7 @@ fun VoiceRoomScreen(
                     userAvatar = myAvatar,
                     countryCode = myCountry
                 )
+                triggerUserEntryAnimation(context, currentUserId, myName)
                 com.example.realtime.VoiceRoomRealtimeManager.broadcastParticipantUpdate(
                     roomId = activeRoomId,
                     userId = currentUserId,
@@ -1020,6 +1025,8 @@ fun VoiceRoomScreen(
                         val targetRole = event.role ?: event.record?.optString("role") ?: "listener"
                         val targetMic = event.isMicEnabled ?: event.record?.optBoolean("is_mic_enabled", false) ?: false
 
+                        val targetName = event.userName ?: event.record?.optString("user_name") ?: "Learner"
+
                         if (action == "ping") {
                             // Another participant is pinging for presence; reply with our info
                             if (currentUserId.isNotBlank()) {
@@ -1046,6 +1053,9 @@ fun VoiceRoomScreen(
                             }
                         } else if (action in listOf("joined", "sync_presence", "update", "insert", "speaker_promoted")) {
                             if (targetUid.isNotBlank()) {
+                                if (action == "joined") {
+                                    triggerUserEntryAnimation(context, targetUid, targetName)
+                                }
                                 val effectiveRole = if (targetUid == roomHostId) "host" else targetRole
                                 withContext(Dispatchers.Main) {
                                     val existingIndex = participantsData.indexOfFirst { it.user_id == targetUid }
@@ -3847,6 +3857,31 @@ fun VoiceRoomScreen(
         hostUserId = roomHostId,
         speakerUserIds = speakerSeats.map { it.userId }
     )
+
+    // Entry Animation Overlay (Non-blocking touch overlay for room entrance animations & banner)
+    EntryAnimationOverlay()
+}
+
+private fun triggerUserEntryAnimation(context: android.content.Context, userId: String, userName: String) {
+    if (userId.isBlank()) return
+    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+        val cosmeticsMap = com.example.store.CosmeticsManager.getUserCosmetics(context, listOf(userId))
+        val cosmetics = cosmeticsMap[userId] ?: com.example.store.CosmeticsManager.getCachedCosmetics(userId)
+        val entrySlot = cosmetics?.entry_animation
+        if (entrySlot != null && entrySlot.config != null) {
+            val animConfig = parseEntryAnimationConfig(entrySlot.config)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                EntryAnimationManager.enqueueAnimation(
+                    EntryAnimationData(
+                        userId = userId,
+                        userName = userName.ifBlank { "Learner" },
+                        config = animConfig
+                    ),
+                    context
+                )
+            }
+        }
+    }
 }
 
 @Composable

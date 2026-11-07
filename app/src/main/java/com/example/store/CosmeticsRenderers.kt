@@ -26,6 +26,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import coil.compose.AsyncImage
+import coil.request.CachePolicy
+import coil.request.ImageRequest
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -180,11 +185,62 @@ fun AvatarFrame(
     config: AvatarFrameConfig?,
     modifier: Modifier = Modifier,
     sizeDp: Dp = 48.dp,
+    enableFrameAnimation: Boolean = true,
     content: @Composable () -> Unit
 ) {
     if (config == null) {
         Box(modifier = modifier.size(sizeDp), contentAlignment = Alignment.Center) {
             content()
+        }
+        return
+    }
+
+    val context = LocalContext.current
+    val asset = config.asset
+    var isAssetLoadFailed by remember(asset?.url) { mutableStateOf(false) }
+
+    if (asset != null && asset.url.isNotBlank() && !isAssetLoadFailed) {
+        val frameSize = sizeDp * asset.scale
+        val imageRequest = remember(context, asset.url, enableFrameAnimation) {
+            ImageRequest.Builder(context)
+                .data(asset.url)
+                .diskCachePolicy(CachePolicy.ENABLED)
+                .memoryCachePolicy(CachePolicy.ENABLED)
+                .crossfade(true)
+                .apply {
+                    if (enableFrameAnimation && (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P)) {
+                        decoderFactory(coil.decode.ImageDecoderDecoder.Factory())
+                    }
+                }
+                .listener(
+                    onError = { _, _ -> isAssetLoadFailed = true }
+                )
+                .build()
+        }
+
+        Box(
+            modifier = modifier.size(sizeDp),
+            contentAlignment = Alignment.Center
+        ) {
+            // Core Avatar Container
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                content()
+            }
+
+            // Transparent Frame Image Asset Overlaid ON TOP of Avatar
+            AsyncImage(
+                model = imageRequest,
+                contentDescription = "Avatar Frame Asset",
+                modifier = Modifier
+                    .size(frameSize)
+                    .offset(x = asset.offset.xDp.dp, y = asset.offset.yDp.dp),
+                contentScale = ContentScale.Fit
+            )
         }
         return
     }
@@ -407,4 +463,46 @@ fun StyledName(
         style = textStyle,
         modifier = modifier
     )
+}
+
+// ====================================================
+// 5. DECORATED USER NAME COMPOSABLE
+// ====================================================
+@Composable
+fun DecoratedUserName(
+    userId: String?,
+    name: String,
+    modifier: Modifier = Modifier,
+    fontSize: TextUnit = 14.sp,
+    fontWeight: FontWeight? = null,
+    defaultColor: Color = Color.Unspecified
+) {
+    val userCosmeticsMap by CosmeticsManager.userCosmeticsMap.collectAsState()
+    val nameEffectConfig = remember(userId, userCosmeticsMap) {
+        if (!userId.isNullOrBlank()) {
+            val userRow = userCosmeticsMap[userId] ?: CosmeticsManager.getCachedCosmetics(userId)
+            val rawConfig = userRow?.name_effect?.config
+            if (rawConfig != null) {
+                runCatching { CosmeticsConfigParser.parseNameEffect(rawConfig) }.getOrNull()
+            } else null
+        } else null
+    }
+
+    if (nameEffectConfig != null) {
+        StyledName(
+            text = name,
+            config = nameEffectConfig,
+            modifier = modifier,
+            fontSize = fontSize,
+            fontWeight = fontWeight
+        )
+    } else {
+        Text(
+            text = name,
+            fontSize = fontSize,
+            fontWeight = fontWeight ?: FontWeight.Bold,
+            color = defaultColor,
+            modifier = modifier
+        )
+    }
 }

@@ -514,68 +514,17 @@ fun ProfileTabContent(
                         modifier = Modifier
                             .align(Alignment.BottomStart)
                             .padding(start = 20.dp)
-                            .size(102.dp)
                     ) {
-                        // Avatar Photo with White Border
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .border(width = 4.dp, color = Color.White, shape = CircleShape)
-                                .clip(CircleShape)
-                                .background(Color.White)
-                        ) {
-                            val avatarModel = resolveAvatarModel(profileAvatar)
-                            val imageRequest = remember(avatarModel) {
-                                ImageRequest.Builder(context)
-                                    .data(avatarModel)
-                                    .crossfade(true)
-                                    .memoryCacheKey(avatarModel.toString())
-                                    .diskCacheKey(avatarModel.toString())
-                                    .placeholder(com.example.R.drawable.male_avatar_1781324792347)
-                                    .error(com.example.R.drawable.male_avatar_1781324792347)
-                                    .fallback(com.example.R.drawable.male_avatar_1781324792347)
-                                    .listener(
-                                        onError = { _, result ->
-                                            Log.w("ProfileTabContent", "Avatar load fallback for $avatarModel: ${result.throwable.message}")
-                                        },
-                                        onSuccess = { _, _ ->
-                                            Log.d("ProfileTabContent", "Avatar loaded successfully: $avatarModel")
-                                        }
-                                    )
-                                    .build()
-                            }
-                            AsyncImage(
-                                model = imageRequest,
-                                contentDescription = "Avatar",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
-
-                        // Top-Right Green Online Dot with White border
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .offset(x = (-6).dp, y = 6.dp)
-                                .size(14.dp)
-                                .background(Color(0xFF22C55E), CircleShape)
-                                .border(2.dp, Color.White, CircleShape)
+                        val myUid = SupabaseSessionManager.getUserId(context)
+                        com.example.ui.components.PresenceAvatar(
+                            avatarUrl = resolveAvatarModel(profileAvatar)?.toString(),
+                            size = 80.dp,
+                            isSpeaking = false,
+                            isOnline = true,
+                            countryCode = profileCountryCode,
+                            userId = myUid,
+                            enableFrameAnimation = true
                         )
-
-                        // Bottom-Right Circle Country Flag with White border
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .offset(x = (-2).dp, y = (-2).dp)
-                        ) {
-                            CircleFlag(
-                                countryCode = profileCountryCode,
-                                modifier = Modifier
-                                    .size(26.dp)
-                                    .clip(CircleShape)
-                                    .border(2.dp, Color.White, CircleShape)
-                            )
-                        }
                     }
                 }
             }
@@ -596,11 +545,13 @@ fun ProfileTabContent(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text(
-                            text = profileDisplayName,
+                        val myUid = SupabaseSessionManager.getUserId(context)
+                        com.example.store.DecoratedUserName(
+                            userId = myUid,
+                            name = profileDisplayName,
                             fontSize = 24.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF0F172A)
+                            defaultColor = Color(0xFF0F172A)
                         )
 
                         // Blue Verified Badge (Custom Canvas Drawn)
@@ -1931,8 +1882,10 @@ fun ProfileTabContent(
     }
 
     if (showThemeStoreSheet) {
-        com.example.ui.screens.profile.FunkyStoreSheet(
-            onDismiss = { showThemeStoreSheet = false }
+        com.example.ui.screens.store.DecorationStoreScreen(
+            onDismiss = { showThemeStoreSheet = false },
+            currentUserAvatar = currentAvatarUrl,
+            currentUserName = currentProfileName
         )
     }
 }

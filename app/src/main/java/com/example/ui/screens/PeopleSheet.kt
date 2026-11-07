@@ -351,17 +351,19 @@ fun PeopleBottomSheetContent(
                                     avatarUrl = imageUrl,
                                     size = 44.dp,
                                     isOnline = true,
+                                    userId = targetUserId,
+                                    enableFrameAnimation = false,
                                     countryCode = mapFlagEmojiToCode(mapCountryCodeToFlagEmoji(flagCode))
                                 )
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
-                                    Text(
-                                        text = name,
+                                    com.example.store.DecoratedUserName(
+                                        userId = targetUserId,
+                                        name = name,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (isDark) Color.White else Color(0xFF0F172A),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                        defaultColor = if (isDark) Color.White else Color(0xFF0F172A),
+                                        modifier = Modifier.fillMaxWidth()
                                     )
                                     Text(
                                         text = "Listener",
@@ -716,6 +718,7 @@ fun PeopleSheetSpeakerItem(
     isHost: Boolean,
     flagEmoji: String = "🇮🇳",
     isDarkMode: Boolean = false,
+    userId: String? = null,
     onClick: () -> Unit = {}
 ) {
     Column(
@@ -729,15 +732,18 @@ fun PeopleSheetSpeakerItem(
             size = 80.dp,
             isSpeaking = false,
             isOnline = true,
-            countryCode = mapFlagEmojiToCode(flagEmoji)
+            countryCode = mapFlagEmojiToCode(flagEmoji),
+            userId = userId,
+            enableFrameAnimation = true
         )
         
         Spacer(modifier = Modifier.height(10.dp))
-        Text(
-            text = name,
+        com.example.store.DecoratedUserName(
+            userId = userId,
+            name = name,
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
-            color = if (isDarkMode) Color.White else Color.Black
+            defaultColor = if (isDarkMode) Color.White else Color.Black
         )
         Spacer(modifier = Modifier.height(6.dp))
         Box(
@@ -766,6 +772,7 @@ fun PeopleSheetListenerItem(
     modifier: Modifier = Modifier,
     flagEmoji: String = "🇮🇳",
     isDarkMode: Boolean = false,
+    userId: String? = null,
     onClick: () -> Unit = {}
 ) {
     Column(
@@ -779,16 +786,17 @@ fun PeopleSheetListenerItem(
             size = 64.dp,
             isSpeaking = false,
             isOnline = true,
-            countryCode = mapFlagEmojiToCode(flagEmoji)
+            countryCode = mapFlagEmojiToCode(flagEmoji),
+            userId = userId,
+            enableFrameAnimation = false
         )
         Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = name,
+        com.example.store.DecoratedUserName(
+            userId = userId,
+            name = name,
             fontSize = 12.sp,
             fontWeight = FontWeight.Medium,
-            color = if (isDarkMode) Color.White else Color.Black,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
+            defaultColor = if (isDarkMode) Color.White else Color.Black
         )
     }
 }

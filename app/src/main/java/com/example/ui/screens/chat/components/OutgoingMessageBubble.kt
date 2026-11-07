@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,6 +31,35 @@ fun OutgoingMessageBubble(
     onReactionClick: () -> Unit = onLongClick,
     modifier: Modifier = Modifier
 ) {
+    val myCosmetics by com.example.store.CosmeticsManager.myCosmetics.collectAsState()
+    val myBubbleConfig = remember(myCosmetics) {
+        myCosmetics?.bubble_theme?.config?.let {
+            runCatching { com.example.store.CosmeticsConfigParser.parseBubbleTheme(it) }.getOrNull()
+        }
+    }
+
+    val bubbleShape = remember(myBubbleConfig) {
+        val rad = myBubbleConfig?.radiusDp?.coerceIn(6f, 26f)?.dp ?: 18.dp
+        val tailRad = if (myBubbleConfig?.tailStyle?.equals("sharp", ignoreCase = true) == true) 2.dp else 4.dp
+        RoundedCornerShape(topStart = rad, topEnd = rad, bottomStart = rad, bottomEnd = tailRad)
+    }
+
+    val bubbleColors = remember(myBubbleConfig) {
+        myBubbleConfig?.bgColorsHex?.map { com.example.store.parseHexColor(it, Color(0xFFFCD34D)) }
+            ?: listOf(Color(0xFFFCD34D))
+    }
+
+    val bubbleBrush = remember(bubbleColors) {
+        if (bubbleColors.size > 1) {
+            androidx.compose.ui.graphics.Brush.linearGradient(bubbleColors)
+        } else androidx.compose.ui.graphics.SolidColor(bubbleColors.firstOrNull() ?: Color(0xFFFCD34D))
+    }
+
+    val bubbleTextColor = remember(myBubbleConfig) {
+        myBubbleConfig?.textColorHex?.let { com.example.store.parseHexColor(it, Color(0xFF111827)) }
+            ?: Color(0xFF111827)
+    }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -40,12 +69,14 @@ fun OutgoingMessageBubble(
     ) {
         Column(horizontalAlignment = Alignment.End) {
             Surface(
-                shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp),
-                color = Color(0xFFFCD34D), // Soft warm amber yellow
-                border = if (isHighlighted) BorderStroke(2.dp, Color.White) else null,
+                shape = bubbleShape,
+                color = Color.Transparent,
+                border = if (isHighlighted) BorderStroke(2.dp, Color.White)
+                         else myBubbleConfig?.border?.let { BorderStroke(it.widthDp.dp, com.example.store.parseHexColor(it.colorHex, Color.Transparent)) },
                 shadowElevation = if (isHighlighted) 6.dp else 0.dp,
                 modifier = Modifier
                     .widthIn(max = 290.dp)
+                    .background(brush = bubbleBrush, shape = bubbleShape)
                     .combinedClickable(
                         onClick = {},
                         onLongClick = onLongClick
@@ -94,7 +125,7 @@ fun OutgoingMessageBubble(
                             lineHeight = 20.sp,
                             fontWeight = FontWeight.Normal
                         ),
-                        color = Color(0xFF111827)
+                        color = bubbleTextColor
                     )
 
                     Spacer(modifier = Modifier.height(3.dp))

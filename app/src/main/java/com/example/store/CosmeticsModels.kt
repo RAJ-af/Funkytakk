@@ -70,11 +70,24 @@ data class FrameGlowConfig(
     val pulse: Boolean = false
 )
 
+data class FrameAssetOffset(
+    val xDp: Float = 0f,
+    val yDp: Float = 0f
+)
+
+data class FrameAssetConfig(
+    val url: String = "",
+    val format: String = "webp", // "webp" | "png"
+    val scale: Float = 1.25f,
+    val offset: FrameAssetOffset = FrameAssetOffset()
+)
+
 data class AvatarFrameConfig(
     val ring: FrameRingConfig = FrameRingConfig(),
     val ornament: FrameOrnamentConfig? = null,
     val particles: FrameParticlesConfig? = null,
-    val glow: FrameGlowConfig? = null
+    val glow: FrameGlowConfig? = null,
+    val asset: FrameAssetConfig? = null
 )
 
 // ----------------------------------------------------
@@ -95,6 +108,18 @@ data class StickerPackConfig(
     val source: String = "noto_animated",
     val format: String = "lottie",
     val emojis: List<String> = listOf("😍", "🥰", "🔥", "🎉", "❤️", "👍")
+)
+
+// ----------------------------------------------------
+// 6. ENTRY EFFECT CONFIG
+// ----------------------------------------------------
+data class EntryEffectConfig(
+    val animationUrl: String? = null,
+    val iconUrl: String? = null,
+    val effectType: String = "rocket", // "rocket" | "car" | "dragon" | "wings" | "sparkles" | "crown" | "fireworks"
+    val bannerTitle: String? = null,
+    val durationMs: Long = 3000L,
+    val badgeIcon: String = "🚀"
 )
 
 // ----------------------------------------------------
@@ -241,11 +266,26 @@ object CosmeticsConfigParser {
                 )
             } else null
 
+            val assetObj = json.optJSONObject("asset")
+            val asset = if (assetObj != null && !assetObj.optString("url").isNullOrBlank()) {
+                val offsetObj = assetObj.optJSONObject("offset")
+                FrameAssetConfig(
+                    url = assetObj.optString("url", ""),
+                    format = assetObj.optString("format", "webp"),
+                    scale = assetObj.optDouble("scale", 1.25).toFloat(),
+                    offset = FrameAssetOffset(
+                        xDp = offsetObj?.optDouble("x", 0.0)?.toFloat() ?: 0f,
+                        yDp = offsetObj?.optDouble("y", 0.0)?.toFloat() ?: 0f
+                    )
+                )
+            } else null
+
             AvatarFrameConfig(
                 ring = ring,
                 ornament = ornament,
                 particles = particles,
-                glow = glow
+                glow = glow,
+                asset = asset
             )
         } catch (_: Exception) {
             AvatarFrameConfig()
@@ -291,6 +331,33 @@ object CosmeticsConfigParser {
             )
         } catch (_: Exception) {
             StickerPackConfig()
+        }
+    }
+
+    fun parseEntryEffect(rawMap: Map<String, Any?>?): EntryEffectConfig {
+        if (rawMap == null) return EntryEffectConfig()
+        return try {
+            val json = JSONObject(rawMap)
+            val effectType = json.optString("effect_type", json.optString("type", "rocket"))
+            val badge = when (effectType.lowercase()) {
+                "car" -> "🏎️"
+                "dragon" -> "🐉"
+                "wings" -> "🪽"
+                "sparkles", "sparkle" -> "✨"
+                "crown" -> "👑"
+                "fireworks" -> "🎆"
+                else -> "🚀"
+            }
+            EntryEffectConfig(
+                animationUrl = json.optString("animation_url").takeIf { it.isNotBlank() && it != "null" },
+                iconUrl = json.optString("icon_url").takeIf { it.isNotBlank() && it != "null" },
+                effectType = effectType,
+                bannerTitle = json.optString("banner_title").takeIf { it.isNotBlank() && it != "null" },
+                durationMs = json.optLong("duration_ms", 3000L),
+                badgeIcon = json.optString("badge_icon", badge)
+            )
+        } catch (_: Exception) {
+            EntryEffectConfig()
         }
     }
 }

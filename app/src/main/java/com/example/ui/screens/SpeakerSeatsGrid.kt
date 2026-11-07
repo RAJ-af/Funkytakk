@@ -65,6 +65,13 @@ fun SpeakerSeatsGrid(
 ) {
     val context = LocalContext.current
 
+    LaunchedEffect(hostSeat, speakerSeats) {
+        val allSpeakerUids = (listOf(hostSeat) + speakerSeats).map { it.userId }.filter { it.isNotBlank() }
+        if (allSpeakerUids.isNotEmpty()) {
+            com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, allSpeakerUids)
+        }
+    }
+
     val handleSlotRequest = {
         if (onRequestSpeakerSeat != {}) {
             onRequestSpeakerSeat()
@@ -356,7 +363,9 @@ fun VoiceSpeakerItem(
                 size = size,
                 isSpeaking = speaker.isSpeaking,
                 isOnline = !speaker.isHostAway,
-                countryCode = speaker.flagCode.ifBlank { null }
+                countryCode = speaker.flagCode.ifBlank { null },
+                userId = speaker.userId,
+                enableFrameAnimation = true
             )
 
             // Host Badge / Crown
@@ -409,11 +418,12 @@ fun VoiceSpeakerItem(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
-            Text(
-                text = speaker.name,
+            com.example.store.DecoratedUserName(
+                userId = speaker.userId,
+                name = speaker.name,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
-                color = primaryTextColor
+                defaultColor = primaryTextColor
             )
             Spacer(modifier = Modifier.width(4.dp))
             CustomMicIcon(

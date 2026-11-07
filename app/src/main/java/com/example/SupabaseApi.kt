@@ -1343,6 +1343,13 @@ interface SupabaseApi {
         @Body body: PurchaseItemRequest
     ): Response<ResponseBody>
 
+    @POST("rest/v1/rpc/purchase_items")
+    suspend fun purchaseItems(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: PurchaseItemsRequest
+    ): Response<ResponseBody>
+
     @POST("rest/v1/rpc/equip_item")
     suspend fun equipItem(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
@@ -1359,6 +1366,13 @@ interface SupabaseApi {
 
     @POST("rest/v1/rpc/get_user_cosmetics")
     suspend fun getUserCosmetics(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: GetUserCosmeticsRequest
+    ): Response<List<UserCosmeticsRow>>
+
+    @POST("rest/v1/rpc/get_user_cosmetics_v2")
+    suspend fun getUserCosmeticsV2(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String,
         @Body body: GetUserCosmeticsRequest
@@ -2244,6 +2258,21 @@ data class PurchaseItemRequest(
 )
 
 @JsonClass(generateAdapter = true)
+data class PurchaseItemsRequest(
+    val p_item_ids: List<Long>,
+    val p_apply: Boolean = false
+)
+
+@JsonClass(generateAdapter = true)
+data class PurchaseItemsResponse(
+    val bought: List<Long> = emptyList(),
+    val already_owned: List<Long> = emptyList(),
+    val equipped: List<Long> = emptyList(),
+    val coins_spent: Int = 0,
+    val remaining_balance: Int = 0
+)
+
+@JsonClass(generateAdapter = true)
 data class EquipItemRequest(
     val p_item_id: Long
 )
@@ -2271,7 +2300,8 @@ data class UserCosmeticsRow(
     val bubble_theme: CosmeticSlotInfo? = null,
     val avatar_frame: CosmeticSlotInfo? = null,
     val name_effect: CosmeticSlotInfo? = null,
-    val chat_bg: CosmeticSlotInfo? = null
+    val chat_bg: CosmeticSlotInfo? = null,
+    val entry_animation: CosmeticSlotInfo? = null
 )
 
 @JsonClass(generateAdapter = true)

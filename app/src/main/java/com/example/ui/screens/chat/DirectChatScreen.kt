@@ -236,6 +236,8 @@ fun DirectChatScreen(
                         if (!p.country.isNullOrBlank()) resolvedCountryName = p.country
                     }
                 }
+                // Fetch partner's equipped cosmetics for real-time display
+                com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, listOf(partnerUserId))
             } catch (e: Exception) {
                 android.util.Log.e("DirectChatScreen", "Error resolving partner profile", e)
             }
@@ -429,52 +431,25 @@ fun DirectChatScreen(
                                 ChatIconBack(tint = colors.text, modifier = Modifier.size(24.dp))
                             }
 
-                            Box(modifier = Modifier.size(42.dp)) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(42.dp)
-                                        .clip(CircleShape)
-                                        .background(colors.accentIn.copy(alpha = 0.15f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (resolvedAvatarUrl.isNotBlank()) {
-                                        AsyncImage(
-                                            model = resolvedAvatarUrl,
-                                            contentDescription = partnerName,
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentScale = ContentScale.Crop
-                                        )
-                                    } else {
-                                        Text(
-                                            text = partnerName.take(1).uppercase(),
-                                            color = colors.accentIn,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 17.sp
-                                        )
-                                    }
-                                }
-
-                                val flagCode = resolvedCountryCode.takeIf { it.isNotBlank() } ?: "us"
-                                CircleFlag(
-                                    countryCode = flagCode,
-                                    modifier = Modifier
-                                        .size(15.dp)
-                                        .align(Alignment.BottomEnd)
-                                        .clip(CircleShape)
-                                        .border(1.5.dp, Color.White, CircleShape)
-                                )
-                            }
+                            com.example.ui.components.PresenceAvatar(
+                                avatarUrl = resolvedAvatarUrl.ifBlank { null },
+                                size = 42.dp,
+                                userId = partnerUserId,
+                                enableFrameAnimation = false,
+                                countryCode = resolvedCountryCode.takeIf { it.isNotBlank() },
+                                isOnline = resolvedIsOnline
+                            )
 
                             Spacer(modifier = Modifier.width(10.dp))
 
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = partnerName,
-                                    color = colors.text,
+                                com.example.store.DecoratedUserName(
+                                    userId = partnerUserId,
+                                    name = partnerName,
                                     fontSize = 16f.chatSp(),
                                     fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    defaultColor = colors.text,
+                                    modifier = Modifier.fillMaxWidth()
                                 )
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Box(
@@ -647,12 +622,23 @@ fun DirectChatScreen(
             },
             containerColor = colors.wallpaper
         ) { paddingValues ->
+            val myCosmetics by com.example.store.CosmeticsManager.myCosmetics.collectAsState()
+            val myChatBgConfig = remember(myCosmetics) {
+                myCosmetics?.chat_bg?.config?.let {
+                    runCatching { com.example.store.CosmeticsConfigParser.parseChatBg(it) }.getOrNull()
+                }
+            }
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
-                    .background(colors.wallpaper)
             ) {
+                if (myChatBgConfig != null) {
+                    com.example.store.ChatBackground(config = myChatBgConfig, isDark = false, modifier = Modifier.fillMaxSize())
+                } else {
+                    Box(modifier = Modifier.fillMaxSize().background(colors.wallpaper))
+                }
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),

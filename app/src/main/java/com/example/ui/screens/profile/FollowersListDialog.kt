@@ -180,11 +180,19 @@ fun FollowersListBottomSheet(
                     )
                 }
             } else {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                LaunchedEffect(userList) {
+                    val uids = userList.map { it.auth_user_id }.filter { it.isNotBlank() }
+                    if (uids.isNotEmpty()) {
+                        com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, uids)
+                    }
+                }
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.heightIn(max = 400.dp)
                 ) {
                     items(userList) { user ->
+                        val targetUid = user.auth_user_id
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -201,7 +209,9 @@ fun FollowersListBottomSheet(
                                 size = 46.dp,
                                 isSpeaking = false,
                                 isOnline = user.is_online ?: false,
-                                countryCode = user.country_code
+                                countryCode = user.country_code,
+                                userId = targetUid,
+                                enableFrameAnimation = false
                             )
 
                             Spacer(modifier = Modifier.width(12.dp))
@@ -210,13 +220,12 @@ fun FollowersListBottomSheet(
                             Column(
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Text(
-                                    text = user.profile_name ?: user.username ?: "Anonymous",
+                                com.example.store.DecoratedUserName(
+                                    userId = targetUid,
+                                    name = user.profile_name ?: user.username ?: "Anonymous",
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF0F172A),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    defaultColor = Color(0xFF0F172A)
                                 )
                                 Text(
                                     text = "@${user.username ?: "anonymous"}",

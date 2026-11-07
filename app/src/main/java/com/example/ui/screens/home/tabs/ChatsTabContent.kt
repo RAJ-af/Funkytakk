@@ -188,6 +188,13 @@ fun ChatsTabContent(
             .distinctBy { it.id }
     }
 
+    LaunchedEffect(mergedConversations) {
+        val partnerUids = mergedConversations.filter { !it.isNativeLanguage.startsWith("Group") }.map { it.id }.filter { it.isNotBlank() }
+        if (partnerUids.isNotEmpty()) {
+            com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, partnerUids)
+        }
+    }
+
     val showSupportInSearch = remember(searchQuery, selectedFilter, supportUnreadCount) {
         val matchesSearch = searchQuery.isBlank() ||
                 "FunkyTalk".contains(searchQuery, ignoreCase = true) ||
@@ -1046,7 +1053,9 @@ fun ChatsTabContent(
                                 PresenceAvatar(
                                     avatarUrl = chat.avatar,
                                     size = if (isMinimalistMode) 40.dp else 56.dp,
-                                    countryCode = if (isGroup) null else flagCode
+                                    countryCode = if (isGroup) null else flagCode,
+                                    userId = if (!isGroup) chat.id else null,
+                                    enableFrameAnimation = false
                                 )
 
                                 if (isGroup) {
@@ -1079,13 +1088,12 @@ fun ChatsTabContent(
                                         verticalAlignment = Alignment.CenterVertically,
                                         modifier = Modifier.weight(1f, fill = false)
                                     ) {
-                                        Text(
-                                            text = chat.name,
-                                            fontWeight = FontWeight.Bold,
+                                        com.example.store.DecoratedUserName(
+                                            userId = if (!isGroup) chat.id else null,
+                                            name = chat.name,
                                             fontSize = if (isMinimalistMode) 14.5.sp else 16.sp,
-                                            color = Color.Black,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
+                                            fontWeight = FontWeight.Bold,
+                                            defaultColor = Color.Black
                                         )
 
                                         if (isPinned) {

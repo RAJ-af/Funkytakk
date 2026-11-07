@@ -46,6 +46,13 @@ fun ActiveFriendsRow(
 
     val onlineCount = activeFriendsList.count { it.isOnline }
 
+    LaunchedEffect(activeFriendsList) {
+        val uids = activeFriendsList.map { it.id }.filter { it.isNotBlank() }
+        if (uids.isNotEmpty()) {
+            com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, uids)
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -226,17 +233,18 @@ fun ActiveFriendsRow(
                         size = 56.dp,
                         isSpeaking = friend.isSpeaking,
                         isOnline = isOnlineUser,
-                        countryCode = friend.flagCode
+                        countryCode = friend.flagCode,
+                        userId = friend.id,
+                        enableFrameAnimation = false
                     )
 
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = friend.name,
+                    com.example.store.DecoratedUserName(
+                        userId = friend.id,
+                        name = friend.name,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (isOnlineUser) Color.Black else Color(0xFF475569),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        defaultColor = if (isOnlineUser) Color.Black else Color(0xFF475569)
                     )
 
                     // Subtitle text: ONLY say "Online" / "Speaking" if actually online! If offline, say "Offline 🌙"!

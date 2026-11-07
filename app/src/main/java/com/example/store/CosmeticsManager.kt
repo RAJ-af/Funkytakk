@@ -9,6 +9,8 @@ import com.example.EquipItemRequest
 import com.example.GetStoreItemsRequest
 import com.example.GetUserCosmeticsRequest
 import com.example.PurchaseItemRequest
+import com.example.PurchaseItemsRequest
+import com.example.PurchaseItemsResponse
 import com.example.StoreItemRow
 import com.example.SupabaseClient
 import com.example.SupabaseSessionManager
@@ -22,6 +24,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+
+data class PurchaseItemsResult(
+    val bought: List<Long> = emptyList(),
+    val alreadyOwned: List<Long> = emptyList(),
+    val equipped: List<Long> = emptyList(),
+    val coinsSpent: Int = 0,
+    val remainingBalance: Int = 0
+)
 
 object CosmeticsManager {
     private const val TAG = "CosmeticsManager"
@@ -43,6 +53,14 @@ object CosmeticsManager {
 
     private val _myCosmetics = MutableStateFlow<UserCosmeticsRow?>(null)
     val myCosmetics: StateFlow<UserCosmeticsRow?> = _myCosmetics.asStateFlow()
+
+    private val _userCosmeticsMap = MutableStateFlow<Map<String, UserCosmeticsRow>>(emptyMap())
+    val userCosmeticsMap: StateFlow<Map<String, UserCosmeticsRow>> = _userCosmeticsMap.asStateFlow()
+
+    fun getCachedCosmetics(userId: String?): UserCosmeticsRow? {
+        if (userId.isNullOrBlank()) return null
+        return cosmeticsCache.get(userId)?.cosmetics ?: _userCosmeticsMap.value[userId]
+    }
 
     suspend fun getOrCreateWallet(context: Context): Int = withContext(Dispatchers.IO) {
         try {
@@ -129,6 +147,85 @@ object CosmeticsManager {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error purchasing item", e)
+            Result.failure(e)
+        }
+    }
+
+    fun updateWalletBalance(newBalance: Int) {
+        _userWalletBalance.value = newBalance
+        try {
+            com.example.gifting.GiftManager.updateWalletBalance(newBalance)
+        } catch (_: Exception) {}
+    }
+
+    suspend fun purchaseItems(
+        context: Context,
+        itemIds: List<Long>,
+        apply: Boolean
+    ): Result<PurchaseItemsResult> = withContext(Dispatchers.IO) {
+        if (itemIds.isEmpty()) return@withContext Result.failure(Exception("No items selected"))
+        try {
+            SupabaseSessionManager.ensureActiveSession(context)
+            val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                ?: return@withContext Result.failure(Exception("Not authenticated"))
+
+            val resp = SupabaseClient.api.purchaseItems(
+                apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                auth = token,
+                body = PurchaseItemsRequest(p_item_ids = itemIds, p_apply = apply)
+            )
+
+            val rawBody = if (resp.isSuccessful) resp.body()?.string().orEmpty() else resp.errorBody()?.string().orEmpty()
+            val jsonObj = runCatching { JSONObject(rawBody) }.getOrNull()
+
+            if (resp.isSuccessful) {
+                val boughtList = mutableListOf<Long>()
+                jsonObj?.optJSONArray("bought")?.let { arr ->
+                    for (i in 0 until arr.length()) boughtList.add(arr.optLong(i))
+                }
+                val alreadyOwnedList = mutableListOf<Long>()
+                jsonObj?.optJSONArray("already_owned")?.let { arr ->
+                    for (i in 0 until arr.length()) alreadyOwnedList.add(arr.optLong(i))
+                }
+                val equippedList = mutableListOf<Long>()
+                jsonObj?.optJSONArray("equipped")?.let { arr ->
+                    for (i in 0 until arr.length()) equippedList.add(arr.optLong(i))
+                }
+                val coinsSpent = jsonObj?.optInt("coins_spent", 0) ?: 0
+                val remaining = jsonObj?.optInt("remaining_balance", _userWalletBalance.value) ?: _userWalletBalance.value
+
+                updateWalletBalance(remaining)
+
+                val myUid = SupabaseSessionManager.getUserId(context).orEmpty()
+                if (myUid.isNotBlank()) {
+                    cosmeticsCache.remove(myUid)
+                    if (apply) {
+                        refreshMyCosmetics(context, myUid)
+                    }
+                }
+
+                Result.success(
+                    PurchaseItemsResult(
+                        bought = boughtList,
+                        alreadyOwned = alreadyOwnedList,
+                        equipped = equippedList,
+                        coinsSpent = coinsSpent,
+                        remainingBalance = remaining
+                    )
+                )
+            } else {
+                val errorMsg = jsonObj?.optString("message")
+                    ?: jsonObj?.optString("error")
+                    ?: rawBody
+                val mappedMsg = when {
+                    errorMsg.contains("insufficient_coins", ignoreCase = true) -> "insufficient_coins"
+                    errorMsg.contains("item_not_found", ignoreCase = true) -> "item_not_found"
+                    else -> errorMsg.ifEmpty { "Purchase failed" }
+                }
+                Result.failure(Exception(mappedMsg))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in purchaseItems", e)
             Result.failure(e)
         }
     }
@@ -226,17 +323,35 @@ object CosmeticsManager {
                 // Batch up to 100 max per call
                 val chunked = missingIds.chunked(100)
                 for (chunk in chunked) {
-                    val resp = SupabaseClient.api.getUserCosmetics(
-                        apiKey = BuildConfig.SUPABASE_ANON_KEY,
-                        auth = token,
-                        body = GetUserCosmeticsRequest(p_user_ids = chunk)
-                    )
+                    // Try get_user_cosmetics_v2 first, fallback to get_user_cosmetics if needed
+                    val resp = try {
+                        val v2Resp = SupabaseClient.api.getUserCosmeticsV2(
+                            apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                            auth = token,
+                            body = GetUserCosmeticsRequest(p_user_ids = chunk)
+                        )
+                        if (v2Resp.isSuccessful) v2Resp else SupabaseClient.api.getUserCosmetics(
+                            apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                            auth = token,
+                            body = GetUserCosmeticsRequest(p_user_ids = chunk)
+                        )
+                    } catch (_: Exception) {
+                        SupabaseClient.api.getUserCosmetics(
+                            apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                            auth = token,
+                            body = GetUserCosmeticsRequest(p_user_ids = chunk)
+                        )
+                    }
+
                     if (resp.isSuccessful) {
                         resp.body().orEmpty().forEach { row ->
                             cosmeticsCache.put(row.user_id, CachedCosmetic(now, row))
                             result[row.user_id] = row
                         }
                     }
+                }
+                if (result.isNotEmpty()) {
+                    _userCosmeticsMap.value = _userCosmeticsMap.value + result
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error fetching user cosmetics", e)
@@ -248,11 +363,17 @@ object CosmeticsManager {
 
     suspend fun refreshMyCosmetics(context: Context, myUserId: String) {
         if (myUserId.isBlank()) return
+        cosmeticsCache.remove(myUserId)
         val map = getUserCosmetics(context, listOf(myUserId))
         val row = map[myUserId]
         if (row != null) {
             _myCosmetics.value = row
+            _userCosmeticsMap.value = _userCosmeticsMap.value + (myUserId to row)
         }
+    }
+
+    suspend fun batchFetchUserCosmetics(context: Context, userIds: List<String>) {
+        getUserCosmetics(context, userIds)
     }
 
     suspend fun verifyOwnedItem(

@@ -136,6 +136,7 @@ dependencies {
   implementation(libs.androidx.work.runtime.ktx)
   implementation(libs.androidx.media3.exoplayer)
   implementation(libs.androidx.media3.common)
+  implementation(libs.androidx.media3.ui)
   implementation(libs.telephoto.zoomable.image.coil)
   implementation(libs.lottie.compose)
   implementation(libs.coil.compose)

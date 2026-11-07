@@ -1,7 +1,11 @@
 package com.example.ui.screens.voiceroom
 
 import android.content.Context
+import android.net.Uri
 import android.provider.Settings
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import androidx.annotation.OptIn
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -18,6 +22,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
@@ -29,13 +34,28 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
+import coil.imageLoader
+import coil.request.CachePolicy
+import coil.request.ImageRequest
+import com.airbnb.lottie.compose.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.ArrayDeque
 import kotlin.math.cos
 import kotlin.math.sin
@@ -495,13 +515,344 @@ private fun Tier2MediumAnimation(data: GiftAnimationData) {
 }
 
 /**
+ * Disk cache helper for MP4 animations:
+ * Downloads and caches the MP4 file to local disk (cacheDir/video_cache) so subsequent plays are instantaneous.
+ */
+object VideoDiskCacheHelper {
+    private val memoryUrlToCachedPath = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    suspend fun getCachedOrDownload(context: Context, videoUrl: String): String? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        if (videoUrl.isBlank()) return@withContext null
+
+        memoryUrlToCachedPath[videoUrl]?.let { path ->
+            val f = File(path)
+            if (f.exists() && f.length() > 0) return@withContext path
+        }
+
+        val cacheDir = File(context.cacheDir, "video_cache").apply { if (!exists()) mkdirs() }
+        val filename = "gift_vid_" + videoUrl.hashCode().toString() + ".mp4"
+        val targetFile = File(cacheDir, filename)
+
+        if (targetFile.exists() && targetFile.length() > 0) {
+            memoryUrlToCachedPath[videoUrl] = targetFile.absolutePath
+            return@withContext targetFile.absolutePath
+        }
+
+        try {
+            val url = URL(videoUrl)
+            val connection = (url.openConnection() as HttpURLConnection).apply {
+                connectTimeout = 8000
+                readTimeout = 12000
+                instanceFollowRedirects = true
+            }
+            if (connection.responseCode in 200..299) {
+                val tempFile = File(cacheDir, "${filename}.tmp")
+                connection.inputStream.use { input ->
+                    FileOutputStream(tempFile).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                if (tempFile.length() > 0 && tempFile.renameTo(targetFile)) {
+                    memoryUrlToCachedPath[videoUrl] = targetFile.absolutePath
+                    return@withContext targetFile.absolutePath
+                } else if (targetFile.exists() && targetFile.length() > 0) {
+                    memoryUrlToCachedPath[videoUrl] = targetFile.absolutePath
+                    return@withContext targetFile.absolutePath
+                }
+            }
+        } catch (_: Exception) {}
+
+        // Fallback: return remote URL if local caching failed
+        return@withContext videoUrl
+    }
+}
+
+/**
+ * Full-screen silent MP4 video animation using Media3 (ExoPlayer).
+ * Plays exactly once, scales to fit/fill entire screen, and signals onEnded or onError.
+ */
+@OptIn(UnstableApi::class)
+@Composable
+private fun FullscreenMp4Player(
+    videoUrl: String,
+    onEnded: () -> Unit,
+    onError: () -> Unit
+) {
+    val context = LocalContext.current
+    var cachedPath by remember(videoUrl) { mutableStateOf<String?>(null) }
+    var hasError by remember { mutableStateOf(false) }
+
+    LaunchedEffect(videoUrl) {
+        val path = VideoDiskCacheHelper.getCachedOrDownload(context, videoUrl)
+        if (path != null) {
+            cachedPath = path
+        } else {
+            hasError = true
+            onError()
+        }
+    }
+
+    if (hasError) return
+
+    val currentPath = cachedPath ?: return
+
+    val exoPlayer = remember(context, currentPath) {
+        ExoPlayer.Builder(context).build().apply {
+            volume = 0f // Silent playback as requested
+            repeatMode = Player.REPEAT_MODE_OFF
+            val mediaItem = if (currentPath.startsWith("/")) {
+                MediaItem.fromUri(Uri.fromFile(File(currentPath)))
+            } else {
+                MediaItem.fromUri(Uri.parse(currentPath))
+            }
+            setMediaItem(mediaItem)
+            prepare()
+            playWhenReady = true
+        }
+    }
+
+    DisposableEffect(exoPlayer) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) {
+                    onEnded()
+                }
+            }
+
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                hasError = true
+                onError()
+            }
+        }
+        exoPlayer.addListener(listener)
+
+        onDispose {
+            exoPlayer.removeListener(listener)
+            exoPlayer.stop()
+            exoPlayer.release()
+        }
+    }
+
+    AndroidView(
+        factory = { ctx ->
+            PlayerView(ctx).apply {
+                player = exoPlayer
+                useController = false
+                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            }
+        },
+        modifier = Modifier.fillMaxSize()
+    )
+}
+
+/**
  * TIER 3: Grand Expensive Gift Animation (~4.0s)
- * Soft dark backdrop dimming, large pulsing center icon (110dp), 30 falling confetti particles, top banner.
+ * Supports .mp4 via Media3 ExoPlayer, .json via Lottie, .webp/.gif via Coil with disk cache,
+ * and gracefully falls back to the high-impact icon animation on any error or missing asset.
  */
 @Composable
 private fun Tier3GrandAnimation(data: GiftAnimationData) {
-    val animScale = remember { Animatable(0.0f) }
+    var hasMediaError by remember(data.id) { mutableStateOf(false) }
+    val animUrl = (data.animationUrl ?: "").trim()
+
+    val isMp4 = remember(animUrl) {
+        animUrl.endsWith(".mp4", ignoreCase = true) ||
+                animUrl.contains(".mp4?", ignoreCase = true) ||
+                animUrl.contains("/video/upload/", ignoreCase = true)
+    }
+
+    val isLottie = remember(animUrl) {
+        animUrl.endsWith(".json", ignoreCase = true) ||
+                animUrl.contains(".json?", ignoreCase = true)
+    }
+
+    val isAnimatedImage = remember(animUrl) {
+        animUrl.endsWith(".webp", ignoreCase = true) ||
+                animUrl.contains(".webp?", ignoreCase = true) ||
+                animUrl.endsWith(".gif", ignoreCase = true) ||
+                animUrl.contains(".gif?", ignoreCase = true)
+    }
+
     val animAlpha = remember { Animatable(1.0f) }
+    LaunchedEffect(data.id) {
+        delay(3300)
+        animAlpha.animateTo(
+            targetValue = 0.0f,
+            animationSpec = tween(durationMillis = 700, easing = LinearEasing)
+        )
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .graphicsLayer { alpha = animAlpha.value },
+        contentAlignment = Alignment.Center
+    ) {
+        if (!hasMediaError && isMp4 && animUrl.isNotBlank()) {
+            // Full-screen silent MP4 video via Media3
+            FullscreenMp4Player(
+                videoUrl = animUrl,
+                onEnded = {
+                    // When video completes, it gracefully fades away with animAlpha
+                },
+                onError = {
+                    hasMediaError = true
+                }
+            )
+            // Top overlay banner showing sender/recipient
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = 48.dp),
+                contentAlignment = Alignment.TopCenter
+            ) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(100.dp))
+                        .background(Color(0xFFFEF3C7))
+                        .border(2.dp, Color(0xFFFFC527), RoundedCornerShape(100.dp))
+                        .padding(horizontal = 20.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(text = "👑", fontSize = 18.sp)
+                    Text(
+                        text = "${data.senderName} sent ${data.giftName ?: "Gift"} to ${data.recipientName}",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color(0xFF78350F),
+                        textAlign = TextAlign.Center
+                    )
+                    Text(text = "✨", fontSize = 18.sp)
+                }
+            }
+        } else if (!hasMediaError && isLottie && animUrl.isNotBlank()) {
+            // Lottie .json animation with disk caching enabled
+            val composition by rememberLottieComposition(
+                LottieCompositionSpec.Url(animUrl)
+            )
+            val lottieAnimState = animateLottieCompositionAsState(
+                composition = composition,
+                iterations = 1,
+                speed = 1.0f
+            )
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.35f * animAlpha.value)),
+                contentAlignment = Alignment.Center
+            ) {
+                if (composition != null) {
+                    LottieAnimation(
+                        composition = composition,
+                        progress = { lottieAnimState.progress },
+                        modifier = Modifier
+                            .fillMaxSize(0.85f)
+                    )
+                }
+
+                // Top overlay banner
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = 48.dp),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(100.dp))
+                            .background(Color(0xFFFEF3C7))
+                            .border(2.dp, Color(0xFFFFC527), RoundedCornerShape(100.dp))
+                            .padding(horizontal = 20.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(text = "👑", fontSize = 18.sp)
+                        Text(
+                            text = "${data.senderName} sent ${data.giftName ?: "Gift"} to ${data.recipientName}",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF78350F),
+                            textAlign = TextAlign.Center
+                        )
+                        Text(text = "✨", fontSize = 18.sp)
+                    }
+                }
+            }
+        } else if (!hasMediaError && isAnimatedImage && animUrl.isNotBlank()) {
+            // Animated WebP / GIF via Coil with disk cache
+            val context = LocalContext.current
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.35f * animAlpha.value)),
+                contentAlignment = Alignment.Center
+            ) {
+                AsyncImage(
+                    model = ImageRequest.Builder(context)
+                        .data(animUrl)
+                        .diskCachePolicy(CachePolicy.ENABLED)
+                        .memoryCachePolicy(CachePolicy.ENABLED)
+                        .crossfade(true)
+                        .listener(
+                            onError = { _, _ -> hasMediaError = true }
+                        )
+                        .build(),
+                    contentDescription = data.giftName ?: "Gift Animation",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.size(260.dp)
+                )
+
+                // Top overlay banner
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = 48.dp),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(100.dp))
+                            .background(Color(0xFFFEF3C7))
+                            .border(2.dp, Color(0xFFFFC527), RoundedCornerShape(100.dp))
+                            .padding(horizontal = 20.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(text = "👑", fontSize = 18.sp)
+                        Text(
+                            text = "${data.senderName} sent ${data.giftName ?: "Gift"} to ${data.recipientName}",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF78350F),
+                            textAlign = TextAlign.Center
+                        )
+                        Text(text = "✨", fontSize = 18.sp)
+                    }
+                }
+            }
+        } else {
+            // Standard / Fallback Icon Animation with Confetti & Pulsing Crown/Badge
+            Tier3IconFallbackAnimation(data = data, animAlpha = animAlpha)
+        }
+    }
+}
+
+/**
+ * Fallback icon animation: Confetti + Center pulsating icon container + Top banner.
+ */
+@Composable
+private fun Tier3IconFallbackAnimation(
+    data: GiftAnimationData,
+    animAlpha: Animatable<Float, AnimationVector1D>
+) {
+    val animScale = remember { Animatable(0.0f) }
     val pulseScale = rememberInfiniteTransition(label = "pulse").animateFloat(
         initialValue = 1.0f,
         targetValue = 1.08f,
@@ -516,14 +867,6 @@ private fun Tier3GrandAnimation(data: GiftAnimationData) {
         animScale.animateTo(
             targetValue = 1.0f,
             animationSpec = spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMediumLow)
-        )
-    }
-
-    LaunchedEffect(data.id) {
-        delay(3300)
-        animAlpha.animateTo(
-            targetValue = 0.0f,
-            animationSpec = tween(durationMillis = 700, easing = LinearEasing)
         )
     }
 
@@ -554,8 +897,7 @@ private fun Tier3GrandAnimation(data: GiftAnimationData) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.45f * animAlpha.value))
-            .graphicsLayer { alpha = animAlpha.value },
+            .background(Color.Black.copy(alpha = 0.45f * animAlpha.value)),
         contentAlignment = Alignment.Center
     ) {
         // Confetti Canvas

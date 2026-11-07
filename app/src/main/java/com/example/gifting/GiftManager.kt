@@ -26,6 +26,10 @@ object GiftManager {
     private val _walletBalance = MutableStateFlow(100)
     val walletBalance: StateFlow<Int> = _walletBalance.asStateFlow()
 
+    fun updateWalletBalance(newBalance: Int) {
+        _walletBalance.value = newBalance
+    }
+
     private val _catalog = MutableStateFlow<List<GiftCatalogItem>>(emptyList())
     val catalog: StateFlow<List<GiftCatalogItem>> = _catalog.asStateFlow()
 

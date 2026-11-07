@@ -177,6 +177,7 @@ fun UserProfileFeedScreen(
     // -------------------------------------------------------------------------
     LaunchedEffect(userId) {
         if (userId.isBlank()) return@LaunchedEffect
+        com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, listOf(userId))
 
         val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
             ?: SupabaseSessionManager.getBearerToken(context)
@@ -667,7 +668,9 @@ fun UserProfileFeedScreen(
                             size = 80.dp,
                             isSpeaking = false,
                             isOnline = isOnline,
-                            countryCode = currentCountryCode
+                            countryCode = currentCountryCode,
+                            userId = userId,
+                            enableFrameAnimation = true
                         )
                     }
                 }
@@ -689,11 +692,12 @@ fun UserProfileFeedScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text(
-                            text = currentProfileName.ifBlank { "User" },
+                        com.example.store.DecoratedUserName(
+                            userId = userId,
+                            name = currentProfileName.ifBlank { "User" },
                             fontSize = 24.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF0F172A)
+                            defaultColor = Color(0xFF0F172A)
                         )
 
                         if (isVerified) {
