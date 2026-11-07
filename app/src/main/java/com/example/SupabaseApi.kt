@@ -191,7 +191,8 @@ data class SupabaseRoomMessage(
     val user_id: String? = null,
     val message: String? = null,
     val created_at: String? = null,
-    val message_type: String? = null
+    val message_type: String? = null,
+    val payload: Map<String, Any?>? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -1310,6 +1311,13 @@ interface SupabaseApi {
         @Body body: SendGiftRequest
     ): Response<ResponseBody>
 
+    @POST("rest/v1/rpc/send_room_gift")
+    suspend fun sendRoomGift(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: SendRoomGiftRequest
+    ): Response<ResponseBody>
+
     @GET("rest/v1/gift_transactions?select=*&order=created_at.desc")
     suspend fun getGiftTransactions(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
@@ -1875,6 +1883,7 @@ data class GiftCatalogItem(
     val icon_url: String = "",
     val price_coins: Int = 0,
     val is_active: Boolean = true,
+    val sort_order: Int? = null,
     val created_at: String? = null
 )
 
@@ -1883,6 +1892,23 @@ data class SendGiftRequest(
     val p_recipient_id: String,
     val p_gift_id: String,
     val p_message: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class SendRoomGiftRequest(
+    val p_room_id: String,
+    val p_recipient_id: String,
+    val p_gift_id: String,
+    val p_quantity: Int = 1
+)
+
+@JsonClass(generateAdapter = true)
+data class SendRoomGiftResponse(
+    val ok: Boolean = false,
+    val remaining_balance: Int? = null,
+    val coins_spent: Int? = null,
+    val message_id: String? = null,
+    val error: String? = null
 )
 
 @JsonClass(generateAdapter = true)

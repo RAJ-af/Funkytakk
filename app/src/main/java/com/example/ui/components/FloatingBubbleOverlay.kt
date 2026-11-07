@@ -159,7 +159,7 @@ fun FloatingBubbleOverlay(
                 },
                 onLeaveRoom = {
                     isOptionsOpen = false
-                    viewModel.leaveRoom(context)
+                    viewModel.leaveRoom(context, trigger = "floating_bubble_leave_button")
                 }
             )
         }

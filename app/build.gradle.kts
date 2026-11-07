@@ -13,7 +13,7 @@ android {
 
   defaultConfig {
     applicationId = "com.funkytalk.app"
-    minSdk = 30
+    minSdk = 28
     targetSdk = 36
     versionCode = 11
     versionName = "2.0"

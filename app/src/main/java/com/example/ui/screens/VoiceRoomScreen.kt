@@ -22,6 +22,11 @@ import com.example.ReportSpeakerLogItem
 import com.example.RoomEndSummaryResponse
 import com.example.repository.EncryptedChatRepository
 import com.example.ui.screens.chat.DirectChatScreen
+import com.example.ui.screens.voiceroom.GiftAnimationData
+import com.example.ui.screens.voiceroom.GiftAnimationManager
+import com.example.ui.screens.voiceroom.GiftAnimationOverlay
+import com.example.ui.screens.voiceroom.GiftReceiverUser
+import com.example.ui.screens.voiceroom.RoomGiftBottomSheet
 import com.google.firebase.auth.FirebaseAuth
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
@@ -336,8 +341,35 @@ data class ChillRoomMessage(
     val id: String? = null,
     val userId: String? = null,
     val createdAt: String? = null,
-    val messageType: String? = "chat"
+    val messageType: String? = "chat",
+    val iconUrl: String? = null,
+    val senderNameBold: String? = null,
+    val recipientNameBold: String? = null
 )
+
+fun parseGiftDetails(
+    rawMessage: String,
+    payloadObj: org.json.JSONObject? = null,
+    payloadMap: Map<*, *>? = null
+): Triple<String?, String?, String?> {
+    val iconUrl = payloadObj?.optString("icon_url")?.ifBlank { null }
+        ?: payloadMap?.get("icon_url")?.toString()?.ifBlank { null }
+
+    var sender = payloadObj?.optString("sender_name")?.ifBlank { null }
+        ?: payloadMap?.get("sender_name")?.toString()?.ifBlank { null }
+
+    var recipient = payloadObj?.optString("recipient_name")?.ifBlank { null }
+        ?: payloadMap?.get("recipient_name")?.toString()?.ifBlank { null }
+
+    if (sender == null && rawMessage.contains(" sent ", ignoreCase = true)) {
+        sender = rawMessage.substringBefore(" sent ").trim().ifBlank { null }
+    }
+    if (recipient == null && rawMessage.contains(" to ", ignoreCase = true)) {
+        recipient = rawMessage.substringAfterLast(" to ").trim().ifBlank { null }
+    }
+
+    return Triple(iconUrl, sender, recipient)
+}
 
 data class PrivateChatItem(
     val id: String,
@@ -884,11 +916,17 @@ fun VoiceRoomScreen(
                         Log.d("VoiceRoomScreen", "[InitialFetch] Message: id=${msg.id}, type=${msg.message_type}, text='${msg.message}', userId=${msg.user_id}, createdAt=${msg.created_at}")
                         val rawType = msg.message_type
                         val isSystem = rawType?.equals("system", ignoreCase = true) == true
+                        val isGift = rawType?.equals("gift", ignoreCase = true) == true
                         val p = supabaseProfiles.find { it.uid == msg.user_id }
                         val isMe = (msg.user_id == currentUserId)
                         val name = if (isMe) (p?.displayName ?: "You") else (p?.displayName ?: p?.username ?: "User")
                         val avatar = p?.avatar ?: (if (isMe) "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200" else "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400")
                         val badge = if (msg.user_id == roomHostId) "Host" else null
+
+                        val (iconUrl, senderBold, recipientBold) = if (isGift) {
+                            parseGiftDetails(msg.message ?: "", payloadMap = msg.payload)
+                        } else Triple(null, null, null)
+
                         ChillRoomMessage(
                             senderName = name,
                             senderImageUrl = avatar,
@@ -898,7 +936,10 @@ fun VoiceRoomScreen(
                             id = msg.id,
                             userId = msg.user_id,
                             createdAt = msg.created_at,
-                            messageType = if (isSystem) "system" else (rawType ?: "chat")
+                            messageType = if (isSystem) "system" else if (isGift) "gift" else (rawType ?: "chat"),
+                            iconUrl = iconUrl,
+                            senderNameBold = senderBold,
+                            recipientNameBold = recipientBold
                         )
                     }
                     withContext(Dispatchers.Main) {
@@ -1102,7 +1143,21 @@ fun VoiceRoomScreen(
                             val createdAt = record.optString("created_at")
                             val msgType = record.optString("message_type")
                             val isSystem = msgType.equals("system", ignoreCase = true)
-                            val messageType = if (isSystem) "system" else if (msgType.isNullOrBlank()) "chat" else msgType
+                            val isGift = msgType.equals("gift", ignoreCase = true)
+
+                            // Only process system and gift messages from postgres_changes to rely on Realtime Broadcast for user messages
+                            if (isSystem || isGift) {
+
+                            val messageType = if (isSystem) "system" else if (isGift) "gift" else if (msgType.isNullOrBlank()) "chat" else msgType
+
+                            val rawPayload = record.opt("payload")
+                            val payloadObj = if (rawPayload is org.json.JSONObject) rawPayload else if (rawPayload is String) {
+                                try { org.json.JSONObject(rawPayload) } catch (_: Exception) { null }
+                            } else null
+
+                            val (iconUrl, senderBold, recipientBold) = if (isGift) {
+                                parseGiftDetails(text, payloadObj = payloadObj)
+                            } else Triple(null, null, null)
 
                             if (isSystem || text.contains("joined the room", ignoreCase = true) || text.contains("left the room", ignoreCase = true)) {
                                 if (text.contains("joined the room", ignoreCase = true) && userId.isNotBlank() && userId != "anon_user" && userId != "System") {
@@ -1153,13 +1208,44 @@ fun VoiceRoomScreen(
                                             id = msgId,
                                             userId = userId,
                                             createdAt = createdAt,
-                                            messageType = messageType
+                                            messageType = messageType,
+                                            iconUrl = iconUrl,
+                                            senderNameBold = senderBold,
+                                            recipientNameBold = recipientBold
                                         )
                                     )
+
+                                    if (isGift) {
+                                        val tier = payloadObj?.optInt("animation_tier", 0)?.takeIf { it > 0 }
+                                            ?: payloadObj?.optInt("tier", 0)?.takeIf { it > 0 }
+                                            ?: when {
+                                                text.contains("Crown", ignoreCase = true) || text.contains("Diamond", ignoreCase = true) || text.contains("Cake", ignoreCase = true) || text.contains("Firework", ignoreCase = true) -> 3
+                                                text.contains("Teddy", ignoreCase = true) || text.contains("Rose", ignoreCase = true) -> 2
+                                                else -> 1
+                                            }
+                                        val qty = payloadObj?.optInt("quantity", 1)?.coerceAtLeast(1) ?: 1
+                                        val sName = senderBold ?: name
+                                        val rName = recipientBold ?: "Friend"
+                                        val rId = payloadObj?.optString("recipient_id")
+
+                                        val animData = GiftAnimationData(
+                                            id = msgId.ifBlank { java.util.UUID.randomUUID().toString() },
+                                            iconUrl = iconUrl ?: "",
+                                            animationTier = tier,
+                                            animationUrl = payloadObj?.optString("animation_url"),
+                                            quantity = qty,
+                                            senderName = sName,
+                                            recipientName = rName,
+                                            recipientId = rId,
+                                            giftName = payloadObj?.optString("gift_name")
+                                        )
+                                        GiftAnimationManager.enqueueAnimation(animData, context)
+                                    }
                                 }
                             }
                         }
                     }
+                }
                 }
                 is RealtimeTableEvent.ModerationActionEnforced -> {
                     val mySupabaseUid = currentUserId.ifBlank { SupabaseSessionManager.getUserId(context) ?: "" }
@@ -1419,6 +1505,7 @@ fun VoiceRoomScreen(
                 Log.d("HostSpeakerRequests", "ON_RESUME event: isHost=$isHost, uid=$uid, hostId=$roomHostId, roomId=$activeRoomId")
                 viewModel?.refreshActiveRoomSpeakers(activeRoomId, context)
                 if (isHost) {
+                    viewModel?.hostRejoinVoiceRoom(activeRoomId, context, trigger = "on_resume_screen_reopen")
                     viewModel?.checkPendingSpeakerRequestsForHost(activeRoomId, context)
                 } else {
                     viewModel?.checkMySpeakerRequest(activeRoomId, context)
@@ -1497,6 +1584,7 @@ fun VoiceRoomScreen(
     
     // Gift Sheet State Variables
     var showGiftSheet by remember { mutableStateOf(false) }
+    var giftTargetUserId by remember { mutableStateOf<String?>(null) }
     var selectedGift by remember { mutableStateOf(giftItemsList[0]) }
     var userCoins by remember { mutableStateOf(1250) }
     var selectedGiftTargetUser by remember { mutableStateOf("Riya") }
@@ -2211,7 +2299,7 @@ fun VoiceRoomScreen(
                                     if (isCurrentUserHost) {
                                         showHostLeaveDialog = true
                                     } else {
-                                        viewModel?.leaveRoom(context)
+                                        viewModel?.leaveRoom(context, trigger = "user_leave_button")
                                         onBack()
                                     }
                                 },
@@ -2787,7 +2875,10 @@ fun VoiceRoomScreen(
                             currentTheme.cardBorderColor,
                             CircleShape
                         )
-                        .clickable { showGiftSheet = true },
+                        .clickable {
+                            giftTargetUserId = null
+                            showGiftSheet = true
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     CustomGiftBoxIcon(tint = Color(0xFFEC4899), modifier = Modifier.size(24.dp))
@@ -2960,6 +3051,17 @@ fun VoiceRoomScreen(
                     tint = inactiveIconTint,
                     onClick = { showReactionsBar = !showReactionsBar }
                 )
+
+                VoiceBottomBarItem(
+                    icon = { CustomGiftBoxIcon(tint = Color(0xFFEC4899), modifier = Modifier.size(24.dp)) },
+                    label = "Gift",
+                    tint = Color(0xFFEC4899),
+                    onClick = {
+                        giftTargetUserId = null
+                        showGiftSheet = true
+                    }
+                )
+
                 var showMoreFeaturesSheet by remember { mutableStateOf(false) }
                 VoiceBottomBarItem(
                     icon = { CustomGridMoreIcon(tint = inactiveIconTint, modifier = Modifier.size(22.dp)) },
@@ -3328,45 +3430,71 @@ fun VoiceRoomScreen(
         }
     }
 
-    // 1) Gift Bottom Sheet container
-    @OptIn(ExperimentalMaterial3Api::class)
-    if (showGiftSheet) {
-        val currentTheme = roomThemes[selectedThemeIndex]
-        ModalBottomSheet(
-            onDismissRequest = { showGiftSheet = false },
-            containerColor = currentTheme.startColor,
-            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-            dragHandle = {
-                BottomSheetDefaults.DragHandle(
-                    color = if (currentTheme.isDark) Color.White.copy(alpha = 0.3f) else Color.Gray.copy(alpha = 0.3f)
+    val giftReceiversList = remember(participantsData, supabaseProfiles, roomHostId, hostSeat, speakerSeats) {
+        val list = mutableListOf<GiftReceiverUser>()
+        val hUid = hostSeat.userId.ifBlank { roomHostId ?: "" }
+        if (hUid.isNotBlank()) {
+            list.add(
+                GiftReceiverUser(
+                    userId = hUid,
+                    name = hostSeat.name,
+                    avatarUrl = hostSeat.imageUrl,
+                    countryCode = hostSeat.flagCode,
+                    role = "host"
                 )
-            }
-        ) {
-            GiftBottomSheetContent(
-                selectedThemeIndex = selectedThemeIndex,
-                coins = userCoins,
-                selectedGift = selectedGift,
-                onSelectedGiftChange = { selectedGift = it },
-                onCoinsChange = { userCoins = it },
-                selectedTarget = selectedGiftTargetUser,
-                onTargetChange = { selectedGiftTargetUser = it },
-                multiplier = selectedGiftMultiplier,
-                onMultiplierChange = { selectedGiftMultiplier = it },
-                isChangingGift = isChangingGift,
-                onChangingGiftChange = { isChangingGift = it },
-                onDismiss = { showGiftSheet = false },
-                onGiftSent = { gift, target, mult ->
-                    val finalCost = gift.cost * mult
-                    if (userCoins >= finalCost) {
-                        userCoins -= finalCost
-                        Toast.makeText(context, "Sent $mult ${gift.name} to $target successfully! 🎁", Toast.LENGTH_LONG).show()
-                    } else {
-                        Toast.makeText(context, "Insufficient Coins! Tap + icon to add coins.", Toast.LENGTH_LONG).show()
-                    }
-                    showGiftSheet = false
-                }
             )
         }
+        speakerSeats.forEach { sp ->
+            if (sp.userId.isNotBlank()) {
+                list.add(
+                    GiftReceiverUser(
+                        userId = sp.userId,
+                        name = sp.name,
+                        avatarUrl = sp.imageUrl,
+                        countryCode = sp.flagCode,
+                        role = "speaker"
+                    )
+                )
+            }
+        }
+        participantsData.filter { p ->
+            p.user_id != hUid && speakerSeats.none { it.userId == p.user_id }
+        }.forEach { p ->
+            val pProfile = supabaseProfiles.find { it.uid == p.user_id }
+            val snippet = com.example.realtime.VoiceRoomRealtimeManager.getUserSnippet(p.user_id)
+            val name = pProfile?.displayName?.ifBlank { null }
+                ?: pProfile?.username?.ifBlank { null }
+                ?: snippet?.name?.ifBlank { null }
+                ?: "Listener"
+            val avatar = pProfile?.avatar?.ifBlank { null } ?: snippet?.avatar
+            val flagCode = pProfile?.countryCode?.ifBlank { null } ?: snippet?.countryCode ?: "in"
+            list.add(
+                GiftReceiverUser(
+                    userId = p.user_id,
+                    name = name,
+                    avatarUrl = avatar,
+                    countryCode = flagCode,
+                    role = "listener"
+                )
+            )
+        }
+        list.distinctBy { it.userId }
+    }
+
+    // 1) Gift Bottom Sheet container
+    if (showGiftSheet) {
+        RoomGiftBottomSheet(
+            roomId = activeRoomId,
+            currentUserId = currentUserId,
+            initialRecipientId = giftTargetUserId,
+            participants = giftReceiversList,
+            isDarkMode = isRoomDarkMode,
+            onDismiss = { showGiftSheet = false },
+            onGiftSentSuccess = { giftName, recipientName, qty, coinsSpent ->
+                // Ephemeral notification Toast
+                Toast.makeText(context, "🎁 Sent $qty $giftName to $recipientName!", Toast.LENGTH_SHORT).show()
+            }
+        )
     }
 
     // Suspension Modal Dialog (Active moderation enforcement)
@@ -3439,7 +3567,7 @@ fun VoiceRoomScreen(
             onDismiss = { showHostLeaveDialog = false },
             onLeaveOnly = {
                 showHostLeaveDialog = false
-                viewModel?.hostLeaveRoomOnly(context) {
+                viewModel?.hostLeaveRoomOnly(context, trigger = "host_leave_only_dialog") {
                     if (com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
                         com.example.service.VoiceRoomOverlayManager.startServiceIfPermitted(context)
                     }
@@ -3737,6 +3865,12 @@ fun VoiceRoomScreen(
             )
         }
     }
+
+    // Gift Animation Overlay (Non-blocking touch overlay for room animations)
+    GiftAnimationOverlay(
+        hostUserId = roomHostId,
+        speakerUserIds = speakerSeats.map { it.userId }
+    )
 }
 
 @Composable
@@ -5371,391 +5505,6 @@ fun GiftIconRepresentation(name: String, modifier: Modifier = Modifier) {
                     close()
                 }
                 drawPath(starPath, color = Color.White)
-            }
-        }
-    }
-}
-
-@Composable
-fun GiftBottomSheetContent(
-    selectedThemeIndex: Int,
-    coins: Int,
-    selectedGift: GiftItem,
-    onSelectedGiftChange: (GiftItem) -> Unit,
-    onCoinsChange: (Int) -> Unit,
-    selectedTarget: String,
-    onTargetChange: (String) -> Unit,
-    multiplier: Int,
-    onMultiplierChange: (Int) -> Unit,
-    isChangingGift: Boolean,
-    onChangingGiftChange: (Boolean) -> Unit,
-    onDismiss: () -> Unit,
-    onGiftSent: (GiftItem, String, Int) -> Unit
-) {
-    val currentTheme = roomThemes[selectedThemeIndex]
-    val textColor = if (currentTheme.isDark) Color.White else Color.Black
-    val secondaryTextColor = if (currentTheme.isDark) Color.White.copy(alpha = 0.5f) else Color.Gray
-
-    var subTabSelected by remember { mutableStateOf(0) } // 0 = Gifts, 1 = Backpack
-    var showMultiplierOptions by remember { mutableStateOf(false) }
-
-    val backpackItems = listOf(
-        GiftItem("Free Rose", 0, ""),
-        GiftItem("Lucky Clover", 0, ""),
-        GiftItem("Star Shard", 0, ""),
-        GiftItem("Magic Sticker", 0, ""),
-        GiftItem("Event Heart", 0, "")
-    )
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .fillMaxHeight(0.7f)
-            .background(if (currentTheme.isDark) Color(0xFF111827) else Color.White)
-            .padding(vertical = 12.dp, horizontal = 16.dp)
-    ) {
-        // "To" Row
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "To",
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold,
-                color = textColor,
-                modifier = Modifier.padding(end = 12.dp)
-            )
-
-            Row(
-                modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                val targets = listOf(
-                    "Riya" to Triple("https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400", "🇮🇳", "1"),
-                    "Sara" to Triple("https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=400", "🇵🇰", "2"),
-                    "Ananya" to Triple("https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400", "🇮🇳", "3"),
-                    "Arjun" to Triple("https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400", "🇮🇳", "4"),
-                    "Meera" to Triple("https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400", "🇺🇸", "5"),
-                    "Vihaan" to Triple("https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400", "🇯🇵", "6")
-                )
-
-                targets.forEach { (name, info) ->
-                    val isSel = selectedTarget == name
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.clickable { onTargetChange(name) }
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .border(
-                                    2.dp,
-                                    if (isSel) Color(0xFFFBBF24) else Color.Transparent,
-                                    CircleShape
-                                )
-                                .padding(if (isSel) 3.dp else 0.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            AsyncImage(
-                                model = info.first,
-                                contentDescription = name,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .clip(CircleShape)
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .offset(x = 1.dp, y = 1.dp)
-                                    .size(12.dp)
-                                    .background(if (currentTheme.isDark) Color(0xFF1E293B) else Color.White, CircleShape)
-                                    .padding(0.5.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CircleFlag(
-                                    countryCode = mapFlagEmojiToCode(info.second),
-                                    modifier = Modifier.fillMaxSize().clip(CircleShape)
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Box(
-                            modifier = Modifier
-                                .background(if (isSel) Color(0xFFFBBF24) else Color(0xFFF3F4F6), RoundedCornerShape(100.dp))
-                                .padding(horizontal = 8.dp, vertical = 1.dp)
-                        ) {
-                            Text(
-                                text = info.third,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isSel) Color(0xFF78350F) else Color.Gray
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            // Select ALL Speakers Button
-            val isAllSel = selectedTarget == "All Speakers"
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .background(if (isAllSel) Color(0xFFEC4899) else Color.Transparent, RoundedCornerShape(100.dp))
-                    .border(1.dp, if (isAllSel) Color.Transparent else Color(0xFFE5E5EA), RoundedCornerShape(100.dp))
-                    .clickable { onTargetChange("All Speakers") }
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-            ) {
-                Text(
-                    text = "ALL", 
-                    fontSize = 11.sp, 
-                    fontWeight = FontWeight.Bold, 
-                    color = if (isAllSel) Color.White else textColor
-                )
-            }
-        }
-
-        // Subtabs: Gifts vs Backpack
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(vertical = 4.dp)
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier
-                    .clickable { subTabSelected = 0 }
-                    .padding(end = 24.dp)
-            ) {
-                Text(
-                    text = "Gifts", 
-                    fontSize = 16.sp, 
-                    fontWeight = FontWeight.Bold, 
-                    color = if (subTabSelected == 0) Color(0xFFF59E0B) else Color.Gray
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Box(
-                    modifier = Modifier
-                        .width(28.dp)
-                        .height(2.5.dp)
-                        .background(if (subTabSelected == 0) Color(0xFFF59E0B) else Color.Transparent, RoundedCornerShape(100.dp))
-                )
-            }
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.clickable { subTabSelected = 1 }
-            ) {
-                Text(
-                    text = "Backpack", 
-                    fontSize = 16.sp, 
-                    fontWeight = FontWeight.Bold, 
-                    color = if (subTabSelected == 1) Color(0xFFF59E0B) else Color.Gray
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Box(
-                    modifier = Modifier
-                        .width(28.dp)
-                        .height(2.5.dp)
-                        .background(if (subTabSelected == 1) Color(0xFFF59E0B) else Color.Transparent, RoundedCornerShape(100.dp))
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(6.dp))
-        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(if (currentTheme.isDark) Color.White.copy(alpha = 0.05f) else Color(0xFFF3F4F6)))
-        Spacer(modifier = Modifier.height(10.dp))
-
-        val activeGiftList = if (subTabSelected == 0) giftItemsList else backpackItems
-
-        // Horizontal swipable/scrollable list of gifts utilizing custom HorizontalPager state
-        val itemsPerPage = 4
-        val pagesCount = (activeGiftList.size + itemsPerPage - 1) / itemsPerPage
-        val pagerState = androidx.compose.foundation.pager.rememberPagerState(pageCount = { pagesCount })
-
-        androidx.compose.foundation.pager.HorizontalPager(
-            state = pagerState,
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            verticalAlignment = Alignment.CenterVertically
-        ) { pageIndex ->
-            val startIndex = pageIndex * itemsPerPage
-            val endIndex = minOf(startIndex + itemsPerPage, activeGiftList.size)
-            val pageItems = activeGiftList.subList(startIndex, endIndex)
-
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                pageItems.forEach { gift ->
-                    val isSel = selectedGift.name == gift.name
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (currentTheme.isDark) Color(0xFF1F2937) else Color(0xFFF9FAFB))
-                            .border(
-                                1.5.dp,
-                                if (isSel) Color(0xFFFBBF24) else Color.Transparent,
-                                RoundedCornerShape(12.dp)
-                            )
-                            .clickable { onSelectedGiftChange(gift) }
-                            .padding(vertical = 12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        GiftIconRepresentation(name = gift.name, modifier = Modifier.size(46.dp))
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(text = gift.name, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = textColor, maxLines = 1)
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (gift.cost > 0) {
-                                CuteCoinIcon(modifier = Modifier.size(10.dp))
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Text(text = gift.cost.toString(), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = secondaryTextColor)
-                            } else {
-                                Text(
-                                    text = "FREE", 
-                                    fontSize = 10.sp, 
-                                    fontWeight = FontWeight.Bold, 
-                                    color = Color(0xFF10B981)
-                                )
-                            }
-                        }
-                    }
-                }
-                
-                // Pad with empty cells on the last page if needed
-                repeat(itemsPerPage - pageItems.size) {
-                    Box(modifier = Modifier.weight(1f))
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        // Dynamic indication dots
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-            horizontalArrangement = Arrangement.Center
-        ) {
-            repeat(pagesCount) { index ->
-                val active = pagerState.currentPage == index
-                Box(
-                    modifier = Modifier
-                        .padding(horizontal = 3.dp)
-                        .size(6.5.dp)
-                        .background(if (active) Color(0xFFFBBF24) else Color(0xFFE5E5EA), CircleShape)
-                )
-            }
-        }
-
-        // Multiplier sliding tray
-        if (showMultiplierOptions) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp)
-                    .background(if (currentTheme.isDark) Color(0xFF1F2937) else Color(0xFFFFFBEB), RoundedCornerShape(100.dp))
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                val options = listOf(1, 10, 30, 40, 60, 70)
-                options.forEach { opt ->
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .background(if (multiplier == opt) Color(0xFFFBBF24) else Color.Transparent, CircleShape)
-                            .clickable {
-                                onMultiplierChange(opt)
-                                showMultiplierOptions = false
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = opt.toString(),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (multiplier == opt) Color(0xFF78350F) else textColor
-                        )
-                    }
-                }
-            }
-        }
-
-        // Footer block
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Coin count display
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .background(if (currentTheme.isDark) Color.White.copy(alpha = 0.1f) else Color(0xFFF9FAFB), RoundedCornerShape(100.dp))
-                    .border(1.dp, if (currentTheme.isDark) Color.White.copy(alpha = 0.05f) else Color(0xFFE5E5EA), RoundedCornerShape(100.dp))
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-            ) {
-                CuteCoinIcon(modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = String.format("%,d", coins),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = textColor
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "+", 
-                    fontSize = 16.sp, 
-                    fontWeight = FontWeight.Medium, 
-                    color = secondaryTextColor, 
-                    modifier = Modifier.clickable { onCoinsChange(coins + 500) }
-                )
-            }
-
-            // Send with Multiplier trigger
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .background(if (currentTheme.isDark) Color.White.copy(alpha = 0.05f) else Color.White, RoundedCornerShape(100.dp))
-                    .border(1.dp, Color(0xFFF59E0B), RoundedCornerShape(100.dp))
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .clickable { showMultiplierOptions = !showMultiplierOptions }
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Text(text = multiplier.toString(), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = textColor)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Canvas(modifier = Modifier.size(8.dp)) {
-                        val w = size.width
-                        val h = size.height
-                        val path = Path().apply {
-                            moveTo(w * 0.1f, h * 0.8f)
-                            lineTo(w * 0.5f, h * 0.4f)
-                            lineTo(w * 0.9f, h * 0.8f)
-                        }
-                        drawPath(path, color = textColor, style = Stroke(width = w * 0.12f, cap = StrokeCap.Round, join = StrokeJoin.Round))
-                    }
-                }
-                
-                Box(
-                    modifier = Modifier
-                        .background(Color(0xFFF59E0B), RoundedCornerShape(100.dp))
-                        .clickable { onGiftSent(selectedGift, selectedTarget, multiplier) }
-                        .padding(horizontal = 20.dp, vertical = 10.dp)
-                ) {
-                    Text(text = "Send", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF78350F))
-                }
             }
         }
     }

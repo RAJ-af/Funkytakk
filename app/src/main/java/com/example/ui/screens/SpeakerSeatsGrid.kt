@@ -31,6 +31,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import com.example.ui.screens.voiceroom.SeatPositionRegistry
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -338,6 +340,14 @@ fun VoiceSpeakerItem(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .width(if (speaker.isCenter) 100.dp else 86.dp)
+            .onGloballyPositioned { coords ->
+                if (speaker.userId.isNotBlank()) {
+                    SeatPositionRegistry.updatePosition(speaker.userId, coords)
+                }
+                if (speaker.name.isNotBlank()) {
+                    SeatPositionRegistry.updatePosition(speaker.name, coords)
+                }
+            }
             .clickable { onClick() }
     ) {
         Box(contentAlignment = Alignment.Center) {

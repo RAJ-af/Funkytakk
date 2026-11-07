@@ -854,18 +854,21 @@ fun HomeScreen(
 
                         var targetRoomId: String? = null
                         var targetRoomTitle: String? = null
+                        var targetHostId: String? = null
 
                         if (response.isSuccessful && rawBody.isNotBlank() && rawBody != "null") {
                             if (rawBody.startsWith("{")) {
                                 val json = org.json.JSONObject(rawBody)
                                 targetRoomId = json.optString("room_id").ifBlank { json.optString("id") }
                                 targetRoomTitle = json.optString("title").ifBlank { "Voice Room" }
+                                targetHostId = json.optString("host_id").ifBlank { null }
                             } else if (rawBody.startsWith("[")) {
                                 val array = org.json.JSONArray(rawBody)
                                 if (array.length() > 0) {
                                     val json = array.getJSONObject(0)
                                     targetRoomId = json.optString("room_id").ifBlank { json.optString("id") }
                                     targetRoomTitle = json.optString("title").ifBlank { "Voice Room" }
+                                    targetHostId = json.optString("host_id").ifBlank { null }
                                 }
                             }
                         }
@@ -877,7 +880,7 @@ fun HomeScreen(
                                 showJoinCodeDialog = false
                                 joinCodeInputText = ""
                                 Toast.makeText(context, "Entering $finalTitle...", Toast.LENGTH_SHORT).show()
-                                viewModel.joinRoom(targetRoomId, finalTitle, context)
+                                viewModel.joinRoom(targetRoomId, finalTitle, context, hostId = targetHostId)
                                 onRoomClick()
                             } else {
                                 Toast.makeText(context, "Invalid or expired room passcode.", Toast.LENGTH_LONG).show()

@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -21,7 +22,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -110,7 +114,94 @@ fun RoomChatPanel(
                 key = { it.id?.takeIf { k -> k.isNotBlank() } ?: "${it.userId}_${it.text}_${it.createdAt}_${it.messageType}_${it.hashCode()}" }
             ) { msg ->
                 val isSystem = msg.messageType?.equals("system", ignoreCase = true) == true
-                if (isSystem) {
+                val isGift = msg.messageType?.equals("gift", ignoreCase = true) == true
+
+                if (isGift) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(
+                                    if (currentTheme.isDark) Color(0xFF2C2219).copy(alpha = 0.85f)
+                                    else Color(0xFFFEF3C7).copy(alpha = 0.9f)
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    color = if (currentTheme.isDark) Color(0xFFFFB800).copy(alpha = 0.35f) else Color(0xFFFDE68A),
+                                    shape = RoundedCornerShape(16.dp)
+                                )
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            if (!msg.iconUrl.isNullOrBlank()) {
+                                AsyncImage(
+                                    model = msg.iconUrl,
+                                    contentDescription = "Gift",
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            } else {
+                                Text(text = "🎁", fontSize = 15.sp)
+                            }
+
+                            val boldColor = if (currentTheme.isDark) Color(0xFFFFD54F) else Color(0xFFD97706)
+                            val textColor = if (currentTheme.isDark) Color(0xFFF8FAFC) else Color(0xFF1E293B)
+
+                            val annotatedGiftText = buildAnnotatedString {
+                                val fullText = msg.text
+                                val sender = msg.senderNameBold
+                                val recipient = msg.recipientNameBold
+
+                                if (!sender.isNullOrBlank() && fullText.contains(sender)) {
+                                    val sIdx = fullText.indexOf(sender)
+                                    val beforeSender = fullText.substring(0, sIdx)
+                                    withStyle(SpanStyle(color = textColor, fontWeight = FontWeight.Normal, fontSize = 12.sp)) {
+                                        append(beforeSender)
+                                    }
+                                    withStyle(SpanStyle(color = boldColor, fontWeight = FontWeight.Bold, fontSize = 12.5.sp)) {
+                                        append(sender)
+                                    }
+
+                                    val afterSender = fullText.substring(sIdx + sender.length)
+                                    if (!recipient.isNullOrBlank() && afterSender.contains(recipient)) {
+                                        val rIdx = afterSender.indexOf(recipient)
+                                        val between = afterSender.substring(0, rIdx)
+                                        val afterRecipient = afterSender.substring(rIdx + recipient.length)
+
+                                        withStyle(SpanStyle(color = textColor, fontWeight = FontWeight.Normal, fontSize = 12.sp)) {
+                                            append(between)
+                                        }
+                                        withStyle(SpanStyle(color = boldColor, fontWeight = FontWeight.Bold, fontSize = 12.5.sp)) {
+                                            append(recipient)
+                                        }
+                                        withStyle(SpanStyle(color = textColor, fontWeight = FontWeight.Normal, fontSize = 12.sp)) {
+                                            append(afterRecipient)
+                                        }
+                                    } else {
+                                        withStyle(SpanStyle(color = textColor, fontWeight = FontWeight.Normal, fontSize = 12.sp)) {
+                                            append(afterSender)
+                                        }
+                                    }
+                                } else {
+                                    withStyle(SpanStyle(color = textColor, fontWeight = FontWeight.Medium, fontSize = 12.sp)) {
+                                        append(fullText)
+                                    }
+                                }
+                            }
+
+                            Text(
+                                text = annotatedGiftText,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+                    }
+                } else if (isSystem) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()

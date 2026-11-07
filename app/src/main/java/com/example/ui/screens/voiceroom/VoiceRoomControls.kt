@@ -8,6 +8,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Mic
@@ -36,6 +37,7 @@ fun VoiceRoomControls(
     onOpenChat: () -> Unit,
     onOpenPeople: () -> Unit,
     onOpenReactions: () -> Unit,
+    onOpenGift: () -> Unit = {},
     onLeaveRoom: () -> Unit
 ) {
     val barBg = if (isDarkMode) Color.Black.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.9f)
@@ -146,6 +148,30 @@ fun VoiceRoomControls(
                     contentDescription = "Reactions",
                     tint = iconColor,
                     modifier = Modifier.size(20.dp)
+                )
+            }
+
+            // Gift Button
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (isDarkMode) Color(0xFFEC4899).copy(alpha = 0.2f) else Color(0xFFFDF2F8)
+                    )
+                    .border(
+                        1.dp,
+                        if (isDarkMode) Color(0xFFEC4899).copy(alpha = 0.4f) else Color(0xFFFCE7F3),
+                        CircleShape
+                    )
+                    .clickable { onOpenGift() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.CardGiftcard,
+                    contentDescription = "Send Gift",
+                    tint = Color(0xFFEC4899),
+                    modifier = Modifier.size(22.dp)
                 )
             }
 

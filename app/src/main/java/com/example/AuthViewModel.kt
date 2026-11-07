@@ -940,21 +940,42 @@ class AuthViewModel : ViewModel() {
             roomId = roomId,
             roomTitle = title,
             avatarUrl = userAvatar,
-            isMicEnabled = (role == "speaker")
+            isMicEnabled = (role == "speaker" || role == "host")
         )
         com.example.service.VoiceRoomOverlayManager.onToggleMicAction = { toggleMic(context) }
-        com.example.service.VoiceRoomOverlayManager.onLeaveRoomAction = { leaveRoom(context) }
+        com.example.service.VoiceRoomOverlayManager.onLeaveRoomAction = { leaveRoom(context, trigger = "notification_leave_action") }
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // If Host rejoins, cancel the 3-minute grace period and restore host
-                if (hostId == uid || _activeRoomHostId.value == uid) {
+                // Resolve hostId from DB if not known yet
+                var effectiveHostId = hostId ?: _activeRoomHostId.value
+                if (effectiveHostId == null) {
                     try {
-                        SupabaseClient.api.hostRejoinVoiceRoom(
+                        val roomRes = SupabaseClient.api.getVoiceRoomById(auth = token, idEq = "eq.$roomId")
+                        if (roomRes.isSuccessful) {
+                            effectiveHostId = roomRes.body()?.firstOrNull()?.host_id
+                            if (effectiveHostId != null) {
+                                withContext(Dispatchers.Main) { _activeRoomHostId.value = effectiveHostId }
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+
+                val isHost = (uid == effectiveHostId)
+                Log.i("VoiceRoomLifecycle", "joinRoom executed: roomId=$roomId, role=$role, isHost=$isHost")
+
+                // If Host rejoins, cancel the 3-minute grace period and restore host
+                if (isHost) {
+                    try {
+                        Log.i("VoiceRoomLifecycle", "RPC host_rejoin_voice_room: roomId=$roomId, trigger=join_room, isHost=true")
+                        val rejoinRes = SupabaseClient.api.hostRejoinVoiceRoom(
                             auth = token,
                             body = mapOf("p_room_id" to roomId)
                         )
-                    } catch (_: Exception) {}
+                        Log.i("VoiceRoomLifecycle", "host_rejoin_voice_room status: ${rejoinRes.code()}")
+                    } catch (rejoinEx: Exception) {
+                        Log.e("VoiceRoomLifecycle", "host_rejoin_voice_room error for roomId=$roomId", rejoinEx)
+                    }
 
                     try {
                         SupabaseClient.api.updateVoiceRoom(
@@ -977,11 +998,11 @@ class AuthViewModel : ViewModel() {
                     participant = SupabaseRoomParticipant(
                         room_id = roomId,
                         user_id = uid,
-                        role = role,
-                        is_mic_enabled = (role == "speaker")
+                        role = if (isHost) "host" else role,
+                        is_mic_enabled = (role == "speaker" || isHost)
                     )
                 )
-                Log.d("AuthViewModel", "User $uid joined room $roomId as $role via Supabase room_participants")
+                Log.d("AuthViewModel", "User $uid joined room $roomId as ${if (isHost) "host" else role} via Supabase room_participants")
                 
                 // Send a system message that the user has joined, so everyone in the room sees it
                 val userObj = (authState.value as? AuthState.Success)?.user
@@ -1037,12 +1058,62 @@ class AuthViewModel : ViewModel() {
         }
     }
 
-    fun leaveRoom(context: Context? = null) {
+    fun hostRejoinVoiceRoom(roomId: String, context: Context? = null, trigger: String = "foreground_return") {
+        val ctx = context ?: FunkyTalkApplication.appContext
+        val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+        val uid = ctx?.let { SupabaseSessionManager.getUserId(it) }
+            ?: (authState.value as? AuthState.Success)?.user?.uid
+        val hostId = _activeRoomHostId.value
+        val isHost = (uid != null && (hostId == null || uid.equals(hostId, ignoreCase = true)))
+
+        Log.i("VoiceRoomLifecycle", "RPC host_rejoin_voice_room: roomId=$roomId, trigger=$trigger, isHost=$isHost")
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val resp = SupabaseClient.api.hostRejoinVoiceRoom(
+                    auth = token,
+                    body = mapOf("p_room_id" to roomId)
+                )
+                Log.i("VoiceRoomLifecycle", "host_rejoin_voice_room status: ${resp.code()} for roomId=$roomId")
+            } catch (e: Exception) {
+                Log.e("VoiceRoomLifecycle", "host_rejoin_voice_room failed for $roomId", e)
+            }
+
+            try {
+                SupabaseClient.api.updateVoiceRoom(
+                    auth = token,
+                    idEq = "eq.$roomId",
+                    updates = UpdateVoiceRoomRequest(host_left_at = null)
+                )
+            } catch (_: Exception) {}
+
+            try {
+                VoiceRoomRealtimeManager.broadcastRoomLifecycle(
+                    roomId = roomId,
+                    action = "host_returned"
+                )
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun leaveRoom(context: Context? = null, trigger: String = "user_leave_button") {
         val roomId = _activeRoomId.value
         val ctx = context ?: FunkyTalkApplication.appContext
         val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
         val uid = ctx?.let { SupabaseSessionManager.getUserId(it) }
             ?: (authState.value as? AuthState.Success)?.user?.uid
+        val hostId = _activeRoomHostId.value
+        val isHost = (uid != null && hostId != null && uid.equals(hostId, ignoreCase = true))
+
+        Log.i("VoiceRoomLifecycle", "leaveRoom invoked: roomId=$roomId, trigger=$trigger, isHost=$isHost")
+
+        // CRITICAL: For Host, leave_voice_room must ONLY be invoked if user explicitly taps Leave/End button!
+        // Never allow from background, screen lock, rotation, navigation, or disposal.
+        val isExplicitUserLeave = trigger in listOf("user_leave_button", "user_end_button", "host_leave_only_dialog", "notification_leave_action", "floating_bubble_leave_button")
+        if (isHost && !isExplicitUserLeave) {
+            Log.w("VoiceRoomLifecycle", "Suppressed non-user leave_voice_room for host on roomId=$roomId with trigger='$trigger'")
+            return
+        }
 
         _activeRoomId.value = null
         _activeRoomTitle.value = null
@@ -1109,10 +1180,12 @@ class AuthViewModel : ViewModel() {
 
                 // 4. Remove participant / execute leave_voice_room RPC
                 try {
-                    SupabaseClient.api.leaveVoiceRoom(
+                    Log.i("VoiceRoomLifecycle", "RPC leave_voice_room: roomId=$roomId, trigger=$trigger, isHost=$isHost")
+                    val leaveRes = SupabaseClient.api.leaveVoiceRoom(
                         auth = token,
                         body = mapOf("p_room_id" to roomId)
                     )
+                    Log.i("VoiceRoomLifecycle", "leave_voice_room status: ${leaveRes.code()} for roomId=$roomId")
                 } catch (_: Exception) {
                     try {
                         SupabaseClient.api.leaveRoomParticipant(
@@ -1121,7 +1194,7 @@ class AuthViewModel : ViewModel() {
                             userIdEq = "eq.$uid"
                         )
                     } catch (e: Exception) {
-                        Log.e("AuthViewModel", "Error leaving room $roomId in Supabase", e)
+                        Log.e("VoiceRoomLifecycle", "Error leaving room $roomId in Supabase", e)
                     }
                 }
             }
@@ -1132,12 +1205,14 @@ class AuthViewModel : ViewModel() {
      * Host chooses "Leave Only": leaves current room screen but does NOT end the room.
      * Room remains open for others, floating bubble can run in background, and 3-minute grace period starts.
      */
-    fun hostLeaveRoomOnly(context: Context? = null, onComplete: (() -> Unit)? = null) {
+    fun hostLeaveRoomOnly(context: Context? = null, trigger: String = "host_leave_only_dialog", onComplete: (() -> Unit)? = null) {
         val roomId = _activeRoomId.value
         val ctx = context ?: FunkyTalkApplication.appContext
         val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
         val uid = ctx?.let { SupabaseSessionManager.getUserId(it) }
             ?: (authState.value as? AuthState.Success)?.user?.uid
+
+        Log.i("VoiceRoomLifecycle", "hostLeaveRoomOnly invoked: roomId=$roomId, trigger=$trigger, isHost=true")
 
         _activeRoomId.value = null
         _activeRoomTitle.value = null
@@ -1176,10 +1251,12 @@ class AuthViewModel : ViewModel() {
 
                 // Set host_left_at in database to start server-authoritative 3-minute grace period
                 try {
-                    SupabaseClient.api.leaveVoiceRoom(
+                    Log.i("VoiceRoomLifecycle", "RPC leave_voice_room (hostLeaveRoomOnly): roomId=$roomId, trigger=$trigger, isHost=true")
+                    val leaveRes = SupabaseClient.api.leaveVoiceRoom(
                         auth = token,
                         body = mapOf("p_room_id" to roomId)
                     )
+                    Log.i("VoiceRoomLifecycle", "leave_voice_room status: ${leaveRes.code()} for roomId=$roomId")
                 } catch (_: Exception) {}
 
                 try {
@@ -1296,7 +1373,12 @@ class AuthViewModel : ViewModel() {
                         _activeRoomId.value = room?.id ?: roomId
                         if (!room?.title.isNullOrBlank()) _activeRoomTitle.value = room?.title
                         if (!room?.host_id.isNullOrBlank()) _activeRoomHostId.value = room?.host_id
-                        onRoomActive(room?.id ?: roomId)
+                        val uid = SupabaseSessionManager.getUserId(context) ?: (authState.value as? AuthState.Success)?.user?.uid
+                        val effectiveTargetRoomId = room?.id ?: roomId
+                        if (room?.host_id != null && room.host_id.equals(uid, ignoreCase = true)) {
+                            hostRejoinVoiceRoom(effectiveTargetRoomId, context, trigger = "verify_and_navigate_reopen")
+                        }
+                        onRoomActive(effectiveTargetRoomId)
                     } else {
                         _activeRoomId.value = null
                         _activeRoomTitle.value = null

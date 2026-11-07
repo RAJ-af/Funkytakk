@@ -6,6 +6,8 @@ import com.example.BuildConfig
 import com.example.GiftCatalogItem
 import com.example.GiftTransactionItem
 import com.example.SendGiftRequest
+import com.example.SendRoomGiftRequest
+import com.example.SendRoomGiftResponse
 import com.example.SupabaseClient
 import com.example.SupabaseSessionManager
 import kotlinx.coroutines.CancellationException
@@ -174,12 +176,109 @@ object GiftManager {
                 return@withContext Result.failure(Exception("Failed to send gift: $errBody"))
             }
         } catch (e: InsufficientCoinsException) {
-            Result.failure(e)
+            Result.failure<Int>(e)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "Exception sending gift", e)
-            Result.failure(e)
+            Result.failure<Int>(e)
+        }
+    }
+    /**
+     * Sends a gift to a recipient inside a voice room via RPC send_room_gift.
+     * Updates wallet balance immediately from returned remaining_balance.
+     * Maps errors:
+     * - insufficient_coins -> "Coins कम हैं"
+     * - recipient_not_in_room -> "यह user अब room में नहीं है"
+     * - room_not_live -> "Room खत्म हो चुका है"
+     * - rate_limited -> "थोड़ा धीरे भेजो"
+     * - account_restricted -> "आपका खाता अभी gift नहीं भेज सकता"
+     * - other -> "Gift नहीं भेजा जा सका, फिर कोशिश करो"
+     */
+    suspend fun sendRoomGift(
+        context: Context,
+        roomId: String,
+        recipientId: String,
+        giftId: String,
+        quantity: Int = 1
+    ): Result<SendRoomGiftResponse> = withContext(Dispatchers.IO) {
+        try {
+            val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+            if (token.isNullOrBlank()) {
+                return@withContext Result.failure(Exception("Not authenticated. Please log in."))
+            }
+
+            val resp = SupabaseClient.api.sendRoomGift(
+                apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                auth = token,
+                body = SendRoomGiftRequest(
+                    p_room_id = roomId,
+                    p_recipient_id = recipientId,
+                    p_gift_id = giftId,
+                    p_quantity = quantity
+                )
+            )
+
+            if (resp.isSuccessful) {
+                val bodyStr = resp.body()?.string()?.trim().orEmpty()
+                val json = try { JSONObject(bodyStr) } catch (_: Exception) { JSONObject() }
+                val ok = json.optBoolean("ok", true)
+                val remaining = if (json.has("remaining_balance")) json.getInt("remaining_balance") else null
+                val coinsSpent = if (json.has("coins_spent")) json.getInt("coins_spent") else null
+                val msgId = if (json.has("message_id")) json.getString("message_id") else null
+
+                if (remaining != null) {
+                    _walletBalance.value = remaining
+                }
+
+                if (ok) {
+                    Log.d(TAG, "Voice room gift sent successfully! Remaining: $remaining, spent: $coinsSpent")
+                    return@withContext Result.success(
+                        SendRoomGiftResponse(
+                            ok = true,
+                            remaining_balance = remaining,
+                            coins_spent = coinsSpent,
+                            message_id = msgId
+                        )
+                    )
+                } else {
+                    val rawErr = json.optString("error", json.optString("message", "unknown"))
+                    val friendlyMsg = mapRoomGiftError(rawErr)
+                    return@withContext Result.failure(Exception(friendlyMsg))
+                }
+            } else {
+                val errBody = resp.errorBody()?.string().orEmpty()
+                Log.w(TAG, "send_room_gift HTTP error ${resp.code()}: $errBody")
+                val friendlyMsg = mapRoomGiftError(errBody)
+                return@withContext Result.failure(Exception(friendlyMsg))
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Exception calling send_room_gift", e)
+            val friendlyMsg = mapRoomGiftError(e.message ?: "")
+            Result.failure(Exception(friendlyMsg))
+        }
+    }
+
+    /**
+     * Maps backend error codes to user-facing Hindi error messages per spec.
+     */
+    fun mapRoomGiftError(rawError: String): String {
+        val lower = rawError.lowercase()
+        return when {
+            lower.contains("insufficient_coins") || lower.contains("insufficient") || lower.contains("not enough coins") ->
+                "Coins कम हैं"
+            lower.contains("recipient_not_in_room") ->
+                "यह user अब room में नहीं है"
+            lower.contains("room_not_live") || lower.contains("room ended") || lower.contains("not_live") ->
+                "Room खत्म हो चुका है"
+            lower.contains("rate_limited") || lower.contains("too many requests") ->
+                "थोड़ा धीरे भेजो"
+            lower.contains("account_restricted") || lower.contains("restricted") ->
+                "आपका खाता अभी gift नहीं भेज सकता"
+            else ->
+                "Gift नहीं भेजा जा सका, फिर कोशिश करो"
         }
     }
 
