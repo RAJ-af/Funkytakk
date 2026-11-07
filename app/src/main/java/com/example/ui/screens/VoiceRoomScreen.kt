@@ -32,6 +32,8 @@ import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import android.net.Uri
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -801,6 +803,26 @@ fun VoiceRoomScreen(
         }
     }
 
+    // 10-second polling loop to reconcile deleted participants (only when app is in foreground)
+    val currentLifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(activeRoomId) {
+        while (isActive) {
+            kotlinx.coroutines.delay(10_000)
+            val isForeground = currentLifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
+            if (isForeground && activeRoomId.isNotBlank()) {
+                try {
+                    val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
+                    if (partsRes.isSuccessful) {
+                        val freshList = partsRes.body() ?: emptyList()
+                        withContext(Dispatchers.Main) {
+                            participantsData = freshList
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
     LaunchedEffect(activeRoomId) {
         renderedMessageCount = 6
         withContext(Dispatchers.IO) {
@@ -1053,18 +1075,14 @@ fun VoiceRoomScreen(
                             }
                         }
 
-                        // Also fetch from API in background as fallback
+                        // Fetch fresh list from API in background on any participant update event
                         scope.launch(Dispatchers.IO) {
                             try {
                                 val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
                                 if (partsRes.isSuccessful) {
                                     val list = partsRes.body() ?: emptyList()
-                                    val liveList = com.example.realtime.VoiceRoomRealtimeManager.getLiveParticipants(activeRoomId)
-                                    val combined = (list + liveList).distinctBy { it.user_id }
                                     withContext(Dispatchers.Main) {
-                                        if (combined.isNotEmpty()) {
-                                            participantsData = combined
-                                        }
+                                        participantsData = list
                                     }
                                 }
                             } catch (_: Exception) {}
@@ -1095,12 +1113,8 @@ fun VoiceRoomScreen(
                                     val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
                                     if (partsRes.isSuccessful) {
                                         val list = partsRes.body() ?: emptyList()
-                                        val liveList = com.example.realtime.VoiceRoomRealtimeManager.getLiveParticipants(activeRoomId)
-                                        val combined = (list + liveList).distinctBy { it.user_id }
                                         withContext(Dispatchers.Main) {
-                                            if (combined.isNotEmpty()) {
-                                                participantsData = combined
-                                            }
+                                            participantsData = list
                                         }
                                     }
                                 } catch (_: Exception) {}
@@ -1142,80 +1156,43 @@ fun VoiceRoomScreen(
                             val text = record.optString("message")
                             val createdAt = record.optString("created_at")
                             val msgType = record.optString("message_type")
-                            val isSystem = msgType.equals("system", ignoreCase = true)
                             val isGift = msgType.equals("gift", ignoreCase = true)
 
-                            // Only process system and gift messages from postgres_changes to rely on Realtime Broadcast for user messages
-                            if (isSystem || isGift) {
+                            // Only process gift messages from postgres_changes to rely on Realtime Broadcast for user and system messages
+                            if (isGift) {
+                                val rawPayload = record.opt("payload")
+                                val payloadObj = if (rawPayload is org.json.JSONObject) rawPayload else if (rawPayload is String) {
+                                    try { org.json.JSONObject(rawPayload) } catch (_: Exception) { null }
+                                } else null
 
-                            val messageType = if (isSystem) "system" else if (isGift) "gift" else if (msgType.isNullOrBlank()) "chat" else msgType
+                                val (iconUrl, senderBold, recipientBold) = parseGiftDetails(text, payloadObj = payloadObj)
 
-                            val rawPayload = record.opt("payload")
-                            val payloadObj = if (rawPayload is org.json.JSONObject) rawPayload else if (rawPayload is String) {
-                                try { org.json.JSONObject(rawPayload) } catch (_: Exception) { null }
-                            } else null
+                                Log.d("VoiceRoomScreen", "[Realtime] Processing gift message: id=$msgId, text='$text', userId=$userId")
 
-                            val (iconUrl, senderBold, recipientBold) = if (isGift) {
-                                parseGiftDetails(text, payloadObj = payloadObj)
-                            } else Triple(null, null, null)
-
-                            if (isSystem || text.contains("joined the room", ignoreCase = true) || text.contains("left the room", ignoreCase = true)) {
-                                if (text.contains("joined the room", ignoreCase = true) && userId.isNotBlank() && userId != "anon_user" && userId != "System") {
-                                    withContext(Dispatchers.Main) {
-                                        if (participantsData.none { it.user_id == userId }) {
-                                            participantsData = participantsData + SupabaseRoomParticipant(
-                                                room_id = activeRoomId,
-                                                user_id = userId,
-                                                role = if (userId == roomHostId) "host" else "listener",
-                                                is_mic_enabled = false
+                                withContext(Dispatchers.Main) {
+                                    if (msgId.isBlank() || messages.none { it.id == msgId }) {
+                                        val p = supabaseProfiles.find { it.uid == userId }
+                                        val isMe = (userId == currentUserId)
+                                        val name = if (isMe) (p?.displayName ?: "You") else (p?.displayName ?: p?.username ?: "User")
+                                        val avatar = p?.avatar ?: (if (isMe) "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200" else "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400")
+                                        val badge = if (userId == roomHostId) "Host" else null
+                                        messages.add(
+                                            ChillRoomMessage(
+                                                senderName = name,
+                                                senderImageUrl = avatar,
+                                                badge = badge,
+                                                badgeColor = if (badge == "Host") ChillGoldIcon else ChillPurpleAccent,
+                                                text = text,
+                                                id = msgId,
+                                                userId = userId,
+                                                createdAt = createdAt,
+                                                messageType = "gift",
+                                                iconUrl = iconUrl,
+                                                senderNameBold = senderBold,
+                                                recipientNameBold = recipientBold
                                             )
-                                        }
-                                    }
-                                }
-                                scope.launch(Dispatchers.IO) {
-                                    try {
-                                        val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
-                                        if (partsRes.isSuccessful) {
-                                            val list = partsRes.body() ?: emptyList()
-                                            val liveList = com.example.realtime.VoiceRoomRealtimeManager.getLiveParticipants(activeRoomId)
-                                            val combined = (list + liveList).distinctBy { it.user_id }
-                                            withContext(Dispatchers.Main) {
-                                                if (combined.isNotEmpty()) {
-                                                    participantsData = combined
-                                                }
-                                            }
-                                        }
-                                    } catch (_: Exception) {}
-                                }
-                            }
-
-                            Log.d("VoiceRoomScreen", "[Realtime] Processing message: id=$msgId, type=$messageType (raw=$msgType), text='$text', userId=$userId")
-
-                            withContext(Dispatchers.Main) {
-                                if (msgId.isBlank() || messages.none { it.id == msgId }) {
-                                    val p = supabaseProfiles.find { it.uid == userId }
-                                    val isMe = (userId == currentUserId)
-                                    val name = if (isMe) (p?.displayName ?: "You") else (p?.displayName ?: p?.username ?: "User")
-                                    val avatar = p?.avatar ?: (if (isMe) "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200" else "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400")
-                                    val badge = if (userId == roomHostId) "Host" else null
-                                    messages.add(
-                                        ChillRoomMessage(
-                                            senderName = name,
-                                            senderImageUrl = avatar,
-                                            badge = badge,
-                                            badgeColor = if (badge == "Host") ChillGoldIcon else ChillPurpleAccent,
-                                            text = text,
-                                            id = msgId,
-                                            userId = userId,
-                                            createdAt = createdAt,
-                                            messageType = messageType,
-                                            iconUrl = iconUrl,
-                                            senderNameBold = senderBold,
-                                            recipientNameBold = recipientBold
                                         )
-                                    )
 
-                                    if (isGift) {
                                         val tier = payloadObj?.optInt("animation_tier", 0)?.takeIf { it > 0 }
                                             ?: payloadObj?.optInt("tier", 0)?.takeIf { it > 0 }
                                             ?: when {
@@ -1225,18 +1202,18 @@ fun VoiceRoomScreen(
                                             }
                                         val qty = payloadObj?.optInt("quantity", 1)?.coerceAtLeast(1) ?: 1
                                         val sName = senderBold ?: name
-                                        val rName = recipientBold ?: "Friend"
-                                        val rId = payloadObj?.optString("recipient_id")
+                                        val rName = recipientBold ?: payloadObj?.optString("recipient_name") ?: "someone"
+                                        val rIdParam = payloadObj?.optString("recipient_id") ?: ""
 
                                         val animData = GiftAnimationData(
-                                            id = msgId.ifBlank { java.util.UUID.randomUUID().toString() },
-                                            iconUrl = iconUrl ?: "",
+                                            id = if (msgId.isNotBlank()) msgId else "gift_${System.currentTimeMillis()}_${(100..999).random()}",
+                                            iconUrl = iconUrl ?: payloadObj?.optString("icon_url") ?: "",
                                             animationTier = tier,
                                             animationUrl = payloadObj?.optString("animation_url"),
                                             quantity = qty,
                                             senderName = sName,
                                             recipientName = rName,
-                                            recipientId = rId,
+                                            recipientId = rIdParam,
                                             giftName = payloadObj?.optString("gift_name")
                                         )
                                         GiftAnimationManager.enqueueAnimation(animData, context)
@@ -1245,7 +1222,6 @@ fun VoiceRoomScreen(
                             }
                         }
                     }
-                }
                 }
                 is RealtimeTableEvent.ModerationActionEnforced -> {
                     val mySupabaseUid = currentUserId.ifBlank { SupabaseSessionManager.getUserId(context) ?: "" }

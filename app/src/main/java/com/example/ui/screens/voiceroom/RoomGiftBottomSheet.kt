@@ -118,16 +118,9 @@ fun RoomGiftBottomSheet(
         }
     }
 
-    // Filter out current user from receivers
+    // Filter out current user from receivers (only real room participants)
     val eligibleReceivers = remember(participants, currentUserId) {
-        val filtered = participants.filter { it.userId.isNotBlank() && it.userId != currentUserId }
-        if (filtered.isNotEmpty()) filtered else listOf(
-            GiftReceiverUser("user_arjun", "Arjun", "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400", "in", "host"),
-            GiftReceiverUser("user_shine", "Shine", "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400", "in", "speaker"),
-            GiftReceiverUser("user_himanshu", "Himanshu", "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400", "in", "speaker"),
-            GiftReceiverUser("user_ansh", "Ansh", "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=400", "in", "speaker"),
-            GiftReceiverUser("user_priya", "Priya", "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400", "in", "speaker")
-        )
+        participants.filter { it.userId.isNotBlank() && it.userId != currentUserId }
     }
 
     // Selected receiver (preselect initialRecipientId if present, else first eligible receiver)
@@ -288,101 +281,117 @@ fun RoomGiftBottomSheet(
                 }
             }
 
-            LazyRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                items(eligibleReceivers, key = { it.userId }) { user ->
-                    val isSelected = (user.userId == selectedReceiverId)
-                    val roleLabel = when (user.role.lowercase()) {
-                        "host" -> "Host"
-                        "speaker" -> "Speaker"
-                        else -> "Listener"
-                    }
-
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .clickable {
-                                selectedReceiverId = user.userId
-                                inlineError = null
-                            }
-                    ) {
-                        Box(contentAlignment = Alignment.TopEnd) {
-                            Box(
-                                modifier = Modifier
-                                    .padding(4.dp)
-                                    .size(62.dp)
-                                    .clip(CircleShape)
-                                    .border(
-                                        width = if (isSelected) 3.dp else 0.dp,
-                                        color = if (isSelected) yellowGoldAccent else Color.Transparent,
-                                        shape = CircleShape
-                                    )
-                                    .padding(if (isSelected) 2.dp else 0.dp)
-                            ) {
-                                PresenceAvatar(
-                                    avatarUrl = user.avatarUrl,
-                                    size = 56.dp,
-                                    flagCountryCode = user.countryCode,
-                                    isOnline = true
-                                )
-                            }
-
-                            // Yellow Checkmark Badge for Selected User
-                            if (isSelected) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(20.dp)
-                                        .clip(CircleShape)
-                                        .background(yellowGoldAccent)
-                                        .border(1.5.dp, Color.White, CircleShape),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = "Selected",
-                                        tint = Color(0xFF1E1B18),
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                }
-                            }
+            if (eligibleReceivers.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp, top = 4.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "No other users in the room to send gifts to",
+                        fontSize = 12.sp,
+                        color = textMutedColor,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            } else {
+                LazyRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    items(eligibleReceivers, key = { it.userId }) { user ->
+                        val isSelected = (user.userId == selectedReceiverId)
+                        val roleLabel = when (user.role.lowercase()) {
+                            "host" -> "Host"
+                            "speaker" -> "Speaker"
+                            else -> "Listener"
                         }
 
-                        Spacer(modifier = Modifier.height(4.dp))
-
-                        Text(
-                            text = user.name.ifBlank { "User" },
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = textMainColor,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-
-                        Spacer(modifier = Modifier.height(2.dp))
-
-                        // Role Tag (Host gets gold crown)
-                        Row(
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier
-                                .clip(RoundedCornerShape(100.dp))
-                                .background(if (user.role.equals("host", ignoreCase = true)) yellowPillBg else Color(0xFFF3F4F6))
-                                .padding(horizontal = 8.dp, vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                .clickable {
+                                    selectedReceiverId = user.userId
+                                    inlineError = null
+                                }
                         ) {
-                            if (user.role.equals("host", ignoreCase = true)) {
-                                Text(text = "👑", fontSize = 10.sp)
+                            Box(contentAlignment = Alignment.TopEnd) {
+                                Box(
+                                    modifier = Modifier
+                                        .padding(4.dp)
+                                        .size(62.dp)
+                                        .clip(CircleShape)
+                                        .border(
+                                            width = if (isSelected) 3.dp else 0.dp,
+                                            color = if (isSelected) yellowGoldAccent else Color.Transparent,
+                                            shape = CircleShape
+                                        )
+                                        .padding(if (isSelected) 2.dp else 0.dp)
+                                ) {
+                                    PresenceAvatar(
+                                        avatarUrl = user.avatarUrl,
+                                        size = 56.dp,
+                                        flagCountryCode = user.countryCode,
+                                        isOnline = true
+                                    )
+                                }
+
+                                // Yellow Checkmark Badge for Selected User
+                                if (isSelected) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .clip(CircleShape)
+                                            .background(yellowGoldAccent)
+                                            .border(1.5.dp, Color.White, CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = "Selected",
+                                            tint = Color(0xFF1E1B18),
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
+                                }
                             }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
                             Text(
-                                text = roleLabel,
-                                fontSize = 10.5.sp,
+                                text = user.name.ifBlank { "User" },
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (user.role.equals("host", ignoreCase = true)) Color(0xFF92400E) else Color(0xFF6B7280)
+                                color = textMainColor,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
+
+                            Spacer(modifier = Modifier.height(2.dp))
+
+                            // Role Tag (Host gets gold crown)
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(100.dp))
+                                    .background(if (user.role.equals("host", ignoreCase = true)) yellowPillBg else Color(0xFFF3F4F6))
+                                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                if (user.role.equals("host", ignoreCase = true)) {
+                                    Text(text = "👑", fontSize = 10.sp)
+                                }
+                                Text(
+                                    text = roleLabel,
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (user.role.equals("host", ignoreCase = true)) Color(0xFF92400E) else Color(0xFF6B7280)
+                                )
+                            }
                         }
                     }
                 }
@@ -427,7 +436,8 @@ fun RoomGiftBottomSheet(
                 columns = GridCells.Fixed(4),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(230.dp),
+                    .height(265.dp),
+                contentPadding = PaddingValues(bottom = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
