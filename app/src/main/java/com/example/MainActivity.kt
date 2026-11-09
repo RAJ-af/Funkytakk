@@ -89,6 +89,7 @@ class MainActivity : FragmentActivity() {
 
                     val authState by authViewModel.authState.collectAsState()
                     val myModerationStatus by authViewModel.myModerationStatus.collectAsState()
+                    val isUnderReview by authViewModel.accountUnderReview.collectAsState()
                     val deletionStatus by authViewModel.deletionStatus.collectAsState()
                     val deletionReceipt by authViewModel.deletionReceipt.collectAsState()
 
@@ -96,6 +97,7 @@ class MainActivity : FragmentActivity() {
                         authViewModel.runPendingEraseLocalChatsIfNeeded(applicationContext)
                         if (SupabaseSessionManager.hasValidAuthenticatedSession(applicationContext)) {
                             authViewModel.checkDeletionStatus(applicationContext)
+                            authViewModel.checkAccountReview(applicationContext)
                         }
                     }
 
@@ -105,6 +107,7 @@ class MainActivity : FragmentActivity() {
                         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
                             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
                                 authViewModel.refreshModerationStatus(applicationContext)
+                                authViewModel.checkAccountReview(applicationContext)
                                 if (SupabaseSessionManager.getUserId(applicationContext) != null || authState is AuthState.Success) {
                                     authViewModel.checkDeletionStatus(applicationContext)
                                     com.example.service.PushNotificationManager.onUserLoggedIn(applicationContext)
@@ -247,6 +250,23 @@ class MainActivity : FragmentActivity() {
                                 authViewModel.refreshModerationStatus(applicationContext)
                             }
                         )
+                    } else if (isUnderReview) {
+                        if (currentScreen == "support_chat") {
+                            SupportChatScreen(
+                                reportId = activeSupportReportId,
+                                onBack = { currentScreen = "home" }
+                            )
+                        } else {
+                            com.example.ui.screens.AccountUnderReviewScreen(
+                                onContactSupport = {
+                                    currentScreen = "support_chat"
+                                },
+                                onReviewEnded = {
+                                    authViewModel.checkAccountReview(applicationContext)
+                                    currentScreen = "home"
+                                }
+                            )
+                        }
                     } else if (deletionReceipt != null) {
                         com.example.ui.screens.profile.AccountDeletionReceiptScreen(
                             receipt = deletionReceipt!!,
@@ -554,6 +574,16 @@ class MainActivity : FragmentActivity() {
                             )
                         }
                     )
+
+                    if (com.example.ModerationManager.showModerationHubDialog) {
+                        com.example.ui.screens.home.dialogs.ModerationReviewDialog(
+                            onDismiss = {
+                                com.example.ModerationManager.showModerationHubDialog = false
+                                com.example.ModerationManager.pendingReportIdToOpen = null
+                            },
+                            initialReportId = com.example.ModerationManager.pendingReportIdToOpen
+                        )
+                    }
                 }
                 }
                 }
@@ -585,6 +615,19 @@ class MainActivity : FragmentActivity() {
             !groupId.isNullOrBlank() ||
             !senderId.isNullOrBlank() ||
             !partnerUserId.isNullOrBlank()
+
+        if (kind == "staff_report" || navigateTo == "moderation_hub") {
+            val targetReportId = intent.getStringExtra("target_report_id") ?: intent.getStringExtra("report_id")
+            com.example.ModerationManager.pendingReportIdToOpen = targetReportId
+            com.example.ModerationManager.showModerationHubDialog = true
+            intent.removeExtra("from_push")
+            intent.removeExtra("kind")
+            intent.removeExtra("event")
+            intent.removeExtra("report_id")
+            intent.removeExtra("target_report_id")
+            intent.removeExtra("navigate_to")
+            return
+        }
 
         if (fromPush || hasChatExtras || navigateTo == "direct_chat") {
             pendingNavigateTo = "home"

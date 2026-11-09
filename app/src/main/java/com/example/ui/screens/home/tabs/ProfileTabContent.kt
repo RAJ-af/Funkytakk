@@ -1835,9 +1835,14 @@ fun ProfileTabContent(
     if (showModerationDialog) {
         val supabaseProfiles by (viewModel?.supabaseProfiles ?: MutableStateFlow(emptyList())).collectAsState()
         ModerationReviewDialog(
-            onDismiss = { showModerationDialog = false },
+            onDismiss = {
+                showModerationDialog = false
+                com.example.ModerationManager.showModerationHubDialog = false
+                com.example.ModerationManager.pendingReportIdToOpen = null
+            },
             currentUserProfile = currentUserProfile,
-            supabaseProfiles = supabaseProfiles
+            supabaseProfiles = supabaseProfiles,
+            initialReportId = com.example.ModerationManager.pendingReportIdToOpen
         )
     }
 

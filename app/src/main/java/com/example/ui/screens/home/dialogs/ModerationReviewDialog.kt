@@ -257,7 +257,8 @@ class ReportAudioPlayerState(
 fun ModerationReviewDialog(
     onDismiss: () -> Unit,
     currentUserProfile: UserProfile? = null,
-    supabaseProfiles: List<UserProfile> = emptyList()
+    supabaseProfiles: List<UserProfile> = emptyList(),
+    initialReportId: String? = null
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
@@ -286,10 +287,17 @@ fun ModerationReviewDialog(
         }
     }
 
+    var activeReportDetailId by remember { mutableStateOf<String?>(initialReportId) }
+    LaunchedEffect(initialReportId) {
+        if (initialReportId != null) {
+            activeReportDetailId = initialReportId
+        }
+    }
+
     var reportsList by remember { mutableStateOf<List<RoomReportItem>>(emptyList()) }
     var activePenaltiesList by remember { mutableStateOf<List<MyModerationStatus>>(emptyList()) }
     var selectedAdminTab by remember { mutableIntStateOf(0) } // 0: Reports, 1: Active Restrictions, 2: Support Inbox
-    var isLoading by remember { mutableStateOf(true) }
+    var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf("All") }
@@ -310,7 +318,6 @@ fun ModerationReviewDialog(
                 val bearerAuth = SupabaseSessionManager.getAuthenticatedBearerToken(context)
                 if (bearerAuth == null) {
                     withContext(Dispatchers.Main) {
-                        reportsList = emptyList()
                         activePenaltiesList = emptyList()
                         errorMessage = "Authentication error: Active session required to view incident reports."
                         isLoading = false
@@ -322,7 +329,6 @@ fun ModerationReviewDialog(
                 val isAdmin = ModerationManager.checkIsAdmin(context)
                 if (!isAdmin) {
                     withContext(Dispatchers.Main) {
-                        reportsList = emptyList()
                         activePenaltiesList = emptyList()
                         errorMessage = "Access Restricted: Administrator permissions required in public.user_roles."
                         isLoading = false
@@ -330,29 +336,17 @@ fun ModerationReviewDialog(
                     return@launch
                 }
 
-                val response = SupabaseClient.api.getRoomReports(auth = bearerAuth)
                 val penalties = ModerationManager.fetchActiveModerationPenalties(context)
 
                 withContext(Dispatchers.Main) {
-                    if (response.isSuccessful) {
-                        reportsList = response.body() ?: emptyList()
-                        errorMessage = null
-                    } else {
-                        reportsList = emptyList()
-                        if (response.code() == 403) {
-                            errorMessage = "Access Restricted: You do not have administrator privileges to view incident reports."
-                        } else {
-                            errorMessage = "Failed to load reports (HTTP ${response.code()})"
-                        }
-                    }
                     activePenaltiesList = penalties
+                    errorMessage = null
                     isLoading = false
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    reportsList = emptyList()
                     activePenaltiesList = emptyList()
-                    errorMessage = "Network error: ${e.localizedMessage ?: "Unable to fetch reports"}"
+                    errorMessage = "Network error: ${e.localizedMessage ?: "Unable to fetch data"}"
                     isLoading = false
                 }
             }
@@ -510,7 +504,7 @@ fun ModerationReviewDialog(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Soft3DRulesActionIcon(modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Reports (${reportsList.size})", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    Text("Report Queue", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                 }
                             }
                         )
@@ -568,213 +562,17 @@ fun ModerationReviewDialog(
                     HorizontalDivider(color = Color(0xFFE5E7EB), thickness = 1.dp)
 
                     if (selectedAdminTab == 0) {
-                        LazyColumn(
+                        Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .weight(1f),
-                            contentPadding = PaddingValues(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                                .weight(1f)
                         ) {
-                            // Summary Stats Bar
-                            item {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    ModernStatBadge(
-                                        title = "Pending",
-                                        count = pendingCount.toString(),
-                                        containerColor = Color(0xFFFFFBEB),
-                                        accentColor = Color(0xFFD97706),
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    ModernStatBadge(
-                                        title = "Urgent",
-                                        count = urgentCount.toString(),
-                                        containerColor = Color(0xFFFEF2F2),
-                                        accentColor = Color(0xFFDC2626),
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    ModernStatBadge(
-                                        title = "Resolved",
-                                        count = solvedCount.toString(),
-                                        containerColor = Color(0xFFECFDF5),
-                                        accentColor = Color(0xFF059669),
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    ModernStatBadge(
-                                        title = "Total",
-                                        count = reportsList.size.toString(),
-                                        containerColor = Color(0xFFF3F4F6),
-                                        accentColor = Color(0xFF4B5563),
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                            }
-
-                            // Search Input
-                            item {
-                                OutlinedTextField(
-                                    value = searchQuery,
-                                    onValueChange = { searchQuery = it },
-                                    placeholder = { Text("Search by Context, User, or Keyword...", fontSize = 13.sp, color = Color(0xFF9CA3AF)) },
-                                    leadingIcon = {
-                                        SoftSearchIcon(size = 18.dp, color = Color(0xFF9CA3AF))
-                                    },
-                                    trailingIcon = {
-                                        if (searchQuery.isNotEmpty()) {
-                                            IconButton(onClick = { searchQuery = "" }) {
-                                                SoftCloseIcon(size = 14.dp, color = Color(0xFF9CA3AF))
-                                            }
-                                        }
-                                    },
-                                    singleLine = true,
-                                    shape = RoundedCornerShape(14.dp),
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedContainerColor = Color.White,
-                                        unfocusedContainerColor = Color.White,
-                                        focusedBorderColor = GoldPrimary,
-                                        unfocusedBorderColor = Color(0xFFE5E7EB)
-                                    ),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(52.dp)
-                                )
-                            }
-
-                            // Filter Chips Row
-                            item {
-                                val filters = listOf("All", "Pending", "Urgent", "Profile", "DM", "Moment", "Room", "Solved")
-                                LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    items(filters) { filter ->
-                                        val isSelected = (selectedFilter == filter)
-                                        val chipBg = if (isSelected) Color(0xFF1E293B) else Color.White
-                                        val chipText = if (isSelected) Color.White else Color(0xFF4B5563)
-                                        val chipBorder = if (isSelected) Color(0xFF1E293B) else Color(0xFFE5E7EB)
-
-                                        Surface(
-                                            onClick = { selectedFilter = filter },
-                                            shape = RoundedCornerShape(100.dp),
-                                            color = chipBg,
-                                            border = BorderStroke(1.dp, chipBorder),
-                                            modifier = Modifier.height(34.dp)
-                                        ) {
-                                            Box(
-                                                modifier = Modifier.padding(horizontal = 14.dp),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(
-                                                    text = filter,
-                                                    color = chipText,
-                                                    fontSize = 12.sp,
-                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Error Banner
-                            if (errorMessage != null) {
-                                item {
-                                    Card(
-                                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF2F2)),
-                                        shape = RoundedCornerShape(16.dp),
-                                        border = BorderStroke(1.dp, Color(0xFFFECACA)),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(14.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            SoftWarningIcon(size = 20.dp, color = Color(0xFFDC2626))
-                                            Spacer(modifier = Modifier.width(10.dp))
-                                            Text(
-                                                text = errorMessage!!,
-                                                color = Color(0xFF991B1B),
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.Medium
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Report Cards
-                            if (isLoading) {
-                                item {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(180.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        CircularProgressIndicator(color = GoldPrimary, modifier = Modifier.size(32.dp))
-                                    }
-                                }
-                            } else if (filteredReports.isEmpty()) {
-                                item {
-                                    Card(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 20.dp),
-                                        colors = CardDefaults.cardColors(containerColor = Color.White),
-                                        shape = RoundedCornerShape(20.dp),
-                                        border = BorderStroke(1.dp, Color(0xFFE5E7EB))
-                                    ) {
-                                        Column(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(32.dp),
-                                            horizontalAlignment = Alignment.CenterHorizontally
-                                        ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(60.dp)
-                                                    .clip(CircleShape)
-                                                    .background(Color(0xFFECFDF5)),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                SoftCheckIcon(size = 30.dp, color = Color(0xFF10B981))
-                                            }
-                                            Spacer(modifier = Modifier.height(14.dp))
-                                            Text(
-                                                text = if (errorMessage != null) "Reports Unavailable" else "All Reports Clear!",
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 16.sp,
-                                                color = DarkText
-                                            )
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                            Text(
-                                                text = if (errorMessage != null) "Administrative access required." else "No pending reports matching the selected filter.",
-                                                fontSize = 13.sp,
-                                                color = GraySubtitle
-                                            )
-                                        }
-                                    }
-                                }
-                            } else {
-                                items(filteredReports, key = { it.id ?: UUID.randomUUID().toString() }) { report ->
-                                    ModernReportCard(
-                                        report = report,
-                                        audioPlayer = audioPlayer,
-                                        onViewScreenshot = { url ->
-                                            previewImageUrl = url
-                                        },
-                                        onCopyText = { text, label ->
-                                            clipboardManager.setText(AnnotatedString(text))
-                                            Toast.makeText(context, "$label copied", Toast.LENGTH_SHORT).show()
-                                        },
-                                        onTakeAction = {
-                                            actionDialogReport = report
-                                        }
-                                    )
-                                }
-                            }
+                            AdminReportQueueView(
+                                onReportClick = { reportId ->
+                                    activeReportDetailId = reportId
+                                },
+                                modifier = Modifier.fillMaxSize()
+                            )
                         }
                     } else if (selectedAdminTab == 1) {
                         // Active Restrictions Tab
@@ -1014,6 +812,20 @@ fun ModerationReviewDialog(
             onDismiss = { actionDialogReport = null },
             onActionApplied = {
                 actionDialogReport = null
+                fetchAllData()
+            }
+        )
+    }
+
+    // Modal: Admin Report Detail Dialog
+    if (activeReportDetailId != null) {
+        AdminReportDetailDialog(
+            reportId = activeReportDetailId!!,
+            onDismiss = {
+                activeReportDetailId = null
+                ModerationManager.pendingReportIdToOpen = null
+            },
+            onReportUpdated = {
                 fetchAllData()
             }
         )

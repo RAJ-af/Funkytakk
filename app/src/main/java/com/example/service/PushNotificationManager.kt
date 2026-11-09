@@ -97,6 +97,8 @@ object PushNotificationManager : DefaultLifecycleObserver {
     private const val TAG = "PushNotificationManager"
     const val CHANNEL_ID_MESSAGES = "messages"
     private const val CHANNEL_NAME_MESSAGES = "Messages & Chats"
+    const val CHANNEL_ID_STAFF_REPORTS = "staff_reports"
+    private const val CHANNEL_NAME_STAFF_REPORTS = "Staff Reports"
 
     private const val PREFS_NAME = "push_notification_debug_prefs"
     private const val KEY_IS_REGISTERED = "is_registered"
@@ -413,9 +415,19 @@ object PushNotificationManager : DefaultLifecycleObserver {
                     setShowBadge(true)
                     lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
                 }
-                notificationManager?.createNotificationChannel(channel)
+                val staffChannel = NotificationChannel(
+                    CHANNEL_ID_STAFF_REPORTS,
+                    CHANNEL_NAME_STAFF_REPORTS,
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "High priority notifications for staff and moderation incident reports"
+                    enableVibration(true)
+                    setShowBadge(true)
+                    lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
+                }
+                notificationManager?.createNotificationChannel(staffChannel)
             } catch (e: Exception) {
-                Log.e(TAG, "Failed creating notification channel '$CHANNEL_ID_MESSAGES'", e)
+                Log.e(TAG, "Failed creating notification channels", e)
             }
         }
     }
@@ -896,6 +908,44 @@ object PushNotificationManager : DefaultLifecycleObserver {
     ) {
         createNotificationChannels(context)
         if (!SystemNotificationHelper.hasNotificationPermission(context)) {
+            return
+        }
+
+        val kind = data["kind"]
+        if (kind == "staff_report") {
+            val event = data["event"].orEmpty()
+            val reportId = data["report_id"]?.takeIf { it.isNotBlank() }
+            val displayTitle = title?.takeIf { it.isNotBlank() } ?: "Moderation Alert"
+            val displayBody = body?.takeIf { it.isNotBlank() } ?: "A safety report requires review"
+            val notificationId = ("staff_report_" + (reportId ?: event)).hashCode()
+
+            val intent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                data.forEach { (k, v) -> putExtra(k, v) }
+                putExtra("from_push", true)
+                putExtra("navigate_to", "moderation_hub")
+                putExtra("target_report_id", reportId)
+            }
+
+            val pendingIntent = PendingIntent.getActivity(
+                context,
+                notificationId,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val notification = NotificationCompat.Builder(context, CHANNEL_ID_STAFF_REPORTS)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle(displayTitle)
+                .setContentText(displayBody)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_STATUS)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
+                .build()
+
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            notificationManager?.notify(notificationId, notification)
             return
         }
 

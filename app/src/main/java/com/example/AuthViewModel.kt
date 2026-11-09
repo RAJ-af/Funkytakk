@@ -137,7 +137,29 @@ class AuthViewModel : ViewModel() {
     private val _deletionReceipt = MutableStateFlow<DeletionReceiptData?>(null)
     val deletionReceipt: StateFlow<DeletionReceiptData?> = _deletionReceipt.asStateFlow()
 
+    private val _accountUnderReview = MutableStateFlow<Boolean>(false)
+    val accountUnderReview: StateFlow<Boolean> = _accountUnderReview.asStateFlow()
+
+    fun checkAccountReview(context: Context, onReviewEnded: (() -> Unit)? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val res = ModerationManager.fetchMyAccountReview(context)
+                val isUnderReview = res.getOrNull()?.under_review == true
+                val wasUnderReview = _accountUnderReview.value
+                _accountUnderReview.value = isUnderReview
+                if (wasUnderReview && !isUnderReview) {
+                    withContext(Dispatchers.Main) {
+                        onReviewEnded?.invoke()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("AuthViewModel", "checkAccountReview error: ${e.message}")
+            }
+        }
+    }
+
     fun refreshModerationStatus(context: Context) {
+        checkAccountReview(context)
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val status = ModerationManager.fetchMyModerationStatus(context)

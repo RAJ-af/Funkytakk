@@ -54,9 +54,16 @@ fun NotificationsScreen(
         onBack()
     }
 
+    var isUserAdmin by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        isUserAdmin = com.example.ModerationManager.checkIsAdmin(context)
+    }
+
     val displayNotifications = remember(notificationsState, selectedFilter) {
         when (selectedFilter) {
             "Unread" -> notificationsState.filter { !it.is_read }
+            "Staff" -> notificationsState.filter { it.type?.lowercase() == "staff_report" }
             "Support" -> notificationsState.filter { it.type?.lowercase() in listOf("support", "support_message", "support_reply") }
             "System" -> notificationsState.filter { it.type?.lowercase() in listOf("system", "moderation", "warning") }
             else -> notificationsState
@@ -192,13 +199,20 @@ fun NotificationsScreen(
             }
 
             // Category Filter Bar
+            val categories = remember(isUserAdmin) {
+                if (isUserAdmin) {
+                    listOf("All", "Unread", "Staff", "Support", "System")
+                } else {
+                    listOf("All", "Unread", "Support", "System")
+                }
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                listOf("All", "Unread", "Support", "System").forEach { category ->
+                categories.forEach { category ->
                     val isSelected = selectedFilter == category
                     Surface(
                         onClick = { selectedFilter = category },
@@ -274,6 +288,10 @@ fun NotificationsScreen(
                                     NotificationsManager.markAsRead(context, item.id)
                                     val notifType = item.type?.lowercase().orEmpty()
                                     when {
+                                        notifType == "staff_report" -> {
+                                            com.example.ModerationManager.pendingReportIdToOpen = item.report_id
+                                            com.example.ModerationManager.showModerationHubDialog = true
+                                        }
                                         notifType == "group_join_request" && !item.group_id.isNullOrBlank() -> {
                                             activeJoinRequestNotif = item
                                         }
@@ -376,6 +394,7 @@ private fun NotificationItemCard(
                     .clip(RoundedCornerShape(14.dp))
                     .background(
                         when (notification.type?.lowercase()) {
+                            "staff_report" -> Color(0xFFFEF3C7)
                             "support", "support_message", "support_reply" -> Color(0xFFECFDF5)
                             "moderation", "warning", "suspend", "mute" -> Color(0xFFFEF2F2)
                             "room", "room_invite" -> Color(0xFFEFF6FF)
@@ -385,6 +404,7 @@ private fun NotificationItemCard(
                 contentAlignment = Alignment.Center
             ) {
                 when (notification.type?.lowercase()) {
+                    "staff_report" -> SoftShieldIcon(size = 20.dp, color = Color(0xFFD97706))
                     "support", "support_message", "support_reply" -> SoftHeadsetIcon(size = 20.dp, color = Color(0xFF10B981))
                     "moderation", "warning", "suspend", "mute" -> SoftShieldIcon(size = 20.dp, color = Color(0xFFEF4444))
                     "room", "room_invite", "group_invite", "group_join_request" -> SoftGroupIcon(size = 20.dp, color = Color(0xFF3B82F6))
@@ -432,23 +452,35 @@ private fun NotificationItemCard(
 
                 // Optional chip if linked to a report
                 if (!notification.report_id.isNullOrBlank()) {
+                    val isStaffReport = notification.type?.lowercase() == "staff_report"
                     Spacer(modifier = Modifier.height(8.dp))
                     Surface(
-                        color = Color(0xFFFEF3C7),
+                        color = if (isStaffReport) Color(0xFFEFF6FF) else Color(0xFFFEF3C7),
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
-                            SoftChatBubbleIcon(size = 12.dp, color = Color(0xFF92400E))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "View Support Thread",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF92400E)
-                            )
+                            if (isStaffReport) {
+                                SoftShieldIcon(size = 12.dp, color = Color(0xFF2563EB))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Open Incident Report",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF2563EB)
+                                )
+                            } else {
+                                SoftChatBubbleIcon(size = 12.dp, color = Color(0xFF92400E))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "View Support Thread",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF92400E)
+                                )
+                            }
                         }
                     }
                 }

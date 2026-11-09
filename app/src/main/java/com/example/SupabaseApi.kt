@@ -908,11 +908,74 @@ interface SupabaseApi {
         @Body body: Map<String, String>
     ): Response<ResponseBody>
 
+    @POST("rest/v1/rpc/admin_take_charge")
+    suspend fun adminTakeCharge(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: AdminTakeChargeRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/admin_release_report")
+    suspend fun adminReleaseReport(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: AdminReleaseReportRequest
+    ): Response<ResponseBody>
+
     @POST("rest/v1/rpc/admin_apply_moderation_action")
     suspend fun adminApplyModerationAction(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String,
         @Body body: AdminApplyModerationActionRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/admin_dismiss_report")
+    suspend fun adminDismissReport(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: AdminDismissReportRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/admin_reopen_report")
+    suspend fun adminReopenReport(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: AdminReopenReportRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/admin_challenge_reopen")
+    suspend fun adminChallengeReopen(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: AdminChallengeReopenRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/owner_decide_dispute")
+    suspend fun ownerDecideDispute(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: OwnerDecideDisputeRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/get_my_account_review")
+    suspend fun getMyAccountReview(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> = emptyMap()
+    ): Response<MyAccountReviewResponse>
+
+    @POST("rest/v1/rpc/admin_get_report_queue")
+    suspend fun adminGetReportQueue(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: AdminGetReportQueueRequest
+    ): Response<List<AdminReportQueueItem>>
+
+    @POST("rest/v1/rpc/admin_get_report_detail")
+    suspend fun adminGetReportDetail(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: AdminGetReportDetailRequest
     ): Response<ResponseBody>
 
     @POST("rest/v1/rpc/admin_revoke_moderation_action")
@@ -949,40 +1012,11 @@ interface SupabaseApi {
         @Header("Authorization") auth: String
     ): Response<List<MyModerationStatus>>
 
-    @POST("rest/v1/room_reports")
-    suspend fun createRoomReport(
-        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String,
-        @Header("Prefer") prefer: String = "return=minimal",
-        @Body report: CreateRoomReportRequest
-    ): Response<ResponseBody>
-
     @GET("rest/v1/user_roles?select=user_id,role")
     suspend fun getMyUserRoles(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String
     ): Response<List<UserRoleItem>>
-
-    @GET("rest/v1/room_reports?select=*&order=created_at.desc")
-    suspend fun getRoomReports(
-        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String
-    ): Response<List<RoomReportItem>>
-
-    @PATCH("rest/v1/room_reports")
-    suspend fun updateRoomReportStatus(
-        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String,
-        @Query("id") idFilter: String,
-        @Body body: Map<String, String>
-    ): Response<ResponseBody>
-
-    @DELETE("rest/v1/room_reports")
-    suspend fun deleteRoomReport(
-        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String,
-        @Query("id") idFilter: String
-    ): Response<ResponseBody>
 
     @Multipart
     @POST("storage/v1/object/{bucket}/{filename}")
@@ -1695,6 +1729,82 @@ data class AdminApplyModerationActionRequest(
 )
 
 @JsonClass(generateAdapter = true)
+data class AdminTakeChargeRequest(
+    val p_report_id: String
+)
+
+@JsonClass(generateAdapter = true)
+data class AdminReleaseReportRequest(
+    val p_report_id: String
+)
+
+@JsonClass(generateAdapter = true)
+data class AdminDismissReportRequest(
+    val p_report_id: String,
+    val p_reason: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class AdminReopenReportRequest(
+    val p_report_id: String,
+    val p_brief: String
+)
+
+@JsonClass(generateAdapter = true)
+data class AdminChallengeReopenRequest(
+    val p_reopen_id: String,
+    val p_brief: String
+)
+
+@JsonClass(generateAdapter = true)
+data class OwnerDecideDisputeRequest(
+    val p_reopen_id: String,
+    val p_decision: String,
+    val p_note: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class AdminGetReportQueueRequest(
+    val p_status: String? = "pending",
+    val p_limit: Int = 50,
+    val p_offset: Int = 0
+)
+
+@JsonClass(generateAdapter = true)
+data class AdminGetReportDetailRequest(
+    val p_report_id: String
+)
+
+@JsonClass(generateAdapter = true)
+data class AdminReportQueueItem(
+    val report_id: String,
+    val created_at: String? = null,
+    val context_type: String? = null,
+    val category: String? = null,
+    val reason: String? = null,
+    val status: String? = null,
+    val evidence_status: String? = null,
+    val reporter_id: String? = null,
+    val reporter_name: String? = null,
+    val reported_user_id: String? = null,
+    val reported_name: String? = null,
+    val reported_score: Int? = 100,
+    val reports_against_total: Long? = 0L,
+    val reports_against_pending: Long? = 0L,
+    val claimed_by: String? = null,
+    val claimed_by_name: String? = null,
+    val claim_expires_at: String? = null,
+    val is_mine: Boolean? = false,
+    val reopen_status: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class MyAccountReviewResponse(
+    val under_review: Boolean = false,
+    val since: String? = null
+)
+
+@JsonClass(generateAdapter = true)
 data class AdminRevokeModerationActionRequest(
     val p_target_user_id: String,
     val p_reason: String? = null
@@ -2077,7 +2187,9 @@ data class UpdateMyGroupPrefsRequest(
 data class ReportGroupRequest(
     val p_group_id: String,
     val p_category: String,
-    val p_reason: String
+    val p_reason: String,
+    val p_evidence: Map<String, Any?>? = null,
+    val p_deletion_log: Map<String, Any?>? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -2169,11 +2281,13 @@ data class BlockedGroupRow(
 @JsonClass(generateAdapter = true)
 data class ReportUserRequest(
     val p_reported_user_id: String,
-    val p_context_type: String, // "profile", "dm", "moment"
+    val p_context_type: String, // "room", "profile", "dm", "moment"
     val p_category: String,
-    val p_reason: String,
+    val p_reason: String? = null,
     val p_context_id: String? = null,
-    val p_screenshot_url: String? = null
+    val p_screenshot_url: String? = null,
+    val p_evidence: Map<String, Any?>? = null,
+    val p_deletion_log: Map<String, Any?>? = null
 )
 
 // ----------------------------------------------------
@@ -2260,7 +2374,7 @@ data class PurchaseItemRequest(
 @JsonClass(generateAdapter = true)
 data class PurchaseItemsRequest(
     val p_item_ids: List<Long>,
-    val p_apply: Boolean = false
+    val p_equip: Boolean = true
 )
 
 @JsonClass(generateAdapter = true)

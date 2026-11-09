@@ -7,14 +7,14 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import com.example.BuildConfig
 import com.example.util.RoomShareHelper
 import com.example.UpdateVoiceRoomRequest
 import com.example.SpeakerRequestInsert
 import com.example.SupabaseRoomParticipant
 import com.example.ModeratorActionRequest
 import com.example.UpdateParticipantMicRequest
-import com.example.BuildConfig
-import com.example.CreateRoomReportRequest
+import com.example.ReportUserRequest
 import com.example.ModerationManager
 import com.example.MyModerationStatus
 import com.example.ReportMessageSnapshot
@@ -3724,23 +3724,23 @@ fun VoiceRoomScreen(
 
                             val details = reportAdditionalDetails.trim().ifEmpty { null }
 
-                            // Persist to Supabase backend room_reports table
-                            val req = CreateRoomReportRequest(
-                                room_id = activeRoomId,
-                                reporter_id = effectiveReporterId,
-                                reason = category,
-                                category = category,
-                                message_snapshot = recentMsgsSnapshot,
-                                speaker_log = speakerLogsSnapshot,
-                                screenshot_url = reportScreenshotUrl,
-                                audio_clip_url = reportAudioClipUrl,
-                                additional_details = details,
-                                status = "pending"
+                            // Submit report via Supabase RPC report_user (p_context_type = "room")
+                            val targetReportedUserId = roomHostId?.takeIf { it.isNotBlank() && it != effectiveReporterId }
+                                ?: participantsData.firstOrNull { it.user_id != effectiveReporterId }?.user_id
+                                ?: roomHostId.orEmpty()
+
+                            val reportReq = ReportUserRequest(
+                                p_reported_user_id = targetReportedUserId,
+                                p_context_type = "room",
+                                p_category = category,
+                                p_reason = details ?: category,
+                                p_context_id = activeRoomId,
+                                p_screenshot_url = reportScreenshotUrl
                             )
-                            val res = SupabaseClient.api.createRoomReport(
+                            val res = SupabaseClient.api.reportUser(
+                                apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
                                 auth = bearerAuth,
-                                prefer = "return=minimal",
-                                report = req
+                                body = reportReq
                             )
 
                             if (res.isSuccessful) {

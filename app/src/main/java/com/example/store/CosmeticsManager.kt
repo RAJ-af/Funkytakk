@@ -163,19 +163,30 @@ object CosmeticsManager {
         itemIds: List<Long>,
         apply: Boolean
     ): Result<PurchaseItemsResult> = withContext(Dispatchers.IO) {
-        if (itemIds.isEmpty()) return@withContext Result.failure(Exception("No items selected"))
+        if (itemIds.isEmpty()) return@withContext Result.failure(Exception("No items selected."))
         try {
             SupabaseSessionManager.ensureActiveSession(context)
             val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
-                ?: return@withContext Result.failure(Exception("Not authenticated"))
+                ?: return@withContext Result.failure(Exception("Please sign in to purchase."))
+
+            val reqBody = PurchaseItemsRequest(p_item_ids = itemIds, p_equip = apply)
+
+            if (BuildConfig.DEBUG) {
+                Log.d(TAG, "[purchaseItems] Request JSON: {\"p_item_ids\":$itemIds,\"p_equip\":$apply}")
+            }
 
             val resp = SupabaseClient.api.purchaseItems(
                 apiKey = BuildConfig.SUPABASE_ANON_KEY,
                 auth = token,
-                body = PurchaseItemsRequest(p_item_ids = itemIds, p_apply = apply)
+                body = reqBody
             )
 
             val rawBody = if (resp.isSuccessful) resp.body()?.string().orEmpty() else resp.errorBody()?.string().orEmpty()
+            
+            if (BuildConfig.DEBUG) {
+                Log.d(TAG, "[purchaseItems] Response code: ${resp.code()}, body: $rawBody")
+            }
+
             val jsonObj = runCatching { JSONObject(rawBody) }.getOrNull()
 
             if (resp.isSuccessful) {
@@ -199,9 +210,7 @@ object CosmeticsManager {
                 val myUid = SupabaseSessionManager.getUserId(context).orEmpty()
                 if (myUid.isNotBlank()) {
                     cosmeticsCache.remove(myUid)
-                    if (apply) {
-                        refreshMyCosmetics(context, myUid)
-                    }
+                    refreshMyCosmetics(context, myUid)
                 }
 
                 Result.success(
@@ -218,15 +227,18 @@ object CosmeticsManager {
                     ?: jsonObj?.optString("error")
                     ?: rawBody
                 val mappedMsg = when {
-                    errorMsg.contains("insufficient_coins", ignoreCase = true) -> "insufficient_coins"
-                    errorMsg.contains("item_not_found", ignoreCase = true) -> "item_not_found"
-                    else -> errorMsg.ifEmpty { "Purchase failed" }
+                    errorMsg.contains("insufficient_coins", ignoreCase = true) -> "Not enough coins."
+                    errorMsg.contains("item_not_found", ignoreCase = true) -> "Item not found in store."
+                    errorMsg.contains("no_items", ignoreCase = true) -> "No items selected."
+                    errorMsg.contains("too_many_items", ignoreCase = true) -> "Too many items selected."
+                    errorMsg.contains("not_authenticated", ignoreCase = true) -> "Please sign in to purchase."
+                    else -> "Something went wrong. Please try again."
                 }
                 Result.failure(Exception(mappedMsg))
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error in purchaseItems", e)
-            Result.failure(e)
+            Result.failure(Exception("Something went wrong. Please try again."))
         }
     }
 
