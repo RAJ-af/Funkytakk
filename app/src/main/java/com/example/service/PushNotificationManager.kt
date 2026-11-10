@@ -99,6 +99,8 @@ object PushNotificationManager : DefaultLifecycleObserver {
     private const val CHANNEL_NAME_MESSAGES = "Messages & Chats"
     const val CHANNEL_ID_STAFF_REPORTS = "staff_reports"
     private const val CHANNEL_NAME_STAFF_REPORTS = "Staff Reports"
+    const val CHANNEL_ID_SUPPORT_CHAT = "support_chat"
+    private const val CHANNEL_NAME_SUPPORT_CHAT = "Support Chat"
 
     private const val PREFS_NAME = "push_notification_debug_prefs"
     private const val KEY_IS_REGISTERED = "is_registered"
@@ -415,6 +417,7 @@ object PushNotificationManager : DefaultLifecycleObserver {
                     setShowBadge(true)
                     lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
                 }
+                notificationManager?.createNotificationChannel(channel)
                 val staffChannel = NotificationChannel(
                     CHANNEL_ID_STAFF_REPORTS,
                     CHANNEL_NAME_STAFF_REPORTS,
@@ -426,6 +429,18 @@ object PushNotificationManager : DefaultLifecycleObserver {
                     lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
                 }
                 notificationManager?.createNotificationChannel(staffChannel)
+
+                val supportChannel = NotificationChannel(
+                    CHANNEL_ID_SUPPORT_CHAT,
+                    CHANNEL_NAME_SUPPORT_CHAT,
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "High priority notifications for official FunkyTalk support chat"
+                    enableVibration(true)
+                    setShowBadge(true)
+                    lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
+                }
+                notificationManager?.createNotificationChannel(supportChannel)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed creating notification channels", e)
             }
@@ -940,6 +955,42 @@ object PushNotificationManager : DefaultLifecycleObserver {
                 .setContentText(displayBody)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_STATUS)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
+                .build()
+
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            notificationManager?.notify(notificationId, notification)
+            return
+        }
+
+        if (kind == "support_chat") {
+            com.example.SupportChatManager.fetchSupportSession(context)
+            val displayTitle = title?.takeIf { it.isNotBlank() } ?: "FunkyTalk Support"
+            val displayBody = body?.takeIf { it.isNotBlank() } ?: "New message from FunkyTalk support"
+            val notificationId = "support_chat_notification".hashCode()
+
+            val intent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                data.forEach { (k, v) -> putExtra(k, v) }
+                putExtra("from_push", true)
+                putExtra("kind", "support_chat")
+                putExtra("navigate_to", "support_chat")
+            }
+
+            val pendingIntent = PendingIntent.getActivity(
+                context,
+                notificationId,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val notification = NotificationCompat.Builder(context, CHANNEL_ID_SUPPORT_CHAT)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle(displayTitle)
+                .setContentText(displayBody)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_MESSAGE)
                 .setAutoCancel(true)
                 .setContentIntent(pendingIntent)
                 .build()

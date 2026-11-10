@@ -5,8 +5,11 @@ import android.util.Log
 import com.example.realtime.RealtimeTableEvent
 import com.example.realtime.VoiceRoomRealtimeManager
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.text.SimpleDateFormat
 import java.util.*
@@ -14,10 +17,12 @@ import java.util.*
 object SupportChatManager {
     private const val TAG = "SupportChatManager"
     private const val PREFS_NAME = "funkytalk_support_prefs"
-    private const val KEY_READ_IDS = "read_admin_msg_ids"
-    private const val KEY_LAST_READ_TIME = "last_read_timestamp"
+    private const val KEY_LAST_AUTO_OPEN_ADMIN_MSG_ID = "last_auto_open_admin_msg_id"
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    private val _session = MutableStateFlow<GetMySupportSessionResponse?>(null)
+    val session: StateFlow<GetMySupportSessionResponse?> = _session.asStateFlow()
 
     private val _conversation = MutableStateFlow<SupabaseSupportConversation?>(null)
     val conversation: StateFlow<SupabaseSupportConversation?> = _conversation.asStateFlow()
@@ -28,7 +33,7 @@ object SupportChatManager {
     private val _unreadCount = MutableStateFlow(0)
     val unreadCount: StateFlow<Int> = _unreadCount.asStateFlow()
 
-    private val _latestMessagePreview = MutableStateFlow<String?>("How can we help you today? Tap to chat with FunkyTalk support.")
+    private val _latestMessagePreview = MutableStateFlow<String?>("Chat with FunkyTalk support")
     val latestMessagePreview: StateFlow<String?> = _latestMessagePreview.asStateFlow()
 
     private val _latestMessageTime = MutableStateFlow<String?>("")
@@ -40,37 +45,18 @@ object SupportChatManager {
     private val _isSending = MutableStateFlow(false)
     val isSending: StateFlow<Boolean> = _isSending.asStateFlow()
 
+    // Event emitted when support chat should automatically open (one-shot per admin message)
+    private val _autoOpenChatEvent = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val autoOpenChatEvent: SharedFlow<Unit> = _autoOpenChatEvent.asSharedFlow()
+
     private var subscribedConversationId: String? = null
     private var isListening = false
-
-    private fun getReadMessageIds(context: Context): Set<String> {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getStringSet(KEY_READ_IDS, emptySet()) ?: emptySet()
-    }
-
-    private fun saveReadMessageIds(context: Context, ids: Set<String>, timestamp: Long) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val existing = prefs.getStringSet(KEY_READ_IDS, emptySet()) ?: emptySet()
-        prefs.edit()
-            .putStringSet(KEY_READ_IDS, existing + ids)
-            .putLong(KEY_LAST_READ_TIME, timestamp)
-            .apply()
-    }
-
-    private fun parseIsoToMillis(isoString: String?): Long {
-        if (isoString.isNullOrBlank()) return 0L
-        return try {
-            val clean = isoString.replace("Z", "+0000").replace("T", " ")
-            val format = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).apply {
-                timeZone = TimeZone.getTimeZone("UTC")
-            }
-            format.parse(clean)?.time ?: 0L
-        } catch (_: Exception) {
-            0L
-        }
-    }
+    private var lastAutoOpenMsgId: String = ""
 
     fun init(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        lastAutoOpenMsgId = prefs.getString(KEY_LAST_AUTO_OPEN_ADMIN_MSG_ID, "").orEmpty()
+
         if (!isListening) {
             isListening = true
             scope.launch {
@@ -78,95 +64,133 @@ object SupportChatManager {
                     when (event) {
                         is RealtimeTableEvent.SupportMessageChanged -> {
                             Log.d(TAG, "Support message changed via Realtime: ${event.eventType}")
-                            fetchSupportConversationAndMessages(context)
+                            fetchSupportSession(context)
+                            fetchSupportMessages(context)
+                        }
+                        is RealtimeTableEvent.SupportConversationChanged -> {
+                            Log.d(TAG, "Support conversation changed via Realtime: until=${event.chatOpenUntil}")
+                            fetchSupportSession(context)
+                        }
+                        is RealtimeTableEvent.NotificationChanged -> {
+                            val record = event.record
+                            val notifType = record?.optString("type")
+                            val actionType = record?.optString("action_type")
+                            if (notifType == "support_message" && actionType == "support_chat_open") {
+                                Log.d(TAG, "Received support_chat_open notification event")
+                                fetchSupportSession(context)
+                            }
                         }
                         is RealtimeTableEvent.Reconnected -> {
-                            fetchSupportConversationAndMessages(context)
+                            fetchSupportSession(context)
+                            fetchSupportMessages(context)
                         }
                         else -> Unit
                     }
                 }
             }
         }
-        fetchSupportConversationAndMessages(context)
+        fetchSupportSession(context)
     }
 
-    fun fetchSupportConversationAndMessages(context: Context, onComplete: (() -> Unit)? = null) {
+    /**
+     * Calls get_my_support_session() RPC -> {"open": bool, "until": timestamp, "conversation_id": uuid, "unread": number}
+     */
+    fun fetchSupportSession(context: Context, onComplete: ((GetMySupportSessionResponse?) -> Unit)? = null) {
         scope.launch {
             try {
                 val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
                 if (token.isNullOrBlank()) {
-                    Log.d(TAG, "fetchSupportConversation: No active token")
+                    _session.value = null
+                    withContext(Dispatchers.Main) { onComplete?.invoke(null) }
                     return@launch
                 }
 
+                val response = SupabaseClient.api.getMySupportSession(auth = token)
+                if (response.isSuccessful && response.body() != null) {
+                    val sess = response.body()!!
+                    _session.value = sess
+                    _unreadCount.value = sess.unread
+
+                    val convId = sess.conversation_id
+                    if (!convId.isNullOrBlank() && convId != subscribedConversationId) {
+                        subscribedConversationId = convId
+                        VoiceRoomRealtimeManager.subscribeSupportMessages(convId)
+                    }
+
+                    if (sess.open) {
+                        fetchSupportMessages(context)
+                    }
+
+                    withContext(Dispatchers.Main) { onComplete?.invoke(sess) }
+                } else {
+                    Log.w(TAG, "getMySupportSession failed: ${response.code()}")
+                    withContext(Dispatchers.Main) { onComplete?.invoke(_session.value) }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching support session", e)
+                withContext(Dispatchers.Main) { onComplete?.invoke(_session.value) }
+            }
+        }
+    }
+
+    fun fetchSupportMessages(context: Context, onComplete: (() -> Unit)? = null) {
+        scope.launch {
+            try {
+                val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                if (token.isNullOrBlank()) return@launch
+
+                val sess = _session.value
+                val convId = sess?.conversation_id
+                if (convId.isNullOrBlank()) return@launch
+
                 _isLoading.value = true
-                val convRes = SupabaseClient.api.getMySupportConversation(auth = token)
-                if (convRes.isSuccessful) {
-                    val conversations = convRes.body() ?: emptyList()
-                    val myConv = conversations.firstOrNull()
-                    _conversation.value = myConv
+                val msgRes = SupabaseClient.api.getSupportMessages(
+                    auth = token,
+                    conversationIdFilter = "eq.$convId"
+                )
 
-                    if (myConv != null) {
-                        val convId = myConv.id
-                        if (convId.isNotBlank() && convId != subscribedConversationId) {
-                            subscribedConversationId = convId
-                            VoiceRoomRealtimeManager.subscribeSupportMessages(convId)
+                if (msgRes.isSuccessful && msgRes.body() != null) {
+                    val rawList = msgRes.body()!!
+                    val distinctList = rawList
+                        .distinctBy { it.id }
+                        .sortedBy { parseIsoToMillis(it.created_at) }
+
+                    _messages.value = distinctList
+
+                    val lastMsg = distinctList.lastOrNull()
+                    if (lastMsg != null) {
+                        _latestMessagePreview.value = if (lastMsg.sender_type == "admin") {
+                            lastMsg.body
+                        } else {
+                            "You: ${lastMsg.body}"
                         }
+                        _latestMessageTime.value = formatMessageTime(lastMsg.created_at)
 
-                        // Fetch messages
-                        val msgRes = SupabaseClient.api.getSupportMessages(
-                            auth = token,
-                            conversationIdFilter = "eq.$convId"
-                        )
-                        if (msgRes.isSuccessful && msgRes.body() != null) {
-                            val rawList = msgRes.body()!!
+                        // If open is true and unread is greater than 0, open automatically ONCE per new admin message
+                        val latestAdminMsg = distinctList.lastOrNull { it.sender_type == "admin" }
+                        val isSessionOpen = _session.value?.open == true
+                        val hasUnread = (_session.value?.unread ?: 0) > 0 || distinctList.any { it.sender_type == "admin" && !it.is_read_by_user }
 
-                            // Deduplicate raw messages by ID and by signature (sender + body + time)
-                            val distinctList = rawList
-                                .distinctBy { it.id }
-                                .distinctBy { "${it.sender_type}|${it.body.trim()}|${it.created_at}" }
-
-                            val locallyReadIds = getReadMessageIds(context)
-                            val lastReadTime = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                                .getLong(KEY_LAST_READ_TIME, 0L)
-
-                            val processedList = distinctList.map { msg ->
-                                val msgTimestamp = parseIsoToMillis(msg.created_at)
-                                if (msg.id in locallyReadIds || (lastReadTime > 0 && msgTimestamp > 0 && msgTimestamp <= lastReadTime)) {
-                                    msg.copy(is_read_by_user = true)
-                                } else {
-                                    msg
-                                }
-                            }
-                            _messages.value = processedList
-
-                            // Calculate unread admin messages strictly
-                            val unreadAdmin = processedList.count { it.sender_type == "admin" && !it.is_read_by_user }
-                            _unreadCount.value = unreadAdmin
-
-                            // Update latest preview
-                            val lastMsg = processedList.lastOrNull()
-                            if (lastMsg != null) {
-                                _latestMessagePreview.value = if (lastMsg.sender_type == "admin") {
-                                    lastMsg.body
-                                } else {
-                                    "You: ${lastMsg.body}"
-                                }
-                                _latestMessageTime.value = formatMessageTime(lastMsg.created_at)
-                            }
+                        if (isSessionOpen && hasUnread && latestAdminMsg != null && latestAdminMsg.id != lastAutoOpenMsgId) {
+                            lastAutoOpenMsgId = latestAdminMsg.id
+                            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                                .edit()
+                                .putString(KEY_LAST_AUTO_OPEN_ADMIN_MSG_ID, lastAutoOpenMsgId)
+                                .apply()
+                            Log.d(TAG, "Triggering auto-open support chat for admin message ${latestAdminMsg.id}")
+                            _autoOpenChatEvent.tryEmit(Unit)
                         }
                     }
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.e(TAG, "Error fetching support conversation", e)
+                Log.e(TAG, "Error fetching support messages", e)
             } finally {
                 _isLoading.value = false
-                withContext(Dispatchers.Main) {
-                    onComplete?.invoke()
-                }
+                withContext(Dispatchers.Main) { onComplete?.invoke() }
             }
         }
     }
@@ -174,12 +198,18 @@ object SupportChatManager {
     fun sendSupportMessage(
         context: Context,
         messageText: String,
-        reportId: String? = null,
         onSuccess: (() -> Unit)? = null,
         onError: ((String) -> Unit)? = null
     ) {
         val trimmed = messageText.trim()
         if (trimmed.isBlank()) return
+
+        // Verify session window before sending
+        val sess = _session.value
+        if (sess == null || !sess.open || isSessionExpired(sess.until)) {
+            onError?.invoke("This support chat has ended.")
+            return
+        }
 
         scope.launch {
             try {
@@ -187,7 +217,7 @@ object SupportChatManager {
                 val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
                 if (token.isNullOrBlank()) {
                     withContext(Dispatchers.Main) {
-                        onError?.invoke("Authentication required to send support message.")
+                        onError?.invoke("Authentication required.")
                     }
                     return@launch
                 }
@@ -196,39 +226,40 @@ object SupportChatManager {
                 val tempId = "temp_${System.currentTimeMillis()}"
                 val optimisticMsg = SupabaseSupportMessage(
                     id = tempId,
-                    conversation_id = _conversation.value?.id,
+                    conversation_id = sess.conversation_id,
                     sender_type = "user",
                     body = trimmed,
-                    report_id = reportId,
                     is_read_by_user = true,
                     is_read_by_admin = false,
                     created_at = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
                         timeZone = TimeZone.getTimeZone("UTC")
                     }.format(Date())
                 )
-                val current = _messages.value
-                _messages.value = (current + optimisticMsg).distinctBy { it.id }
+                _messages.value = (_messages.value + optimisticMsg).distinctBy { it.id }
                 _latestMessagePreview.value = "You: $trimmed"
                 _latestMessageTime.value = "Just now"
 
                 val response = SupabaseClient.api.sendSupportMessage(
                     auth = token,
-                    body = SendSupportMessageRequest(
-                        p_message = trimmed,
-                        p_report_id = reportId?.ifBlank { null }
-                    )
+                    body = SendSupportMessageRequest(p_message = trimmed)
                 )
 
                 if (response.isSuccessful) {
                     Log.d(TAG, "send_support_message RPC successful")
-                    fetchSupportConversationAndMessages(context) {
+                    fetchSupportMessages(context) {
                         onSuccess?.invoke()
                     }
                 } else {
-                    val err = response.errorBody()?.string() ?: response.message()
-                    Log.e(TAG, "send_support_message RPC failed: $err")
+                    val errBody = response.errorBody()?.string().orEmpty()
+                    Log.e(TAG, "send_support_message RPC failed: $errBody")
+                    val friendlyError = if (errBody.contains("support_chat_closed", ignoreCase = true)) {
+                        _session.value = _session.value?.copy(open = false)
+                        "This support chat has ended."
+                    } else {
+                        "Failed to send message. Please try again."
+                    }
                     withContext(Dispatchers.Main) {
-                        onError?.invoke("Failed to send message. Please try again.")
+                        onError?.invoke(friendlyError)
                     }
                 }
             } catch (e: CancellationException) {
@@ -245,15 +276,11 @@ object SupportChatManager {
     }
 
     fun markSupportConversationRead(context: Context) {
-        // Mark all current admin messages as read in local storage and memory
-        val currentMsgs = _messages.value
-        val adminIds = currentMsgs.filter { it.sender_type == "admin" }.map { it.id }.toSet()
-        saveReadMessageIds(context, adminIds, System.currentTimeMillis())
-
-        _messages.value = currentMsgs.map {
+        _unreadCount.value = 0
+        _session.value = _session.value?.copy(unread = 0)
+        _messages.value = _messages.value.map {
             if (it.sender_type == "admin") it.copy(is_read_by_user = true) else it
         }
-        _unreadCount.value = 0
 
         scope.launch {
             try {
@@ -261,14 +288,46 @@ object SupportChatManager {
                 val res = SupabaseClient.api.markSupportConversationRead(auth = token)
                 if (res.isSuccessful) {
                     Log.d(TAG, "mark_support_conversation_read RPC successful")
-                } else {
-                    Log.w(TAG, "mark_support_conversation_read failed: ${res.code()}")
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Error marking support conversation read", e)
             }
+        }
+    }
+
+    fun isSessionExpired(untilIso: String?): Boolean {
+        if (untilIso.isNullOrBlank()) return true
+        val targetMillis = parseIsoToMillis(untilIso)
+        return targetMillis > 0 && System.currentTimeMillis() >= targetMillis
+    }
+
+    fun formatRemainingCountdown(untilIso: String?): String {
+        if (untilIso.isNullOrBlank()) return "0m"
+        val targetMillis = parseIsoToMillis(untilIso)
+        val diffMillis = targetMillis - System.currentTimeMillis()
+        if (diffMillis <= 0) return "0m"
+        val totalMinutes = (diffMillis / (1000 * 60)).toInt()
+        val hours = totalMinutes / 60
+        val minutes = totalMinutes % 60
+        return if (hours > 0) {
+            "${hours}h ${minutes}m"
+        } else {
+            "${minutes}m"
+        }
+    }
+
+    fun parseIsoToMillis(isoString: String?): Long {
+        if (isoString.isNullOrBlank()) return 0L
+        return try {
+            val clean = isoString.replace("Z", "+0000").replace("T", " ")
+            val format = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }
+            format.parse(clean)?.time ?: 0L
+        } catch (_: Exception) {
+            0L
         }
     }
 

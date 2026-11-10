@@ -1,9 +1,6 @@
 package com.example.moderation
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Paint
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -37,19 +34,16 @@ import com.example.ui.theme.GoldAccent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.RequestBody.Companion.toRequestBody
-import java.io.ByteArrayOutputStream
-import java.util.UUID
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReportUserDialog(
     reportedUserId: String,
     reportedUserName: String,
-    contextType: String, // "profile", "dm", "moment"
+    contextType: String, // "profile", "dm", "moment", "room"
     contextId: String? = null,
-    dmMessageText: String? = null,
+    dmProofMessages: List<Map<String, Any?>>? = null,
+    dmDeletionLog: List<Map<String, Any?>>? = null,
     existingScreenshotUrl: String? = null,
     onDismiss: () -> Unit,
     onReportSubmitted: () -> Unit = {}
@@ -59,18 +53,20 @@ fun ReportUserDialog(
 
     val categories = remember {
         listOf(
-            "Harassment & Bullying",
-            "Inappropriate Content / NSFW",
             "Spam & Scam",
             "Hate Speech",
-            "Impersonation",
+            "Harassment",
+            "Inappropriate Content / NSFW",
             "Other"
         )
     }
 
     var selectedCategory by remember { mutableStateOf(categories[0]) }
     var reasonText by remember { mutableStateOf("") }
+    var includeProof by remember { mutableStateOf(true) }
     var isSubmitting by remember { mutableStateOf(false) }
+
+    val showProofSwitch = (contextType == "dm" || contextType == "group") && !dmProofMessages.isNullOrEmpty()
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -180,22 +176,39 @@ fun ReportUserDialog(
             Spacer(modifier = Modifier.height(14.dp))
 
             // Additional details input
-            Text(
-                text = "Additional Details (Optional)",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF334155)
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Additional Details (Optional)",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF334155)
+                )
+                Text(
+                    text = "${reasonText.length}/1000",
+                    fontSize = 11.sp,
+                    color = if (reasonText.length > 1000) Color(0xFFEF4444) else Color(0xFF94A3B8)
+                )
+            }
 
             Spacer(modifier = Modifier.height(6.dp))
 
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(64.dp)
+                    .height(68.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(Color(0xFFF8FAFC))
-                    .border(BorderStroke(1.dp, Color(0xFFE2E8F0)), RoundedCornerShape(12.dp))
+                    .border(
+                        BorderStroke(
+                            1.dp,
+                            if (reasonText.length > 1000) Color(0xFFEF4444) else Color(0xFFE2E8F0)
+                        ),
+                        RoundedCornerShape(12.dp)
+                    )
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 contentAlignment = Alignment.TopStart
             ) {
@@ -208,21 +221,48 @@ fun ReportUserDialog(
                 }
                 BasicTextField(
                     value = reasonText,
-                    onValueChange = { reasonText = it },
+                    onValueChange = { if (it.length <= 1000) reasonText = it },
                     textStyle = TextStyle(color = Color.Black, fontSize = 13.sp),
                     cursorBrush = SolidColor(Color.Black),
                     modifier = Modifier.fillMaxWidth()
                 )
             }
 
-            if (contextType == "dm") {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "📸 A client-side snapshot of the decrypted message will be attached as evidence so moderators can review it.",
-                    fontSize = 11.5.sp,
-                    color = Color(0xFF64748B),
-                    lineHeight = 15.sp
-                )
+            if (showProofSwitch) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFFF8FAFC))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Include the last 20 messages as proof",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF0F172A)
+                        )
+                        Text(
+                            text = "Only messages you can see are sent, to moderators only.",
+                            fontSize = 11.5.sp,
+                            color = Color(0xFF64748B),
+                            lineHeight = 15.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Switch(
+                        checked = includeProof,
+                        onCheckedChange = { includeProof = it },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = GoldAccent
+                        )
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(20.dp))
@@ -230,27 +270,39 @@ fun ReportUserDialog(
             // Submit Button
             Button(
                 onClick = {
+                    if (reasonText.length > 1000) {
+                        Toast.makeText(context, mapReportError("reason_too_long"), Toast.LENGTH_SHORT).show()
+                        return@Button
+                    }
                     isSubmitting = true
+                    val evidenceMap: Map<String, Any?>? = if (showProofSwitch && includeProof && !dmProofMessages.isNullOrEmpty()) {
+                        mapOf("messages" to dmProofMessages)
+                    } else null
+
+                    val deletionLogMap: Map<String, Any?>? = if (showProofSwitch && includeProof && !dmDeletionLog.isNullOrEmpty()) {
+                        mapOf("deletions" to dmDeletionLog)
+                    } else null
+
                     scope.launch {
                         submitReport(
                             context = context,
                             reportedUserId = reportedUserId,
-                            reportedUserName = reportedUserName,
                             contextType = contextType,
                             contextId = contextId,
                             category = selectedCategory,
-                            reason = reasonText.ifBlank { selectedCategory },
-                            dmMessageText = dmMessageText,
+                            reason = reasonText.ifBlank { null },
+                            evidence = evidenceMap,
+                            deletionLog = deletionLogMap,
                             existingScreenshotUrl = existingScreenshotUrl,
                             onSuccess = {
                                 isSubmitting = false
-                                Toast.makeText(context, "Report submitted. Thank you for keeping FunkyTalk safe!", Toast.LENGTH_LONG).show()
+                                Toast.makeText(context, "Thanks, our team will review your report.", Toast.LENGTH_LONG).show()
                                 onReportSubmitted()
                                 onDismiss()
                             },
                             onError = { err ->
                                 isSubmitting = false
-                                Toast.makeText(context, "Failed to submit report: $err", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, mapReportError(err), Toast.LENGTH_SHORT).show()
                             }
                         )
                     }
@@ -281,63 +333,19 @@ fun ReportUserDialog(
 private suspend fun submitReport(
     context: Context,
     reportedUserId: String,
-    reportedUserName: String,
     contextType: String,
     contextId: String?,
     category: String,
-    reason: String,
-    dmMessageText: String?,
+    reason: String?,
+    evidence: Map<String, Any?>?,
+    deletionLog: Map<String, Any?>?,
     existingScreenshotUrl: String?,
     onSuccess: () -> Unit,
     onError: (String) -> Unit
 ) = withContext(Dispatchers.IO) {
     try {
         val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
-            ?: return@withContext onError("Please log in to submit a report")
-
-        var screenshotUrl = existingScreenshotUrl
-
-        // For DM reports: render the decrypted message into a bitmap snapshot and upload to report-evidence
-        if (contextType == "dm" && screenshotUrl.isNullOrBlank() && !dmMessageText.isNullOrBlank()) {
-            try {
-                val bitmap = renderMessageToBitmap(reportedUserName, dmMessageText)
-                val stream = ByteArrayOutputStream()
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, stream)
-                val bytes = stream.toByteArray()
-                val filename = "dm_report_${UUID.randomUUID()}.jpg"
-
-                val reqBody = bytes.toRequestBody("image/jpeg".toMediaTypeOrNull())
-
-                // Upload to report-evidence bucket (or fallback to reports/avatars)
-                val uploadRes = SupabaseClient.api.uploadStorageRawBytes(
-                    auth = token,
-                    bucket = "report-evidence",
-                    path = filename,
-                    body = reqBody
-                )
-
-                if (uploadRes.isSuccessful) {
-                    val baseUrl = BuildConfig.SUPABASE_URL.trimEnd('/')
-                    val host = if (baseUrl.startsWith("http")) baseUrl else "https://$baseUrl"
-                    screenshotUrl = "$host/storage/v1/object/public/report-evidence/$filename"
-                } else {
-                    // Fallback to avatars bucket if report-evidence doesn't allow raw write
-                    val fbRes = SupabaseClient.api.uploadStorageRawBytes(
-                        auth = token,
-                        bucket = "avatars",
-                        path = filename,
-                        body = reqBody
-                    )
-                    if (fbRes.isSuccessful) {
-                        val baseUrl = BuildConfig.SUPABASE_URL.trimEnd('/')
-                        val host = if (baseUrl.startsWith("http")) baseUrl else "https://$baseUrl"
-                        screenshotUrl = "$host/storage/v1/object/public/avatars/$filename"
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.w("ReportUser", "Screenshot capture/upload warning: ${e.message}")
-            }
-        }
+            ?: return@withContext onError("not_authenticated")
 
         val resp = SupabaseClient.api.reportUser(
             apiKey = BuildConfig.SUPABASE_ANON_KEY,
@@ -348,53 +356,38 @@ private suspend fun submitReport(
                 p_category = category,
                 p_reason = reason,
                 p_context_id = contextId,
-                p_screenshot_url = screenshotUrl
+                p_screenshot_url = existingScreenshotUrl,
+                p_evidence = evidence,
+                p_deletion_log = deletionLog
             )
         )
 
         if (resp.isSuccessful) {
             withContext(Dispatchers.Main) { onSuccess() }
         } else {
-            val err = resp.errorBody()?.string() ?: "Failed to report user"
+            val err = resp.errorBody()?.string() ?: "Could not send, try again."
             withContext(Dispatchers.Main) { onError(err) }
         }
     } catch (e: Exception) {
-        withContext(Dispatchers.Main) { onError(e.localizedMessage ?: "Unknown error") }
+        withContext(Dispatchers.Main) { onError(e.localizedMessage ?: "Could not send, try again.") }
     }
 }
 
-private fun renderMessageToBitmap(
-    senderName: String,
-    messageText: String
-): Bitmap {
-    val width = 720
-    val height = 360
-    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-    canvas.drawColor(android.graphics.Color.WHITE)
-
-    val paint = Paint().apply { isAntiAlias = true }
-
-    // Card background
-    paint.color = android.graphics.Color.parseColor("#FEF3C7")
-    canvas.drawRoundRect(30f, 30f, 690f, 330f, 24f, 24f, paint)
-
-    // Sender title
-    paint.color = android.graphics.Color.parseColor("#92400E")
-    paint.textSize = 28f
-    paint.isFakeBoldText = true
-    canvas.drawText("Encrypted DM Evidence: $senderName", 60f, 80f, paint)
-
-    // Decrypted Plaintext
-    paint.color = android.graphics.Color.parseColor("#0F172A")
-    paint.textSize = 28f
-    paint.isFakeBoldText = false
-    val lines = messageText.chunked(36)
-    var y = 140f
-    for (line in lines.take(4)) {
-        canvas.drawText(line, 60f, y, paint)
-        y += 40f
+fun mapReportError(raw: String?): String {
+    if (raw.isNullOrBlank()) return "Could not send, try again."
+    val lower = raw.lowercase()
+    return when {
+        lower.contains("not_authenticated") -> "Please log in to submit a report."
+        lower.contains("cannot_report_yourself") -> "You cannot report yourself."
+        lower.contains("category_required") -> "Please select a category."
+        lower.contains("reason_too_long") -> "Reason text is too long (max 1000 characters)."
+        lower.contains("evidence_too_large") -> "Evidence size exceeds limit (max 200 KB)."
+        lower.contains("deletion_log_too_large") -> "Deletion log size exceeds limit (max 20 KB)."
+        lower.contains("rate_limited") -> "You have submitted too many reports recently. Please wait a while before reporting again."
+        lower.contains("not_in_room") -> "You are not in this voice room."
+        lower.contains("reported_not_in_room") -> "The reported user is not in this voice room."
+        lower.contains("moment_mismatch") -> "The reported moment was not found or does not belong to this user."
+        lower.contains("cannot_report_own_group") -> "You can't report a group you created."
+        else -> "Could not send, try again."
     }
-
-    return bitmap
 }

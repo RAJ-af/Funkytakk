@@ -1137,6 +1137,13 @@ interface SupabaseApi {
         @Query("conversation_id") conversationIdFilter: String // format: "eq.<conversation_id>"
     ): Response<List<SupabaseSupportMessage>>
 
+    @POST("rest/v1/rpc/get_my_support_session")
+    suspend fun getMySupportSession(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> = emptyMap()
+    ): Response<GetMySupportSessionResponse>
+
     @POST("rest/v1/rpc/send_support_message")
     suspend fun sendSupportMessage(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
@@ -1932,6 +1939,14 @@ data class SupabaseSupportMessage(
     val is_read_by_user: Boolean = false,
     val is_read_by_admin: Boolean = false,
     val created_at: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class GetMySupportSessionResponse(
+    val open: Boolean = false,
+    val until: String? = null,
+    val conversation_id: String? = null,
+    val unread: Int = 0
 )
 
 @JsonClass(generateAdapter = true)

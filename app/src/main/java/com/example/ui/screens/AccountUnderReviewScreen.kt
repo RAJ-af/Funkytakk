@@ -258,25 +258,50 @@ fun AccountUnderReviewScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            // ONE button: "Contact support"
-            Button(
-                onClick = onContactSupport,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF0F172A),
-                    contentColor = Color.White
-                ),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-            ) {
-                SoftHeadsetIcon(size = 20.dp, color = Color.White)
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    text = "Contact Support",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold
-                )
+            val supportSession by com.example.SupportChatManager.session.collectAsState()
+            val isSupportOpen = supportSession?.open == true && !com.example.SupportChatManager.isSessionExpired(supportSession?.until)
+
+            if (isSupportOpen) {
+                Button(
+                    onClick = onContactSupport,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFFFD200),
+                        contentColor = Color(0xFF1E293B)
+                    ),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                ) {
+                    SoftHeadsetIcon(size = 20.dp, color = Color(0xFF1E293B))
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "Open support chat",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            } else {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color(0xFFF1F5F9),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        SoftShieldIcon(size = 20.dp, color = Color(0xFF64748B))
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Our team will message you here if they need anything.",
+                            fontSize = 13.sp,
+                            color = Color(0xFF475569),
+                            lineHeight = 18.sp
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))

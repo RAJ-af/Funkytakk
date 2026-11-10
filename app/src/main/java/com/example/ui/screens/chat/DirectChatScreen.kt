@@ -49,6 +49,7 @@ import com.example.SupabaseSessionManager
 import com.example.db.LocalDmConversation
 import com.example.db.LocalDmMessage
 import com.example.db.LocalDmMessageReaction
+import com.example.moderation.ReportUserDialog
 import com.example.repository.EncryptedChatRepository
 import com.example.ui.chat.*
 import com.example.ui.components.CircleFlag
@@ -127,6 +128,8 @@ fun DirectChatScreen(
     var activeWordLookup by remember { mutableStateOf<WordLookupState?>(null) }
     var showAiAssistSheet by remember { mutableStateOf(false) }
     var activeMediaViewerIndex by remember { mutableStateOf<Int?>(null) }
+    var showReportUserDialog by remember { mutableStateOf(false) }
+    var showTopMenu by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
     val voicePlayer = rememberVoicePlaybackController()
@@ -465,6 +468,31 @@ fun DirectChatScreen(
                                         text = displayLocation,
                                         color = colors.textSecondary,
                                         fontSize = 12f.chatSp()
+                                    )
+                                }
+                            }
+
+                            Box {
+                                IconButton(onClick = { showTopMenu = true }) {
+                                    com.example.ui.components.SoftThreeDotsIcon(size = 18.dp, color = colors.text)
+                                }
+                                DropdownMenu(
+                                    expanded = showTopMenu,
+                                    onDismissRequest = { showTopMenu = false },
+                                    modifier = Modifier.background(colors.surface)
+                                ) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                com.example.ui.components.SoftShieldIcon(size = 16.dp, color = Color(0xFFEF4444))
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text("Report", color = Color(0xFFEF4444), fontWeight = FontWeight.Medium)
+                                            }
+                                        },
+                                        onClick = {
+                                            showTopMenu = false
+                                            showReportUserDialog = true
+                                        }
                                     )
                                 }
                             }
@@ -1052,6 +1080,40 @@ fun DirectChatScreen(
                     showAiAssistSheet = false
                 },
                 onDismiss = { showAiAssistSheet = false }
+            )
+        }
+
+        // Report User Dialog
+        if (showReportUserDialog) {
+            val last20ProofMessages = remember(rawMessages) {
+                rawMessages.takeLast(20).map { msg ->
+                    val type = when {
+                        msg.text.startsWith("[img]") || msg.text.startsWith("[imgs]") -> "image"
+                        msg.text.startsWith("[voice]") -> "voice"
+                        else -> "text"
+                    }
+                    val textVal = if (type == "text") msg.text else null
+                    val isoTime = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US).apply {
+                        timeZone = java.util.TimeZone.getTimeZone("UTC")
+                    }.format(java.util.Date(msg.timestamp))
+                    mapOf<String, Any?>(
+                        "sender" to if (msg.isOutgoing) "me" else "them",
+                        "type" to type,
+                        "text" to textVal,
+                        "sent_at" to isoTime
+                    )
+                }
+            }
+
+            ReportUserDialog(
+                reportedUserId = partnerUserId,
+                reportedUserName = partnerName,
+                contextType = "dm",
+                contextId = conversationId.ifBlank { partnerUserId },
+                dmProofMessages = last20ProofMessages,
+                existingScreenshotUrl = null,
+                onDismiss = { showReportUserDialog = false },
+                onReportSubmitted = { showReportUserDialog = false }
             )
         }
     }

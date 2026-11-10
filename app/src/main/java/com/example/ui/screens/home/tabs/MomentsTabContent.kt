@@ -388,33 +388,35 @@ fun MomentsTabContent(
                                         Spacer(modifier = Modifier.height(2.dp))
                                         Text("@" + post.username + " • Seoul, South Korea • " + post.timeAgo, color = Color(0xFF64748B), fontSize = 12.sp)
                                     }
-                                    var showPostMenu by remember { mutableStateOf(false) }
-                                    Box {
-                                        IconButton(
-                                            onClick = { showPostMenu = true },
-                                            modifier = Modifier.size(28.dp)
-                                        ) {
-                                            SoftThreeDotsIcon(size = 18.dp, color = Color(0xFF94A3B8))
-                                        }
+                                    if (post.userId != selfUserId) {
+                                        var showPostMenu by remember { mutableStateOf(false) }
+                                        Box {
+                                            IconButton(
+                                                onClick = { showPostMenu = true },
+                                                modifier = Modifier.size(28.dp)
+                                            ) {
+                                                SoftThreeDotsIcon(size = 18.dp, color = Color(0xFF94A3B8))
+                                            }
 
-                                        DropdownMenu(
-                                            expanded = showPostMenu,
-                                            onDismissRequest = { showPostMenu = false },
-                                            modifier = Modifier.background(Color.White, RoundedCornerShape(14.dp))
-                                        ) {
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                                        SoftShieldIcon(size = 15.dp, color = Color(0xFFEF4444))
-                                                        Spacer(modifier = Modifier.width(8.dp))
-                                                        Text("Report Post", color = Color(0xFFEF4444), fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                            DropdownMenu(
+                                                expanded = showPostMenu,
+                                                onDismissRequest = { showPostMenu = false },
+                                                modifier = Modifier.background(Color.White, RoundedCornerShape(14.dp))
+                                            ) {
+                                                DropdownMenuItem(
+                                                    text = {
+                                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                                            SoftShieldIcon(size = 15.dp, color = Color(0xFFEF4444))
+                                                            Spacer(modifier = Modifier.width(8.dp))
+                                                            Text("Report Post", color = Color(0xFFEF4444), fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                                        }
+                                                    },
+                                                    onClick = {
+                                                        showPostMenu = false
+                                                        reportingPost = post
                                                     }
-                                                },
-                                                onClick = {
-                                                    showPostMenu = false
-                                                    reportingPost = post
-                                                }
-                                            )
+                                                )
+                                            }
                                         }
                                     }
                                 }

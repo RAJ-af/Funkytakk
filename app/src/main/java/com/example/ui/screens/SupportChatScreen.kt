@@ -5,7 +5,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -14,12 +13,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,11 +21,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -41,7 +32,8 @@ import com.example.SupportChatManager
 import com.example.ui.components.*
 import com.example.ui.screens.chat.components.*
 import com.example.ui.theme.GoldAccent
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,23 +42,41 @@ fun SupportChatScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
+    val session by SupportChatManager.session.collectAsState()
     val messages by SupportChatManager.messages.collectAsState()
     val isLoading by SupportChatManager.isLoading.collectAsState()
     val isSending by SupportChatManager.isSending.collectAsState()
 
     var inputText by remember { mutableStateOf("") }
-    var activeReportId by remember { mutableStateOf(reportId) }
+    var remainingTimeText by remember { mutableStateOf("") }
+    var isChatEnded by remember { mutableStateOf(false) }
 
-    // Lifecycle observer to mark conversation read on open/resume
+    // Live countdown update loop every second
+    LaunchedEffect(session?.until, session?.open) {
+        while (isActive) {
+            val sess = session
+            if (sess == null || !sess.open || SupportChatManager.isSessionExpired(sess.until)) {
+                isChatEnded = true
+                remainingTimeText = "Chat ended"
+            } else {
+                isChatEnded = false
+                val formatted = SupportChatManager.formatRemainingCountdown(sess.until)
+                remainingTimeText = "Support chat open for $formatted"
+            }
+            delay(1000L)
+        }
+    }
+
+    // Lifecycle observer to mark conversation read on open/resume & refresh session
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-                SupportChatManager.markSupportConversationRead(context)
-                SupportChatManager.fetchSupportConversationAndMessages(context)
+                SupportChatManager.fetchSupportSession(context) {
+                    SupportChatManager.markSupportConversationRead(context)
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -77,24 +87,15 @@ fun SupportChatScreen(
 
     LaunchedEffect(Unit) {
         SupportChatManager.init(context)
-        SupportChatManager.fetchSupportConversationAndMessages(context) {
+        SupportChatManager.fetchSupportSession(context) {
             SupportChatManager.markSupportConversationRead(context)
         }
     }
 
-    // Auto-scroll to bottom or target report message
+    // Auto-scroll to bottom on new messages
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
-            if (!activeReportId.isNullOrBlank()) {
-                val targetIndex = messages.indexOfLast { it.report_id == activeReportId }
-                if (targetIndex >= 0) {
-                    listState.animateScrollToItem(targetIndex)
-                } else {
-                    listState.animateScrollToItem(messages.size - 1)
-                }
-            } else {
-                listState.animateScrollToItem(messages.size - 1)
-            }
+            listState.animateScrollToItem(messages.size - 1)
         }
     }
 
@@ -191,9 +192,10 @@ fun SupportChatScreen(
                         }
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Direct assistance & moderation inquiries",
+                            text = if (isChatEnded) "This support chat has ended." else remainingTimeText,
                             fontSize = 12.sp,
-                            color = Color(0xFF6B7280)
+                            fontWeight = if (!isChatEnded) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (isChatEnded) Color(0xFFEF4444) else Color(0xFFB45309)
                         )
                     }
                 }
@@ -212,124 +214,110 @@ fun SupportChatScreen(
                         .navigationBarsPadding()
                         .padding(horizontal = 16.dp, vertical = 10.dp)
                 ) {
-                    // Optional Report context pill if attached
-                    if (!activeReportId.isNullOrBlank()) {
-                        Row(
+                    if (isChatEnded) {
+                        Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(bottom = 8.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFFFEF3C7))
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                                .padding(vertical = 4.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0xFFFEE2E2),
+                            border = BorderStroke(1.dp, Color(0xFFFCA5A5))
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                SoftShieldIcon(
-                                    size = 14.dp,
-                                    color = Color(0xFF92400E)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                SoftShieldIcon(size = 18.dp, color = Color(0xFFDC2626))
+                                Spacer(modifier = Modifier.width(10.dp))
                                 Text(
-                                    text = "Replying to Report #${activeReportId?.take(8)}",
-                                    fontSize = 12.sp,
+                                    text = "This support chat has ended.",
+                                    fontSize = 13.5.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF92400E)
+                                    color = Color(0xFFB91C1C)
                                 )
                             }
-                            Text(
-                                text = "Clear",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFFB45309),
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .clickable { activeReportId = null }
-                                    .padding(horizontal = 4.dp, vertical = 2.dp)
-                            )
                         }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedTextField(
-                            value = inputText,
-                            onValueChange = { inputText = it },
-                            placeholder = {
-                                Text(
-                                    text = "Type a message to FunkyTalk Support...",
-                                    color = Color(0xFF9CA3AF),
-                                    fontSize = 14.sp
-                                )
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("support_chat_input"),
-                            shape = RoundedCornerShape(24.dp),
-                            maxLines = 4,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = Color(0xFFF9FAFB),
-                                unfocusedContainerColor = Color(0xFFF9FAFB),
-                                focusedBorderColor = GoldAccent,
-                                unfocusedBorderColor = Color(0xFFE5E7EB),
-                                focusedTextColor = Color.Black,
-                                unfocusedTextColor = Color.Black
-                            ),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                            keyboardActions = KeyboardActions(onSend = {
-                                if (inputText.isNotBlank() && !isSending) {
-                                    val textToSend = inputText
-                                    inputText = ""
-                                    SupportChatManager.sendSupportMessage(
-                                        context = context,
-                                        messageText = textToSend,
-                                        reportId = activeReportId,
-                                        onError = { err ->
-                                            Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
-                                        }
-                                    )
-                                }
-                            })
-                        )
-
-                        Spacer(modifier = Modifier.width(8.dp))
-
-                        IconButton(
-                            onClick = {
-                                if (inputText.isNotBlank() && !isSending) {
-                                    val textToSend = inputText
-                                    inputText = ""
-                                    SupportChatManager.sendSupportMessage(
-                                        context = context,
-                                        messageText = textToSend,
-                                        reportId = activeReportId,
-                                        onError = { err ->
-                                            Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
-                                        }
-                                    )
-                                }
-                            },
-                            enabled = inputText.isNotBlank() && !isSending,
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(CircleShape)
-                                .background(if (inputText.isNotBlank() && !isSending) GoldAccent else Color(0xFFE5E7EB))
-                                .testTag("support_chat_send_button")
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            if (isSending) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    color = Color.Black,
-                                    strokeWidth = 2.dp
-                                )
-                            } else {
-                                AppSvgIcon(
-                                    icon = ChatIconAsset.Send,
-                                    tint = if (inputText.isNotBlank()) Color.Black else Color(0xFF9CA3AF),
-                                    modifier = Modifier.size(18.dp)
-                                )
+                            OutlinedTextField(
+                                value = inputText,
+                                onValueChange = { inputText = it },
+                                placeholder = {
+                                    Text(
+                                        text = "Type a message to FunkyTalk Support...",
+                                        color = Color(0xFF9CA3AF),
+                                        fontSize = 14.sp
+                                    )
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("support_chat_input"),
+                                shape = RoundedCornerShape(24.dp),
+                                maxLines = 4,
+                                enabled = !isSending,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedContainerColor = Color(0xFFF9FAFB),
+                                    unfocusedContainerColor = Color(0xFFF9FAFB),
+                                    focusedBorderColor = GoldAccent,
+                                    unfocusedBorderColor = Color(0xFFE5E7EB),
+                                    focusedTextColor = Color.Black,
+                                    unfocusedTextColor = Color.Black
+                                ),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                                keyboardActions = KeyboardActions(onSend = {
+                                    if (inputText.isNotBlank() && !isSending) {
+                                        val textToSend = inputText
+                                        inputText = ""
+                                        SupportChatManager.sendSupportMessage(
+                                            context = context,
+                                            messageText = textToSend,
+                                            onError = { err ->
+                                                Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                                            }
+                                        )
+                                    }
+                                })
+                            )
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            IconButton(
+                                onClick = {
+                                    if (inputText.isNotBlank() && !isSending) {
+                                        val textToSend = inputText
+                                        inputText = ""
+                                        SupportChatManager.sendSupportMessage(
+                                            context = context,
+                                            messageText = textToSend,
+                                            onError = { err ->
+                                                Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                                            }
+                                        )
+                                    }
+                                },
+                                enabled = inputText.isNotBlank() && !isSending,
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(if (inputText.isNotBlank() && !isSending) GoldAccent else Color(0xFFE5E7EB))
+                                    .testTag("support_chat_send_button")
+                            ) {
+                                if (isSending) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        color = Color.Black,
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    AppSvgIcon(
+                                        icon = ChatIconAsset.Send,
+                                        tint = if (inputText.isNotBlank()) Color.Black else Color(0xFF9CA3AF),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -352,14 +340,11 @@ fun SupportChatScreen(
             ) {
                 // Official Welcome Note Card at the top of thread
                 item {
-                    OfficialWelcomeCard()
+                    OfficialWelcomeCard(isEnded = isChatEnded)
                 }
 
                 items(messages.distinctBy { it.id }, key = { it.id }) { msg ->
-                    SupportMessageBubble(
-                        message = msg,
-                        isHighlighted = !activeReportId.isNullOrBlank() && msg.report_id == activeReportId
-                    )
+                    SupportMessageBubble(message = msg)
                 }
             }
 
@@ -374,36 +359,40 @@ fun SupportChatScreen(
 }
 
 @Composable
-private fun OfficialWelcomeCard() {
+private fun OfficialWelcomeCard(isEnded: Boolean) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 8.dp),
         shape = RoundedCornerShape(20.dp),
-        color = Color(0xFFFFFBEB),
-        border = BorderStroke(1.dp, Color(0xFFFDE68A))
+        color = if (isEnded) Color(0xFFF1F5F9) else Color(0xFFFFFBEB),
+        border = BorderStroke(1.dp, if (isEnded) Color(0xFFCBD5E1) else Color(0xFFFDE68A))
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 SoftHeadsetIcon(
                     size = 22.dp,
-                    color = Color(0xFFB45309)
+                    color = if (isEnded) Color(0xFF475569) else Color(0xFFB45309)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = "FunkyTalk Official Support",
                     fontWeight = FontWeight.Bold,
                     fontSize = 15.sp,
-                    color = Color(0xFF92400E)
+                    color = if (isEnded) Color(0xFF1E293B) else Color(0xFF92400E)
                 )
             }
 
             Spacer(modifier = Modifier.height(6.dp))
 
             Text(
-                text = "Welcome to your personal support channel. Have questions about language rooms, report appeals, or safety guidelines? Send a message below and our team will get back to you promptly.",
+                text = if (isEnded) {
+                    "This support session has ended. If moderators need additional information, they will open a new chat window."
+                } else {
+                    "Welcome to your personal support channel. Have questions about your account or safety guidelines? Reply directly to this message."
+                },
                 fontSize = 13.sp,
-                color = Color(0xFF78350F),
+                color = if (isEnded) Color(0xFF475569) else Color(0xFF78350F),
                 lineHeight = 18.sp
             )
         }
@@ -411,10 +400,7 @@ private fun OfficialWelcomeCard() {
 }
 
 @Composable
-private fun SupportMessageBubble(
-    message: SupabaseSupportMessage,
-    isHighlighted: Boolean = false
-) {
+private fun SupportMessageBubble(message: SupabaseSupportMessage) {
     val isUser = message.sender_type == "user"
     val formattedTime = SupportChatManager.formatMessageTime(message.created_at)
 
@@ -473,38 +459,14 @@ private fun SupportMessageBubble(
                     bottomStart = if (isUser) 18.dp else 4.dp,
                     bottomEnd = if (isUser) 4.dp else 18.dp
                 ),
-                color = when {
-                    isUser -> GoldAccent
-                    isHighlighted -> Color(0xFFFEF3C7)
-                    else -> Color.White
-                },
+                color = if (isUser) GoldAccent else Color.White,
                 border = BorderStroke(
                     1.dp,
-                    when {
-                        isUser -> Color(0xFFF59E0B)
-                        isHighlighted -> Color(0xFFFDE68A)
-                        else -> Color(0xFFE5E7EB)
-                    }
+                    if (isUser) Color(0xFFF59E0B) else Color(0xFFE5E7EB)
                 ),
                 shadowElevation = 0.5.dp
             ) {
                 Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                    if (!message.report_id.isNullOrBlank()) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = if (isUser) Color(0x33000000) else Color(0xFFF3F4F6),
-                            modifier = Modifier.padding(bottom = 6.dp)
-                        ) {
-                            Text(
-                                text = "Report #${message.report_id.take(8)}",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isUser) Color.Black else Color(0xFF6B7280),
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-
                     Text(
                         text = message.body,
                         fontSize = 14.sp,

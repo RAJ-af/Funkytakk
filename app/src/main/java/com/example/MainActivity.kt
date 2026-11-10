@@ -98,6 +98,14 @@ class MainActivity : FragmentActivity() {
                         if (SupabaseSessionManager.hasValidAuthenticatedSession(applicationContext)) {
                             authViewModel.checkDeletionStatus(applicationContext)
                             authViewModel.checkAccountReview(applicationContext)
+                            com.example.SupportChatManager.init(applicationContext)
+                        }
+                    }
+
+                    // Auto-open support chat when event emitted (open == true and unread > 0)
+                    LaunchedEffect(Unit) {
+                        com.example.SupportChatManager.autoOpenChatEvent.collect {
+                            currentScreen = "support_chat"
                         }
                     }
 
@@ -108,6 +116,7 @@ class MainActivity : FragmentActivity() {
                             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
                                 authViewModel.refreshModerationStatus(applicationContext)
                                 authViewModel.checkAccountReview(applicationContext)
+                                com.example.SupportChatManager.fetchSupportSession(applicationContext)
                                 if (SupabaseSessionManager.getUserId(applicationContext) != null || authState is AuthState.Success) {
                                     authViewModel.checkDeletionStatus(applicationContext)
                                     com.example.service.PushNotificationManager.onUserLoggedIn(applicationContext)
@@ -625,6 +634,15 @@ class MainActivity : FragmentActivity() {
             intent.removeExtra("event")
             intent.removeExtra("report_id")
             intent.removeExtra("target_report_id")
+            intent.removeExtra("navigate_to")
+            return
+        }
+
+        if (kind == "support_chat" || navigateTo == "support_chat") {
+            pendingNavigateTo = "support_chat"
+            com.example.SupportChatManager.fetchSupportSession(applicationContext)
+            intent.removeExtra("from_push")
+            intent.removeExtra("kind")
             intent.removeExtra("navigate_to")
             return
         }

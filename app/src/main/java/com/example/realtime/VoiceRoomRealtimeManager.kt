@@ -73,6 +73,12 @@ sealed class RealtimeTableEvent {
         val record: JSONObject?,
         val conversationId: String? = null
     ) : RealtimeTableEvent()
+    data class SupportConversationChanged(
+        val eventType: String,
+        val record: JSONObject?,
+        val conversationId: String? = null,
+        val chatOpenUntil: String? = null
+    ) : RealtimeTableEvent()
     data class DmMessageReceived(
         val eventType: String,
         val record: JSONObject?,
@@ -413,6 +419,28 @@ object VoiceRoomRealtimeManager {
         }
         ws.send(joinSupportMessages.toString())
 
+        // Subscribe to support_conversations table changes
+        val joinSupportConversations = JSONObject().apply {
+            put("topic", "realtime:public:support_conversations")
+            put("event", "phx_join")
+            put("payload", JSONObject().apply {
+                if (!token.isNullOrBlank()) {
+                    put("access_token", token)
+                }
+                put("config", JSONObject().apply {
+                    put("postgres_changes", org.json.JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("event", "*")
+                            put("schema", "public")
+                            put("table", "support_conversations")
+                        })
+                    })
+                })
+            })
+            put("ref", refCounter.getAndIncrement().toString())
+        }
+        ws.send(joinSupportConversations.toString())
+
         // Subscribe to dm_messages table changes
         val joinDmMessages = JSONObject().apply {
             put("topic", "realtime:public:dm_messages")
@@ -697,6 +725,18 @@ object VoiceRoomRealtimeManager {
                             eventType = eventType,
                             record = record,
                             conversationId = conversationId
+                        )
+                    )
+                } else if (table == "support_conversations" || topic.contains("support_conversations")) {
+                    val conversationId = record?.optString("id")
+                    val chatOpenUntil = record?.optString("chat_open_until")
+                    if (BuildConfig.DEBUG) Log.d(TAG, "[Realtime] Received support_conversations event ($eventType) for conversation $conversationId, until=$chatOpenUntil")
+                    _events.tryEmit(
+                        RealtimeTableEvent.SupportConversationChanged(
+                            eventType = eventType,
+                            record = record,
+                            conversationId = conversationId,
+                            chatOpenUntil = chatOpenUntil
                         )
                     )
                 } else if (table == "dm_messages" || topic.contains("dm_messages")) {

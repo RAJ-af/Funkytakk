@@ -165,6 +165,7 @@ object GroupChatRepository {
             lower.contains("invalid_invite") -> "This invite link is no longer valid"
             lower.contains("invite_disabled") -> "This invite link is no longer valid"
             lower.contains("cannot_remove_creator") -> "The group creator cannot be removed or demoted."
+            lower.contains("cannot_report_own_group") -> "You can't report a group you created."
             lower.contains("last_admin") -> "Cannot complete action as you are the last admin."
             lower.contains("invalid_group_name") -> "Please enter a valid group name (1–60 characters)."
             else -> {
@@ -1497,7 +1498,9 @@ object GroupChatRepository {
         context: Context,
         groupId: String,
         category: String,
-        reason: String
+        reason: String,
+        evidence: Map<String, Any?>? = null,
+        deletionLog: Map<String, Any?>? = null
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             SupabaseSessionManager.ensureActiveSession(context)
@@ -1511,7 +1514,9 @@ object GroupChatRepository {
                 body = ReportGroupRequest(
                     p_group_id = cleanGroupId,
                     p_category = category.trim(),
-                    p_reason = reason.trim()
+                    p_reason = reason.trim().ifBlank { category.trim() },
+                    p_evidence = evidence,
+                    p_deletion_log = deletionLog
                 )
             )
 

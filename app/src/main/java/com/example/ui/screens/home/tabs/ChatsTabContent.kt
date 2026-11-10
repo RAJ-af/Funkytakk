@@ -95,6 +95,7 @@ fun ChatsTabContent(
     val supportPreview by SupportChatManager.latestMessagePreview.collectAsState()
     val supportTime by SupportChatManager.latestMessageTime.collectAsState()
     val supportUnreadCount by SupportChatManager.unreadCount.collectAsState()
+    val supportSession by SupportChatManager.session.collectAsState()
 
     val vaultStatus by VaultSecurityManager.vaultStatus.collectAsState()
     val dbConversations by EncryptedChatRepository.conversations.collectAsState()
@@ -195,7 +196,10 @@ fun ChatsTabContent(
         }
     }
 
-    val showSupportInSearch = remember(searchQuery, selectedFilter, supportUnreadCount) {
+    val showSupportInSearch = remember(searchQuery, selectedFilter, supportUnreadCount, supportSession) {
+        val isSessionOpen = supportSession?.open == true && !SupportChatManager.isSessionExpired(supportSession?.until)
+        if (!isSessionOpen) return@remember false
+
         val matchesSearch = searchQuery.isBlank() ||
                 "FunkyTalk".contains(searchQuery, ignoreCase = true) ||
                 "Support".contains(searchQuery, ignoreCase = true) ||

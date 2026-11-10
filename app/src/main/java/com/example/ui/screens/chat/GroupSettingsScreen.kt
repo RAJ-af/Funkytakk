@@ -7,7 +7,11 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -40,6 +44,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GroupSettingsScreen(
     group: LocalGroupConversation,
@@ -759,38 +764,260 @@ fun GroupSettingsScreen(
 
     // Report Group Dialog
     if (showReportDialog) {
-        val categories = listOf("spam", "harassment", "inappropriate", "scam", "other")
-        var selectedCategory by remember { mutableStateOf("spam") }
+        val categories = remember {
+            listOf(
+                "Spam & Scam",
+                "Hate Speech",
+                "Harassment",
+                "Inappropriate Content / NSFW",
+                "Other"
+            )
+        }
+        var selectedCategory by remember { mutableStateOf(categories[0]) }
         var reportReason by remember { mutableStateOf("") }
+        var includeProof by remember { mutableStateOf(true) }
+        var isSubmitting by remember { mutableStateOf(false) }
 
-        AppCustomConfirmDialog(
-            onDismissRequest = { if (!isActionInProgress) showReportDialog = false },
-            title = "Report Group",
-            message = "Select a reason for reporting \"${group.name}\" to community moderators.",
-            confirmText = "Submit Report",
-            cancelText = "Cancel",
-            isDestructive = true,
-            isLoading = isActionInProgress,
-            icon = { ChatIconAlert(modifier = Modifier.size(26.dp), tint = Color(0xFFDC2626)) },
-            onConfirm = {
-                scope.launch {
-                    isActionInProgress = true
-                    val res = GroupChatRepository.reportGroup(
-                        context = context,
-                        groupId = group.id,
-                        category = selectedCategory,
-                        reason = reportReason.ifBlank { "Reported for $selectedCategory" }
-                    )
-                    isActionInProgress = false
-                    res.onSuccess {
-                        showReportDialog = false
-                        Toast.makeText(context, "Report submitted to moderators", Toast.LENGTH_SHORT).show()
-                    }.onFailure { err ->
-                        Toast.makeText(context, err.message ?: "Failed to submit report", Toast.LENGTH_SHORT).show()
+        ModalBottomSheet(
+            onDismissRequest = { if (!isSubmitting) showReportDialog = false },
+            containerColor = Color.White,
+            dragHandle = { BottomSheetDefaults.DragHandle() },
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 24.dp, vertical = 8.dp)
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFFEE2E2)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            SoftShieldIcon(size = 18.dp, color = Color(0xFFEF4444))
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "Report Group",
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF0F172A)
+                            )
+                            Text(
+                                text = "Reporting \"${group.name}\"",
+                                fontSize = 12.sp,
+                                color = Color(0xFF64748B)
+                            )
+                        }
+                    }
+
+                    IconButton(
+                        onClick = { showReportDialog = false },
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFF1F5F9))
+                    ) {
+                        SoftCloseIcon(size = 14.dp, color = Color(0xFF475569))
                     }
                 }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "Select a reason for reporting this group",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF334155)
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Categories
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 200.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(categories) { cat ->
+                        val isSel = selectedCategory == cat
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isSel) Color(0xFFFFFBEB) else Color(0xFFF8FAFC))
+                                .border(
+                                    width = if (isSel) 1.5.dp else 1.dp,
+                                    color = if (isSel) Color(0xFFFFC529) else Color(0xFFE2E8F0),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .clickable { selectedCategory = cat }
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = isSel,
+                                onClick = { selectedCategory = cat },
+                                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFFFFC529))
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = cat,
+                                fontSize = 13.5.sp,
+                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                                color = Color(0xFF0F172A)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Additional Details (Optional)",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF334155)
+                    )
+                    Text(
+                        text = "${reportReason.length}/1000",
+                        fontSize = 11.sp,
+                        color = if (reportReason.length > 1000) Color(0xFFEF4444) else Color(0xFF94A3B8)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(68.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFFF8FAFC))
+                        .border(
+                            BorderStroke(
+                                1.dp,
+                                if (reportReason.length > 1000) Color(0xFFEF4444) else Color(0xFFE2E8F0)
+                            ),
+                            RoundedCornerShape(12.dp)
+                        )
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.TopStart
+                ) {
+                    if (reportReason.isEmpty()) {
+                        Text(
+                            text = "Provide any helpful context for moderators...",
+                            color = Color(0xFF94A3B8),
+                            fontSize = 13.sp
+                        )
+                    }
+                    BasicTextField(
+                        value = reportReason,
+                        onValueChange = { if (it.length <= 1000) reportReason = it },
+                        textStyle = androidx.compose.ui.text.TextStyle(color = Color.Black, fontSize = 13.sp),
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.Black),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFFF8FAFC))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Include the last 20 messages as proof",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF0F172A)
+                        )
+                        Text(
+                            text = "Only messages you can see are sent, to moderators only.",
+                            fontSize = 11.5.sp,
+                            color = Color(0xFF64748B),
+                            lineHeight = 15.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Switch(
+                        checked = includeProof,
+                        onCheckedChange = { includeProof = it },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Color(0xFFFFC529)
+                        )
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Button(
+                    onClick = {
+                        if (reportReason.length > 1000) {
+                            Toast.makeText(context, "Reason text is too long (max 1000 characters).", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        isSubmitting = true
+                        scope.launch {
+                            val res = GroupChatRepository.reportGroup(
+                                context = context,
+                                groupId = group.id,
+                                category = selectedCategory,
+                                reason = reportReason.ifBlank { selectedCategory }
+                            )
+                            isSubmitting = false
+                            res.onSuccess {
+                                showReportDialog = false
+                                Toast.makeText(context, "Thanks, our team will review your report.", Toast.LENGTH_LONG).show()
+                            }.onFailure { err ->
+                                Toast.makeText(context, com.example.moderation.mapReportError(err.message), Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    enabled = !isSubmitting,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                ) {
+                    if (isSubmitting) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Submitting Report...", color = Color.White, fontWeight = FontWeight.Bold)
+                    } else {
+                        SoftShieldIcon(size = 18.dp, color = Color.White)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Submit Report", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.5.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
             }
-        )
+        }
     }
 
     // Block Group Confirmation Dialog (leaves and prevents re-invite)
