@@ -1,6 +1,7 @@
 package com.example.moderation
 
 import android.content.Context
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -28,12 +29,15 @@ import com.example.BuildConfig
 import com.example.ReportUserRequest
 import com.example.SupabaseClient
 import com.example.SupabaseSessionManager
+import com.example.repository.EncryptedChatRepository
 import com.example.ui.components.SoftCloseIcon
 import com.example.ui.components.SoftShieldIcon
 import com.example.ui.theme.GoldAccent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+private const val TAG = "ReportUserDialog"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -279,8 +283,8 @@ fun ReportUserDialog(
                         mapOf("messages" to dmProofMessages)
                     } else null
 
-                    val deletionLogMap: Map<String, Any?>? = if (showProofSwitch && includeProof && !dmDeletionLog.isNullOrEmpty()) {
-                        mapOf("deletions" to dmDeletionLog)
+                    val deletionLogList: List<Map<String, Any?>>? = if (showProofSwitch && includeProof && !dmDeletionLog.isNullOrEmpty()) {
+                        dmDeletionLog
                     } else null
 
                     scope.launch {
@@ -292,7 +296,7 @@ fun ReportUserDialog(
                             category = selectedCategory,
                             reason = reasonText.ifBlank { null },
                             evidence = evidenceMap,
-                            deletionLog = deletionLogMap,
+                            deletionLog = deletionLogList,
                             existingScreenshotUrl = existingScreenshotUrl,
                             onSuccess = {
                                 isSubmitting = false
@@ -302,7 +306,7 @@ fun ReportUserDialog(
                             },
                             onError = { err ->
                                 isSubmitting = false
-                                Toast.makeText(context, mapReportError(err), Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, mapReportError(err), Toast.LENGTH_LONG).show()
                             }
                         )
                     }
@@ -338,7 +342,7 @@ private suspend fun submitReport(
     category: String,
     reason: String?,
     evidence: Map<String, Any?>?,
-    deletionLog: Map<String, Any?>?,
+    deletionLog: List<Map<String, Any?>>?,
     existingScreenshotUrl: String?,
     onSuccess: () -> Unit,
     onError: (String) -> Unit
@@ -347,11 +351,28 @@ private suspend fun submitReport(
         val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
             ?: return@withContext onError("not_authenticated")
 
+        // Ensure reportedUserId is a valid Supabase Auth UUID string, not a display name or Firebase UID
+        val effectiveReportedUserId = if (SupabaseSessionManager.isValidUuid(reportedUserId)) {
+            reportedUserId.trim()
+        } else {
+            val resolved = EncryptedChatRepository.resolveRecipientAuthUserId(context, reportedUserId)
+            if (!resolved.isNullOrBlank() && SupabaseSessionManager.isValidUuid(resolved)) {
+                resolved.trim()
+            } else {
+                reportedUserId.trim()
+            }
+        }
+
+        Log.d(
+            TAG,
+            "Calling report_user: target=$effectiveReportedUserId, context=$contextType, category=$category, contextId=$contextId"
+        )
+
         val resp = SupabaseClient.api.reportUser(
             apiKey = BuildConfig.SUPABASE_ANON_KEY,
             auth = token,
             body = ReportUserRequest(
-                p_reported_user_id = reportedUserId,
+                p_reported_user_id = effectiveReportedUserId,
                 p_context_type = contextType,
                 p_category = category,
                 p_reason = reason,
@@ -363,12 +384,18 @@ private suspend fun submitReport(
         )
 
         if (resp.isSuccessful) {
+            Log.i(TAG, "report_user RPC succeeded: HTTP ${resp.code()}")
             withContext(Dispatchers.Main) { onSuccess() }
         } else {
-            val err = resp.errorBody()?.string() ?: "Could not send, try again."
-            withContext(Dispatchers.Main) { onError(err) }
+            val code = resp.code()
+            val rawErr = resp.errorBody()?.string().orEmpty()
+            Log.e(TAG, "report_user RPC failed with HTTP $code: $rawErr")
+            withContext(Dispatchers.Main) {
+                onError("[$code] $rawErr")
+            }
         }
     } catch (e: Exception) {
+        Log.e(TAG, "report_user exception: ${e.message}", e)
         withContext(Dispatchers.Main) { onError(e.localizedMessage ?: "Could not send, try again.") }
     }
 }
@@ -376,18 +403,32 @@ private suspend fun submitReport(
 fun mapReportError(raw: String?): String {
     if (raw.isNullOrBlank()) return "Could not send, try again."
     val lower = raw.lowercase()
-    return when {
+
+    // Debugging assistance: extract HTTP status code or error code if present
+    val codePrefix = if (raw.startsWith("[")) {
+        val closing = raw.indexOf("]")
+        if (closing > 0) raw.substring(0, closing + 1) + " " else ""
+    } else ""
+
+    val friendlyMsg = when {
         lower.contains("not_authenticated") -> "Please log in to submit a report."
         lower.contains("cannot_report_yourself") -> "You cannot report yourself."
         lower.contains("category_required") -> "Please select a category."
         lower.contains("reason_too_long") -> "Reason text is too long (max 1000 characters)."
-        lower.contains("evidence_too_large") -> "Evidence size exceeds limit (max 200 KB)."
+        lower.contains("evidence_too_large") -> "Evidence size exceeds limit (max 200 KB). Retry without proof."
         lower.contains("deletion_log_too_large") -> "Deletion log size exceeds limit (max 20 KB)."
-        lower.contains("rate_limited") -> "You have submitted too many reports recently. Please wait a while before reporting again."
+        lower.contains("rate_limited") -> "You can send up to 10 reports per hour. Please wait a while before reporting again."
         lower.contains("not_in_room") -> "You are not in this voice room."
         lower.contains("reported_not_in_room") -> "The reported user is not in this voice room."
         lower.contains("moment_mismatch") -> "The reported moment was not found or does not belong to this user."
         lower.contains("cannot_report_own_group") -> "You can't report a group you created."
-        else -> "Could not send, try again."
+        lower.contains("function not found") || lower.contains("404") -> "Server RPC signature mismatch [404]. Check parameter types."
+        else -> raw.trim()
+    }
+
+    return if (codePrefix.isNotEmpty() && !friendlyMsg.startsWith("[")) {
+        "$codePrefix$friendlyMsg"
+    } else {
+        friendlyMsg
     }
 }

@@ -2217,7 +2217,7 @@ data class ReportGroupRequest(
     val p_category: String,
     val p_reason: String,
     val p_evidence: Map<String, Any?>? = null,
-    val p_deletion_log: Map<String, Any?>? = null
+    val p_deletion_log: List<Map<String, Any?>>? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -2315,7 +2315,7 @@ data class ReportUserRequest(
     val p_context_id: String? = null,
     val p_screenshot_url: String? = null,
     val p_evidence: Map<String, Any?>? = null,
-    val p_deletion_log: Map<String, Any?>? = null
+    val p_deletion_log: List<Map<String, Any?>>? = null
 )
 
 // ----------------------------------------------------

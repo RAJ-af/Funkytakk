@@ -1500,7 +1500,7 @@ object GroupChatRepository {
         category: String,
         reason: String,
         evidence: Map<String, Any?>? = null,
-        deletionLog: Map<String, Any?>? = null
+        deletionLog: List<Map<String, Any?>>? = null
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             SupabaseSessionManager.ensureActiveSession(context)
@@ -1523,10 +1523,13 @@ object GroupChatRepository {
             if (resp.isSuccessful) {
                 Result.success(Unit)
             } else {
-                val err = resp.errorBody()?.string()
-                Result.failure(Exception(mapGroupError(err, "Failed to submit group report")))
+                val errCode = resp.code()
+                val errBody = resp.errorBody()?.string().orEmpty()
+                android.util.Log.e("GroupChatRepo", "report_group RPC failed ($errCode): $errBody")
+                Result.failure(Exception(mapGroupError("[$errCode] $errBody", "Failed to submit group report")))
             }
         } catch (e: Exception) {
+            android.util.Log.e("GroupChatRepo", "report_group exception: ${e.message}", e)
             Result.failure(Exception(mapGroupError(e.message, "Failed to submit group report")))
         }
     }
