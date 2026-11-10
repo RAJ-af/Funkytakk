@@ -48,12 +48,16 @@ fun AdminSupportInboxView(
     val context = LocalContext.current
     val conversations by AdminSupportManager.conversations.collectAsState()
     val messages by AdminSupportManager.messages.collectAsState()
+    val lastMessagesMap by AdminSupportManager.lastMessagesMap.collectAsState()
+    val unreadConversationsSet by AdminSupportManager.unreadConversationsSet.collectAsState()
+    val appealUserIdsSet by AdminSupportManager.appealUserIdsSet.collectAsState()
     val isLoading by AdminSupportManager.isLoading.collectAsState()
     val isSending by AdminSupportManager.isSending.collectAsState()
 
     var activeConversation by remember { mutableStateOf<SupabaseSupportConversation?>(null) }
     var searchQuery by remember { mutableStateOf("") }
     var inputText by remember { mutableStateOf("") }
+    var selectedOpenHours by remember { mutableIntStateOf(2) } // default 2 hours
     val listState = rememberLazyListState()
 
     LaunchedEffect(Unit) {
@@ -68,7 +72,7 @@ fun AdminSupportInboxView(
     }
 
     if (activeConversation != null) {
-        // Thread View
+        // FULL CHAT SCREEN (admin view)
         val conv = activeConversation!!
         val targetUid = conv.user_id ?: ""
         val targetProfile = supabaseProfiles.find { it.uid == targetUid }
@@ -87,12 +91,15 @@ fun AdminSupportInboxView(
             ?: userSnippet?.countryCode
             ?: "in"
 
+        val statusLine = AdminSupportManager.formatChatOpenStatus(conv.chat_open_until)
+        val isOpen = statusLine.startsWith("Chat open until")
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color(0xFFF9FAFB))
         ) {
-            // Thread Header
+            // Header Bar
             Surface(
                 color = Color.White,
                 shadowElevation = 1.dp,
@@ -151,148 +158,296 @@ fun AdminSupportInboxView(
                             color = Color(0xFF1E293B)
                         )
                         Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "UID: ${targetUid.take(12)}...",
-                            fontSize = 11.sp,
-                            color = Color(0xFF64748B)
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isOpen) Color(0xFF16A34A) else Color(0xFF94A3B8))
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = statusLine,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isOpen) Color(0xFF15803D) else Color(0xFF64748B)
+                            )
+                        }
                     }
 
-                    Surface(
-                        color = Color(0xFFEFF6FF),
-                        shape = RoundedCornerShape(8.dp),
-                        border = BorderStroke(1.dp, Color(0xFFBFDBFE))
-                    ) {
-                        Text(
-                            text = "1:1 Support",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF1D4ED8),
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                        )
+                    // Close Chat Button in Top Bar
+                    if (isOpen) {
+                        OutlinedButton(
+                            onClick = {
+                                AdminSupportManager.adminCloseSupportChat(
+                                    context = context,
+                                    userId = targetUid,
+                                    onSuccess = {
+                                        Toast.makeText(context, "Support chat closed", Toast.LENGTH_SHORT).show()
+                                        val updated = conv.copy(chat_open_until = null)
+                                        activeConversation = updated
+                                    },
+                                    onError = { err ->
+                                        Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                                    }
+                                )
+                            },
+                            border = BorderStroke(1.dp, Color(0xFFFECACA)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626)),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.height(34.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Close chat", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    } else {
+                        Surface(
+                            color = Color(0xFFF1F5F9),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, Color(0xFFE2E8F0))
+                        ) {
+                            Text(
+                                text = "Closed",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF64748B),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
                     }
                 }
             }
 
-            // Message List
+            // Message List with Date Separators
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
             ) {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 14.dp),
-                    contentPadding = PaddingValues(vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(messages.distinctBy { it.id }, key = { it.id }) { msg ->
-                        AdminThreadMessageBubble(
-                            message = msg,
-                            targetName = targetName,
-                            targetAvatar = targetAvatar,
-                            supabaseProfiles = supabaseProfiles,
-                            onOpenReport = onOpenReport
+                if (messages.isEmpty() && isLoading) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = GoldPrimary)
+                    }
+                } else if (messages.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "No messages in this support conversation yet.",
+                            fontSize = 13.sp,
+                            color = Color(0xFF94A3B8)
                         )
+                    }
+                } else {
+                    val distinctMsgs = remember(messages) { messages.distinctBy { it.id } }
+
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 14.dp),
+                        contentPadding = PaddingValues(vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        for (i in distinctMsgs.indices) {
+                            val msg = distinctMsgs[i]
+                            val prevMsg = if (i > 0) distinctMsgs[i - 1] else null
+
+                            val msgDateHeader = AdminSupportManager.formatDateHeader(msg.created_at)
+                            val prevDateHeader = if (prevMsg != null) AdminSupportManager.formatDateHeader(prevMsg.created_at) else null
+
+                            // Date Separator item
+                            if (i == 0 || msgDateHeader != prevDateHeader) {
+                                item(key = "date_hdr_$i") {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 6.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Surface(
+                                            color = Color(0xFFE2E8F0),
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Text(
+                                                text = msgDateHeader,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF475569),
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Message Item
+                            item(key = msg.id) {
+                                AdminThreadMessageBubble(
+                                    message = msg,
+                                    targetName = targetName,
+                                    targetAvatar = targetAvatar,
+                                    supabaseProfiles = supabaseProfiles,
+                                    onOpenReport = onOpenReport
+                                )
+                            }
+                        }
                     }
                 }
             }
 
-            // Staff Reply Box
+            // Staff Reply Panel
             Surface(
                 color = Color.White,
-                shadowElevation = 4.dp,
+                shadowElevation = 6.dp,
                 border = BorderStroke(1.dp, Color(0xFFE5E7EB))
             ) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
                 ) {
-                    OutlinedTextField(
-                        value = inputText,
-                        onValueChange = { inputText = it },
-                        placeholder = {
-                            Text(
-                                text = "Reply as FunkyTalk Support...",
-                                color = Color(0xFF94A3B8),
-                                fontSize = 13.sp
-                            )
-                        },
+                    // Segmented Duration Selector above input
+                    Row(
                         modifier = Modifier
-                            .weight(1f)
-                            .testTag("admin_support_reply_input"),
-                        shape = RoundedCornerShape(20.dp),
-                        maxLines = 4,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = Color(0xFFF8FAFC),
-                            unfocusedContainerColor = Color(0xFFF8FAFC),
-                            focusedBorderColor = GoldPrimary,
-                            unfocusedBorderColor = Color(0xFFE2E8F0)
-                        ),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                        keyboardActions = KeyboardActions(onSend = {
-                            if (inputText.isNotBlank() && !isSending) {
-                                val textToSend = inputText
-                                inputText = ""
-                                AdminSupportManager.adminSendMessage(
-                                    context = context,
-                                    userId = targetUid,
-                                    messageText = textToSend,
-                                    onError = { err ->
-                                        Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
-                                    }
-                                )
-                            }
-                        })
-                    )
-
-                    Spacer(modifier = Modifier.width(8.dp))
-
-                    IconButton(
-                        onClick = {
-                            if (inputText.isNotBlank() && !isSending) {
-                                val textToSend = inputText
-                                inputText = ""
-                                AdminSupportManager.adminSendMessage(
-                                    context = context,
-                                    userId = targetUid,
-                                    messageText = textToSend,
-                                    onError = { err ->
-                                        Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
-                                    }
-                                )
-                            }
-                        },
-                        enabled = inputText.isNotBlank() && !isSending,
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(if (inputText.isNotBlank() && !isSending) GoldPrimary else Color(0xFFE2E8F0))
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        if (isSending) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                color = Color.Black,
-                                strokeWidth = 2.dp
+                        Text(
+                            text = "Keep chat open:",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF475569)
+                        )
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            FilterChip(
+                                selected = selectedOpenHours == 1,
+                                onClick = { selectedOpenHours = 1 },
+                                label = { Text("1 hour", fontSize = 11.5.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = GoldPrimary,
+                                    selectedLabelColor = Color.Black
+                                ),
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.height(30.dp)
                             )
-                        } else {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.Send,
-                                contentDescription = "Send Reply",
-                                tint = if (inputText.isNotBlank()) Color.Black else Color(0xFF94A3B8),
-                                modifier = Modifier.size(18.dp)
+
+                            FilterChip(
+                                selected = selectedOpenHours == 2,
+                                onClick = { selectedOpenHours = 2 },
+                                label = { Text("2 hours (Default)", fontSize = 11.5.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = GoldPrimary,
+                                    selectedLabelColor = Color.Black
+                                ),
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.height(30.dp)
                             )
+                        }
+                    }
+
+                    // Input Box + Send Button
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = inputText,
+                            onValueChange = { inputText = it },
+                            placeholder = {
+                                Text(
+                                    text = "Reply as FunkyTalk Support...",
+                                    color = Color(0xFF94A3B8),
+                                    fontSize = 13.sp
+                                )
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("admin_support_reply_input"),
+                            shape = RoundedCornerShape(20.dp),
+                            maxLines = 4,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = Color(0xFFF8FAFC),
+                                unfocusedContainerColor = Color(0xFFF8FAFC),
+                                focusedBorderColor = GoldPrimary,
+                                unfocusedBorderColor = Color(0xFFE2E8F0)
+                            ),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                            keyboardActions = KeyboardActions(onSend = {
+                                if (inputText.isNotBlank() && !isSending) {
+                                    val textToSend = inputText
+                                    inputText = ""
+                                    AdminSupportManager.adminSendMessage(
+                                        context = context,
+                                        userId = targetUid,
+                                        messageText = textToSend,
+                                        openHours = selectedOpenHours,
+                                        onSuccess = {
+                                            AdminSupportManager.fetchConversations(context)
+                                        },
+                                        onError = { err ->
+                                            Toast.makeText(context, err, Toast.LENGTH_LONG).show()
+                                        }
+                                    )
+                                }
+                            })
+                        )
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        IconButton(
+                            onClick = {
+                                if (inputText.isNotBlank() && !isSending) {
+                                    val textToSend = inputText
+                                    inputText = ""
+                                    AdminSupportManager.adminSendMessage(
+                                        context = context,
+                                        userId = targetUid,
+                                        messageText = textToSend,
+                                        openHours = selectedOpenHours,
+                                        onSuccess = {
+                                            AdminSupportManager.fetchConversations(context)
+                                        },
+                                        onError = { err ->
+                                            Toast.makeText(context, err, Toast.LENGTH_LONG).show()
+                                        }
+                                    )
+                                }
+                            },
+                            enabled = inputText.isNotBlank() && !isSending,
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(if (inputText.isNotBlank() && !isSending) GoldPrimary else Color(0xFFE2E8F0))
+                        ) {
+                            if (isSending) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    color = Color.Black,
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = "Send Reply",
+                                    tint = if (inputText.isNotBlank()) Color.Black else Color(0xFF94A3B8),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
                 }
             }
         }
     } else {
-        // Conversation List View
+        // INBOX CONVERSATION LIST VIEW
         val filteredList = remember(conversations, searchQuery, supabaseProfiles) {
             if (searchQuery.isBlank()) conversations
             else {
@@ -405,6 +560,9 @@ fun AdminSupportInboxView(
                         ?: "in"
 
                     val relativeTime = AdminSupportManager.formatRelativeTime(conv.last_message_at)
+                    val lastMsg = lastMessagesMap[conv.id]
+                    val hasUnread = unreadConversationsSet.contains(conv.id)
+                    val isAppealUser = appealUserIdsSet.contains(uid)
 
                     Surface(
                         modifier = Modifier
@@ -416,8 +574,11 @@ fun AdminSupportInboxView(
                             }
                             .testTag("admin_support_item_${conv.id}"),
                         shape = RoundedCornerShape(16.dp),
-                        color = Color.White,
-                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        color = if (hasUnread) Color(0xFFFFFBEB) else Color.White,
+                        border = BorderStroke(
+                            1.dp,
+                            if (hasUnread) Color(0xFFFCD34D) else Color(0xFFE2E8F0)
+                        ),
                         shadowElevation = 0.5.dp
                     ) {
                         Row(
@@ -426,7 +587,7 @@ fun AdminSupportInboxView(
                                 .padding(14.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Avatar
+                            // Avatar + Unread Dot Indicator
                             Box(modifier = Modifier.size(48.dp)) {
                                 AsyncImage(
                                     model = avatar,
@@ -454,45 +615,67 @@ fun AdminSupportInboxView(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(
-                                        text = name,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 15.sp,
-                                        color = Color(0xFF0F172A),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
                                         modifier = Modifier.weight(1f)
-                                    )
+                                    ) {
+                                        Text(
+                                            text = name,
+                                            fontWeight = if (hasUnread) FontWeight.Black else FontWeight.Bold,
+                                            fontSize = 15.sp,
+                                            color = Color(0xFF0F172A),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+
+                                        // Red Unread Dot
+                                        if (hasUnread) {
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(8.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(0xFFEF4444))
+                                            )
+                                        }
+
+                                        // Appeal Badge
+                                        if (isAppealUser) {
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Surface(
+                                                color = Color(0xFFFEF2F2),
+                                                shape = RoundedCornerShape(6.dp),
+                                                border = BorderStroke(0.5.dp, Color(0xFFFCA5A5))
+                                            ) {
+                                                Text(
+                                                    text = "Appeal",
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color(0xFFDC2626),
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                    }
 
                                     Spacer(modifier = Modifier.width(8.dp))
 
                                     Text(
                                         text = relativeTime,
                                         fontSize = 11.sp,
-                                        color = Color(0xFF94A3B8),
-                                        fontWeight = FontWeight.Normal
+                                        color = if (hasUnread) Color(0xFFD97706) else Color(0xFF94A3B8),
+                                        fontWeight = if (hasUnread) FontWeight.Bold else FontWeight.Normal
                                     )
                                 }
 
-                                Spacer(modifier = Modifier.height(2.dp))
+                                Spacer(modifier = Modifier.height(3.dp))
 
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "@${p?.username ?: "user"}",
-                                        fontSize = 12.sp,
-                                        color = Color(0xFF64748B),
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.height(4.dp))
-
+                                // Last Message Snippet
                                 Text(
-                                    text = "Tap to review conversation & reply",
-                                    fontSize = 12.sp,
-                                    color = Color(0xFF64748B),
+                                    text = lastMsg?.body?.ifBlank { null } ?: "Tap to view conversation...",
+                                    fontSize = 12.5.sp,
+                                    fontWeight = if (hasUnread) FontWeight.SemiBold else FontWeight.Normal,
+                                    color = if (hasUnread) Color(0xFF1E293B) else Color(0xFF64748B),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -525,7 +708,6 @@ private fun AdminThreadMessageBubble(
     val isAdmin = message.sender_type == "admin"
     val formattedTime = AdminSupportManager.formatRelativeTime(message.created_at)
 
-    // Join staff sender_id to profile name if admin
     val staffProfile = remember(message.sender_id, supabaseProfiles) {
         if (isAdmin && !message.sender_id.isNullOrBlank()) {
             supabaseProfiles.find { it.uid == message.sender_id }

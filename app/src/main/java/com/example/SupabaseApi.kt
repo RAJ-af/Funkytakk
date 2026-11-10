@@ -1668,6 +1668,13 @@ interface SupabaseApi {
         @Body body: ReportUserRequest
     ): Response<ResponseBody>
 
+    @POST("rest/v1/rpc/attach_report_proofs")
+    suspend fun attachReportProofs(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: AttachReportProofsRequest
+    ): Response<ResponseBody>
+
     // ----------------------------------------------------
     // CHAT BACKUP & RESTORE
     // ----------------------------------------------------
@@ -1932,6 +1939,7 @@ data class SupabaseSupportConversation(
     val user_id: String? = null,
     val status: String? = "open",
     val last_message_at: String? = null,
+    val chat_open_until: String? = null,
     val created_at: String? = null
 )
 
@@ -2323,6 +2331,12 @@ data class ReportUserRequest(
     val p_screenshot_url: String? = null,
     val p_evidence: Map<String, Any?>? = null,
     val p_deletion_log: List<Map<String, Any?>>? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class AttachReportProofsRequest(
+    val p_report_id: String,
+    val p_media_paths: List<String>
 )
 
 // ----------------------------------------------------

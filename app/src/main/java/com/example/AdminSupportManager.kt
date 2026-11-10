@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.text.SimpleDateFormat
+import java.time.Instant
 import java.util.*
 
 object AdminSupportManager {
@@ -20,6 +21,15 @@ object AdminSupportManager {
 
     private val _messages = MutableStateFlow<List<SupabaseSupportMessage>>(emptyList())
     val messages: StateFlow<List<SupabaseSupportMessage>> = _messages.asStateFlow()
+
+    private val _lastMessagesMap = MutableStateFlow<Map<String, SupabaseSupportMessage>>(emptyMap())
+    val lastMessagesMap: StateFlow<Map<String, SupabaseSupportMessage>> = _lastMessagesMap.asStateFlow()
+
+    private val _unreadConversationsSet = MutableStateFlow<Set<String>>(emptySet())
+    val unreadConversationsSet: StateFlow<Set<String>> = _unreadConversationsSet.asStateFlow()
+
+    private val _appealUserIdsSet = MutableStateFlow<Set<String>>(emptySet())
+    val appealUserIdsSet: StateFlow<Set<String>> = _appealUserIdsSet.asStateFlow()
 
     private val _unreadConversationsCount = MutableStateFlow(0)
     val unreadConversationsCount: StateFlow<Int> = _unreadConversationsCount.asStateFlow()
@@ -74,9 +84,8 @@ object AdminSupportManager {
                     val list = response.body()!!
                     _conversations.value = list
 
-                    // Fetch messages to calculate unread for admin
-                    val unreadCount = calculateUnreadCount(context, token, list)
-                    _unreadConversationsCount.value = unreadCount
+                    // Fetch metadata (last messages, unread flags, and appeal statuses)
+                    fetchConversationMetadata(context, token, list)
                 } else {
                     Log.e(TAG, "Failed to fetch support conversations: ${response.code()}")
                 }
@@ -93,13 +102,33 @@ object AdminSupportManager {
         }
     }
 
-    private suspend fun calculateUnreadCount(
+    private suspend fun fetchConversationMetadata(
         context: Context,
         token: String,
         conversations: List<SupabaseSupportConversation>
-    ): Int {
-        var count = 0
+    ) {
+        val lastMsgs = mutableMapOf<String, SupabaseSupportMessage>()
+        val unreadSet = mutableSetOf<String>()
+        val appealSet = mutableSetOf<String>()
+
+        // 1. Fetch active moderation statuses for appeal badge check
+        try {
+            val modRes = SupabaseClient.api.getAllActiveModerationStatuses(auth = token)
+            if (modRes.isSuccessful && modRes.body() != null) {
+                modRes.body()!!.forEach { mod ->
+                    if (!mod.user_id.isNullOrBlank() && !mod.action_type.isNullOrBlank() && mod.action_type != "none") {
+                        appealSet.add(mod.user_id)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to fetch moderation statuses for appeal check: ${e.message}")
+        }
+        _appealUserIdsSet.value = appealSet
+
+        // 2. Fetch messages for each conversation to find last message and unread indicator
         conversations.forEach { conv ->
+            if (conv.id.isBlank()) return@forEach
             try {
                 val res = SupabaseClient.api.getSupportMessages(
                     auth = token,
@@ -107,13 +136,20 @@ object AdminSupportManager {
                 )
                 if (res.isSuccessful && res.body() != null) {
                     val msgs = res.body()!!
+                    if (msgs.isNotEmpty()) {
+                        val lastMsg = msgs.maxByOrNull { it.created_at ?: "" } ?: msgs.last()
+                        lastMsgs[conv.id] = lastMsg
+                    }
                     if (msgs.any { it.sender_type == "user" && !it.is_read_by_admin }) {
-                        count++
+                        unreadSet.add(conv.id)
                     }
                 }
             } catch (_: Exception) {}
         }
-        return count
+
+        _lastMessagesMap.value = lastMsgs
+        _unreadConversationsSet.value = unreadSet
+        _unreadConversationsCount.value = unreadSet.size
     }
 
     fun selectConversation(context: Context, conversation: SupabaseSupportConversation) {
@@ -154,11 +190,19 @@ object AdminSupportManager {
         userId: String,
         messageText: String,
         reportId: String? = null,
+        openHours: Int = 2,
         onSuccess: (() -> Unit)? = null,
         onError: ((String) -> Unit)? = null
     ) {
         val trimmed = messageText.trim()
-        if (trimmed.isBlank() || userId.isBlank()) return
+        if (trimmed.isBlank()) {
+            onError?.invoke("Message text cannot be empty.")
+            return
+        }
+        if (userId.isBlank()) {
+            onError?.invoke("Target user account not found.")
+            return
+        }
 
         scope.launch {
             try {
@@ -166,35 +210,20 @@ object AdminSupportManager {
                 val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
                 if (token.isNullOrBlank()) {
                     withContext(Dispatchers.Main) {
-                        onError?.invoke("Authentication required")
+                        onError?.invoke("Staff admin privileges required to send support messages.")
                     }
                     return@launch
                 }
 
                 val currentStaffUid = SupabaseSessionManager.getUserId(context)
 
-                // Optimistic local add
-                val tempMsg = SupabaseSupportMessage(
-                    id = "temp_${System.currentTimeMillis()}",
-                    conversation_id = selectedConversationId,
-                    sender_type = "admin",
-                    sender_id = currentStaffUid,
-                    body = trimmed,
-                    report_id = reportId,
-                    is_read_by_user = false,
-                    is_read_by_admin = true,
-                    created_at = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-                        timeZone = TimeZone.getTimeZone("UTC")
-                    }.format(Date())
-                )
-                _messages.value = _messages.value + tempMsg
-
                 val response = SupabaseClient.api.adminSendSupportMessage(
                     auth = token,
                     body = AdminSendSupportMessageRequest(
                         p_user_id = userId,
                         p_message = trimmed,
-                        p_report_id = reportId?.ifBlank { null }
+                        p_report_id = reportId?.ifBlank { null },
+                        p_open_hours = openHours
                     )
                 )
 
@@ -208,10 +237,11 @@ object AdminSupportManager {
                         onSuccess?.invoke()
                     }
                 } else {
-                    val err = response.errorBody()?.string() ?: response.message()
-                    Log.e(TAG, "admin_send_support_message RPC failed: $err")
+                    val rawErr = response.errorBody()?.string() ?: response.message()
+                    Log.e(TAG, "admin_send_support_message RPC failed: $rawErr")
+                    val mapped = mapErrorString(rawErr)
                     withContext(Dispatchers.Main) {
-                        onError?.invoke("Failed to send reply. Please try again.")
+                        onError?.invoke(mapped)
                     }
                 }
             } catch (e: CancellationException) {
@@ -227,6 +257,57 @@ object AdminSupportManager {
         }
     }
 
+    fun adminCloseSupportChat(
+        context: Context,
+        userId: String,
+        onSuccess: (() -> Unit)? = null,
+        onError: ((String) -> Unit)? = null
+    ) {
+        if (userId.isBlank()) {
+            onError?.invoke("Target user account not found.")
+            return
+        }
+        scope.launch {
+            try {
+                val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                if (token.isNullOrBlank()) {
+                    withContext(Dispatchers.Main) {
+                        onError?.invoke("Staff admin privileges required.")
+                    }
+                    return@launch
+                }
+
+                val response = SupabaseClient.api.adminCloseSupportChat(
+                    auth = token,
+                    body = AdminCloseSupportChatRequest(p_user_id = userId)
+                )
+
+                if (response.isSuccessful) {
+                    Log.d(TAG, "admin_close_support_chat RPC successful for $userId")
+                    fetchConversations(context)
+                    if (!selectedConversationId.isNullOrBlank()) {
+                        fetchMessagesForConversation(context, selectedConversationId!!)
+                    }
+                    withContext(Dispatchers.Main) {
+                        onSuccess?.invoke()
+                    }
+                } else {
+                    val rawErr = response.errorBody()?.string() ?: response.message()
+                    Log.e(TAG, "admin_close_support_chat RPC failed: $rawErr")
+                    val mapped = mapErrorString(rawErr)
+                    withContext(Dispatchers.Main) {
+                        onError?.invoke(mapped)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Exception closing support chat", e)
+                withContext(Dispatchers.Main) {
+                    onError?.invoke(e.localizedMessage ?: "Error closing chat")
+                }
+            }
+        }
+    }
+
     fun adminMarkRead(context: Context, userId: String) {
         if (userId.isBlank()) return
         scope.launch {
@@ -238,8 +319,43 @@ object AdminSupportManager {
                 )
                 if (res.isSuccessful) {
                     Log.d(TAG, "admin_mark_support_conversation_read RPC successful for user $userId")
+                    // Update local unread set
+                    val currentConv = _conversations.value.find { it.user_id == userId }
+                    if (currentConv != null) {
+                        _unreadConversationsSet.value = _unreadConversationsSet.value - currentConv.id
+                        _unreadConversationsCount.value = _unreadConversationsSet.value.size
+                    }
                 }
             } catch (_: Exception) {}
+        }
+    }
+
+    private fun mapErrorString(rawErr: String?): String {
+        if (rawErr.isNullOrBlank()) return "Action failed. Please try again."
+        return when {
+            rawErr.contains("staff_required", ignoreCase = true) -> "Staff admin privileges required to perform this action."
+            rawErr.contains("empty_message", ignoreCase = true) -> "Message text cannot be empty."
+            rawErr.contains("invalid_open_hours", ignoreCase = true) -> "Invalid chat open duration specified."
+            rawErr.contains("target_user_not_found", ignoreCase = true) -> "Target user account not found."
+            else -> rawErr
+        }
+    }
+
+    fun formatChatOpenStatus(chatOpenUntil: String?): String {
+        if (chatOpenUntil.isNullOrBlank()) return "Chat closed"
+        return try {
+            val instant = Instant.parse(chatOpenUntil)
+            if (instant.isAfter(Instant.now())) {
+                val sdf = SimpleDateFormat("HH:mm", Locale.getDefault()).apply {
+                    timeZone = TimeZone.getDefault()
+                }
+                val formatted = sdf.format(Date.from(instant))
+                "Chat open until $formatted"
+            } else {
+                "Chat closed"
+            }
+        } catch (_: Exception) {
+            "Chat closed"
         }
     }
 
@@ -272,6 +388,34 @@ object AdminSupportManager {
             }
         } catch (_: Exception) {
             "Recently"
+        }
+    }
+
+    fun formatDateHeader(isoString: String?): String {
+        if (isoString.isNullOrBlank()) return "Today"
+        return try {
+            val clean = isoString.replace("Z", "+0000").replace("T", " ")
+            val format = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }
+            val date = format.parse(clean) ?: Date()
+            val nowCal = Calendar.getInstance()
+            val msgCal = Calendar.getInstance().apply { time = date }
+
+            if (nowCal.get(Calendar.YEAR) == msgCal.get(Calendar.YEAR) &&
+                nowCal.get(Calendar.DAY_OF_YEAR) == msgCal.get(Calendar.DAY_OF_YEAR)) {
+                "Today"
+            } else {
+                val yesterdayCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
+                if (yesterdayCal.get(Calendar.YEAR) == msgCal.get(Calendar.YEAR) &&
+                    yesterdayCal.get(Calendar.DAY_OF_YEAR) == msgCal.get(Calendar.DAY_OF_YEAR)) {
+                    "Yesterday"
+                } else {
+                    SimpleDateFormat("EEEE, MMM d", Locale.getDefault()).format(date)
+                }
+            }
+        } catch (_: Exception) {
+            "Messages"
         }
     }
 }

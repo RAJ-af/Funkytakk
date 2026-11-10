@@ -29,11 +29,23 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Collections
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.ui.platform.testTag
 import com.example.AdminSendSupportMessageRequest
+import com.example.AdminSupportManager
 import com.example.BuildConfig
+import com.example.CreateSignedUrlRequest
 import com.example.ModerationManager
 import com.example.SupabaseClient
 import com.example.SupabaseSessionManager
+import com.example.SupabaseSupportMessage
 import com.example.ui.components.*
 import com.example.ui.screens.home.models.DarkText
 import com.example.ui.screens.home.models.GraySubtitle
@@ -528,6 +540,12 @@ fun AdminReportDetailDialog(
                                 }
                             }
                         }
+
+                        // Reporter Proof Screenshots Section (Requirement 4)
+                        ReporterProofScreenshotsSection(
+                            mediaPathsArr = reportObj.optJSONArray("media_paths"),
+                            onImageClick = { url -> previewImageUrl = url }
+                        )
 
                         // 3. Reported User Card (Safety Score & Moderation History)
                         Card(
@@ -1066,158 +1084,30 @@ fun AdminReportDetailDialog(
         )
     }
 
-    // Modal Message User Dialog (Updated with p_open_hours choice & close chat now)
+    // Modal Message User Dialog (Opens full support chat for reported user)
     if (showMessageUserDialog) {
         val targetUid = detailJson?.optJSONObject("reported")?.optString("user_id")
             ?: detailJson?.optJSONObject("report")?.optString("reported_user_id")
             ?: ""
 
-        AlertDialog(
-            onDismissRequest = { if (!isSendingUserMessage && !isClosingSupportChat) showMessageUserDialog = false },
-            title = { Text("Message User (Support Inquiry)", fontWeight = FontWeight.Bold) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "Send a support inquiry to this user regarding this incident. They can reply directly in Support Chat.",
-                        fontSize = 12.5.sp,
-                        color = Color(0xFF475569)
-                    )
-
-                    // Choice: Keep chat open for 1 hour / 2 hours (default 2 hours)
-                    Text(text = "Keep the chat open for:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = DarkText)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(
-                            selected = messageOpenHours == 1,
-                            onClick = { messageOpenHours = 1 },
-                            label = { Text("1 Hour", fontSize = 12.sp) }
-                        )
-                        FilterChip(
-                            selected = messageOpenHours == 2,
-                            onClick = { messageOpenHours = 2 },
-                            label = { Text("2 Hours (Default)", fontSize = 12.sp) }
-                        )
-                    }
-
-                    OutlinedTextField(
-                        value = messageUserInput,
-                        onValueChange = { messageUserInput = it },
-                        placeholder = { Text("Type your inquiry to the user...", fontSize = 13.sp) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(110.dp),
-                        maxLines = 4
-                    )
-
-                    // Line under text field
-                    Text(
-                        text = "The user will see a support chat for this time and can reply.",
-                        fontSize = 11.5.sp,
-                        color = Color(0xFF64748B),
-                        fontWeight = FontWeight.Medium
-                    )
-
-                    if (chatOpenUntilTime != null) {
-                        Surface(
-                            color = Color(0xFFECFDF5),
-                            shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, Color(0xFFA7F3D0)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = "Chat open until $chatOpenUntilTime",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF047857),
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                            )
-                        }
-                    }
-
-                    // Button to close chat immediately
-                    TextButton(
-                        onClick = {
-                            if (targetUid.isBlank()) return@TextButton
-                            isClosingSupportChat = true
-                            scope.launch(Dispatchers.IO) {
-                                val res = ModerationManager.closeSupportChat(context, targetUid)
-                                withContext(Dispatchers.Main) {
-                                    isClosingSupportChat = false
-                                    if (res.isSuccess) {
-                                        chatOpenUntilTime = null
-                                        Toast.makeText(context, "Support chat closed now", Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        Toast.makeText(context, res.exceptionOrNull()?.message ?: "Failed to close chat", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            }
-                        },
-                        enabled = !isClosingSupportChat && !isSendingUserMessage
-                    ) {
-                        Text(
-                            text = if (isClosingSupportChat) "Closing chat..." else "Close chat now",
-                            color = Color(0xFFDC2626),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (messageUserInput.isBlank()) {
-                            Toast.makeText(context, ModerationManager.mapModerationError("empty_message"), Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-                        isSendingUserMessage = true
-                        scope.launch(Dispatchers.IO) {
-                            try {
-                                val token = SupabaseSessionManager.getAuthenticatedBearerToken(context) ?: ""
-                                val resp = SupabaseClient.api.adminSendSupportMessage(
-                                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
-                                    auth = token,
-                                    body = AdminSendSupportMessageRequest(
-                                        p_user_id = targetUid,
-                                        p_message = messageUserInput.trim(),
-                                        p_report_id = reportId,
-                                        p_open_hours = messageOpenHours
-                                    )
-                                )
-                                withContext(Dispatchers.Main) {
-                                    isSendingUserMessage = false
-                                    if (resp.isSuccessful) {
-                                        val cal = Calendar.getInstance().apply { add(Calendar.HOUR_OF_DAY, messageOpenHours) }
-                                        val untilStr = SimpleDateFormat("HH:mm", Locale.getDefault()).format(cal.time)
-                                        chatOpenUntilTime = untilStr
-                                        Toast.makeText(context, "Support message sent. Chat open until $untilStr", Toast.LENGTH_LONG).show()
-                                        messageUserInput = ""
-                                    } else {
-                                        val errBody = resp.errorBody()?.string() ?: ""
-                                        val friendly = ModerationManager.mapModerationError(errBody, "Failed to send message (${resp.code()})")
-                                        Toast.makeText(context, friendly, Toast.LENGTH_LONG).show()
-                                    }
-                                }
-                            } catch (e: Exception) {
-                                withContext(Dispatchers.Main) {
-                                    isSendingUserMessage = false
-                                    val friendly = ModerationManager.mapModerationError(e.message, "Network error sending message")
-                                    Toast.makeText(context, friendly, Toast.LENGTH_LONG).show()
-                                }
-                            }
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F172A)),
-                    enabled = !isSendingUserMessage && !isClosingSupportChat
-                ) {
-                    Text(if (isSendingUserMessage) "Sending..." else "Send Message")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showMessageUserDialog = false }, enabled = !isSendingUserMessage && !isClosingSupportChat) {
-                    Text("Close")
-                }
+        Dialog(
+            onDismissRequest = { showMessageUserDialog = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth(0.95f)
+                    .fillMaxHeight(0.92f)
+                    .clip(RoundedCornerShape(20.dp)),
+                color = Color(0xFFF9FAFB)
+            ) {
+                AdminReportSupportChatView(
+                    reportedUserId = targetUid,
+                    reportId = reportId,
+                    onClose = { showMessageUserDialog = false }
+                )
             }
-        )
+        }
     }
 
     // Modal Reopen Report Dialog
@@ -1801,5 +1691,412 @@ private fun formatCountdown(expiresAt: String?): String {
         }
     } catch (_: Exception) {
         "Active"
+    }
+}
+
+@Composable
+private fun ReporterProofScreenshotsSection(
+    mediaPathsArr: JSONArray?,
+    onImageClick: (String) -> Unit
+) {
+    if (mediaPathsArr == null || mediaPathsArr.length() == 0) return
+
+    val context = LocalContext.current
+    var signedUrls by remember { mutableStateOf<List<String>>(emptyList()) }
+    var isGenerating by remember { mutableStateOf(true) }
+
+    LaunchedEffect(mediaPathsArr) {
+        isGenerating = true
+        val urls = mutableListOf<String>()
+        val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+        for (i in 0 until mediaPathsArr.length()) {
+            val rawPath = mediaPathsArr.optString(i).takeIf { it.isNotBlank() && it != "null" } ?: continue
+            val cleanPath = rawPath.removePrefix("/")
+            if (token != null) {
+                try {
+                    val res = SupabaseClient.api.createSignedUrl(
+                        auth = token,
+                        bucket = "report-proofs",
+                        filename = cleanPath,
+                        body = CreateSignedUrlRequest(expiresIn = 300)
+                    )
+                    if (res.isSuccessful && res.body() != null) {
+                        val resolved = res.body()!!.getResolvedPath()
+                        if (resolved != null) {
+                            val fullUrl = if (resolved.startsWith("http")) resolved else "${BuildConfig.SUPABASE_URL}/storage/v1$resolved"
+                            urls.add(fullUrl)
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+        signedUrls = urls
+        isGenerating = false
+    }
+
+    if (!isGenerating && signedUrls.isNotEmpty()) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            shape = RoundedCornerShape(18.dp),
+            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Screenshots from the reporter",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.5.sp,
+                    color = DarkText
+                )
+
+                androidx.compose.foundation.lazy.LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(vertical = 4.dp)
+                ) {
+                    items(signedUrls.size) { index ->
+                        val url = signedUrls[index]
+                        AsyncImage(
+                            model = url,
+                            contentDescription = "Reporter proof screenshot",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(width = 140.dp, height = 180.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(12.dp))
+                                .clickable { onImageClick(url) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdminReportSupportChatView(
+    reportedUserId: String,
+    reportId: String,
+    onClose: () -> Unit
+) {
+    val context = LocalContext.current
+    val messages by AdminSupportManager.messages.collectAsState()
+    val conversations by AdminSupportManager.conversations.collectAsState()
+    val isSending by AdminSupportManager.isSending.collectAsState()
+
+    var inputText by remember { mutableStateOf("") }
+    var selectedOpenHours by remember { mutableIntStateOf(2) }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+
+    val targetConv = remember(conversations, reportedUserId) {
+        conversations.find { it.user_id == reportedUserId }
+    }
+
+    LaunchedEffect(reportedUserId) {
+        if (targetConv != null) {
+            AdminSupportManager.selectConversation(context, targetConv)
+        } else {
+            AdminSupportManager.fetchConversations(context)
+        }
+    }
+
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.size - 1)
+        }
+    }
+
+    val statusLine = AdminSupportManager.formatChatOpenStatus(targetConv?.chat_open_until)
+    val isOpen = statusLine.startsWith("Chat open until")
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFF9FAFB))
+    ) {
+        // Top Header
+        Surface(
+            color = Color.White,
+            shadowElevation = 2.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = onClose,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFF3F4F6))
+                ) {
+                    androidx.compose.material3.Icon(
+                        imageVector = androidx.compose.material.icons.Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Close",
+                        tint = Color(0xFF374151),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(10.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Message Reported User",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = DarkText
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(if (isOpen) Color(0xFF16A34A) else Color(0xFF94A3B8))
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = statusLine,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (isOpen) Color(0xFF15803D) else Color(0xFF64748B)
+                        )
+                    }
+                }
+
+                if (isOpen) {
+                    OutlinedButton(
+                        onClick = {
+                            AdminSupportManager.adminCloseSupportChat(
+                                context = context,
+                                userId = reportedUserId,
+                                onSuccess = {
+                                    Toast.makeText(context, "Support chat closed", Toast.LENGTH_SHORT).show()
+                                },
+                                onError = { err ->
+                                    Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                                }
+                            )
+                        },
+                        border = BorderStroke(1.dp, Color(0xFFFECACA)),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626)),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier.height(34.dp)
+                    ) {
+                        Text("Close chat", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        // Message List
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+        ) {
+            if (messages.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "Send an inquiry to open a 1:1 support window with the user.",
+                        fontSize = 13.sp,
+                        color = Color(0xFF94A3B8),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(24.dp)
+                    )
+                }
+            } else {
+                val distinctMsgs = remember(messages) { messages.distinctBy { it.id } }
+
+                androidx.compose.foundation.lazy.LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 14.dp),
+                    contentPadding = PaddingValues(vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    for (i in distinctMsgs.indices) {
+                        val msg = distinctMsgs[i]
+                        val prevMsg = if (i > 0) distinctMsgs[i - 1] else null
+
+                        val msgDateHeader = AdminSupportManager.formatDateHeader(msg.created_at)
+                        val prevDateHeader = if (prevMsg != null) AdminSupportManager.formatDateHeader(prevMsg.created_at) else null
+
+                        if (i == 0 || msgDateHeader != prevDateHeader) {
+                            item(key = "date_hdr_$i") {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 6.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Surface(
+                                        color = Color(0xFFE2E8F0),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Text(
+                                            text = msgDateHeader,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF475569),
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        item(key = msg.id) {
+                            val isAdminMsg = msg.sender_type == "admin"
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = if (isAdminMsg) Arrangement.End else Arrangement.Start
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(14.dp),
+                                    color = if (isAdminMsg) GoldPrimary else Color.White,
+                                    border = BorderStroke(1.dp, if (isAdminMsg) Color(0xFFF59E0B) else Color(0xFFE2E8F0)),
+                                    modifier = Modifier.widthIn(max = 280.dp)
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Text(
+                                            text = msg.body,
+                                            fontSize = 13.sp,
+                                            color = Color(0xFF0F172A)
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = AdminSupportManager.formatRelativeTime(msg.created_at),
+                                            fontSize = 10.sp,
+                                            color = if (isAdminMsg) Color(0xFF451A03) else Color(0xFF94A3B8),
+                                            modifier = Modifier.align(Alignment.End)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Bottom Input Box
+        Surface(
+            color = Color.White,
+            shadowElevation = 6.dp,
+            border = BorderStroke(1.dp, Color(0xFFE5E7EB))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Keep chat open:",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF475569)
+                    )
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FilterChip(
+                            selected = selectedOpenHours == 1,
+                            onClick = { selectedOpenHours = 1 },
+                            label = { Text("1 hour", fontSize = 11.5.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = GoldPrimary,
+                                selectedLabelColor = Color.Black
+                            ),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.height(30.dp)
+                        )
+
+                        FilterChip(
+                            selected = selectedOpenHours == 2,
+                            onClick = { selectedOpenHours = 2 },
+                            label = { Text("2 hours (Default)", fontSize = 11.5.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = GoldPrimary,
+                                selectedLabelColor = Color.Black
+                            ),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.height(30.dp)
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = inputText,
+                        onValueChange = { inputText = it },
+                        placeholder = { Text("Type inquiry regarding report...", fontSize = 13.sp) },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("admin_report_message_input"),
+                        shape = RoundedCornerShape(20.dp),
+                        maxLines = 4
+                    )
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    IconButton(
+                        onClick = {
+                            if (inputText.isNotBlank() && !isSending) {
+                                val textToSend = inputText
+                                inputText = ""
+                                AdminSupportManager.adminSendMessage(
+                                    context = context,
+                                    userId = reportedUserId,
+                                    messageText = textToSend,
+                                    reportId = reportId,
+                                    openHours = selectedOpenHours,
+                                    onSuccess = {
+                                        Toast.makeText(context, "Inquiry sent to user", Toast.LENGTH_SHORT).show()
+                                    },
+                                    onError = { err ->
+                                        Toast.makeText(context, err, Toast.LENGTH_LONG).show()
+                                    }
+                                )
+                            }
+                        },
+                        enabled = inputText.isNotBlank() && !isSending,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(if (inputText.isNotBlank() && !isSending) GoldPrimary else Color(0xFFE2E8F0))
+                    ) {
+                        if (isSending) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                color = Color.Black,
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            androidx.compose.material3.Icon(
+                                imageVector = androidx.compose.material.icons.Icons.AutoMirrored.Filled.Send,
+                                contentDescription = "Send Message",
+                                tint = if (inputText.isNotBlank()) Color.Black else Color(0xFF94A3B8),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
