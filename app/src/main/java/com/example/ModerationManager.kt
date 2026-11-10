@@ -179,8 +179,32 @@ object ModerationManager {
             err.contains("not_open") -> "This reopen request is no longer open for challenge."
             err.contains("owner_required") -> "Only the owner (superadmin) can decide disputes."
             err.contains("already_decided") -> "This dispute has already been decided."
+            err.contains("staff_required") -> "Administrator permissions required."
+            err.contains("empty_message") -> "Message cannot be empty."
+            err.contains("invalid_open_hours") -> "Invalid open hours selected."
+            err.contains("target_user_not_found") -> "Target user not found."
             err.contains("reopen_not_found") -> "Reopen record not found."
             else -> defaultMessage
+        }
+    }
+
+    suspend fun closeSupportChat(context: Context, userId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            SupabaseSessionManager.ensureActiveSession(context)
+            val auth = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                ?: return@withContext Result.failure(Exception("Please log in to continue."))
+            val res = SupabaseClient.api.adminCloseSupportChat(
+                auth = auth,
+                body = AdminCloseSupportChatRequest(p_user_id = userId)
+            )
+            if (res.isSuccessful) {
+                Result.success(Unit)
+            } else {
+                val errBody = res.errorBody()?.string() ?: res.message()
+                Result.failure(Exception(mapModerationError(errBody, "Failed to close support chat.")))
+            }
+        } catch (e: Exception) {
+            Result.failure(Exception(mapModerationError(e.message, "Network error closing support chat.")))
         }
     }
 

@@ -45,8 +45,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.text.SimpleDateFormat
 import java.time.Duration
 import java.time.Instant
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,6 +69,7 @@ fun AdminReportDetailDialog(
 
     var isSuperAdmin by remember { mutableStateOf(false) }
     var currentAdminUid by remember { mutableStateOf<String?>(null) }
+    var previewImageUrl by remember { mutableStateOf<String?>(null) }
 
     // Dialog action states
     var showActionDialog by remember { mutableStateOf(false) }
@@ -79,7 +84,10 @@ fun AdminReportDetailDialog(
 
     var showMessageUserDialog by remember { mutableStateOf(false) }
     var messageUserInput by remember { mutableStateOf("") }
+    var messageOpenHours by remember { mutableIntStateOf(2) } // default 2 hours
     var isSendingUserMessage by remember { mutableStateOf(false) }
+    var chatOpenUntilTime by remember { mutableStateOf<String?>(null) }
+    var isClosingSupportChat by remember { mutableStateOf(false) }
 
     var showReopenDialog by remember { mutableStateOf(false) }
     var reopenBriefInput by remember { mutableStateOf("") }
@@ -244,6 +252,20 @@ fun AdminReportDetailDialog(
 
                     val reporterName = reporterObj.optString("name").takeIf { it.isNotBlank() && it != "null" } ?: "Anonymous Reporter"
 
+                    val contextType = reportObj.optString("context_type", "report").lowercase()
+                    val evidenceStatus = reportObj.optString("evidence_status", "none")
+
+                    // Extract proof containers
+                    val evidenceObj = parseJsonObject(reportObj.opt("evidence"))
+                    val messageSnapshotArr = parseJsonArray(reportObj.opt("message_snapshot"))
+                    val speakerLogObj = parseJsonObject(reportObj.opt("speaker_log"))
+                    val deletionLogArr = parseJsonArray(reportObj.opt("deletion_log"))
+
+                    val hasProof = evidenceObj != null ||
+                            (messageSnapshotArr != null && messageSnapshotArr.length() > 0) ||
+                            speakerLogObj != null ||
+                            (deletionLogArr != null && deletionLogArr.length() > 0)
+
                     // Live countdown ticker for claim expiration
                     var remainingTimeFormatted by remember(claimExpiresAt) {
                         mutableStateOf(formatCountdown(claimExpiresAt))
@@ -407,7 +429,6 @@ fun AdminReportDetailDialog(
                                         }
                                     }
 
-                                    // Check 30 days window for reopen
                                     val canReopen = remember(resolvedAt) {
                                         try {
                                             if (resolvedAt != null) {
@@ -446,17 +467,22 @@ fun AdminReportDetailDialog(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text("Incident Details", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = DarkText)
-                                    Surface(
-                                        color = Color(0xFFF1F5F9),
-                                        shape = RoundedCornerShape(8.dp)
-                                    ) {
-                                        Text(
-                                            text = reportObj.optString("context_type", "report").uppercase(),
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF475569),
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                        )
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        // Context Badge
+                                        Surface(
+                                            color = Color(0xFFF1F5F9),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Text(
+                                                text = contextType.uppercase(),
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF475569),
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                            )
+                                        }
+                                        // Evidence Status Badge (Requirement 1)
+                                        EvidenceStatusBadge(status = evidenceStatus)
                                     }
                                 }
 
@@ -483,7 +509,7 @@ fun AdminReportDetailDialog(
                                     )
                                 }
 
-                                // Screenshot evidence if provided
+                                // Screenshot evidence if provided directly
                                 val screenshotUrl = reportObj.optString("screenshot_url").takeIf { it.isNotBlank() && it != "null" }
                                 if (screenshotUrl != null) {
                                     Spacer(modifier = Modifier.height(4.dp))
@@ -495,7 +521,8 @@ fun AdminReportDetailDialog(
                                             .fillMaxWidth()
                                             .height(180.dp)
                                             .clip(RoundedCornerShape(12.dp))
-                                            .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(12.dp)),
+                                            .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(12.dp))
+                                            .clickable { previewImageUrl = screenshotUrl },
                                         contentScale = ContentScale.Crop
                                     )
                                 }
@@ -517,7 +544,6 @@ fun AdminReportDetailDialog(
                                 ) {
                                     Text("Reported User Profile", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = DarkText)
 
-                                    // Safety score badge
                                     val scoreBg = when {
                                         reportedScore >= 80 -> Color(0xFFDCFCE7)
                                         reportedScore >= 50 -> Color(0xFFFEF3C7)
@@ -569,7 +595,79 @@ fun AdminReportDetailDialog(
                             }
                         }
 
-                        // 4. Action Buttons (ONLY visible if claim.is_mine == true and report not resolved)
+                        // 4. PROOF AND EVIDENCE SECTIONS (Requirements 2, 3, 4, 5, 6, 8)
+                        Text("Proof & Attached Evidence", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = DarkText)
+
+                        if (!hasProof) {
+                            // Requirement 6: Empty proof card when no evidence exists
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = Color.White),
+                                shape = RoundedCornerShape(18.dp),
+                                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(24.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        SoftShieldIcon(size = 32.dp, color = Color(0xFF94A3B8))
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(
+                                            text = "No proof was attached to this report",
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 13.5.sp,
+                                            color = Color(0xFF64748B)
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            // Render specific proof components ONLY when they exist
+
+                            // Moment Evidence (Context: "moment")
+                            if (evidenceObj != null && contextType == "moment") {
+                                MomentEvidenceCard(
+                                    evidenceObj = evidenceObj,
+                                    onImageClick = { url -> previewImageUrl = url }
+                                )
+                            }
+
+                            // Room Evidence (Context: "room")
+                            if (evidenceObj != null && contextType == "room") {
+                                RoomEvidenceCard(evidenceObj = evidenceObj)
+                            }
+
+                            // DM or Group Evidence (Context: "dm" or "group") - Requirement 8
+                            if (evidenceObj != null && (contextType == "dm" || contextType == "group")) {
+                                ChatEvidenceCard(
+                                    evidenceObj = evidenceObj,
+                                    contextType = contextType
+                                )
+                            }
+
+                            // Message Snapshot (Room Reports) - Requirement 3
+                            if (messageSnapshotArr != null && messageSnapshotArr.length() > 0) {
+                                MessageSnapshotCard(
+                                    snapshotArr = messageSnapshotArr,
+                                    reportedUserId = reportedUserId
+                                )
+                            }
+
+                            // Speaker Log (Room Reports) - Requirement 4
+                            if (speakerLogObj != null) {
+                                SpeakerLogCard(speakerLogObj = speakerLogObj)
+                            }
+
+                            // Deletion Log - Requirement 5
+                            if (deletionLogArr != null && deletionLogArr.length() > 0) {
+                                DeletionLogCard(deletionLogArr = deletionLogArr)
+                            }
+                        }
+
+                        // 5. Action Buttons (ONLY visible if claim.is_mine == true and report not resolved)
                         if (isMine && !isResolved) {
                             Text("Enforce Moderation Action", fontWeight = FontWeight.Bold, fontSize = 14.5.sp, color = DarkText)
 
@@ -638,7 +736,7 @@ fun AdminReportDetailDialog(
                             }
                         }
 
-                        // 5. Reopens & Challenges Section
+                        // 6. Reopens & Challenges Section
                         if (reopensArr.length() > 0) {
                             Text("Reopen & Dispute History", fontWeight = FontWeight.Bold, fontSize = 14.5.sp, color = DarkText)
 
@@ -709,7 +807,6 @@ fun AdminReportDetailDialog(
                                             }
                                         }
 
-                                        // If I am the original admin and status is 'open': show "Challenge" button
                                         val isOriginalAdmin = currentAdminUid != null && originalAdmin.equals(currentAdminUid, ignoreCase = true)
                                         if (roStatus == "open" && isOriginalAdmin) {
                                             Button(
@@ -725,7 +822,6 @@ fun AdminReportDetailDialog(
                                             }
                                         }
 
-                                        // If I am superadmin (owner) and status is 'open' or 'challenged': show dispute buttons
                                         if (isSuperAdmin && roStatus in listOf("open", "challenged")) {
                                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                                 Button(
@@ -746,7 +842,7 @@ fun AdminReportDetailDialog(
                             }
                         }
 
-                        // 6. Events Timeline
+                        // 7. Audit Event Timeline (Requirement 7: Human readable sentences)
                         if (eventsArr.length() > 0) {
                             Text("Audit Event Timeline", fontWeight = FontWeight.Bold, fontSize = 14.5.sp, color = DarkText)
 
@@ -761,7 +857,9 @@ fun AdminReportDetailDialog(
                                         val ev = eventsArr.optJSONObject(i) ?: continue
                                         val evName = ev.optString("event", "event")
                                         val evTime = ev.optString("created_at").take(19).replace('T', ' ')
-                                        val evDetail = ev.optJSONObject("detail")?.toString()
+                                        val evDetail = ev.optJSONObject("detail")
+
+                                        val readableSentence = formatAuditEventSentence(evName, evDetail)
 
                                         Row(verticalAlignment = Alignment.Top) {
                                             Box(
@@ -774,21 +872,12 @@ fun AdminReportDetailDialog(
                                             Column {
                                                 Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                                                     Text(
-                                                        text = evName.replace('_', ' ').uppercase(),
+                                                        text = readableSentence,
                                                         fontWeight = FontWeight.Bold,
-                                                        fontSize = 11.5.sp,
+                                                        fontSize = 12.sp,
                                                         color = DarkText
                                                     )
                                                     Text(text = evTime, fontSize = 10.5.sp, color = GraySubtitle)
-                                                }
-                                                if (!evDetail.isNullOrBlank() && evDetail != "{}") {
-                                                    Text(
-                                                        text = evDetail,
-                                                        fontSize = 11.sp,
-                                                        color = Color(0xFF64748B),
-                                                        maxLines = 2,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
                                                 }
                                             }
                                         }
@@ -803,6 +892,29 @@ fun AdminReportDetailDialog(
                         Spacer(modifier = Modifier.height(20.dp))
                     }
                 }
+            }
+        }
+    }
+
+    // Image Preview Modal
+    if (previewImageUrl != null) {
+        Dialog(onDismissRequest = { previewImageUrl = null }) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.9f))
+                    .clickable { previewImageUrl = null },
+                contentAlignment = Alignment.Center
+            ) {
+                AsyncImage(
+                    model = previewImageUrl,
+                    contentDescription = "Enlarged preview",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                        .clip(RoundedCornerShape(12.dp)),
+                    contentScale = ContentScale.Fit
+                )
             }
         }
     }
@@ -954,18 +1066,38 @@ fun AdminReportDetailDialog(
         )
     }
 
-    // Modal Message User Dialog (For investigation)
+    // Modal Message User Dialog (Updated with p_open_hours choice & close chat now)
     if (showMessageUserDialog) {
         val targetUid = detailJson?.optJSONObject("reported")?.optString("user_id")
             ?: detailJson?.optJSONObject("report")?.optString("reported_user_id")
             ?: ""
 
         AlertDialog(
-            onDismissRequest = { if (!isSendingUserMessage) showMessageUserDialog = false },
-            title = { Text("Message User (Investigation)", fontWeight = FontWeight.Bold) },
+            onDismissRequest = { if (!isSendingUserMessage && !isClosingSupportChat) showMessageUserDialog = false },
+            title = { Text("Message User (Support Inquiry)", fontWeight = FontWeight.Bold) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Send a support inquiry to this user regarding this incident. They can reply directly in Support Chat.", fontSize = 13.sp, color = Color(0xFF475569))
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Send a support inquiry to this user regarding this incident. They can reply directly in Support Chat.",
+                        fontSize = 12.5.sp,
+                        color = Color(0xFF475569)
+                    )
+
+                    // Choice: Keep chat open for 1 hour / 2 hours (default 2 hours)
+                    Text(text = "Keep the chat open for:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = DarkText)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = messageOpenHours == 1,
+                            onClick = { messageOpenHours = 1 },
+                            label = { Text("1 Hour", fontSize = 12.sp) }
+                        )
+                        FilterChip(
+                            selected = messageOpenHours == 2,
+                            onClick = { messageOpenHours = 2 },
+                            label = { Text("2 Hours (Default)", fontSize = 12.sp) }
+                        )
+                    }
+
                     OutlinedTextField(
                         value = messageUserInput,
                         onValueChange = { messageUserInput = it },
@@ -975,13 +1107,66 @@ fun AdminReportDetailDialog(
                             .height(110.dp),
                         maxLines = 4
                     )
+
+                    // Line under text field
+                    Text(
+                        text = "The user will see a support chat for this time and can reply.",
+                        fontSize = 11.5.sp,
+                        color = Color(0xFF64748B),
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    if (chatOpenUntilTime != null) {
+                        Surface(
+                            color = Color(0xFFECFDF5),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, Color(0xFFA7F3D0)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "Chat open until $chatOpenUntilTime",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF047857),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+
+                    // Button to close chat immediately
+                    TextButton(
+                        onClick = {
+                            if (targetUid.isBlank()) return@TextButton
+                            isClosingSupportChat = true
+                            scope.launch(Dispatchers.IO) {
+                                val res = ModerationManager.closeSupportChat(context, targetUid)
+                                withContext(Dispatchers.Main) {
+                                    isClosingSupportChat = false
+                                    if (res.isSuccess) {
+                                        chatOpenUntilTime = null
+                                        Toast.makeText(context, "Support chat closed now", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, res.exceptionOrNull()?.message ?: "Failed to close chat", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
+                        },
+                        enabled = !isClosingSupportChat && !isSendingUserMessage
+                    ) {
+                        Text(
+                            text = if (isClosingSupportChat) "Closing chat..." else "Close chat now",
+                            color = Color(0xFFDC2626),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
                         if (messageUserInput.isBlank()) {
-                            Toast.makeText(context, "Please enter a message", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, ModerationManager.mapModerationError("empty_message"), Toast.LENGTH_SHORT).show()
                             return@Button
                         }
                         isSendingUserMessage = true
@@ -994,35 +1179,42 @@ fun AdminReportDetailDialog(
                                     body = AdminSendSupportMessageRequest(
                                         p_user_id = targetUid,
                                         p_message = messageUserInput.trim(),
-                                        p_report_id = reportId
+                                        p_report_id = reportId,
+                                        p_open_hours = messageOpenHours
                                     )
                                 )
                                 withContext(Dispatchers.Main) {
                                     isSendingUserMessage = false
                                     if (resp.isSuccessful) {
-                                        Toast.makeText(context, "Support message sent to user", Toast.LENGTH_SHORT).show()
-                                        showMessageUserDialog = false
+                                        val cal = Calendar.getInstance().apply { add(Calendar.HOUR_OF_DAY, messageOpenHours) }
+                                        val untilStr = SimpleDateFormat("HH:mm", Locale.getDefault()).format(cal.time)
+                                        chatOpenUntilTime = untilStr
+                                        Toast.makeText(context, "Support message sent. Chat open until $untilStr", Toast.LENGTH_LONG).show()
+                                        messageUserInput = ""
                                     } else {
-                                        Toast.makeText(context, "Failed to send message: ${resp.code()}", Toast.LENGTH_SHORT).show()
+                                        val errBody = resp.errorBody()?.string() ?: ""
+                                        val friendly = ModerationManager.mapModerationError(errBody, "Failed to send message (${resp.code()})")
+                                        Toast.makeText(context, friendly, Toast.LENGTH_LONG).show()
                                     }
                                 }
                             } catch (e: Exception) {
                                 withContext(Dispatchers.Main) {
                                     isSendingUserMessage = false
-                                    Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    val friendly = ModerationManager.mapModerationError(e.message, "Network error sending message")
+                                    Toast.makeText(context, friendly, Toast.LENGTH_LONG).show()
                                 }
                             }
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F172A)),
-                    enabled = !isSendingUserMessage
+                    enabled = !isSendingUserMessage && !isClosingSupportChat
                 ) {
                     Text(if (isSendingUserMessage) "Sending..." else "Send Message")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showMessageUserDialog = false }, enabled = !isSendingUserMessage) {
-                    Text("Cancel")
+                TextButton(onClick = { showMessageUserDialog = false }, enabled = !isSendingUserMessage && !isClosingSupportChat) {
+                    Text("Close")
                 }
             }
         )
@@ -1050,28 +1242,18 @@ fun AdminReportDetailDialog(
                             .height(110.dp),
                         maxLines = 4
                     )
-                    Text(
-                        text = "${reopenBriefInput.trim().length}/2000 characters",
-                        fontSize = 11.sp,
-                        color = if (reopenBriefInput.trim().length in 10..2000) Color(0xFF16A34A) else Color(0xFFDC2626)
-                    )
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        val trimmed = reopenBriefInput.trim()
-                        if (trimmed.length < 10) {
-                            Toast.makeText(context, "Brief must be at least 10 characters.", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
                         isSubmittingReopen = true
                         scope.launch(Dispatchers.IO) {
-                            val res = ModerationManager.reopenReport(context, reportId, trimmed)
+                            val res = ModerationManager.reopenReport(context, reportId, reopenBriefInput)
                             withContext(Dispatchers.Main) {
                                 isSubmittingReopen = false
                                 if (res.isSuccess) {
-                                    Toast.makeText(context, "Report reopened and returned to Free queue", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context, "Report reopened successfully", Toast.LENGTH_SHORT).show()
                                     showReopenDialog = false
                                     loadDetail()
                                     onReportUpdated()
@@ -1082,9 +1264,9 @@ fun AdminReportDetailDialog(
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEA580C)),
-                    enabled = !isSubmittingReopen && reopenBriefInput.trim().length >= 10
+                    enabled = !isSubmittingReopen
                 ) {
-                    Text(if (isSubmittingReopen) "Reopening..." else "Submit Reopen")
+                    Text(if (isSubmittingReopen) "Reopening..." else "Reopen Report")
                 }
             },
             dismissButton = {
@@ -1099,59 +1281,36 @@ fun AdminReportDetailDialog(
     if (showChallengeDialog && activeChallengeReopenId != null) {
         AlertDialog(
             onDismissRequest = { if (!isSubmittingChallenge) showChallengeDialog = false },
-            title = { Text("Challenge Reopen", fontWeight = FontWeight.Bold) },
+            title = { Text("Challenge Reopen Request", fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Surface(
-                        color = Color(0xFFFFFBEB),
-                        shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.dp, Color(0xFFFDE68A)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = "Notice: Your brief goes directly to the owner by email.",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.5.sp,
-                            color = Color(0xFF92400E),
-                            modifier = Modifier.padding(10.dp)
-                        )
-                    }
                     Text(
-                        text = "Provide your counter-argument for why the original moderation action was justified (10 to 2000 chars):",
+                        text = "As the original investigating admin, you can challenge this reopen. Your brief goes directly to the owner by email.",
                         fontSize = 12.5.sp,
-                        color = Color(0xFF475569)
+                        color = Color(0xFF991B1B),
+                        fontWeight = FontWeight.SemiBold
                     )
                     OutlinedTextField(
                         value = challengeBriefInput,
                         onValueChange = { challengeBriefInput = it },
-                        placeholder = { Text("Type counter brief...", fontSize = 13.sp) },
+                        placeholder = { Text("Provide statement for owner review (min 10 chars)...", fontSize = 13.sp) },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(110.dp),
                         maxLines = 4
-                    )
-                    Text(
-                        text = "${challengeBriefInput.trim().length}/2000 characters",
-                        fontSize = 11.sp,
-                        color = if (challengeBriefInput.trim().length in 10..2000) Color(0xFF16A34A) else Color(0xFFDC2626)
                     )
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        val trimmed = challengeBriefInput.trim()
-                        if (trimmed.length < 10) {
-                            Toast.makeText(context, "Brief must be at least 10 characters.", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
                         isSubmittingChallenge = true
                         scope.launch(Dispatchers.IO) {
-                            val res = ModerationManager.challengeReopen(context, activeChallengeReopenId!!, trimmed)
+                            val res = ModerationManager.challengeReopen(context, activeChallengeReopenId!!, challengeBriefInput)
                             withContext(Dispatchers.Main) {
                                 isSubmittingChallenge = false
                                 if (res.isSuccess) {
-                                    Toast.makeText(context, "Challenge submitted. Owner notified by email.", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context, "Challenge submitted to owner", Toast.LENGTH_SHORT).show()
                                     showChallengeDialog = false
                                     loadDetail()
                                     onReportUpdated()
@@ -1162,9 +1321,9 @@ fun AdminReportDetailDialog(
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48)),
-                    enabled = !isSubmittingChallenge && challengeBriefInput.trim().length >= 10
+                    enabled = !isSubmittingChallenge
                 ) {
-                    Text(if (isSubmittingChallenge) "Sending..." else "Challenge & Email Owner")
+                    Text(if (isSubmittingChallenge) "Sending..." else "Submit Challenge")
                 }
             },
             dismissButton = {
@@ -1175,27 +1334,23 @@ fun AdminReportDetailDialog(
         )
     }
 
-    // Modal Owner Decide Dispute Dialog
+    // Modal Owner Decision Dialog
     if (showDisputeDecisionDialog && activeDisputeReopenId != null) {
-        var selectedDecision by remember { mutableStateOf("reopen_upheld") }
+        var selectedDecision by remember { mutableStateOf("reopen_upheld") } // "reopen_upheld" | "original_upheld"
 
         AlertDialog(
             onDismissRequest = { if (!isSubmittingDecision) showDisputeDecisionDialog = false },
-            title = { Text("Owner Dispute Decision", fontWeight = FontWeight.Bold) },
+            title = { Text("Owner Final Dispute Decision", fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "As superadmin (owner), choose which party is upheld:",
-                        fontSize = 13.sp,
-                        color = Color(0xFF334155)
-                    )
+                    Text("As platform owner, make a final binding decision on this reopen dispute:", fontSize = 12.5.sp, color = Color(0xFF475569))
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         RadioButton(
                             selected = selectedDecision == "reopen_upheld",
                             onClick = { selectedDecision = "reopen_upheld" }
                         )
-                        Text("Uphold Reopen (Lift penalty)", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Text("Uphold Reopen (Keep report open for review)", fontSize = 13.sp, fontWeight = FontWeight.Medium)
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1253,6 +1408,383 @@ fun AdminReportDetailDialog(
     }
 }
 
+// ----------------------------------------------------
+// PROOF RENDERING HELPER COMPOSABLES
+// ----------------------------------------------------
+
+@Composable
+private fun EvidenceStatusBadge(status: String) {
+    val bg = when (status.lowercase()) {
+        "server_verified" -> Color(0xFFDCFCE7)
+        "unverified" -> Color(0xFFFEF3C7)
+        else -> Color(0xFFF1F5F9)
+    }
+    val fg = when (status.lowercase()) {
+        "server_verified" -> Color(0xFF15803D)
+        "unverified" -> Color(0xFFB45309)
+        else -> Color(0xFF64748B)
+    }
+    val text = when (status.lowercase()) {
+        "server_verified" -> "Verified by server"
+        "unverified" -> "Sent by the reporter's app (not verified)"
+        else -> "No proof attached"
+    }
+
+    Surface(color = bg, shape = RoundedCornerShape(8.dp)) {
+        Text(
+            text = text,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = fg,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+        )
+    }
+}
+
+@Composable
+private fun MomentEvidenceCard(evidenceObj: JSONObject, onImageClick: (String) -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Moment Evidence", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = DarkText)
+
+            val repMoment = evidenceObj.optJSONObject("reported_moment")
+            if (repMoment != null) {
+                Surface(
+                    color = Color(0xFFFFFBEB),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                            Text("Reported Moment", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFFB45309))
+                            Text(repMoment.optString("created_at").take(10), fontSize = 11.sp, color = Color(0xFFD97706))
+                        }
+                        val content = repMoment.optString("content")
+                        if (content.isNotBlank()) {
+                            Text(content, fontSize = 13.sp, color = DarkText)
+                        }
+                        val imageUrls = repMoment.optJSONArray("image_urls")
+                        if (imageUrls != null && imageUrls.length() > 0) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                for (i in 0 until imageUrls.length()) {
+                                    val url = imageUrls.optString(i) ?: continue
+                                    AsyncImage(
+                                        model = url,
+                                        contentDescription = "Moment image",
+                                        modifier = Modifier
+                                            .size(70.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable { onImageClick(url) },
+                                        contentScale = ContentScale.Crop
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            val recentArr = evidenceObj.optJSONArray("recent_moments")
+            if (recentArr != null && recentArr.length() > 0) {
+                Text("Their Last Moments", fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp, color = GraySubtitle)
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (i in 0 until recentArr.length()) {
+                        val m = recentArr.optJSONObject(i) ?: continue
+                        Surface(
+                            color = Color(0xFFF8FAFC),
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(m.optString("content", "No text"), fontSize = 12.sp, color = DarkText)
+                                val imgArr = m.optJSONArray("image_urls")
+                                if (imgArr != null && imgArr.length() > 0) {
+                                    Row(modifier = Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        for (j in 0 until imgArr.length()) {
+                                            val u = imgArr.optString(j) ?: continue
+                                            AsyncImage(
+                                                model = u,
+                                                contentDescription = "Recent moment image",
+                                                modifier = Modifier
+                                                    .size(44.dp)
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .clickable { onImageClick(u) },
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RoomEvidenceCard(evidenceObj: JSONObject) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Voice Room Evidence", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = DarkText)
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Room Title:", fontSize = 12.sp, color = GraySubtitle)
+                Text(evidenceObj.optString("title", "Voice Room"), fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp, color = DarkText)
+            }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Room Status:", fontSize = 12.sp, color = GraySubtitle)
+                Text(if (evidenceObj.optBoolean("room_live")) "LIVE" else "ENDED", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = if (evidenceObj.optBoolean("room_live")) Color(0xFF16A34A) else Color(0xFF64748B))
+            }
+            if (evidenceObj.has("captured_at")) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Captured At:", fontSize = 12.sp, color = GraySubtitle)
+                    Text(evidenceObj.optString("captured_at").take(19).replace('T', ' '), fontSize = 11.5.sp, color = DarkText)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChatEvidenceCard(evidenceObj: JSONObject, contextType: String) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(if (contextType == "group") "Group Chat Evidence" else "1:1 Chat Evidence", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = DarkText)
+
+            val messagesArr = evidenceObj.optJSONArray("messages")
+            if (messagesArr == null || messagesArr.length() == 0) {
+                Text("No chat messages contained in evidence.", fontSize = 12.sp, color = GraySubtitle)
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (i in 0 until messagesArr.length()) {
+                        val msg = messagesArr.optJSONObject(i) ?: continue
+                        val sender = msg.optString("sender", "unknown")
+                        val text = msg.optString("text").takeIf { it.isNotBlank() && it != "null" } ?: "[${msg.optString("type", "message")}]"
+                        val sentAt = msg.optString("sent_at").take(19).replace('T', ' ')
+
+                        Surface(
+                            color = if (sender == "them" || sender.contains("reported", ignoreCase = true)) Color(0xFFFFF2F2) else Color(0xFFF8FAFC),
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, if (sender == "them" || sender.contains("reported", ignoreCase = true)) Color(0xFFFECACA) else Color(0xFFE2E8F0)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                    Text(sender.uppercase(), fontWeight = FontWeight.Bold, fontSize = 10.5.sp, color = Color(0xFF475569))
+                                    Text(sentAt, fontSize = 10.sp, color = GraySubtitle)
+                                }
+                                Text(text, fontSize = 12.5.sp, color = DarkText, modifier = Modifier.padding(top = 2.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MessageSnapshotCard(snapshotArr: JSONArray, reportedUserId: String?) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Room Message Snapshot", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = DarkText)
+
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (i in 0 until snapshotArr.length()) {
+                    val item = snapshotArr.optJSONObject(i) ?: continue
+                    val userId = item.optString("user_id")
+                    val senderName = item.optString("sender", "User")
+                    val msgText = item.optString("message")
+                    val createdAt = item.optString("created_at").take(19).replace('T', ' ')
+
+                    val isReportedUser = reportedUserId != null && userId.equals(reportedUserId, ignoreCase = true)
+
+                    Surface(
+                        color = if (isReportedUser) Color(0xFFFEF2F2) else Color(0xFFF8FAFC),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, if (isReportedUser) Color(0xFFFCA5A5) else Color(0xFFE2E8F0)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(senderName, fontWeight = FontWeight.Bold, fontSize = 11.5.sp, color = DarkText)
+                                    if (isReportedUser) {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Surface(color = Color(0xFFDC2626), shape = RoundedCornerShape(4.dp)) {
+                                            Text(
+                                                "REPORTED USER",
+                                                color = Color.White,
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Black,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                                Text(createdAt, fontSize = 10.sp, color = GraySubtitle)
+                            }
+                            Text(msgText, fontSize = 12.5.sp, color = DarkText, modifier = Modifier.padding(top = 2.dp))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SpeakerLogCard(speakerLogObj: JSONObject) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Voice Room Speaker Log", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = DarkText)
+
+            val repUserObj = speakerLogObj.optJSONObject("reported_user")
+            if (repUserObj != null) {
+                val summary = repUserObj.optJSONObject("summary")
+                val micTurns = summary?.optInt("mic_turns") ?: 0
+                val micSecs = summary?.optInt("mic_on_seconds") ?: 0
+                val formattedTime = String.format(Locale.US, "%02d:%02d", micSecs / 60, micSecs % 60)
+
+                Surface(color = Color(0xFFFFFBEB), shape = RoundedCornerShape(10.dp), border = BorderStroke(1.dp, Color(0xFFFDE68A)), modifier = Modifier.fillMaxWidth()) {
+                    Row(modifier = Modifier.padding(10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Mic Turns: $micTurns", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFFB45309))
+                        Text("Mic Time: $formattedTime", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFFB45309))
+                    }
+                }
+
+                val eventsArr = repUserObj.optJSONArray("events")
+                if (eventsArr != null && eventsArr.length() > 0) {
+                    Text("Speaker Timeline", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = GraySubtitle)
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        for (i in 0 until eventsArr.length()) {
+                            val ev = eventsArr.optJSONObject(i) ?: continue
+                            val atTime = ev.optString("at").take(19).replace('T', ' ')
+                            val eventName = ev.optString("event")
+                            val role = ev.optString("role")
+                            Text("• $atTime - $eventName ($role)", fontSize = 11.5.sp, color = DarkText)
+                        }
+                    }
+                }
+            }
+
+            val participantsArr = speakerLogObj.optJSONArray("participants")
+            if (participantsArr != null && participantsArr.length() > 0) {
+                Text("Room Participants", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = GraySubtitle)
+                val names = mutableListOf<String>()
+                for (i in 0 until participantsArr.length()) {
+                    val p = participantsArr.optJSONObject(i) ?: continue
+                    names.add(p.optString("name", "User"))
+                }
+                Text(names.joinToString(", "), fontSize = 11.5.sp, color = Color(0xFF475569))
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeletionLogCard(deletionLogArr: JSONArray) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(1.dp, Color(0xFFFCA5A5)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "Messages Deleted by Reporter (${deletionLogArr.length()})",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                color = Color(0xFFDC2626)
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                for (i in 0 until deletionLogArr.length()) {
+                    val item = deletionLogArr.optJSONObject(i) ?: continue
+                    val atTime = item.optString("at").take(19).replace('T', ' ')
+                    val msgType = item.optString("type", "message")
+                    Text("• $atTime - Deleted $msgType message", fontSize = 12.sp, color = Color(0xFF7F1D1D))
+                }
+            }
+        }
+    }
+}
+
+// ----------------------------------------------------
+// UTILITY HELPERS
+// ----------------------------------------------------
+
+private fun parseJsonObject(obj: Any?): JSONObject? {
+    if (obj == null || obj == JSONObject.NULL) return null
+    if (obj is JSONObject) return obj
+    if (obj is String && obj.isNotBlank()) {
+        return try {
+            JSONObject(obj)
+        } catch (_: Exception) {
+            null
+        }
+    }
+    return null
+}
+
+private fun parseJsonArray(obj: Any?): JSONArray? {
+    if (obj == null || obj == JSONObject.NULL) return null
+    if (obj is JSONArray) return obj
+    if (obj is String && obj.isNotBlank()) {
+        return try {
+            JSONArray(obj)
+        } catch (_: Exception) {
+            null
+        }
+    }
+    return null
+}
+
+private fun formatAuditEventSentence(evName: String, detailObj: JSONObject?): String {
+    val norm = evName.lowercase().trim()
+    return when {
+        norm.contains("take_charge") -> "Admin took charge"
+        norm.contains("auto_release") -> "Auto released after 48 hours"
+        norm.contains("release") -> "Admin released claim"
+        norm.contains("dismiss") -> "Report dismissed"
+        norm.contains("reopen") -> "Report reopened"
+        norm.contains("challenge") -> "Admin challenged reopen"
+        norm.contains("owner") || norm.contains("dispute") -> "Owner decided dispute"
+        norm.contains("action") || norm.contains("warning") || norm.contains("mute") || norm.contains("suspend") -> {
+            val actType = detailObj?.optString("action_type") ?: norm.replace("action_", "")
+            "Action: ${actType.ifBlank { "enforced" }}"
+        }
+        else -> evName.replace('_', ' ').replaceFirstChar { it.uppercase() }
+    }
+}
+
 private fun formatCountdown(expiresAt: String?): String {
     if (expiresAt.isNullOrBlank()) return "00:00:00"
     return try {
@@ -1265,7 +1797,7 @@ private fun formatCountdown(expiresAt: String?): String {
             val hours = duration.toHours()
             val minutes = (duration.toMinutes() % 60)
             val seconds = (duration.seconds % 60)
-            String.format("%02dh %02dm %02ds", hours, minutes, seconds)
+            String.format(Locale.US, "%02dh %02dm %02ds", hours, minutes, seconds)
         }
     } catch (_: Exception) {
         "Active"

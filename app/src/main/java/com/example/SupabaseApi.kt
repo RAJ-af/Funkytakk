@@ -1164,6 +1164,13 @@ interface SupabaseApi {
         @Body body: AdminSendSupportMessageRequest
     ): Response<ResponseBody>
 
+    @POST("rest/v1/rpc/admin_close_support_chat")
+    suspend fun adminCloseSupportChat(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: AdminCloseSupportChatRequest
+    ): Response<ResponseBody>
+
     @POST("rest/v1/rpc/admin_mark_support_conversation_read")
     suspend fun adminMarkSupportConversationRead(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
@@ -1937,7 +1944,13 @@ data class SendSupportMessageRequest(
 data class AdminSendSupportMessageRequest(
     val p_user_id: String,
     val p_message: String,
-    val p_report_id: String? = null
+    val p_report_id: String? = null,
+    val p_open_hours: Int? = 2
+)
+
+@JsonClass(generateAdapter = true)
+data class AdminCloseSupportChatRequest(
+    val p_user_id: String
 )
 
 @JsonClass(generateAdapter = true)
