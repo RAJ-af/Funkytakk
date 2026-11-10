@@ -432,6 +432,8 @@ fun VoiceRoomScreen(
         emptyList()
     }
 
+    val voiceProfilesState by com.example.realtime.VoiceRoomProfileManager.profilesFlow.collectAsState()
+
     val activeRoomId = viewModel?.activeRoomId?.collectAsState()?.value ?: ""
     val activeRoomTitle = viewModel?.activeRoomTitle?.collectAsState()?.value ?: "Voice Circle"
 
@@ -504,6 +506,13 @@ fun VoiceRoomScreen(
     var roomHostId by remember { mutableStateOf<String?>("") }
     val roomHostProfile = remember(supabaseProfiles, roomHostId) {
         supabaseProfiles.find { it.uid == roomHostId }
+    }
+
+    LaunchedEffect(participantsData, roomHostId) {
+        val uids = (participantsData.map { it.user_id } + listOfNotNull(roomHostId)).filter { it.isNotBlank() }.distinct()
+        if (uids.isNotEmpty()) {
+            com.example.realtime.VoiceRoomProfileManager.loadParticipants(context, uids, viewModel)
+        }
     }
 
     var hostAwaySecondsLeft by remember { mutableStateOf<Int?>(null) }
@@ -668,23 +677,28 @@ fun VoiceRoomScreen(
         }
     }
 
-    val hostSeat = remember(participantsData, supabaseProfiles, roomHostId, isHostPresent, currentUserProfile, currentUserId, speakingUserIds) {
+    val hostSeat = remember(participantsData, supabaseProfiles, voiceProfilesState, roomHostId, isHostPresent, currentUserProfile, currentUserId, speakingUserIds) {
         val hostProfile = supabaseProfiles.find { it.uid == roomHostId }
+        val cachedProf = voiceProfilesState[roomHostId ?: ""] ?: com.example.realtime.VoiceRoomProfileManager.getCachedProfile(roomHostId ?: "")
         val snippet = com.example.realtime.VoiceRoomRealtimeManager.getUserSnippet(roomHostId ?: "")
-        val name = hostProfile?.displayName?.ifBlank { null }
+        val name: String = (hostProfile?.displayName?.ifBlank { null }
             ?: hostProfile?.username?.ifBlank { null }
+            ?: cachedProf?.name?.ifBlank { null }
             ?: snippet?.name?.ifBlank { null }
-            ?: if (currentUserId == roomHostId) (currentUserProfile?.displayName ?: "Host") else "Host"
-        val avatar = hostProfile?.avatar?.ifBlank { null }
+            ?: (if (currentUserId == roomHostId) (currentUserProfile?.displayName?.ifBlank { null } ?: currentUserProfile?.username?.ifBlank { null }) else null)
+            ?: "Host")
+        val avatar: String = (hostProfile?.avatar?.ifBlank { null }
+            ?: cachedProf?.avatar?.ifBlank { null }
             ?: snippet?.avatar?.ifBlank { null }
-            ?: if (currentUserId == roomHostId) currentUserProfile?.avatar else "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400"
-        val flagCode = hostProfile?.countryCode ?: snippet?.countryCode ?: "in"
+            ?: (if (currentUserId == roomHostId) currentUserProfile?.avatar?.ifBlank { null } else null)
+            ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400")
+        val flagCode: String = hostProfile?.countryCode ?: cachedProf?.countryCode ?: snippet?.countryCode ?: "in"
         val pHost = participantsData.find { it.user_id == roomHostId }
         val hostUid = hostProfile?.uid ?: (roomHostId ?: "")
 
         ChillRoomSpeaker(
             name = name,
-            imageUrl = avatar ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400",
+            imageUrl = avatar,
             flagCode = flagCode,
             isMuted = if (currentUserId == roomHostId) !isMicOn else (pHost?.let { !it.is_mic_enabled } ?: true),
             isCenter = true,
@@ -696,16 +710,28 @@ fun VoiceRoomScreen(
         )
     }
 
-    val allRoomSeats = remember(hostSeat, participantsData, supabaseProfiles, roomHostId, isMicOn, speakingUserIds) {
+    val allRoomSeats = remember(hostSeat, participantsData, supabaseProfiles, voiceProfilesState, roomHostId, isMicOn, speakingUserIds) {
         if (participantsData.isEmpty()) {
             listOf(hostSeat)
         } else {
             participantsData.map { p ->
                 val pProfile = supabaseProfiles.find { it.uid == p.user_id }
-                val name = pProfile?.displayName ?: pProfile?.username ?: "User"
-                val avatar = pProfile?.avatar ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400"
-                val flagCode = pProfile?.countryCode ?: "in"
+                val cachedProf = voiceProfilesState[p.user_id] ?: com.example.realtime.VoiceRoomProfileManager.getCachedProfile(p.user_id)
+                val snippet = com.example.realtime.VoiceRoomRealtimeManager.getUserSnippet(p.user_id)
                 val isHost = (p.role == "host") || (p.user_id == roomHostId)
+                val roleLabel = if (isHost) "Host" else if (p.role == "speaker") "Speaker" else "Learner"
+                val name: String = (pProfile?.displayName?.ifBlank { null }
+                    ?: pProfile?.username?.ifBlank { null }
+                    ?: cachedProf?.name?.ifBlank { null }
+                    ?: snippet?.name?.ifBlank { null }
+                    ?: (if (p.user_id == currentUserId) (currentUserProfile?.displayName?.ifBlank { null } ?: currentUserProfile?.username?.ifBlank { null }) else null)
+                    ?: roleLabel)
+                val avatar: String = (pProfile?.avatar?.ifBlank { null }
+                    ?: cachedProf?.avatar?.ifBlank { null }
+                    ?: snippet?.avatar?.ifBlank { null }
+                    ?: (if (p.user_id == currentUserId) currentUserProfile?.avatar?.ifBlank { null } else null)
+                    ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400")
+                val flagCode: String = pProfile?.countryCode ?: cachedProf?.countryCode ?: snippet?.countryCode ?: "in"
                 ChillRoomSpeaker(
                     name = name,
                     imageUrl = avatar,
@@ -722,26 +748,32 @@ fun VoiceRoomScreen(
         }
     }
 
-    val speakerSeats = remember(participantsData, supabaseProfiles, roomHostId, hostSeat, isMicOn, speakingUserIds) {
+    val speakerSeats = remember(participantsData, supabaseProfiles, voiceProfilesState, roomHostId, hostSeat, isMicOn, speakingUserIds) {
         participantsData.filter { p ->
             val isHost = (p.role == "host") || (p.user_id == roomHostId)
             !isHost && p.role == "speaker"
         }.sortedBy { it.joined_at ?: "" }.take(4).map { p ->
             val pProfile = supabaseProfiles.find { it.uid == p.user_id }
+            val cachedProf = voiceProfilesState[p.user_id] ?: com.example.realtime.VoiceRoomProfileManager.getCachedProfile(p.user_id)
             val snippet = com.example.realtime.VoiceRoomRealtimeManager.getUserSnippet(p.user_id)
-            val name = pProfile?.displayName?.ifBlank { null }
+            val name: String = (pProfile?.displayName?.ifBlank { null }
                 ?: pProfile?.username?.ifBlank { null }
+                ?: cachedProf?.name?.ifBlank { null }
                 ?: snippet?.name?.ifBlank { null }
-                ?: if (p.user_id == currentUserId) (currentUserProfile?.displayName ?: "Speaker") else "Speaker"
-            val avatar = pProfile?.avatar?.ifBlank { null }
+                ?: (if (p.user_id == currentUserId) (currentUserProfile?.displayName?.ifBlank { null } ?: currentUserProfile?.username?.ifBlank { null }) else null)
+                ?: "Speaker")
+            val avatar: String = (pProfile?.avatar?.ifBlank { null }
+                ?: cachedProf?.avatar?.ifBlank { null }
                 ?: snippet?.avatar?.ifBlank { null }
-                ?: if (p.user_id == currentUserId) currentUserProfile?.avatar else "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400"
-            val flagCode = pProfile?.countryCode?.ifBlank { null }
+                ?: (if (p.user_id == currentUserId) currentUserProfile?.avatar?.ifBlank { null } else null)
+                ?: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400")
+            val flagCode: String = (pProfile?.countryCode?.ifBlank { null }
+                ?: cachedProf?.countryCode
                 ?: snippet?.countryCode
-                ?: "in"
+                ?: "in")
             ChillRoomSpeaker(
                 name = name,
-                imageUrl = avatar ?: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400",
+                imageUrl = avatar,
                 flagCode = flagCode,
                 isMuted = if (p.user_id == currentUserId) !isMicOn else !p.is_mic_enabled,
                 isCenter = false,
@@ -753,24 +785,30 @@ fun VoiceRoomScreen(
         }
     }
 
-    val listenerSeats = remember(participantsData, supabaseProfiles, roomHostId) {
+    val listenerSeats = remember(participantsData, supabaseProfiles, voiceProfilesState, roomHostId) {
         participantsData.filter { p ->
             val isHost = (p.role == "host") || (p.user_id == roomHostId)
             !isHost && p.role != "speaker"
         }.map { p ->
             val pProfile = supabaseProfiles.find { it.uid == p.user_id }
+            val cachedProf = voiceProfilesState[p.user_id] ?: com.example.realtime.VoiceRoomProfileManager.getCachedProfile(p.user_id)
             val snippet = com.example.realtime.VoiceRoomRealtimeManager.getUserSnippet(p.user_id)
-            val name = pProfile?.displayName?.ifBlank { null }
+            val name: String = (pProfile?.displayName?.ifBlank { null }
                 ?: pProfile?.username?.ifBlank { null }
+                ?: cachedProf?.name?.ifBlank { null }
                 ?: snippet?.name?.ifBlank { null }
-                ?: if (p.user_id == currentUserId) (currentUserProfile?.displayName ?: "Listener") else "Listener"
-            val avatar = pProfile?.avatar?.ifBlank { null }
+                ?: (if (p.user_id == currentUserId) (currentUserProfile?.displayName?.ifBlank { null } ?: currentUserProfile?.username?.ifBlank { null }) else null)
+                ?: "Learner")
+            val avatar: String = (pProfile?.avatar?.ifBlank { null }
+                ?: cachedProf?.avatar?.ifBlank { null }
                 ?: snippet?.avatar?.ifBlank { null }
-                ?: if (p.user_id == currentUserId) currentUserProfile?.avatar else "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400"
-            val flagCode = pProfile?.countryCode?.ifBlank { null }
+                ?: (if (p.user_id == currentUserId) currentUserProfile?.avatar?.ifBlank { null } else null)
+                ?: "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400")
+            val flagCode: String = (pProfile?.countryCode?.ifBlank { null }
+                ?: cachedProf?.countryCode
                 ?: snippet?.countryCode
-                ?: "in"
-            Triple(name, avatar ?: "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400", flagCode)
+                ?: "in")
+            Triple(name, avatar, flagCode)
         }
     }
 
@@ -1053,6 +1091,8 @@ fun VoiceRoomScreen(
                             }
                         } else if (action in listOf("joined", "sync_presence", "update", "insert", "speaker_promoted")) {
                             if (targetUid.isNotBlank()) {
+                                com.example.realtime.VoiceRoomProfileManager.recordProfile(targetUid, event.userName, event.userAvatar)
+                                com.example.realtime.VoiceRoomProfileManager.loadParticipantProfile(context, targetUid, viewModel)
                                 if (action == "joined") {
                                     triggerUserEntryAnimation(context, targetUid, targetName)
                                 }

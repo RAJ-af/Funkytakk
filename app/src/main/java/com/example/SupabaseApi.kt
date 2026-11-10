@@ -487,7 +487,14 @@ interface SupabaseApi {
     @GET("rest/v1/profiles")
     suspend fun getAllProfiles(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+        @Header("Authorization") auth: String
+    ): Response<List<SupabaseProfile>>
+
+    @GET("rest/v1/profiles")
+    suspend fun getProfilesIn(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("auth_user_id") authUserIdIn: String // e.g. "in.(uuid1,uuid2)"
     ): Response<List<SupabaseProfile>>
 
     @GET("rest/v1/users")

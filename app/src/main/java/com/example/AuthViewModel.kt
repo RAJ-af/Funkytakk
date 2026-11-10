@@ -3243,22 +3243,80 @@ class AuthViewModel : ViewModel() {
         // No-op: Supabase profiles and users tables are the sole source of truth
     }
 
+    fun updateOrAddProfile(profile: UserProfile) {
+        if (profile.uid.isBlank()) return
+        val current = _supabaseProfiles.value.toMutableList()
+        val idx = current.indexOfFirst { it.uid == profile.uid }
+        if (idx >= 0) {
+            val existing = current[idx]
+            current[idx] = existing.copy(
+                displayName = profile.displayName ?: existing.displayName,
+                avatar = profile.avatar ?: existing.avatar,
+                username = profile.username ?: existing.username,
+                country = profile.country ?: existing.country,
+                countryCode = profile.countryCode ?: existing.countryCode
+            )
+        } else {
+            current.add(profile)
+        }
+        _supabaseProfiles.value = current
+    }
+
     fun fetchSupabaseProfiles(context: Context) {
         viewModelScope.launch {
             try {
-                val response = withContext(Dispatchers.IO) {
-                    SupabaseClient.api.getAllProfiles()
+                // Ensure active authenticated session
+                SupabaseSessionManager.ensureActiveSession(context)
+                var token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                    ?: SupabaseSessionManager.getBearerToken(context)
+
+                var response = withContext(Dispatchers.IO) {
+                    try {
+                        SupabaseClient.api.getAllProfiles(
+                            apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                            auth = token
+                        )
+                    } catch (e: Exception) {
+                        Log.e("AuthViewModel", "Exception calling getAllProfiles: ${e.message}", e)
+                        null
+                    }
                 }
-                if (response.isSuccessful) {
+
+                // If 401, force-refresh session once and retry
+                if (response != null && response.code() == 401) {
+                    val errBody = response.errorBody()?.string().orEmpty()
+                    Log.e("AuthViewModel", "GET /rest/v1/profiles returned 401: $errBody. Refreshing session and retrying...")
+                    SupabaseSessionManager.forceRefreshSession(context)
+                    token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                        ?: SupabaseSessionManager.getBearerToken(context)
+                    response = withContext(Dispatchers.IO) {
+                        try {
+                            SupabaseClient.api.getAllProfiles(
+                                apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                                auth = token
+                            )
+                        } catch (e: Exception) {
+                            Log.e("AuthViewModel", "Retry exception calling getAllProfiles: ${e.message}", e)
+                            null
+                        }
+                    }
+                }
+
+                if (response != null && response.isSuccessful) {
                     val supaProfiles = response.body() ?: emptyList()
                     val profiles = supaProfiles.map { supaProfile ->
+                        val pName = supaProfile.profile_name?.takeIf { it.isNotBlank() }
+                            ?: supaProfile.username?.takeIf { it.isNotBlank() }
+                            ?: "Learner"
+                        val pAvatar = supaProfile.avatar_url?.takeIf { it.isNotBlank() }
+                            ?: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150"
                         UserProfile(
                             uid = supaProfile.auth_user_id ?: "",
                             email = supaProfile.email ?: "",
-                            displayName = supaProfile.profile_name ?: "Learner",
+                            displayName = pName,
                             isEmailVerified = true,
                             username = supaProfile.username ?: "learner_user",
-                            avatar = supaProfile.avatar_url ?: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150",
+                            avatar = pAvatar,
                             dob = "2000-01-01",
                             gender = supaProfile.gender ?: "Non-binary",
                             nativeLanguage = supaProfile.native_languages?.joinToString(", ") ?: "Hindi",
@@ -3270,13 +3328,26 @@ class AuthViewModel : ViewModel() {
                     }
                     _supabaseProfiles.value = profiles
                     Log.d("AuthViewModel", "Fetched ${profiles.size} profiles from Supabase successfully")
-                } else {
-                    Log.e("AuthViewModel", "Failed to fetch Supabase profiles: ${response.code()} ${response.message()}")
-                    _supabaseProfiles.value = emptyList()
+
+                    // Also cache them in VoiceRoomProfileManager
+                    profiles.forEach { p ->
+                        if (p.uid.isNotBlank()) {
+                            com.example.realtime.VoiceRoomProfileManager.recordProfile(
+                                userId = p.uid,
+                                name = p.displayName,
+                                avatar = p.avatar,
+                                countryCode = p.countryCode,
+                                username = p.username
+                            )
+                        }
+                    }
+                } else if (response != null) {
+                    val code = response.code()
+                    val err = response.errorBody()?.string().orEmpty()
+                    Log.e("AuthViewModel", "Failed to fetch Supabase profiles: HTTP $code - $err")
                 }
             } catch (e: Exception) {
                 Log.e("AuthViewModel", "Error fetching Supabase profiles: ${e.message}", e)
-                _supabaseProfiles.value = emptyList()
             }
         }
     }
