@@ -112,33 +112,18 @@ object DriveBackupEngine {
             val firebaseUid = FirebaseAuth.getInstance().currentUser?.uid
                 ?: throw IllegalStateException("User not logged in.")
 
-            val activeVaultKey = VaultSecurityManager.getActiveVaultKey()
+            val activeVaultKey = VaultSecurityManager.getActiveVaultKey(context)
+                ?: BackupCrypto.loadVaultKeyFromKeystore(context)
                 ?: throw IllegalStateException("Vault is locked. Password required.")
 
             onProgress?.invoke(5, "Checking Google Drive storage...")
 
             val existingDriveFiles = DriveRestApiClient.listAppDataFiles(context, accountEmail)
             val headerFile = existingDriveFiles.find { it.name == HEADER_FILE_NAME }
+                ?: throw IllegalStateException("Backup header not found on Google Drive. Please set up your backup password.")
 
-            var masterKey = BackupCrypto.loadMasterKeyFromKeystore(context)
-            if (masterKey == null) {
-                masterKey = BackupCrypto.generateMasterKey()
-                BackupCrypto.saveMasterKeyToKeystore(context, masterKey)
-            }
-
-            if (headerFile == null) {
-                val cachedPassword = ChatBackupPreferencesManager.getCachedVaultPassword(context)
-                    ?: throw IllegalStateException("Vault password required to initialize backup key header.")
-                val headerObj = BackupCrypto.wrapMasterKey(masterKey, cachedPassword, firebaseUid)
-                val headerBytes = headerObj.toJson().toByteArray(Charsets.UTF_8)
-                DriveRestApiClient.uploadSmallFile(
-                    context = context,
-                    accountEmail = accountEmail,
-                    name = HEADER_FILE_NAME,
-                    mimeType = "application/json",
-                    content = headerBytes
-                )
-            }
+            val masterKey = BackupCrypto.loadMasterKeyFromKeystore(context)
+                ?: throw IllegalStateException("Backup master key is missing. Please set up your backup password.")
 
             if (isCancelled()) return@withContext false
             onProgress?.invoke(15, "Reading local chat database...")
@@ -438,6 +423,61 @@ object DriveBackupEngine {
             Log.e(TAG, "Backup failed: ${e.message}", e)
             throw e
         }
+    }
+
+    fun hasMasterKeyInKeystore(context: Context): Boolean {
+        return BackupCrypto.loadMasterKeyFromKeystore(context) != null
+    }
+
+    suspend fun hasBackupHeaderOnDrive(context: Context, accountEmail: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val driveFiles = DriveRestApiClient.listAppDataFiles(context, accountEmail)
+            driveFiles.any { it.name == HEADER_FILE_NAME }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking backup header on Drive", e)
+            false
+        }
+    }
+
+    suspend fun initializeBackupKeyHeader(
+        context: Context,
+        accountEmail: String,
+        vaultPassword: String
+    ): ByteArray = withContext(Dispatchers.IO) {
+        val firebaseUid = FirebaseAuth.getInstance().currentUser?.uid
+            ?: throw IllegalStateException("User not logged in.")
+
+        val existingDriveFiles = DriveRestApiClient.listAppDataFiles(context, accountEmail)
+        val headerFile = existingDriveFiles.find { it.name == HEADER_FILE_NAME }
+
+        val masterKey: ByteArray
+        if (headerFile != null) {
+            val headerBytes = DriveRestApiClient.downloadFileContent(context, accountEmail, headerFile.id)
+            val headerJson = String(headerBytes, Charsets.UTF_8)
+            masterKey = try {
+                BackupCrypto.unwrapMasterKey(headerJson, vaultPassword, firebaseUid)
+            } catch (e: Exception) {
+                throw IllegalArgumentException("Wrong password")
+            }
+        } else {
+            masterKey = BackupCrypto.loadMasterKeyFromKeystore(context) ?: BackupCrypto.generateMasterKey()
+            val headerObj = BackupCrypto.wrapMasterKey(masterKey, vaultPassword, firebaseUid)
+            val headerBytes = headerObj.toJson().toByteArray(Charsets.UTF_8)
+            DriveRestApiClient.uploadSmallFile(
+                context = context,
+                accountEmail = accountEmail,
+                name = HEADER_FILE_NAME,
+                mimeType = "application/json",
+                content = headerBytes
+            )
+        }
+
+        BackupCrypto.saveMasterKeyToKeystore(context, masterKey)
+        val vaultKey = VaultSecurityManager.getActiveVaultKey(context)
+        if (vaultKey != null) {
+            BackupCrypto.saveVaultKeyToKeystore(context, vaultKey)
+        }
+        masterKey
     }
 
     suspend fun checkBackupOnDrive(context: Context, accountEmail: String): DriveBackupInfo? = withContext(Dispatchers.IO) {

@@ -72,7 +72,18 @@ object VaultSecurityManager {
         return !isUnlocked()
     }
 
-    fun getActiveVaultKey(): ByteArray? = activeVaultKey
+    fun getActiveVaultKey(context: Context? = null): ByteArray? {
+        if (activeVaultKey != null) return activeVaultKey
+        if (context != null) {
+            val restored = BackupCrypto.loadVaultKeyFromKeystore(context)
+            if (restored != null) {
+                activeVaultKey = restored
+                _vaultStatus.value = VaultStatus.UNLOCKED
+                return activeVaultKey
+            }
+        }
+        return null
+    }
 
     fun init(context: Context) {
         if (!isVaultConfigured(context)) {
@@ -120,6 +131,7 @@ object VaultSecurityManager {
 
             activeVaultKey = vaultKey
             _vaultStatus.value = VaultStatus.UNLOCKED
+            BackupCrypto.saveVaultKeyToKeystore(context, vaultKey)
             Log.d(TAG, "Vault configured and unlocked successfully with password.")
             Result.success(vaultKey)
         } catch (e: Exception) {
@@ -152,6 +164,7 @@ object VaultSecurityManager {
             val unwrappedKey = cipher.doFinal(wrappedVaultKey)
             activeVaultKey = unwrappedKey
             _vaultStatus.value = VaultStatus.UNLOCKED
+            BackupCrypto.saveVaultKeyToKeystore(context, unwrappedKey)
             Log.d(TAG, "Vault unlocked successfully with password.")
             Result.success(unwrappedKey)
         } catch (e: javax.crypto.AEADBadTagException) {
@@ -266,6 +279,7 @@ object VaultSecurityManager {
             Log.w(TAG, "Error deleting KeyStore entry", e)
         }
         EncryptedChatDatabase.deleteDatabase(context)
+        BackupCrypto.clearMasterKeyFromKeystore(context)
         _vaultStatus.value = VaultStatus.NOT_CONFIGURED
         Log.d(TAG, "Vault reset complete.")
     }

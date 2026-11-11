@@ -229,10 +229,60 @@ object BackupCrypto {
         }
     }
 
+    private const val PREF_WRAPPED_VAULT_KEY = "wrapped_vault_key_keystore"
+
+    fun saveVaultKeyToKeystore(context: Context, vaultKey: ByteArray) {
+        try {
+            val wrapperKey = getOrCreateKeystoreWrapperKey()
+            val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
+            cipher.init(Cipher.ENCRYPT_MODE, wrapperKey)
+            val iv = cipher.iv
+            val encryptedBytes = cipher.doFinal(vaultKey)
+
+            val buffer = ByteBuffer.allocate(NONCE_SIZE_BYTES + encryptedBytes.size)
+            buffer.put(iv)
+            buffer.put(encryptedBytes)
+
+            val base64 = Base64.getEncoder().encodeToString(buffer.array())
+            context.getSharedPreferences(KEYSTORE_PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putString(PREF_WRAPPED_VAULT_KEY, base64)
+                .apply()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save vault key to Keystore", e)
+        }
+    }
+
+    fun loadVaultKeyFromKeystore(context: Context): ByteArray? {
+        val base64 = context.getSharedPreferences(KEYSTORE_PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(PREF_WRAPPED_VAULT_KEY, null) ?: return null
+        return try {
+            val payloadBytes = Base64.getDecoder().decode(base64)
+            if (payloadBytes.size <= NONCE_SIZE_BYTES) return null
+
+            val buffer = ByteBuffer.wrap(payloadBytes)
+            val iv = ByteArray(NONCE_SIZE_BYTES)
+            buffer.get(iv)
+
+            val ciphertext = ByteArray(buffer.remaining())
+            buffer.get(ciphertext)
+
+            val wrapperKey = getOrCreateKeystoreWrapperKey()
+            val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
+            cipher.init(Cipher.DECRYPT_MODE, wrapperKey, GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv))
+
+            cipher.doFinal(ciphertext)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load vault key from Keystore", e)
+            null
+        }
+    }
+
     fun clearMasterKeyFromKeystore(context: Context) {
         context.getSharedPreferences(KEYSTORE_PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .remove(PREF_WRAPPED_BK)
+            .remove(PREF_WRAPPED_VAULT_KEY)
             .apply()
     }
 

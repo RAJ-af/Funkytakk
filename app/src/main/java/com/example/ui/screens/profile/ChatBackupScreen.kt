@@ -18,9 +18,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -34,10 +37,13 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
+import com.example.crypto.BackupCrypto
 import com.example.crypto.DriveBackupEngine
+import com.example.crypto.VaultSecurityManager
 import com.example.service.ChatBackupScheduler
 import com.example.ui.components.Soft3DCloudIcon
 import com.example.ui.components.Soft3DShieldIcon
@@ -94,40 +100,12 @@ fun ChatBackupScreen(
 
     var userErrorMessage by remember { mutableStateOf<String?>(null) }
 
+    var showProtectBackupDialog by remember { mutableStateOf(false) }
     var showChangePasswordDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
 
-    val googleSignInLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-            try {
-                val account = task.getResult(Exception::class.java)
-                if (account != null && !account.email.isNullOrBlank()) {
-                    driveAccountName = account.email
-                    isReconnectNeeded = false
-                    ChatBackupPreferencesManager.setDriveAccountName(context, account.email)
-                    Toast.makeText(context, "Connected: ${account.email}", Toast.LENGTH_SHORT).show()
-                }
-            } catch (e: Exception) {
-                Toast.makeText(context, "Google Drive sign-in failed: ${e.message}", Toast.LENGTH_LONG).show()
-            }
-        }
-    }
-
-    fun initiateDriveConnection() {
-        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-            .requestEmail()
-            .requestScopes(Scope("https://www.googleapis.com/auth/drive.appdata"))
-            .build()
-        val client = GoogleSignIn.getClient(context, gso)
-        googleSignInLauncher.launch(client.signInIntent)
-    }
-
     fun triggerBackupNow() {
         if (driveAccountName.isNullOrBlank()) {
-            initiateDriveConnection()
             return
         }
 
@@ -151,6 +129,7 @@ fun ChatBackupScreen(
                 if (success) {
                     lastBackupTimestamp = ChatBackupPreferencesManager.getLastBackupTimestamp(context)
                     lastBackupSizeBytes = ChatBackupPreferencesManager.getLastBackupSizeBytes(context)
+                    userErrorMessage = null // Dismiss red error banner
                     Toast.makeText(context, "Chat backup finished successfully!", Toast.LENGTH_SHORT).show()
                 } else {
                     Toast.makeText(context, "Backup cancelled.", Toast.LENGTH_SHORT).show()
@@ -166,16 +145,82 @@ fun ChatBackupScreen(
                 val msg = e.message.orEmpty()
                 if (msg.contains("quota", ignoreCase = true)) {
                     userErrorMessage = "Your Google Drive is full. Please free up space to back up your chats."
-                } else if (msg.contains("network", ignoreCase = true) || msg.contains("connect", ignoreCase = true)) {
+                } else if (msg.contains("network", ignoreCase = true) || msg.contains("connect", ignoreCase = true) || msg.contains("timeout", ignoreCase = true)) {
                     userErrorMessage = "No network connection. Please check your internet connection."
+                } else if (msg.contains("401", ignoreCase = true) || msg.contains("unauthorized", ignoreCase = true) || msg.contains("expired", ignoreCase = true)) {
+                    isReconnectNeeded = true
+                    userErrorMessage = "Google Drive access expired. Please reconnect."
+                } else if (msg.contains("password", ignoreCase = true) || msg.contains("key", ignoreCase = true) || msg.contains("header", ignoreCase = true)) {
+                    showProtectBackupDialog = true
+                    userErrorMessage = "Backup password setup required. Please protect your backup."
                 } else {
-                    userErrorMessage = "Backup failed: ${e.message}"
+                    userErrorMessage = "Backup could not be completed. Please check your connection and try again."
                 }
             } finally {
                 isBackingUp = false
                 backupCancellationRequested = false
             }
         }
+    }
+
+    fun onBackUpNowClicked() {
+        if (driveAccountName.isNullOrBlank()) {
+            return
+        }
+
+        val email = driveAccountName!!
+        val hasLocalBk = BackupCrypto.loadMasterKeyFromKeystore(context) != null
+        if (!hasLocalBk) {
+            showProtectBackupDialog = true
+            return
+        }
+
+        coroutineScope.launch {
+            val hasHeader = DriveBackupEngine.hasBackupHeaderOnDrive(context, email)
+            if (!hasHeader) {
+                showProtectBackupDialog = true
+            } else {
+                triggerBackupNow()
+            }
+        }
+    }
+
+    val googleSignInLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+            try {
+                val account = task.getResult(Exception::class.java)
+                if (account != null && !account.email.isNullOrBlank()) {
+                    val emailStr = account.email!!
+                    driveAccountName = emailStr
+                    isReconnectNeeded = false
+                    ChatBackupPreferencesManager.setDriveAccountName(context, emailStr)
+                    Toast.makeText(context, "Connected: $emailStr", Toast.LENGTH_SHORT).show()
+
+                    // Check if first-time setup is needed
+                    coroutineScope.launch {
+                        val hasLocalBk = BackupCrypto.loadMasterKeyFromKeystore(context) != null
+                        val hasHeader = DriveBackupEngine.hasBackupHeaderOnDrive(context, emailStr)
+                        if (!hasLocalBk || !hasHeader) {
+                            showProtectBackupDialog = true
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "Google Drive sign-in failed: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    fun initiateDriveConnection() {
+        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestEmail()
+            .requestScopes(Scope("https://www.googleapis.com/auth/drive.appdata"))
+            .build()
+        val client = GoogleSignIn.getClient(context, gso)
+        googleSignInLauncher.launch(client.signInIntent)
     }
 
     val formattedLastBackupTime = remember(lastBackupTimestamp) {
@@ -304,8 +349,20 @@ fun ChatBackupScreen(
                         text = userErrorMessage!!,
                         fontSize = 13.sp,
                         color = Color(0xFF991B1B),
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f)
                     )
+                    IconButton(
+                        onClick = { userErrorMessage = null },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Dismiss error",
+                            tint = Color(0xFF991B1B),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
             }
         }
@@ -517,7 +574,13 @@ fun ChatBackupScreen(
                             .background(
                                 Brush.horizontalGradient(listOf(Color(0xFFFFD000), Color(0xFFFFB800)))
                             )
-                            .clickable { triggerBackupNow() },
+                            .clickable {
+                                if (driveAccountName.isNullOrBlank()) {
+                                    initiateDriveConnection()
+                                } else {
+                                    onBackUpNowClicked()
+                                }
+                            },
                         contentAlignment = Alignment.Center
                     ) {
                         Text("Back up now", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.Black)
@@ -648,6 +711,344 @@ fun ChatBackupScreen(
         }
 
         Spacer(modifier = Modifier.height(28.dp))
+    }
+
+    // Dialog: Protect your backup (First-Time Setup)
+    if (showProtectBackupDialog) {
+        val hasVaultConfigured = remember { VaultSecurityManager.isVaultConfigured(context) }
+
+        if (hasVaultConfigured) {
+            // Case A: User already has a vault password
+            var enteredPassword by remember { mutableStateOf("") }
+            var isPasswordVisible by remember { mutableStateOf(false) }
+            var isVerifying by remember { mutableStateOf(false) }
+            var dialogError by remember { mutableStateOf<String?>(null) }
+
+            AlertDialog(
+                onDismissRequest = { if (!isVerifying) showProtectBackupDialog = false },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(Color(0xFFFEF08A), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = Color(0xFF854D0E),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text("Protect your backup", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    }
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            "Enter your vault password to initialize and encrypt your cloud backup.",
+                            fontSize = 13.sp,
+                            color = Color(0xFF64748B),
+                            lineHeight = 18.sp
+                        )
+
+                        OutlinedTextField(
+                            value = enteredPassword,
+                            onValueChange = {
+                                enteredPassword = it
+                                dialogError = null
+                            },
+                            label = { Text("Enter your vault password") },
+                            visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
+                                    Icon(
+                                        imageVector = if (isPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                        contentDescription = if (isPasswordVisible) "Hide password" else "Show password",
+                                        tint = Color(0xFF64748B)
+                                    )
+                                }
+                            },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            singleLine = true,
+                            isError = dialogError != null,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        if (dialogError != null) {
+                            Text(
+                                text = dialogError!!,
+                                color = Color(0xFFDC2626),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            if (enteredPassword.isBlank()) {
+                                dialogError = "Please enter your vault password."
+                                return@Button
+                            }
+                            coroutineScope.launch {
+                                isVerifying = true
+                                dialogError = null
+                                val unlockResult = VaultSecurityManager.unlockWithPassword(context, enteredPassword)
+                                if (unlockResult.isFailure) {
+                                    isVerifying = false
+                                    dialogError = "Wrong password"
+                                    return@launch
+                                }
+                                try {
+                                    DriveBackupEngine.initializeBackupKeyHeader(
+                                        context = context,
+                                        accountEmail = driveAccountName ?: "",
+                                        vaultPassword = enteredPassword
+                                    )
+                                    showProtectBackupDialog = false
+                                    userErrorMessage = null
+                                    triggerBackupNow()
+                                } catch (e: Exception) {
+                                    val msg = e.message.orEmpty()
+                                    dialogError = if (msg.contains("password", ignoreCase = true)) {
+                                        "Wrong password"
+                                    } else {
+                                        "Could not initialize backup. Please check your internet connection."
+                                    }
+                                } finally {
+                                    isVerifying = false
+                                }
+                            }
+                        },
+                        enabled = !isVerifying,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB800))
+                    ) {
+                        if (isVerifying) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.Black)
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
+                        Text("Continue", color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { showProtectBackupDialog = false },
+                        enabled = !isVerifying
+                    ) {
+                        Text("Cancel", color = Color(0xFF64748B))
+                    }
+                }
+            )
+        } else {
+            // Case B: No vault password exists yet -> Create a backup password
+            var newPassword by remember { mutableStateOf("") }
+            var confirmPassword by remember { mutableStateOf("") }
+            var isNewPasswordVisible by remember { mutableStateOf(false) }
+            var isConfirmPasswordVisible by remember { mutableStateOf(false) }
+            var understandChecked by remember { mutableStateOf(false) }
+            var isSubmitting by remember { mutableStateOf(false) }
+            var dialogError by remember { mutableStateOf<String?>(null) }
+
+            val (strengthLabel, strengthColor) = remember(newPassword) {
+                calculatePasswordStrength(newPassword)
+            }
+
+            AlertDialog(
+                onDismissRequest = { if (!isSubmitting) showProtectBackupDialog = false },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(Color(0xFFFEF08A), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = Color(0xFF854D0E),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text("Protect your backup", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    }
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            "Create a password to protect your end-to-end encrypted backup.",
+                            fontSize = 13.sp,
+                            color = Color(0xFF64748B),
+                            lineHeight = 18.sp
+                        )
+
+                        OutlinedTextField(
+                            value = newPassword,
+                            onValueChange = {
+                                newPassword = it
+                                dialogError = null
+                            },
+                            label = { Text("Create a backup password") },
+                            visualTransformation = if (isNewPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { isNewPasswordVisible = !isNewPasswordVisible }) {
+                                    Icon(
+                                        imageVector = if (isNewPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                        contentDescription = if (isNewPasswordVisible) "Hide password" else "Show password",
+                                        tint = Color(0xFF64748B)
+                                    )
+                                }
+                            },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            singleLine = true,
+                            isError = dialogError != null,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        // Strength hint
+                        if (newPassword.isNotEmpty()) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text("Password strength:", fontSize = 12.sp, color = Color(0xFF64748B))
+                                Text(
+                                    text = strengthLabel,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = strengthColor
+                                )
+                            }
+                        }
+
+                        OutlinedTextField(
+                            value = confirmPassword,
+                            onValueChange = {
+                                confirmPassword = it
+                                dialogError = null
+                            },
+                            label = { Text("Confirm password") },
+                            visualTransformation = if (isConfirmPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { isConfirmPasswordVisible = !isConfirmPasswordVisible }) {
+                                    Icon(
+                                        imageVector = if (isConfirmPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                        contentDescription = if (isConfirmPasswordVisible) "Hide password" else "Show password",
+                                        tint = Color(0xFF64748B)
+                                    )
+                                }
+                            },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            singleLine = true,
+                            isError = dialogError != null,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        // Checkbox: "I understand that if I forget this password my backup cannot be recovered"
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { understandChecked = !understandChecked }
+                                .padding(vertical = 4.dp)
+                        ) {
+                            Checkbox(
+                                checked = understandChecked,
+                                onCheckedChange = { understandChecked = it },
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = Color(0xFFFFB800),
+                                    checkmarkColor = Color.Black
+                                )
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "I understand that if I forget this password my backup cannot be recovered",
+                                fontSize = 12.sp,
+                                color = Color(0xFF334155),
+                                lineHeight = 16.sp
+                            )
+                        }
+
+                        if (dialogError != null) {
+                            Text(
+                                text = dialogError!!,
+                                color = Color(0xFFDC2626),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    val canSubmit = newPassword.length >= 8 &&
+                            newPassword == confirmPassword &&
+                            understandChecked &&
+                            !isSubmitting
+
+                    Button(
+                        onClick = {
+                            if (newPassword.length < 8) {
+                                dialogError = "Password must be at least 8 characters."
+                                return@Button
+                            }
+                            if (newPassword != confirmPassword) {
+                                dialogError = "Passwords do not match."
+                                return@Button
+                            }
+                            if (!understandChecked) {
+                                dialogError = "Please check the confirmation box."
+                                return@Button
+                            }
+
+                            coroutineScope.launch {
+                                isSubmitting = true
+                                dialogError = null
+                                try {
+                                    val setupResult = VaultSecurityManager.setupVaultWithPassword(context, newPassword)
+                                    if (setupResult.isFailure) {
+                                        dialogError = "Could not create backup password. Please try again."
+                                        return@launch
+                                    }
+                                    DriveBackupEngine.initializeBackupKeyHeader(
+                                        context = context,
+                                        accountEmail = driveAccountName ?: "",
+                                        vaultPassword = newPassword
+                                    )
+                                    showProtectBackupDialog = false
+                                    userErrorMessage = null
+                                    triggerBackupNow()
+                                } catch (e: Exception) {
+                                    dialogError = "Could not set up backup. Please check your internet connection."
+                                } finally {
+                                    isSubmitting = false
+                                }
+                            }
+                        },
+                        enabled = canSubmit,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB800))
+                    ) {
+                        if (isSubmitting) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.Black)
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
+                        Text("Create backup", color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { showProtectBackupDialog = false },
+                        enabled = !isSubmitting
+                    ) {
+                        Text("Cancel", color = Color(0xFF64748B))
+                    }
+                }
+            )
+        }
     }
 
     // Dialog: Change Backup Password (Re-wrap only)
@@ -788,5 +1189,24 @@ fun ChatBackupScreen(
                 }
             }
         )
+    }
+}
+
+private fun calculatePasswordStrength(password: String): Pair<String, Color> {
+    if (password.length < 8) {
+        return Pair("Too short (min 8 chars)", Color(0xFFDC2626))
+    }
+    var score = 0
+    if (password.any { it.isUpperCase() }) score++
+    if (password.any { it.isLowerCase() }) score++
+    if (password.any { it.isDigit() }) score++
+    if (password.any { !it.isLetterOrDigit() }) score++
+    if (password.length >= 12) score++
+
+    return when {
+        score <= 2 -> Pair("Weak", Color(0xFFEF4444))
+        score == 3 -> Pair("Fair", Color(0xFFF59E0B))
+        score == 4 -> Pair("Good", Color(0xFF3B82F6))
+        else -> Pair("Strong", Color(0xFF10B981))
     }
 }
