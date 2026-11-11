@@ -796,16 +796,10 @@ object PushNotificationManager : DefaultLifecycleObserver {
                 }
                 com.example.util.ChatBackupPreferencesManager.clearAll(appCtx)
                 try {
-                    androidx.work.WorkManager.getInstance(appCtx)
-                        .cancelUniqueWork(com.example.service.ChatBackupWorker.WORK_NAME)
+                    com.example.service.ChatBackupScheduler.cancelBackup(appCtx)
+                    com.example.util.ChatBackupPreferencesManager.clearAll(appCtx)
                 } catch (e: Exception) {
-                    Log.w(TAG, "Error cancelling backup work on logout", e)
-                }
-                VaultSecurityManager.lock()
-                try {
-                    com.example.util.GoogleDriveBackupHelper.signOut(appCtx)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error signing out Drive account on logout", e)
+                    Log.w(TAG, "Error cancelling backup work or clearing backup prefs on logout", e)
                 }
 
                 // 4. Unregister push token on server using the valid pre-signOut JWT and delete local FCM token

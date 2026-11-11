@@ -93,7 +93,7 @@ object SupportChatManager {
     }
 
     /**
-     * Calls get_my_support_session() RPC -> {"open": bool, "until": timestamp, "conversation_id": uuid, "unread": number}
+     * Calls get_my_support_session() RPC -> {"open": bool, "reason": "support_opened"|"appeal", "until": timestamp, "conversation_id": uuid, "unread": number, "can_appeal": bool}
      */
     fun fetchSupportSession(context: Context, onComplete: ((GetMySupportSessionResponse?) -> Unit)? = null) {
         scope.launch {
@@ -117,7 +117,7 @@ object SupportChatManager {
                         VoiceRoomRealtimeManager.subscribeSupportMessages(convId)
                     }
 
-                    if (sess.open) {
+                    if (sess.open || !convId.isNullOrBlank()) {
                         fetchSupportMessages(context)
                     }
 
@@ -143,7 +143,10 @@ object SupportChatManager {
 
                 val sess = _session.value
                 val convId = sess?.conversation_id
-                if (convId.isNullOrBlank()) return@launch
+                if (convId.isNullOrBlank()) {
+                    _messages.value = emptyList()
+                    return@launch
+                }
 
                 _isLoading.value = true
                 val msgRes = SupabaseClient.api.getSupportMessages(
@@ -168,7 +171,6 @@ object SupportChatManager {
                         }
                         _latestMessageTime.value = formatMessageTime(lastMsg.created_at)
 
-                        // If open is true and unread is greater than 0, open automatically ONCE per new admin message
                         val latestAdminMsg = distinctList.lastOrNull { it.sender_type == "admin" }
                         val isSessionOpen = _session.value?.open == true
                         val hasUnread = (_session.value?.unread ?: 0) > 0 || distinctList.any { it.sender_type == "admin" && !it.is_read_by_user }
@@ -204,10 +206,9 @@ object SupportChatManager {
         val trimmed = messageText.trim()
         if (trimmed.isBlank()) return
 
-        // Verify session window before sending
         val sess = _session.value
-        if (sess == null || !sess.open || isSessionExpired(sess.until)) {
-            onError?.invoke("This support chat has ended.")
+        if (sess == null || !sess.open || isSessionExpired(sess)) {
+            onError?.invoke("This chat is closed.")
             return
         }
 
@@ -226,7 +227,7 @@ object SupportChatManager {
                 val tempId = "temp_${System.currentTimeMillis()}"
                 val optimisticMsg = SupabaseSupportMessage(
                     id = tempId,
-                    conversation_id = sess.conversation_id,
+                    conversation_id = sess.conversation_id ?: "pending",
                     sender_type = "user",
                     body = trimmed,
                     is_read_by_user = true,
@@ -246,15 +247,17 @@ object SupportChatManager {
 
                 if (response.isSuccessful) {
                     Log.d(TAG, "send_support_message RPC successful")
-                    fetchSupportMessages(context) {
-                        onSuccess?.invoke()
+                    fetchSupportSession(context) { updatedSess ->
+                        fetchSupportMessages(context) {
+                            onSuccess?.invoke()
+                        }
                     }
                 } else {
                     val errBody = response.errorBody()?.string().orEmpty()
                     Log.e(TAG, "send_support_message RPC failed: $errBody")
                     val friendlyError = if (errBody.contains("support_chat_closed", ignoreCase = true)) {
                         _session.value = _session.value?.copy(open = false)
-                        "This support chat has ended."
+                        "This chat is closed."
                     } else {
                         "Failed to send message. Please try again."
                     }
@@ -301,6 +304,12 @@ object SupportChatManager {
         if (untilIso.isNullOrBlank()) return true
         val targetMillis = parseIsoToMillis(untilIso)
         return targetMillis > 0 && System.currentTimeMillis() >= targetMillis
+    }
+
+    fun isSessionExpired(sess: GetMySupportSessionResponse?): Boolean {
+        if (sess == null || !sess.open) return true
+        if (sess.reason == "appeal") return false
+        return isSessionExpired(sess.until)
     }
 
     fun formatRemainingCountdown(untilIso: String?): String {

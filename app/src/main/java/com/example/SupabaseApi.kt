@@ -1959,9 +1959,11 @@ data class SupabaseSupportMessage(
 @JsonClass(generateAdapter = true)
 data class GetMySupportSessionResponse(
     val open: Boolean = false,
+    val reason: String? = null, // "support_opened" | "appeal"
     val until: String? = null,
     val conversation_id: String? = null,
-    val unread: Int = 0
+    val unread: Int = 0,
+    val can_appeal: Boolean = false
 )
 
 @JsonClass(generateAdapter = true)

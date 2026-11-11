@@ -44,7 +44,8 @@ import kotlin.math.sin
 @Composable
 fun SuspendedAccountScreen(
     moderationStatus: MyModerationStatus?,
-    onStatusRefreshed: () -> Unit = {}
+    onStatusRefreshed: () -> Unit = {},
+    onAppeal: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
@@ -395,38 +396,83 @@ fun SuspendedAccountScreen(
                 }
             }
 
-            // Bottom Action Area: Exit App Pill Button
+            // Bottom Action Area: Appeal button & Exit App Pill Button
+            val supportSession by com.example.SupportChatManager.session.collectAsState()
+            val canAppeal = supportSession?.can_appeal == true || supportSession?.open == true || supportSession?.reason == "appeal"
+
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Button(
-                    onClick = {
-                        activity?.finishAffinity()
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp)
-                        .shadow(
-                            elevation = 6.dp,
-                            shape = RoundedCornerShape(100.dp),
-                            spotColor = Color(0x3DFBBF24)
+                if (canAppeal) {
+                    Button(
+                        onClick = onAppeal,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                            .shadow(
+                                elevation = 6.dp,
+                                shape = RoundedCornerShape(100.dp),
+                                spotColor = Color(0x3DFBBF24)
+                            ),
+                        shape = RoundedCornerShape(100.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = brandYellow,
+                            contentColor = Color.Black
                         ),
-                    shape = RoundedCornerShape(100.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = brandYellow,
-                        contentColor = Color.Black
-                    ),
-                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
-                ) {
-                    Text(
-                        text = "Exit App",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.Black
-                    )
+                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
+                    ) {
+                        Text(
+                            text = "Appeal this decision",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Black
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    TextButton(
+                        onClick = {
+                            activity?.finishAffinity()
+                        }
+                    ) {
+                        Text(
+                            text = "Exit App",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = textSecondary
+                        )
+                    }
+                } else {
+                    Button(
+                        onClick = {
+                            activity?.finishAffinity()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                            .shadow(
+                                elevation = 6.dp,
+                                shape = RoundedCornerShape(100.dp),
+                                spotColor = Color(0x3DFBBF24)
+                            ),
+                        shape = RoundedCornerShape(100.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = brandYellow,
+                            contentColor = Color.Black
+                        ),
+                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
+                    ) {
+                        Text(
+                            text = "Exit App",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Black
+                        )
+                    }
                 }
             }
         }

@@ -259,9 +259,9 @@ fun AccountUnderReviewScreen(
             Spacer(modifier = Modifier.height(32.dp))
 
             val supportSession by com.example.SupportChatManager.session.collectAsState()
-            val isSupportOpen = supportSession?.open == true && !com.example.SupportChatManager.isSessionExpired(supportSession?.until)
+            val isSupportAvailable = supportSession?.can_appeal == true || (supportSession?.open == true && !com.example.SupportChatManager.isSessionExpired(supportSession))
 
-            if (isSupportOpen) {
+            if (isSupportAvailable) {
                 Button(
                     onClick = onContactSupport,
                     colors = ButtonDefaults.buttonColors(
@@ -276,7 +276,7 @@ fun AccountUnderReviewScreen(
                     SoftHeadsetIcon(size = 20.dp, color = Color(0xFF1E293B))
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = "Open support chat",
+                        text = if (supportSession?.can_appeal == true || supportSession?.reason == "appeal") "Appeal this decision" else "Open support chat",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
                     )

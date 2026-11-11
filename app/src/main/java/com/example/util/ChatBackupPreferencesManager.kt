@@ -26,6 +26,7 @@ object ChatBackupPreferencesManager {
     private const val KEY_INCLUDE_MEDIA = "include_media"
     private const val KEY_WIFI_ONLY = "wifi_only"
     private const val KEY_WRAPPED_VAULT_PASSWORD = "wrapped_vault_password"
+    private const val KEY_HAS_SKIPPED_RESTORE = "has_skipped_restore"
 
     private const val WRAPPER_KEY_ALIAS = "vault_password_wrapper_key"
     private const val CIPHER_TRANSFORMATION = "AES/GCM/NoPadding"
@@ -167,6 +168,14 @@ object ChatBackupPreferencesManager {
             Log.e(TAG, "Error unwrapping vault password from storage", e)
             null
         }
+    }
+
+    fun hasSkippedRestore(context: Context): Boolean {
+        return getPrefs(context).getBoolean(KEY_HAS_SKIPPED_RESTORE, false)
+    }
+
+    fun setHasSkippedRestore(context: Context, skipped: Boolean) {
+        getPrefs(context).edit().putBoolean(KEY_HAS_SKIPPED_RESTORE, skipped).apply()
     }
 
     fun clearAll(context: Context) {

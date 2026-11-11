@@ -6,11 +6,17 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,44 +25,90 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ChatBackupStatusResponse
-import com.example.crypto.ChatBackupArchiveManager
-import com.example.crypto.ChatBackupCryptoManager
+import com.example.crypto.BackupCrypto
+import com.example.crypto.DriveBackupEngine
+import com.example.crypto.DriveBackupInfo
 import com.example.crypto.VaultSecurityManager
+import com.example.service.ChatRestoreWorker
+import com.example.service.RestoreProgressTracker
 import com.example.ui.components.GroupLockIcon
 import com.example.ui.components.Soft3DCloudIcon
 import com.example.ui.components.Soft3DShieldIcon
 import com.example.util.ChatBackupPreferencesManager
-import com.example.util.GoogleDriveBackupHelper
 import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.Scope
+import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 @Composable
 fun RestoreChatBackupScreen(
-    backupStatus: ChatBackupStatusResponse,
     onRestoreSuccess: () -> Unit,
     onSkipRestore: () -> Unit
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val firebaseUser = FirebaseAuth.getInstance().currentUser
 
     var googleAccountName by remember {
-        mutableStateOf(GoogleDriveBackupHelper.getSignedInAccount(context)?.email)
+        mutableStateOf(ChatBackupPreferencesManager.getDriveAccountName(context))
     }
+    var isCheckingDrive by remember { mutableStateOf(false) }
+    var driveBackupInfo by remember { mutableStateOf<DriveBackupInfo?>(null) }
+    var noBackupFound by remember { mutableStateOf(false) }
+
     var vaultPasswordInput by remember { mutableStateOf("") }
-    var isRestoring by remember { mutableStateOf(false) }
-    var restoreStatusText by remember { mutableStateOf("") }
+    var isVerifyingPassword by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    var retryDelaySeconds by remember { mutableIntStateOf(0) }
+
     var failedAttemptsCount by remember { mutableIntStateOf(0) }
-    var showSkipWarningDialog by remember { mutableStateOf(false) }
+    var lockoutSecondsRemaining by remember { mutableIntStateOf(0) }
+
+    val restoreState by RestoreProgressTracker.progress.collectAsState()
+
+    // Countdown timer for lockout
+    LaunchedEffect(lockoutSecondsRemaining) {
+        if (lockoutSecondsRemaining > 0) {
+            delay(1000L)
+            lockoutSecondsRemaining--
+        }
+    }
+
+    // Check Drive whenever googleAccountName is present
+    fun checkDriveForBackup(accountEmail: String) {
+        coroutineScope.launch {
+            isCheckingDrive = true
+            errorMessage = null
+            noBackupFound = false
+            driveBackupInfo = null
+            try {
+                val info = DriveBackupEngine.checkBackupOnDrive(context, accountEmail)
+                if (info != null && info.hasBackup) {
+                    driveBackupInfo = info
+                    noBackupFound = false
+                } else {
+                    driveBackupInfo = null
+                    noBackupFound = true
+                }
+            } catch (e: Exception) {
+                errorMessage = "Could not check Google Drive: ${e.message}"
+            } finally {
+                isCheckingDrive = false
+            }
+        }
+    }
+
+    LaunchedEffect(googleAccountName) {
+        val email = googleAccountName
+        if (!email.isNullOrBlank() && driveBackupInfo == null && !noBackupFound && !restoreState.isRestoring) {
+            checkDriveForBackup(email)
+        }
+    }
 
     val googleSignInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -65,10 +117,11 @@ fun RestoreChatBackupScreen(
             val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
             try {
                 val account = task.getResult(Exception::class.java)
-                if (account != null) {
+                if (account != null && !account.email.isNullOrBlank()) {
                     googleAccountName = account.email
                     ChatBackupPreferencesManager.setDriveAccountName(context, account.email)
-                    Toast.makeText(context, "Connected Google Drive: ${account.email}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Connected: ${account.email}", Toast.LENGTH_SHORT).show()
+                    checkDriveForBackup(account.email!!)
                 }
             } catch (e: Exception) {
                 Toast.makeText(context, "Failed to connect Google Drive: ${e.message}", Toast.LENGTH_LONG).show()
@@ -77,88 +130,87 @@ fun RestoreChatBackupScreen(
     }
 
     fun initiateDriveConnection() {
-        val gso = GoogleDriveBackupHelper.getGoogleSignInOptions()
+        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestEmail()
+            .requestScopes(Scope("https://www.googleapis.com/auth/drive.appdata"))
+            .build()
         val client = GoogleSignIn.getClient(context, gso)
         googleSignInLauncher.launch(client.signInIntent)
     }
 
-    fun executeRestore() {
+    fun startRestore() {
+        if (lockoutSecondsRemaining > 0) return
         if (vaultPasswordInput.isBlank()) {
             errorMessage = "Please enter your vault password."
             return
         }
+        val currentUid = firebaseUser?.uid
+        if (currentUid.isNullOrBlank()) {
+            errorMessage = "User not authenticated."
+            return
+        }
+        val headerJson = driveBackupInfo?.headerJson
+        if (headerJson.isNullOrBlank()) {
+            errorMessage = "Backup header missing on Google Drive."
+            return
+        }
 
         coroutineScope.launch {
-            isRestoring = true
+            isVerifyingPassword = true
             errorMessage = null
-            restoreStatusText = "Connecting to Google Drive..."
 
             try {
-                val account = GoogleDriveBackupHelper.getSignedInAccount(context)
-                if (account == null) {
-                    isRestoring = false
-                    errorMessage = "Please connect your Google Drive account first."
-                    return@launch
-                }
-
-                val token = GoogleDriveBackupHelper.fetchOAuthToken(context, account)
-                if (token.isNullOrBlank()) {
-                    isRestoring = false
-                    errorMessage = "Drive authorization failed. Please reconnect."
-                    return@launch
-                }
-
-                restoreStatusText = "Searching for chat backup archive..."
-                val backupFile = GoogleDriveBackupHelper.findBackupFileId(token)
-                if (backupFile == null) {
-                    isRestoring = false
-                    errorMessage = "No backup file found in Google Drive appDataFolder."
-                    return@launch
-                }
-
-                restoreStatusText = "Downloading encrypted chat backup..."
-                val downloadResult = GoogleDriveBackupHelper.downloadBackupFile(token, backupFile.id)
-                if (downloadResult.isFailure) {
-                    isRestoring = false
-                    errorMessage = "Failed to download backup file: ${downloadResult.exceptionOrNull()?.message}"
-                    return@launch
-                }
-
-                val encryptedBytes = downloadResult.getOrThrow()
-
-                restoreStatusText = "Decrypting chat backup..."
-                val decryptedArchiveBytes = try {
-                    ChatBackupCryptoManager.decryptBackup(vaultPasswordInput, encryptedBytes)
+                // Verify account UID & unwrap master key BK
+                val masterKey = try {
+                    BackupCrypto.unwrapMasterKey(headerJson, vaultPasswordInput, currentUid)
                 } catch (e: IllegalArgumentException) {
-                    failedAttemptsCount++
-                    val delayMs = (failedAttemptsCount * 1000L).coerceAtMost(5000L)
-                    restoreStatusText = "Wrong password. Retrying in ${delayMs / 1000}s..."
-                    delay(delayMs)
-                    isRestoring = false
-                    errorMessage = "Wrong vault password. Please try again."
-                    return@launch
+                    if (e.message?.contains("another FunkyTalk account", ignoreCase = true) == true) {
+                        throw IllegalArgumentException("This backup belongs to another FunkyTalk account")
+                    }
+                    throw IllegalArgumentException("Wrong password")
+                } catch (e: javax.crypto.AEADBadTagException) {
+                    throw IllegalArgumentException("Wrong password")
+                } catch (e: Exception) {
+                    val msg = e.message.orEmpty()
+                    if (msg.contains("another FunkyTalk account", ignoreCase = true)) {
+                        throw IllegalArgumentException("This backup belongs to another FunkyTalk account")
+                    }
+                    throw IllegalArgumentException("Wrong password")
                 }
 
-                restoreStatusText = "Restoring database & encryption keys..."
-                val restoreSuccess = ChatBackupArchiveManager.restoreFromArchive(
-                    context = context,
-                    archiveBytes = decryptedArchiveBytes,
-                    vaultPassword = vaultPasswordInput
-                )
-
-                if (restoreSuccess) {
-                    ChatBackupPreferencesManager.setCachedVaultPassword(context, vaultPasswordInput)
-                    ChatBackupPreferencesManager.setLastBackupTimestamp(context, System.currentTimeMillis())
-                    Toast.makeText(context, "Chats & keys restored successfully!", Toast.LENGTH_SHORT).show()
-                    onRestoreSuccess()
+                // Password verified! Save master key and configure vault
+                BackupCrypto.saveMasterKeyToKeystore(context, masterKey)
+                if (!VaultSecurityManager.isVaultConfigured(context)) {
+                    VaultSecurityManager.setupVaultWithPassword(context, vaultPasswordInput)
                 } else {
-                    errorMessage = "Failed to unpack and restore chat database."
+                    VaultSecurityManager.unlockWithPassword(context, vaultPasswordInput)
+                }
+                ChatBackupPreferencesManager.setCachedVaultPassword(context, vaultPasswordInput)
+
+                // Enqueue background restore worker via WorkManager (foreground service type dataSync)
+                ChatRestoreWorker.enqueueRestore(context, vaultPasswordInput)
+            } catch (e: IllegalArgumentException) {
+                if (e.message == "This backup belongs to another FunkyTalk account") {
+                    errorMessage = "This backup belongs to another FunkyTalk account"
+                } else {
+                    failedAttemptsCount++
+                    val lockout = when (failedAttemptsCount) {
+                        1, 2 -> 0
+                        3 -> 3
+                        4 -> 10
+                        else -> 30
+                    }
+                    lockoutSecondsRemaining = lockout
+                    errorMessage = if (lockout > 0) {
+                        "Wrong password. Please wait $lockout seconds."
+                    } else {
+                        "Wrong password"
+                    }
                 }
             } catch (e: Exception) {
-                errorMessage = "Restore error: ${e.message}"
+                errorMessage = "Verification error: ${e.message}"
             } finally {
-                isRestoring = false
-                restoreStatusText = ""
+                isVerifyingPassword = false
             }
         }
     }
@@ -166,7 +218,7 @@ fun RestoreChatBackupScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFF8FAFC))
+            .background(Color(0xFFFFFDF5))
             .systemBarsPadding()
     ) {
         Column(
@@ -175,255 +227,368 @@ fun RestoreChatBackupScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(20.dp)
+            verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            // Header Icon Badge
+            // Cloud Icon
             Box(
                 modifier = Modifier
-                    .size(72.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(Color(0xFFFEF3C7)),
+                    .size(80.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFFEF08A).copy(alpha = 0.5f)),
                 contentAlignment = Alignment.Center
             ) {
-                Soft3DCloudIcon(size = 40.dp)
+                Soft3DCloudIcon(size = 64.dp)
             }
 
             Text(
-                text = "Restore Encrypted Chats",
-                fontSize = 22.sp,
+                text = "Restore your chats",
+                fontSize = 24.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = Color(0xFF0F172A)
             )
 
             Text(
-                text = "We found an encrypted chat backup from your Google Drive account. Connect Drive and enter your Vault password to restore your conversations.",
-                fontSize = 14.sp,
+                text = "Restore your encrypted messages, media attachments and group history safely from your Google Drive.",
+                fontSize = 13.sp,
                 color = Color(0xFF64748B),
-                lineHeight = 20.sp,
-                modifier = Modifier.padding(horizontal = 8.dp)
+                lineHeight = 18.sp,
+                modifier = Modifier.padding(horizontal = 12.dp)
             )
 
-            // Key Version Warning Banner if backup key version < current key version
-            if (backupStatus.backup_key_version < backupStatus.current_key_version) {
+            // Warning Banner
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFFFFFBEB),
+                border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Soft3DShieldIcon(size = 28.dp)
+                    Text(
+                        text = "If you forget your vault password, your backup cannot be recovered.",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFFB45309),
+                        lineHeight = 16.sp
+                    )
+                }
+            }
+
+            // Case 1: Active Restore in Progress
+            if (restoreState.isRestoring) {
                 Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color(0xFFFFFBEB),
-                    border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color.White,
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Soft3DShieldIcon(size = 22.dp)
                         Text(
-                            text = "Warning: The backup is older than your current keys. Some messages may not decrypt.",
+                            text = "Restoring Chats (${restoreState.percent}%)",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+
+                        LinearProgressIndicator(
+                            progress = { restoreState.percent / 100f },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp)),
+                            color = Color(0xFFFFB800),
+                            trackColor = Color(0xFFF1F5F9)
+                        )
+
+                        Text(
+                            text = restoreState.statusText,
                             fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color(0xFFB45309),
+                            color = Color(0xFF64748B)
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Text(
+                            text = "You can leave this screen and start using FunkyTalk while restoration finishes in the background.",
+                            fontSize = 12.sp,
+                            color = Color(0xFF334155),
                             lineHeight = 16.sp
                         )
+
+                        Button(
+                            onClick = onRestoreSuccess,
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFFFD000),
+                                contentColor = Color.Black
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Continue to FunkyTalk", fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
-            }
-
-            // Backup Details Summary Card
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = Color.White,
-                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+            } else if (restoreState.isComplete) {
+                // Restore Completed Successfully
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color.White,
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text("Backup Date", fontSize = 13.sp, color = Color(0xFF64748B))
                         Text(
-                            text = if (!backupStatus.last_backup_at.isNullOrBlank()) {
-                                backupStatus.last_backup_at
-                            } else "Available on Drive",
-                            fontSize = 13.sp,
+                            text = "Chats restored successfully!",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF16A34A)
+                        )
+
+                        Button(
+                            onClick = onRestoreSuccess,
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFFFD000),
+                                contentColor = Color.Black
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Open FunkyTalk", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            } else if (googleAccountName.isNullOrBlank()) {
+                // Step 1: Connect Google Drive
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color.White,
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        Text(
+                            text = "Connect Google Drive",
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF0F172A)
                         )
-                    }
 
-                    HorizontalDivider(color = Color(0xFFF1F5F9))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Backup Size", fontSize = 13.sp, color = Color(0xFF64748B))
-                        Text(
-                            text = if (backupStatus.size_bytes > 0) {
-                                String.format(Locale.US, "%.2f MB", backupStatus.size_bytes.toDouble() / (1024 * 1024))
-                            } else "Unknown size",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A)
-                        )
+                        Button(
+                            onClick = { initiateDriveConnection() },
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFFFD000),
+                                contentColor = Color.Black
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                        ) {
+                            Text("Connect Google Drive", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        }
                     }
                 }
-            }
 
-            // Step 1: Connect Google Drive
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = Color.White,
-                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text(
-                        text = "1. Connect Google Account",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0F172A)
-                    )
-
-                    Button(
-                        onClick = { initiateDriveConnection() },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (googleAccountName != null) Color(0xFFF1F5F9) else Color(0xFF0F172A),
-                            contentColor = if (googleAccountName != null) Color(0xFF0F172A) else Color.White
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = if (googleAccountName != null) "Connected: $googleAccountName" else "Connect Google Drive",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
-                    }
-                }
-            }
-
-            // Step 2: Vault Password Input
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = Color.White,
-                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text(
-                        text = "2. Secure Chat Vault Password",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0F172A)
-                    )
-
-                    OutlinedTextField(
-                        value = vaultPasswordInput,
-                        onValueChange = {
-                            vaultPasswordInput = it
-                            errorMessage = null
-                        },
-                        label = { Text("Vault Password") },
-                        visualTransformation = PasswordVisualTransformation(),
-                        singleLine = true,
-                        leadingIcon = { GroupLockIcon(size = 20.dp, color = Color(0xFF64748B)) },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    if (!errorMessage.isNullOrBlank()) {
-                        Text(
-                            text = errorMessage.orEmpty(),
-                            fontSize = 12.sp,
-                            color = Color(0xFFDC2626),
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                }
-            }
-
-            if (isRestoring) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp, color = Color(0xFF0F172A))
-                    Text(restoreStatusText, fontSize = 13.sp, color = Color(0xFF475569))
-                }
-            }
-
-            // Action Buttons
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Button(
-                    onClick = { executeRestore() },
-                    enabled = !isRestoring && googleAccountName != null && vaultPasswordInput.isNotBlank(),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFF59E0B),
-                        contentColor = Color.White
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                ) {
-                    Text("Restore Chats Now", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                }
-
+                // Skip for now button
                 OutlinedButton(
-                    onClick = { showSkipWarningDialog = true },
-                    enabled = !isRestoring,
+                    onClick = {
+                        ChatBackupPreferencesManager.setHasSkippedRestore(context, true)
+                        onSkipRestore()
+                    },
                     shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Skip Restore", fontSize = 15.sp, color = Color(0xFF64748B))
+                    Text("Skip for now", color = Color(0xFF64748B))
+                }
+            } else if (isCheckingDrive) {
+                // Checking Drive
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color.White,
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        CircularProgressIndicator(color = Color(0xFFFFB800))
+                        Text("Searching for backups on Google Drive...", fontSize = 13.sp, color = Color(0xFF64748B))
+                    }
+                }
+            } else if (noBackupFound) {
+                // No backup found
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color.White,
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "No backup found",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+
+                        Text(
+                            text = "No encrypted chat backup was found in your Google Drive account ($googleAccountName).",
+                            fontSize = 12.sp,
+                            color = Color(0xFF64748B),
+                            lineHeight = 16.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Button(
+                            onClick = {
+                                ChatBackupPreferencesManager.setHasSkippedRestore(context, true)
+                                onSkipRestore()
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFFFD000),
+                                contentColor = Color.Black
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Continue", fontWeight = FontWeight.Bold)
+                        }
+
+                        TextButton(onClick = { initiateDriveConnection() }) {
+                            Text("Connect a different Google account", fontSize = 12.sp, color = Color(0xFF64748B))
+                        }
+                    }
+                }
+            } else if (driveBackupInfo != null) {
+                // Backup found!
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color.White,
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = "Backup found: ${driveBackupInfo!!.dateString}, ${driveBackupInfo!!.sizeString}",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF0F172A)
+                                )
+                                Text(
+                                    text = "Account: $googleAccountName",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF64748B)
+                                )
+                            }
+                        }
+
+                        HorizontalDivider(color = Color(0xFFF1F5F9))
+
+                        OutlinedTextField(
+                            value = vaultPasswordInput,
+                            onValueChange = {
+                                vaultPasswordInput = it
+                                errorMessage = null
+                            },
+                            enabled = !isVerifyingPassword && lockoutSecondsRemaining == 0,
+                            label = { Text("Enter your vault password") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            singleLine = true,
+                            leadingIcon = { GroupLockIcon(size = 20.dp, color = Color(0xFF64748B)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            isError = errorMessage != null
+                        )
+
+                        if (!errorMessage.isNullOrBlank()) {
+                            Text(
+                                text = errorMessage.orEmpty(),
+                                fontSize = 12.sp,
+                                color = Color(0xFFDC2626),
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+
+                        if (lockoutSecondsRemaining > 0) {
+                            Text(
+                                text = "Too many failed attempts. Try again in ${lockoutSecondsRemaining}s",
+                                fontSize = 12.sp,
+                                color = Color(0xFFDC2626),
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        if (isVerifyingPassword) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                Text("Verifying password...", fontSize = 12.sp, color = Color(0xFF64748B))
+                            }
+                        }
+
+                        Button(
+                            onClick = { startRestore() },
+                            enabled = !isVerifyingPassword && lockoutSecondsRemaining == 0 && vaultPasswordInput.isNotBlank(),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFFFD000),
+                                contentColor = Color.Black
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                        ) {
+                            Text("Restore", fontWeight = FontWeight.Bold)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                ChatBackupPreferencesManager.setHasSkippedRestore(context, true)
+                                onSkipRestore()
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Skip for now", color = Color(0xFF64748B))
+                        }
+                    }
                 }
             }
         }
-    }
-
-    // Skip Confirmation Warning Dialog
-    if (showSkipWarningDialog) {
-        AlertDialog(
-            onDismissRequest = { showSkipWarningDialog = false },
-            title = { Text("Skip Chat Restore?", fontWeight = FontWeight.Bold) },
-            text = {
-                Text(
-                    "If you skip restoring, a new empty vault will be initialized. Previous local chat history and encrypted messages will be permanently lost on this device.",
-                    lineHeight = 18.sp
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showSkipWarningDialog = false
-                        onSkipRestore()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
-                ) {
-                    Text("Skip & Start Fresh")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showSkipWarningDialog = false }) {
-                    Text("Back to Restore")
-                }
-            }
-        )
     }
 }

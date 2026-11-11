@@ -20,6 +20,9 @@ interface DmConversationDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdate(conversation: LocalDmConversation)
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertConversationIgnore(conversation: LocalDmConversation)
+
     @Query("UPDATE dm_conversations SET unreadCount = 0 WHERE id = :conversationId")
     suspend fun markRead(conversationId: String)
 
@@ -41,11 +44,20 @@ interface DmMessageDao {
     @Query("SELECT * FROM dm_messages WHERE conversationId = :conversationId ORDER BY timestamp ASC")
     fun getMessages(conversationId: String): Flow<List<LocalDmMessage>>
 
+    @Query("SELECT * FROM dm_messages WHERE conversationId = :conversationId ORDER BY timestamp ASC")
+    suspend fun getMessagesList(conversationId: String): List<LocalDmMessage>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessage(message: LocalDmMessage)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessages(messages: List<LocalDmMessage>)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMessageIgnore(message: LocalDmMessage)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMessagesIgnore(messages: List<LocalDmMessage>)
 
     @Query("DELETE FROM dm_messages WHERE id = :id")
     suspend fun deleteMessage(id: String)
@@ -68,6 +80,9 @@ interface DmMessageReactionDao {
     @Query("SELECT * FROM dm_message_reactions WHERE conversation_id = :conversationId ORDER BY ts ASC")
     fun getReactionsForConversation(conversationId: String): Flow<List<LocalDmMessageReaction>>
 
+    @Query("SELECT * FROM dm_message_reactions WHERE conversation_id = :conversationId ORDER BY ts ASC")
+    suspend fun getReactionsForConversationList(conversationId: String): List<LocalDmMessageReaction>
+
     @Query("SELECT * FROM dm_message_reactions WHERE target_message_id = :messageId ORDER BY ts ASC")
     fun getReactionsForMessage(messageId: String): Flow<List<LocalDmMessageReaction>>
 
@@ -76,6 +91,9 @@ interface DmMessageReactionDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertReaction(reaction: LocalDmMessageReaction)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertReactionsIgnore(reactions: List<LocalDmMessageReaction>)
 
     @Query("DELETE FROM dm_message_reactions WHERE target_message_id = :messageId AND sender_id = :senderId")
     suspend fun deleteReaction(messageId: String, senderId: String)

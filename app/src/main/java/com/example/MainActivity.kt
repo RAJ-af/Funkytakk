@@ -182,23 +182,25 @@ class MainActivity : FragmentActivity() {
                             if (!user.isEmailVerified) {
                                 currentScreen = "verify_email"
                             } else if (user.onboardingComplete) {
-                                val supaAuth = SupabaseSessionManager.getBearerToken(applicationContext)
+                                val hasSkipped = com.example.util.ChatBackupPreferencesManager.hasSkippedRestore(applicationContext)
                                 val isVaultConfigured = com.example.crypto.VaultSecurityManager.isVaultConfigured(applicationContext)
-                                if (!supaAuth.isNullOrBlank() && !isVaultConfigured) {
-                                    try {
-                                        val statusResp = SupabaseClient.api.getChatBackupStatus(
-                                            apiKey = BuildConfig.SUPABASE_ANON_KEY,
-                                            auth = supaAuth
-                                        )
-                                        if (statusResp.isSuccessful && statusResp.body()?.has_backup == true) {
-                                            pendingBackupStatus = statusResp.body()
-                                            currentScreen = "restore_chat_backup"
-                                        } else {
-                                            currentScreen = "home"
+                                var isDatabaseEmpty = !isVaultConfigured
+
+                                if (isVaultConfigured) {
+                                    val activeKey = com.example.crypto.VaultSecurityManager.getActiveVaultKey()
+                                    if (activeKey != null) {
+                                        try {
+                                            val db = com.example.db.EncryptedChatDatabase.getInstance(applicationContext, activeKey)
+                                            isDatabaseEmpty = db.conversationDao().getAllConversationsList().isEmpty() &&
+                                                    db.groupConversationDao().getAllJoinedGroupsList().isEmpty()
+                                        } catch (_: Exception) {
+                                            isDatabaseEmpty = false
                                         }
-                                    } catch (_: Exception) {
-                                        currentScreen = "home"
                                     }
+                                }
+
+                                if (!hasSkipped && isDatabaseEmpty) {
+                                    currentScreen = "restore_chat_backup"
                                 } else {
                                     currentScreen = "home"
                                 }
@@ -253,12 +255,22 @@ class MainActivity : FragmentActivity() {
                     }
 
                     if (isSuspended) {
-                        SuspendedAccountScreen(
-                            moderationStatus = myModerationStatus,
-                            onStatusRefreshed = {
-                                authViewModel.refreshModerationStatus(applicationContext)
-                            }
-                        )
+                        if (currentScreen == "support_chat") {
+                            SupportChatScreen(
+                                reportId = activeSupportReportId,
+                                onBack = { currentScreen = "home" }
+                            )
+                        } else {
+                            SuspendedAccountScreen(
+                                moderationStatus = myModerationStatus,
+                                onStatusRefreshed = {
+                                    authViewModel.refreshModerationStatus(applicationContext)
+                                },
+                                onAppeal = {
+                                    currentScreen = "support_chat"
+                                }
+                            )
+                        }
                     } else if (isUnderReview) {
                         if (currentScreen == "support_chat") {
                             SupportChatScreen(
@@ -311,7 +323,6 @@ class MainActivity : FragmentActivity() {
                                 }
                             )
                             "restore_chat_backup" -> RestoreChatBackupScreen(
-                                backupStatus = pendingBackupStatus ?: ChatBackupStatusResponse(has_backup = true),
                                 onRestoreSuccess = {
                                     currentScreen = "home"
                                 },

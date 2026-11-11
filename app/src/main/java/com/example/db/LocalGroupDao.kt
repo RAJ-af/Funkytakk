@@ -32,6 +32,9 @@ interface GroupConversationDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdate(group: LocalGroupConversation)
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertGroupIgnore(group: LocalGroupConversation)
+
     @Query("UPDATE group_conversations SET isArchived = 1, myStatus = :reason, tombstoneReason = :reason, tombstoneDeletedByName = :deletedByName WHERE id = :groupId")
     suspend fun archiveGroup(groupId: String, reason: String, deletedByName: String?)
 
@@ -94,6 +97,12 @@ interface GroupMessageDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessage(message: LocalGroupMessage)
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMessageIgnore(message: LocalGroupMessage)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMessagesIgnore(messages: List<LocalGroupMessage>)
+
     @Query("SELECT EXISTS(SELECT 1 FROM group_messages WHERE id = :id)")
     suspend fun messageExists(id: String): Boolean
 
@@ -115,6 +124,9 @@ interface MessageReactionDao {
     @Query("SELECT * FROM message_reactions WHERE group_id = :groupId")
     fun getReactionsForGroup(groupId: String): Flow<List<LocalMessageReaction>>
 
+    @Query("SELECT * FROM message_reactions WHERE group_id = :groupId")
+    suspend fun getReactionsForGroupList(groupId: String): List<LocalMessageReaction>
+
     @Query("SELECT * FROM message_reactions WHERE target_message_id = :targetMessageId")
     fun getReactionsForMessage(targetMessageId: String): Flow<List<LocalMessageReaction>>
 
@@ -126,6 +138,12 @@ interface MessageReactionDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdateReaction(reaction: LocalMessageReaction)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertReactionIgnore(reaction: LocalMessageReaction)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertReactionsIgnore(reactions: List<LocalMessageReaction>)
 
     @Query("DELETE FROM message_reactions WHERE target_message_id = :targetMessageId AND sender_id = :senderId")
     suspend fun deleteReaction(targetMessageId: String, senderId: String)
