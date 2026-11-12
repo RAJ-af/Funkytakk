@@ -214,6 +214,11 @@ fun AuthScreen(
     }
 
     LaunchedEffect(authState) {
+        if (authState is AuthState.Loading) {
+            com.example.ui.components.AppLoadingManager.show(if (isSignUpMode) "Creating your account..." else "Logging in...")
+        } else {
+            com.example.ui.components.AppLoadingManager.hide()
+        }
         if (authState is AuthState.Success) {
             val userProfile = (authState as AuthState.Success).user
             if (!userProfile.isEmailVerified) {

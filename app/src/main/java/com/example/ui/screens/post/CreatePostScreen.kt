@@ -116,6 +116,7 @@ fun CreatePostScreen(
     fun handlePublish() {
         if (!canPost) return
         isUploading = true
+        com.example.ui.components.AppLoadingManager.show("Publishing your moment...")
         coroutineScope.launch {
             try {
                 val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
@@ -158,6 +159,7 @@ fun CreatePostScreen(
                 Toast.makeText(context, "Posted. It’s live in Trending.", Toast.LENGTH_SHORT).show()
                 showSuccessAnimation = true
             } finally {
+                com.example.ui.components.AppLoadingManager.hide()
                 isUploading = false
             }
         }

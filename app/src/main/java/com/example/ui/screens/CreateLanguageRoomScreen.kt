@@ -438,6 +438,7 @@ fun CreateLanguageRoomScreen(
 
                         if (isCreatingRoom) return@Button
                         isCreatingRoom = true
+                        com.example.ui.components.AppLoadingManager.show("Setting up your voice room...")
 
                         scope.launch {
                             try {
@@ -449,6 +450,8 @@ fun CreateLanguageRoomScreen(
                                 }
                             } catch (e: Exception) {
                                 android.util.Log.e("CreateRoom", "Failed to insert room to Supabase: ${e.message}")
+                            } finally {
+                                com.example.ui.components.AppLoadingManager.hide()
                             }
 
                             viewModel.joinRoom(roomUuid, newRoom.title ?: "", context, role = "speaker", hostId = hostId)

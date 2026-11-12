@@ -94,6 +94,7 @@ class MainActivity : FragmentActivity() {
                     val deletionReceipt by authViewModel.deletionReceipt.collectAsState()
 
                     LaunchedEffect(Unit) {
+                        com.example.ui.components.AppNetworkManager.startMonitoring(applicationContext)
                         authViewModel.runPendingEraseLocalChatsIfNeeded(applicationContext)
                         if (SupabaseSessionManager.hasValidAuthenticatedSession(applicationContext)) {
                             authViewModel.checkDeletionStatus(applicationContext)
@@ -602,6 +603,16 @@ class MainActivity : FragmentActivity() {
                                 com.example.ModerationManager.pendingReportIdToOpen = null
                             },
                             initialReportId = com.example.ModerationManager.pendingReportIdToOpen
+                        )
+                    }
+
+                    // Global Loading HUD & No Internet Connection Dialogs
+                    com.example.ui.components.AppLoadingHUDOverlay()
+
+                    val showNoInternetDialog by com.example.ui.components.AppNetworkManager.showNoInternetDialog.collectAsState()
+                    if (showNoInternetDialog) {
+                        com.example.ui.components.AppNoInternetDialog(
+                            onDismiss = { com.example.ui.components.AppNetworkManager.dismissNoInternetDialog() }
                         )
                     }
                 }
