@@ -993,6 +993,52 @@ fun DiscoverTabContent(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
+                // "They speak" vs "They're learning" Segmented Control
+                var languageFilterType by remember { mutableStateOf("They speak") }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(Color(0xFFFEF3C7))
+                        .padding(4.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(42.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(if (languageFilterType == "They speak") Color.White else Color.Transparent)
+                            .clickable { languageFilterType = "They speak" },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "They speak",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(42.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(if (languageFilterType == "They're learning") Color.White else Color.Transparent)
+                            .clickable { languageFilterType = "They're learning" },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "They're learning",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
                 // Search Input
                 var langSearchQuery by remember { mutableStateOf("") }
                 OutlinedTextField(

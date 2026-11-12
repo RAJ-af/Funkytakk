@@ -25,12 +25,14 @@ fun HomeBottomBar(
     activeTab: String,
     onTabSelected: (String) -> Unit
 ) {
+    val isMomentsTab = activeTab == "moments"
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding(),
-        color = Color(0xFFFCFBF7),
-        shadowElevation = 8.dp
+        color = if (isMomentsTab) Color.Black.copy(alpha = 0.75f) else Color(0xFFFCFBF7),
+        shadowElevation = if (isMomentsTab) 0.dp else 8.dp
     ) {
         Row(
             modifier = Modifier
@@ -43,10 +45,16 @@ fun HomeBottomBar(
             BottomNavItem(
                 label = "Home",
                 isSelected = activeTab == "home",
+                isDarkTheme = isMomentsTab,
                 onClick = { onTabSelected("home") },
                 icon = {
                     FunkyHomeIcon(
-                        color = if (activeTab == "home") Color.Black else Color(0xFF6B7280),
+                        color = when {
+                            activeTab == "home" && isMomentsTab -> Color(0xFFFFB800)
+                            activeTab == "home" -> Color.Black
+                            isMomentsTab -> Color.White.copy(alpha = 0.7f)
+                            else -> Color(0xFF6B7280)
+                        },
                         modifier = Modifier.size(24.dp)
                     )
                 }
@@ -57,40 +65,54 @@ fun HomeBottomBar(
             BottomNavItem(
                 label = "Discover",
                 isSelected = isDiscoverSelected,
+                isDarkTheme = isMomentsTab,
                 onClick = { onTabSelected("discover") },
-                usePillBackground = true,
+                usePillBackground = !isMomentsTab,
                 icon = {
                     FunkyDiscoverIcon(
-                        color = Color.Black,
+                        color = when {
+                            isDiscoverSelected && isMomentsTab -> Color(0xFFFFB800)
+                            isDiscoverSelected -> Color.Black
+                            isMomentsTab -> Color.White.copy(alpha = 0.7f)
+                            else -> Color(0xFF6B7280)
+                        },
                         isFilled = isDiscoverSelected,
                         modifier = Modifier.size(24.dp)
                     )
                 }
             )
 
-            // 3. Moments
+            // 3. Moments (Matches Moments v2 design, preserving icon without adding + button)
             BottomNavItem(
                 label = "Moments",
-                isSelected = activeTab == "moments",
+                isSelected = isMomentsTab,
+                isDarkTheme = isMomentsTab,
                 onClick = { onTabSelected("moments") },
+                usePillBackground = false,
                 icon = {
                     FunkyGlobeIcon(
-                        color = if (activeTab == "moments") Color.Black else Color(0xFF6B7280),
+                        color = if (isMomentsTab) Color(0xFFFFB800) else Color(0xFF6B7280),
                         modifier = Modifier.size(24.dp)
                     )
                 }
             )
 
-            // 4. Chats (Active Pill style matching the design mockup)
+            // 4. Chats
             BottomNavItem(
                 label = "Chats",
                 isSelected = activeTab == "chats",
+                isDarkTheme = isMomentsTab,
                 onClick = { onTabSelected("chats") },
                 badgeCount = 3,
-                usePillBackground = true,
+                usePillBackground = !isMomentsTab,
                 icon = {
                     FunkyChatIcon(
-                        color = Color.Black,
+                        color = when {
+                            activeTab == "chats" && isMomentsTab -> Color(0xFFFFB800)
+                            activeTab == "chats" -> Color.Black
+                            isMomentsTab -> Color.White.copy(alpha = 0.7f)
+                            else -> Color(0xFF6B7280)
+                        },
                         isFilled = activeTab == "chats",
                         modifier = Modifier.size(22.dp)
                     )
@@ -101,10 +123,16 @@ fun HomeBottomBar(
             BottomNavItem(
                 label = "Profile",
                 isSelected = activeTab == "profile",
+                isDarkTheme = isMomentsTab,
                 onClick = { onTabSelected("profile") },
                 icon = {
                     FunkyProfileIcon(
-                        color = if (activeTab == "profile") Color.Black else Color(0xFF6B7280),
+                        color = when {
+                            activeTab == "profile" && isMomentsTab -> Color(0xFFFFB800)
+                            activeTab == "profile" -> Color.Black
+                            isMomentsTab -> Color.White.copy(alpha = 0.7f)
+                            else -> Color(0xFF6B7280)
+                        },
                         modifier = Modifier.size(24.dp)
                     )
                 }
@@ -117,6 +145,7 @@ fun HomeBottomBar(
 private fun BottomNavItem(
     label: String,
     isSelected: Boolean,
+    isDarkTheme: Boolean = false,
     onClick: () -> Unit,
     icon: @Composable () -> Unit,
     badgeCount: Int = 0,
@@ -139,7 +168,7 @@ private fun BottomNavItem(
             modifier = Modifier
                 .height(32.dp)
                 .then(
-                    if (isSelected && usePillBackground) {
+                    if (isSelected && usePillBackground && !isDarkTheme) {
                         Modifier
                             .clip(RoundedCornerShape(20.dp))
                             .background(Color(0xFFFFE380))
@@ -177,7 +206,12 @@ private fun BottomNavItem(
             text = label,
             fontSize = 11.sp,
             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-            color = if (isSelected) Color.Black else Color(0xFF6B7280)
+            color = when {
+                isSelected && isDarkTheme -> Color(0xFFFFB800)
+                isSelected -> Color.Black
+                isDarkTheme -> Color.White.copy(alpha = 0.7f)
+                else -> Color(0xFF6B7280)
+            }
         )
     }
 }

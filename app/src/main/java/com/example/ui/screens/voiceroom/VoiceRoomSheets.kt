@@ -185,6 +185,52 @@ fun FilterRoomsSheetContent(
             }
         }
 
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // "They speak" vs "They're learning" Segmented Control
+        var speakOrLearnTab by remember { mutableStateOf("They speak") }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xFFFEF9C3))
+                .padding(4.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(38.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(if (speakOrLearnTab == "They speak") Color.White else Color.Transparent)
+                    .clickable { speakOrLearnTab = "They speak" },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "They speak",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0F172A)
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(38.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(if (speakOrLearnTab == "They're learning") Color.White else Color.Transparent)
+                    .clickable { speakOrLearnTab = "They're learning" },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "They're learning",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0F172A)
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.height(12.dp))
 
         // Language Grid (2 columns)

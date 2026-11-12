@@ -4,6 +4,7 @@ import android.widget.Toast
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.*
@@ -546,7 +547,7 @@ fun HomeScreen(
 
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
-            containerColor = Color(0xFFFAFAEE),
+            containerColor = if (activeTab == "moments") Color.Black else Color(0xFFFAFAEE),
             bottomBar = {
                 HomeBottomBar(
                     activeTab = activeTab,
@@ -557,7 +558,9 @@ fun HomeScreen(
             Crossfade(
                 targetState = activeTab,
                 label = "HomeSubNavigation",
-                modifier = Modifier.padding(innerPadding)
+                modifier = Modifier.padding(
+                    if (activeTab == "moments") PaddingValues(bottom = 0.dp) else innerPadding
+                )
             ) { currentTab ->
                 when (currentTab) {
                     "home" -> {
