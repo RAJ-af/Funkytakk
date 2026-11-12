@@ -1249,256 +1249,32 @@ private fun CommentItemRow(comment: MomentV2Comment) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CreateMomentBottomSheet(
     onDismiss: () -> Unit,
     onPostCreated: (MomentV2Item) -> Unit
 ) {
-    val context = LocalContext.current
-    var captionText by remember { mutableStateOf("") }
-    var selectedColorIndex by remember { mutableIntStateOf(0) }
-    var isPhotoMode by remember { mutableStateOf(false) }
-    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
-    var selectedLanguage by remember { mutableStateOf("Korean") }
-    var showTranslationLine by remember { mutableStateOf(true) }
-    var locationInput by remember { mutableStateOf("Seoul, South Korea") }
-    val selectedTopics = remember { mutableStateListOf("#Study", "#Korean") }
-
-    val gradientPresets = listOf(
-        listOf(Color(0xFF8A2387), Color(0xFFE94057), Color(0xFFF27121)),
-        listOf(Color(0xFF2C3E50), Color(0xFF3498DB), Color(0xFF2980B9)),
-        listOf(Color(0xFF11998E), Color(0xFF38EF7D)),
-        listOf(Color(0xFF654EA3), Color(0xFFEAAFC8)),
-        listOf(Color(0xFF0F2027), Color(0xFF203A43), Color(0xFF2C5364))
-    )
-
-    val imagePicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia()
-    ) { uri ->
-        if (uri != null) {
-            selectedImageUri = uri
-            isPhotoMode = true
-        }
-    }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = Color(0xFF0F172A),
-        contentColor = Color.White,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.9f)
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Create Moment", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                Text(
-                    text = "${captionText.length}/400",
-                    fontSize = 12.sp,
-                    color = if (captionText.length > 400) Color(0xFFEF4444) else Color.White.copy(alpha = 0.6f)
-                )
-            }
-
-            // Mode Selector: Photo vs Gradient
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                OutlinedButton(
-                    onClick = {
-                        imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                    },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = if (isPhotoMode) Color(0xFFFFB800) else Color.Transparent
-                    )
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PhotoCamera,
-                        contentDescription = null,
-                        tint = if (isPhotoMode) Color.Black else Color.White
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = if (selectedImageUri != null) "Photo picked" else "Pick Photo",
-                        color = if (isPhotoMode) Color.Black else Color.White,
-                        fontSize = 12.sp
-                    )
-                }
-
-                OutlinedButton(
-                    onClick = {
-                        isPhotoMode = false
-                        selectedImageUri = null
-                    },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = if (!isPhotoMode) Color(0xFFFFB800) else Color.Transparent
-                    )
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Palette,
-                        contentDescription = null,
-                        tint = if (!isPhotoMode) Color.Black else Color.White
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Colour Card",
-                        color = if (!isPhotoMode) Color.Black else Color.White,
-                        fontSize = 12.sp
-                    )
-                }
-            }
-
-            // Palette picker for text-only moments
-            if (!isPhotoMode) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    gradientPresets.forEachIndexed { index, grad ->
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(CircleShape)
-                                .background(Brush.linearGradient(grad))
-                                .border(
-                                    2.dp,
-                                    if (selectedColorIndex == index) Color.White else Color.Transparent,
-                                    CircleShape
-                                )
-                                .clickable { selectedColorIndex = index }
-                        )
-                    }
-                }
-            }
-
-            // Main Text Input
-            OutlinedTextField(
-                value = captionText,
-                onValueChange = { if (it.length <= 400) captionText = it },
-                placeholder = {
-                    Text(
-                        if (isPhotoMode) "Your text sits on top of your photo..." else "Your words sit on this colour...",
-                        color = Color.White.copy(alpha = 0.5f),
-                        fontSize = 14.sp
-                    )
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(110.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
-                )
+    com.example.ui.screens.post.CreatePostScreen(
+        onDismiss = onDismiss,
+        onPostCreated = {
+            val newMoment = MomentV2Item(
+                id = "moment_${System.currentTimeMillis()}",
+                title = "New Practice Moment",
+                subtitle = "Language practice moment shared with community",
+                authorName = "You",
+                authorAvatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200",
+                isVerified = true,
+                isFollowing = false,
+                location = "Kuala Lumpur, Malaysia",
+                countryFlag = "🇲🇾",
+                languageBadge = "🇬🇧 English · Practice",
+                timeAgo = "Just now",
+                tags = listOf("#Practice", "#LanguageExchange"),
+                bgGradient = listOf(Color(0xFFFFC21A), Color(0xFFFF8A1F))
             )
-
-            // Language Selector
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Which language is this post in?", fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f))
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val langs = listOf("Korean", "English", "Mandarin", "Japanese", "Hindi", "Malay", "Spanish")
-                    items(langs) { lang ->
-                        FilterChip(
-                            selected = selectedLanguage == lang,
-                            onClick = { selectedLanguage = lang },
-                            label = { Text(lang, fontSize = 11.sp) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Color(0xFFFFB800),
-                                selectedLabelColor = Color.Black
-                            )
-                        )
-                    }
-                }
-            }
-
-            // Translation Line Toggle
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Show a translation line", fontSize = 13.sp, color = Color.White)
-                Switch(
-                    checked = showTranslationLine,
-                    onCheckedChange = { showTranslationLine = it },
-                    colors = SwitchDefaults.colors(checkedTrackColor = Color(0xFFFFB800), checkedThumbColor = Color.Black)
-                )
-            }
-
-            // Topics Picker
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Pick up to 3 topics so the right people find it:", fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f))
-                val availableTopics = listOf("#Travel", "#Study", "#Nature", "#Culture", "#Food", "#City", "#Native")
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(availableTopics) { topic ->
-                        val isPicked = selectedTopics.contains(topic)
-                        FilterChip(
-                            selected = isPicked,
-                            onClick = {
-                                if (isPicked) selectedTopics.remove(topic)
-                                else if (selectedTopics.size < 3) selectedTopics.add(topic)
-                            },
-                            label = { Text(topic, fontSize = 11.sp) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Color(0xFFFFB800),
-                                selectedLabelColor = Color.Black
-                            )
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.weight(1f))
-
-            // Post Button
-            Button(
-                onClick = {
-                    if (captionText.isBlank()) {
-                        Toast.makeText(context, "Please enter some text for your moment", Toast.LENGTH_SHORT).show()
-                        return@Button
-                    }
-
-                    val newMoment = MomentV2Item(
-                        id = "moment_${System.currentTimeMillis()}",
-                        title = captionText.lines().firstOrNull() ?: captionText,
-                        subtitle = if (captionText.lines().size > 1) captionText.lines().drop(1).joinToString("\n") else "Language practice moment",
-                        authorName = "You",
-                        authorAvatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200",
-                        isVerified = true,
-                        isFollowing = false,
-                        location = locationInput,
-                        countryFlag = if (selectedLanguage == "Korean") "🇰🇷" else "🌐",
-                        languageBadge = "$selectedLanguage · Learner",
-                        timeAgo = "Just now",
-                        tags = selectedTopics.toList(),
-                        images = if (isPhotoMode && selectedImageUri != null) listOf(selectedImageUri.toString()) else emptyList(),
-                        bgGradient = if (!isPhotoMode) gradientPresets[selectedColorIndex] else null
-                    )
-                    onPostCreated(newMoment)
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
-                shape = RoundedCornerShape(24.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB800))
-            ) {
-                Text("Post Moment", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
+            onPostCreated(newMoment)
         }
-    }
+    )
 }
 
 private fun formatCount(count: Int): String {
