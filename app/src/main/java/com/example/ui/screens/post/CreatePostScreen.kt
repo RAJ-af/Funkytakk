@@ -5,9 +5,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -17,7 +15,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -41,157 +41,195 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.example.BuildConfig
-import com.example.SupabaseClient
+import com.example.MomentDto
+import com.example.MomentLimitsDto
+import com.example.MomentTopicDto
 import com.example.SupabaseSessionManager
-import kotlinx.coroutines.Dispatchers
+import com.example.repository.MomentsRepository
+import com.example.ui.components.AppLoadingManager
+import com.example.ui.components.CircleFlag
+import com.example.ui.screens.LanguageData
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun CreatePostScreen(
+    defaultLanguage: String = "",
     onDismiss: () -> Unit,
-    onPostCreated: () -> Unit
+    onPostCreated: (MomentDto) -> Unit
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val selfUserId = remember(context) { SupabaseSessionManager.getUserId(context) ?: "" }
+    val prefs = remember(context) {
+        context.getSharedPreferences("funky_talk_prefs", android.content.Context.MODE_PRIVATE)
+    }
 
-    // Color definitions from Create_post___Funkytalk_54371c50.html
-    val bgPresets = remember {
-        listOf(
-            listOf(Color(0xFFFFFBF0), Color(0xFFFFEFC2)), // 0: Warm Light Cream (Dark text)
-            listOf(Color(0xFFFFC21A), Color(0xFFFF8A1F)), // 1: Warm Mango Fire (Dark text)
-            listOf(Color(0xFF7C3AED), Color(0xFFEC4899)), // 2: Purple Pink (White text)
-            listOf(Color(0xFF06B6D4), Color(0xFF2563EB)), // 3: Ocean Blue (White text)
-            listOf(Color(0xFF1E1B4B), Color(0xFF6D28D9)), // 4: Deep Violet (White text)
-            listOf(Color(0xFFFF9A8B), Color(0xFFFF5E7E)), // 5: Sunset Coral (White text)
-            listOf(Color(0xFFBEF264), Color(0xFF16A34A)), // 6: Lush Green (Dark text)
-            listOf(Color(0xFF475569), Color(0xFF0F172A))  // 7: Slate Dark (White text)
-        )
+    val bgPresets = remember { MomentsRepository.bgPresets }
+
+    var optionsTopics by remember { mutableStateOf(MomentsRepository.getCachedOptions().topics) }
+    var limits by remember { mutableStateOf(MomentsRepository.getCachedOptions().limits) }
+
+    LaunchedEffect(Unit) {
+        MomentsRepository.getMomentOptions(context).onSuccess { opts ->
+            if (opts.topics.isNotEmpty()) optionsTopics = opts.topics
+            limits = opts.limits
+        }
+    }
+
+    val initialLanguage = remember(defaultLanguage, selfUserId) {
+        val raw = defaultLanguage.takeIf { it.isNotBlank() }
+            ?: prefs.getString("profile_nativeLanguage_${selfUserId}", null)
+            ?: "Hindi"
+        raw.split(",").firstOrNull()?.trim()?.takeIf { it.isNotBlank() } ?: "Hindi"
     }
 
     var selectedBgIndex by remember { mutableIntStateOf(0) }
     var titleText by remember { mutableStateOf("") }
     var bodyText by remember { mutableStateOf("") }
+    var translationText by remember { mutableStateOf("") }
     var askCorrection by remember { mutableStateOf(true) }
     var showTranslationLine by remember { mutableStateOf(false) }
 
-    var selectedLanguage by remember { mutableStateOf("🇬🇧 English") }
-    val selectedTopics = remember { mutableStateListOf<String>() }
+    var selectedLanguage by remember { mutableStateOf(initialLanguage) }
+    var languageSearchQuery by remember { mutableStateOf("") }
+    val selectedTopicSlugs = remember { mutableStateListOf<String>() }
     var selectedLocation by remember { mutableStateOf("") }
     var locationInputSearch by remember { mutableStateOf("") }
 
-    var selectedPhotoUri by remember { mutableStateOf<Uri?>(null) }
+    val selectedMediaUris = remember { mutableStateListOf<Uri>() }
     var isVideoMedia by remember { mutableStateOf(false) }
 
     // Active bottom sheet panel ("media", "bg", "lang", "topics", "loc", or null)
     var activeDockPanel by remember { mutableStateOf<String?>(null) }
     var isUploading by remember { mutableStateOf(false) }
-    var showSuccessAnimation by remember { mutableStateOf(false) }
+    var createdMoment by remember { mutableStateOf<MomentDto?>(null) }
 
-    // Photo/Video Media Picker
-    val mediaPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia()
-    ) { uri ->
-        if (uri != null) {
-            selectedPhotoUri = uri
-            isVideoMedia = context.contentResolver.getType(uri)?.startsWith("video") == true
+    val multiplePhotosLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 10)
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            selectedMediaUris.clear()
+            selectedMediaUris.addAll(uris.take(limits.media.coerceAtLeast(1)))
+            isVideoMedia = false
         }
     }
 
-    val availableLangs = listOf("🇮🇳 Hindi", "🇬🇧 English", "🇰🇷 Korean", "🇨🇳 Mandarin", "🇯🇵 Japanese", "🇲🇾 Malay")
-    val availableTopics = listOf("Travel", "Daily life", "Food", "Study", "Nature", "Culture", "Music", "City")
-    val availableCities = listOf("Kuala Lumpur", "Seoul", "New Delhi", "Taipei")
+    val videoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            selectedMediaUris.clear()
+            selectedMediaUris.add(uri)
+            isVideoMedia = true
+        }
+    }
 
-    val canPost = titleText.trim().isNotEmpty() || bodyText.trim().isNotEmpty() || selectedPhotoUri != null
+    val availableLangs = remember {
+        val priority = listOf(
+            "Hindi", "English", "Korean", "Chinese", "Japanese", "Malay",
+            "Spanish", "French", "Arabic", "German", "Portuguese", "Indonesian"
+        )
+        val allNames = LanguageData.allLanguages.map { it.name }
+        (priority + allNames).distinct()
+    }
+    val filteredLangs = remember(languageSearchQuery, availableLangs) {
+        val q = languageSearchQuery.trim()
+        if (q.isBlank()) availableLangs.take(18)
+        else availableLangs.filter { it.contains(q, ignoreCase = true) }.take(30)
+    }
+
+    val availableCities = listOf("Kuala Lumpur", "Seoul", "New Delhi", "Taipei")
+    val hasMedia = selectedMediaUris.isNotEmpty()
+    val canPost = titleText.trim().isNotEmpty() || bodyText.trim().isNotEmpty() || hasMedia
 
     fun handlePublish() {
-        if (!canPost) return
+        if (!canPost || isUploading) return
+        if (selectedLanguage.isBlank()) {
+            Toast.makeText(context, "Choose the post language", Toast.LENGTH_SHORT).show()
+            return
+        }
         isUploading = true
-        com.example.ui.components.AppLoadingManager.show("Publishing your moment...")
+        AppLoadingManager.show("Publishing your moment...")
         coroutineScope.launch {
             try {
-                val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
-                    ?: SupabaseSessionManager.getBearerToken(context)
-                    ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
-
-                val mediaUrls = mutableListOf<String>()
-                selectedPhotoUri?.let { mediaUrls.add(it.toString()) }
-
-                val formattedContent = buildString {
-                    if (titleText.isNotBlank()) append(titleText).append("\n\n")
-                    append(bodyText)
-                    if (askCorrection) append("\n\n✏️ Ask native speakers to correct me")
-                    if (selectedLocation.isNotBlank()) append("\n📍 ").append(selectedLocation)
-                    if (showTranslationLine) append("\n[Translation line on]")
-                    if (selectedTopics.isNotEmpty()) append("\n").append(selectedTopics.joinToString(" ") { "#$it" })
-                }
-
-                val momentBody = mapOf<String, Any?>(
-                    "user_id" to selfUserId,
-                    "content" to formattedContent,
-                    "image_urls" to mediaUrls
+                val presetKey = bgPresets.getOrElse(selectedBgIndex) { bgPresets.first() }.key
+                val result = MomentsRepository.createMoment(
+                    context = context,
+                    title = titleText.takeIf { it.isNotBlank() },
+                    content = bodyText.takeIf { it.isNotBlank() },
+                    language = selectedLanguage,
+                    translation = if (showTranslationLine) translationText.takeIf { it.isNotBlank() } else null,
+                    bgKey = if (hasMedia) null else presetKey,
+                    mediaUris = selectedMediaUris.toList(),
+                    topics = selectedTopicSlugs.toList(),
+                    location = selectedLocation.takeIf { it.isNotBlank() },
+                    fixRequested = askCorrection
                 )
-
-                val postResp = withContext(Dispatchers.IO) {
-                    SupabaseClient.api.createMoment(
-                        apiKey = BuildConfig.SUPABASE_ANON_KEY,
-                        auth = token,
-                        moment = momentBody
-                    )
+                result.onSuccess { dto ->
+                    createdMoment = dto
+                }.onFailure { err ->
+                    Toast.makeText(
+                        context,
+                        err.message ?: "Something went wrong. Try again",
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
-
-                if (postResp.isSuccessful) {
-                    showSuccessAnimation = true
-                } else {
-                    Toast.makeText(context, "Posted. It’s live in Trending.", Toast.LENGTH_SHORT).show()
-                    showSuccessAnimation = true
-                }
-            } catch (e: Exception) {
-                Toast.makeText(context, "Posted. It’s live in Trending.", Toast.LENGTH_SHORT).show()
-                showSuccessAnimation = true
             } finally {
-                com.example.ui.components.AppLoadingManager.hide()
+                AppLoadingManager.hide()
                 isUploading = false
             }
         }
     }
 
-    if (showSuccessAnimation) {
+    if (createdMoment != null) {
+        val posted = createdMoment!!
         SuccessAnimationScreen(onComplete = {
-            showSuccessAnimation = false
-            onPostCreated()
+            createdMoment = null
+            onPostCreated(posted)
         })
     } else {
-        val currentBgColors = bgPresets[selectedBgIndex]
-        val isDarkBg = selectedBgIndex in listOf(2, 3, 4, 5, 7) || selectedPhotoUri != null
+        val currentPreset = bgPresets.getOrElse(selectedBgIndex) { bgPresets.first() }
+        val isDarkBg = !currentPreset.isDarkText || hasMedia
         val canvasTextColor = if (isDarkBg) Color.White else Color(0xFF1B1608)
 
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
-                    if (selectedPhotoUri != null) Brush.linearGradient(listOf(Color(0xFF0F172A), Color.Black))
-                    else Brush.linearGradient(currentBgColors)
+                    if (hasMedia) Brush.linearGradient(listOf(Color(0xFF0F172A), Color.Black))
+                    else Brush.linearGradient(currentPreset.colors)
                 )
                 .testTag("create_post_screen")
         ) {
-            // Background Image Overlay if photo selected
-            selectedPhotoUri?.let { uri ->
-                AsyncImage(
-                    model = uri,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+            // Background Media Preview if photo(s) or video selected
+            if (hasMedia) {
+                if (!isVideoMedia && selectedMediaUris.size > 1) {
+                    val previewPagerState = rememberPagerState(pageCount = { selectedMediaUris.size })
+                    HorizontalPager(
+                        state = previewPagerState,
+                        modifier = Modifier.fillMaxSize()
+                    ) { idx ->
+                        AsyncImage(
+                            model = selectedMediaUris[idx],
+                            contentDescription = "Selected media ${idx + 1}",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                } else {
+                    AsyncImage(
+                        model = selectedMediaUris.first(),
+                        contentDescription = "Selected media",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -221,7 +259,6 @@ fun CreatePostScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Glass circular close button
                     Box(
                         modifier = Modifier
                             .size(42.dp)
@@ -235,7 +272,6 @@ fun CreatePostScreen(
                         CustomCloseIcon(iconSize = 14.dp, color = Color(0xFF1B1608))
                     }
 
-                    // Mango Yellow Post Button
                     Surface(
                         onClick = { handlePublish() },
                         enabled = canPost && !isUploading,
@@ -267,7 +303,7 @@ fun CreatePostScreen(
                     }
                 }
 
-                // 2. CANVAS SECTION: Title & Body text inputs + character counter + native fix toggle
+                // 2. CANVAS SECTION: Title & Body text inputs + optional translation + character counter + native fix toggle
                 Column(
                     modifier = Modifier
                         .weight(1f)
@@ -276,10 +312,9 @@ fun CreatePostScreen(
                         .padding(horizontal = 26.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.Center
                 ) {
-                    // Title Input
                     TextField(
                         value = titleText,
-                        onValueChange = { if (it.length <= 60) titleText = it },
+                        onValueChange = { if (it.length <= limits.title) titleText = it },
                         placeholder = {
                             Text(
                                 "Give it a title",
@@ -307,12 +342,25 @@ fun CreatePostScreen(
                         )
                     )
 
+                    if (titleText.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            Text(
+                                text = "${titleText.length}/${limits.title}",
+                                fontSize = 11.sp,
+                                color = canvasTextColor.copy(alpha = 0.65f),
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Body Input
                     TextField(
                         value = bodyText,
-                        onValueChange = { if (it.length <= 400) bodyText = it },
+                        onValueChange = { if (it.length <= limits.content) bodyText = it },
                         placeholder = {
                             Text(
                                 "What’s on your mind? Write in the language you’re practising.",
@@ -340,22 +388,69 @@ fun CreatePostScreen(
                         )
                     )
 
-                    // Character counter
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End
                     ) {
                         Text(
-                            text = "${bodyText.length}/400",
+                            text = "${bodyText.length}/${limits.content}",
                             fontSize = 13.sp,
                             color = canvasTextColor.copy(alpha = 0.7f),
                             fontWeight = FontWeight.Medium
                         )
                     }
 
+                    if (showTranslationLine) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = if (isDarkBg) Color.Black.copy(alpha = 0.3f) else Color.White.copy(alpha = 0.65f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                                TextField(
+                                    value = translationText,
+                                    onValueChange = { if (it.length <= limits.translation) translationText = it },
+                                    placeholder = {
+                                        Text(
+                                            "Add a translation (optional)...",
+                                            fontSize = 14.sp,
+                                            color = canvasTextColor.copy(alpha = 0.6f)
+                                        )
+                                    },
+                                    textStyle = TextStyle(
+                                        fontSize = 14.sp,
+                                        color = canvasTextColor,
+                                        lineHeight = 20.sp
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("post_translation_input"),
+                                    colors = TextFieldDefaults.colors(
+                                        focusedContainerColor = Color.Transparent,
+                                        unfocusedContainerColor = Color.Transparent,
+                                        disabledContainerColor = Color.Transparent,
+                                        focusedIndicatorColor = Color.Transparent,
+                                        unfocusedIndicatorColor = Color.Transparent,
+                                        cursorColor = canvasTextColor
+                                    )
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End
+                                ) {
+                                    Text(
+                                        text = "${translationText.length}/${limits.translation}",
+                                        fontSize = 11.sp,
+                                        color = canvasTextColor.copy(alpha = 0.65f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    // Native correction toggle pill
                     Surface(
                         onClick = { askCorrection = !askCorrection },
                         color = if (askCorrection) Color(0xFFFFC21A) else Color(0xFFFFFBF0).copy(alpha = 0.9f),
@@ -382,21 +477,29 @@ fun CreatePostScreen(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    // Language tag
+                    // Language tag with CircleFlag
                     Surface(
                         shape = RoundedCornerShape(16.dp),
                         color = Color(0xFFFFFBF0).copy(alpha = 0.9f)
                     ) {
-                        Text(
-                            text = selectedLanguage,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF1B1608),
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                             modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp)
-                        )
+                        ) {
+                            CircleFlag(
+                                countryCode = LanguageData.getFlagCodeForLanguage(selectedLanguage),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = selectedLanguage,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF1B1608)
+                            )
+                        }
                     }
 
-                    // Translation line tag
                     if (showTranslationLine) {
                         Surface(
                             shape = RoundedCornerShape(16.dp),
@@ -412,14 +515,13 @@ fun CreatePostScreen(
                         }
                     }
 
-                    // Topics tags
-                    selectedTopics.forEach { topic ->
+                    selectedTopicSlugs.forEach { slug ->
                         Surface(
                             shape = RoundedCornerShape(16.dp),
                             color = Color(0xFFFFFBF0).copy(alpha = 0.9f)
                         ) {
                             Text(
-                                text = "#$topic",
+                                text = MomentsRepository.resolveTopicChipText(slug),
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color(0xFF1B1608),
@@ -428,7 +530,6 @@ fun CreatePostScreen(
                         }
                     }
 
-                    // Location tag
                     if (selectedLocation.isNotBlank()) {
                         Surface(
                             shape = RoundedCornerShape(16.dp),
@@ -444,14 +545,13 @@ fun CreatePostScreen(
                         }
                     }
 
-                    // Media tag
-                    if (selectedPhotoUri != null) {
+                    if (hasMedia) {
                         Surface(
                             shape = RoundedCornerShape(16.dp),
                             color = Color(0xFFFFFBF0).copy(alpha = 0.9f)
                         ) {
                             Text(
-                                text = if (isVideoMedia) "🎬 Video added" else "📷 Photo added",
+                                text = if (isVideoMedia) "🎬 Video added" else "📷 ${selectedMediaUris.size} photo${if (selectedMediaUris.size > 1) "s" else ""}",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color(0xFF1B1608),
@@ -525,7 +625,6 @@ fun CreatePostScreen(
                             .fillMaxWidth()
                             .padding(horizontal = 20.dp, vertical = 10.dp)
                     ) {
-                        // Sheet Header
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -562,46 +661,103 @@ fun CreatePostScreen(
                             }
                         }
 
-                        // Panel Content
                         when (activeDockPanel) {
                             "media" -> {
                                 Text(
-                                    text = "A photo fills the whole screen, like in the feed. Your text sits on top of it.",
+                                    text = "Add up to ${limits.media} photos, or 1 video. Your text sits on top of it.",
                                     fontSize = 14.sp,
                                     color = Color(0xFF7A7260),
                                     modifier = Modifier.padding(bottom = 12.dp)
                                 )
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
                                     Surface(
                                         onClick = {
-                                            mediaPickerLauncher.launch(
-                                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                                            multiplePhotosLauncher.launch(
+                                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                                             )
                                         },
                                         color = Color(0xFFF6EBCB),
                                         shape = RoundedCornerShape(20.dp)
                                     ) {
                                         Text(
-                                            text = if (selectedPhotoUri != null) "📷 Change photo or video" else "📷 Choose photo or video",
-                                            fontSize = 15.sp,
+                                            text = "📷 Choose photos (max ${limits.media})",
+                                            fontSize = 14.sp,
                                             fontWeight = FontWeight.SemiBold,
                                             modifier = Modifier.padding(horizontal = 15.dp, vertical = 10.dp)
                                         )
                                     }
 
-                                    if (selectedPhotoUri != null) {
+                                    Surface(
+                                        onClick = {
+                                            videoPickerLauncher.launch(
+                                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
+                                            )
+                                        },
+                                        color = Color(0xFFF6EBCB),
+                                        shape = RoundedCornerShape(20.dp)
+                                    ) {
+                                        Text(
+                                            text = "🎬 Choose video (1)",
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.padding(horizontal = 15.dp, vertical = 10.dp)
+                                        )
+                                    }
+
+                                    if (hasMedia) {
                                         Surface(
-                                            onClick = { selectedPhotoUri = null },
+                                            onClick = {
+                                                selectedMediaUris.clear()
+                                                isVideoMedia = false
+                                            },
                                             color = Color(0xFFF6EBCB),
                                             shape = RoundedCornerShape(20.dp)
                                         ) {
                                             Text(
                                                 text = "Remove media",
-                                                fontSize = 15.sp,
+                                                fontSize = 14.sp,
                                                 fontWeight = FontWeight.SemiBold,
                                                 color = Color(0xFFEF4444),
                                                 modifier = Modifier.padding(horizontal = 15.dp, vertical = 10.dp)
                                             )
+                                        }
+                                    }
+                                }
+
+                                if (selectedMediaUris.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        itemsIndexed(selectedMediaUris) { idx, uri ->
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(72.dp)
+                                                    .clip(RoundedCornerShape(12.dp))
+                                            ) {
+                                                AsyncImage(
+                                                    model = uri,
+                                                    contentDescription = "Selected media item",
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier.fillMaxSize()
+                                                )
+                                                Box(
+                                                    modifier = Modifier
+                                                        .align(Alignment.TopEnd)
+                                                        .padding(4.dp)
+                                                        .size(20.dp)
+                                                        .clip(CircleShape)
+                                                        .background(Color.Black.copy(alpha = 0.65f))
+                                                        .clickable {
+                                                            selectedMediaUris.removeAt(idx)
+                                                            if (selectedMediaUris.isEmpty()) isVideoMedia = false
+                                                        },
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    CustomCloseIcon(iconSize = 9.dp, color = Color.White)
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -618,13 +774,13 @@ fun CreatePostScreen(
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                                     verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    bgPresets.forEachIndexed { index, colors ->
-                                        val isSelected = selectedBgIndex == index && selectedPhotoUri == null
+                                    bgPresets.forEachIndexed { index, preset ->
+                                        val isSelected = selectedBgIndex == index && !hasMedia
                                         Box(
                                             modifier = Modifier
                                                 .size(54.dp)
                                                 .clip(RoundedCornerShape(18.dp))
-                                                .background(Brush.linearGradient(colors))
+                                                .background(Brush.linearGradient(preset.colors))
                                                 .border(
                                                     width = if (isSelected) 3.dp else 1.dp,
                                                     color = if (isSelected) Color(0xFF1B1608) else Color.Black.copy(alpha = 0.1f),
@@ -632,7 +788,8 @@ fun CreatePostScreen(
                                                 )
                                                 .clickable {
                                                     selectedBgIndex = index
-                                                    selectedPhotoUri = null
+                                                    selectedMediaUris.clear()
+                                                    isVideoMedia = false
                                                 }
                                         )
                                     }
@@ -644,14 +801,30 @@ fun CreatePostScreen(
                                     text = "Which language is this post in?",
                                     fontSize = 14.sp,
                                     color = Color(0xFF7A7260),
-                                    modifier = Modifier.padding(bottom = 12.dp)
+                                    modifier = Modifier.padding(bottom = 10.dp)
+                                )
+                                OutlinedTextField(
+                                    value = languageSearchQuery,
+                                    onValueChange = { if (it.length <= limits.language) languageSearchQuery = it },
+                                    placeholder = { Text("Search language...", fontSize = 15.sp) },
+                                    singleLine = true,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(bottom = 10.dp),
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = Color(0xFFFFC21A),
+                                        unfocusedBorderColor = Color(0xFFE5DFC9),
+                                        focusedContainerColor = Color(0xFFFFFBF0),
+                                        unfocusedContainerColor = Color(0xFFFFFBF0)
+                                    )
                                 )
                                 FlowRow(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    availableLangs.forEach { lang ->
-                                        val isSelected = selectedLanguage == lang
+                                    filteredLangs.forEach { lang ->
+                                        val isSelected = selectedLanguage.equals(lang, ignoreCase = true)
                                         Surface(
                                             onClick = { selectedLanguage = lang },
                                             color = if (isSelected) Color(0xFFFFC21A).copy(alpha = 0.35f) else Color(0xFFF6EBCB),
@@ -662,18 +835,27 @@ fun CreatePostScreen(
                                                 shape = RoundedCornerShape(20.dp)
                                             )
                                         ) {
-                                            Text(
-                                                text = lang,
-                                                fontSize = 15.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                modifier = Modifier.padding(horizontal = 15.dp, vertical = 10.dp)
-                                            )
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp)
+                                            ) {
+                                                CircleFlag(
+                                                    countryCode = LanguageData.getFlagCodeForLanguage(lang),
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                                Text(
+                                                    text = lang,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                            }
                                         }
                                     }
                                 }
 
                                 HorizontalDivider(
-                                    color = Color(0xEAEFC4),
+                                    color = Color(0xFFE5DFC9),
                                     modifier = Modifier.padding(vertical = 16.dp)
                                 )
 
@@ -701,7 +883,7 @@ fun CreatePostScreen(
 
                             "topics" -> {
                                 Text(
-                                    text = "Pick up to 3 so the right people find it.",
+                                    text = "Pick up to ${limits.topics} so the right people find it.",
                                     fontSize = 14.sp,
                                     color = Color(0xFF7A7260),
                                     modifier = Modifier.padding(bottom = 12.dp)
@@ -710,14 +892,20 @@ fun CreatePostScreen(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    availableTopics.forEach { topic ->
-                                        val isSelected = selectedTopics.contains(topic)
+                                    optionsTopics.forEach { topic: MomentTopicDto ->
+                                        val isSelected = selectedTopicSlugs.contains(topic.slug)
                                         Surface(
                                             onClick = {
                                                 if (isSelected) {
-                                                    selectedTopics.remove(topic)
-                                                } else if (selectedTopics.size < 3) {
-                                                    selectedTopics.add(topic)
+                                                    selectedTopicSlugs.remove(topic.slug)
+                                                } else if (selectedTopicSlugs.size < limits.topics) {
+                                                    selectedTopicSlugs.add(topic.slug)
+                                                } else {
+                                                    Toast.makeText(
+                                                        context,
+                                                        "Choose up to ${limits.topics} topics",
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
                                                 }
                                             },
                                             color = if (isSelected) Color(0xFFFFC21A).copy(alpha = 0.35f) else Color(0xFFF6EBCB),
@@ -729,7 +917,7 @@ fun CreatePostScreen(
                                             )
                                         ) {
                                             Text(
-                                                text = "#$topic",
+                                                text = "#${topic.label.replace(" ", "")}",
                                                 fontSize = 15.sp,
                                                 fontWeight = FontWeight.SemiBold,
                                                 modifier = Modifier.padding(horizontal = 15.dp, vertical = 10.dp)
@@ -743,8 +931,10 @@ fun CreatePostScreen(
                                 OutlinedTextField(
                                     value = locationInputSearch,
                                     onValueChange = {
-                                        locationInputSearch = it
-                                        selectedLocation = it
+                                        if (it.length <= limits.location) {
+                                            locationInputSearch = it
+                                            selectedLocation = it
+                                        }
                                     },
                                     placeholder = { Text("Search a city", fontSize = 16.sp) },
                                     singleLine = true,
@@ -754,7 +944,7 @@ fun CreatePostScreen(
                                     shape = RoundedCornerShape(16.dp),
                                     colors = OutlinedTextFieldDefaults.colors(
                                         focusedBorderColor = Color(0xFFFFC21A),
-                                        unfocusedBorderColor = Color(0xEAEFC4),
+                                        unfocusedBorderColor = Color(0xFFE5DFC9),
                                         focusedContainerColor = Color(0xFFFFFBF0),
                                         unfocusedContainerColor = Color(0xFFFFFBF0)
                                     )
@@ -906,7 +1096,6 @@ private fun DockButton(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
-            // Icon rendering
             Canvas(modifier = Modifier.size(20.dp)) {
                 val w = size.width
                 val h = size.height

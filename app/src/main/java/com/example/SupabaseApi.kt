@@ -313,38 +313,10 @@ data class RevokeBadgeRequest(
 )
 
 @JsonClass(generateAdapter = true)
-data class SupabaseMoment(
-    val id: String,
-    val user_id: String? = null,
-    val content: String? = null,
-    val image_urls: List<String>? = null,
-    val likes_count: Int? = 0,
-    val comments_count: Int? = 0,
-    val created_at: String? = null
-)
-
-@JsonClass(generateAdapter = true)
 data class SupabaseFollower(
     val id: String? = null,
     val follower_id: String,
     val following_id: String,
-    val created_at: String? = null
-)
-
-@JsonClass(generateAdapter = true)
-data class SupabaseMomentLike(
-    val id: String? = null,
-    val moment_id: String,
-    val user_id: String,
-    val created_at: String? = null
-)
-
-@JsonClass(generateAdapter = true)
-data class SupabaseMomentComment(
-    val id: String? = null,
-    val moment_id: String,
-    val user_id: String,
-    val content: String,
     val created_at: String? = null
 )
 
@@ -359,7 +331,11 @@ data class CloudinarySignatureResponse(
 
 @JsonClass(generateAdapter = true)
 data class CloudinaryUploadResponse(
-    val secure_url: String? = null
+    val secure_url: String? = null,
+    val width: Int? = null,
+    val height: Int? = null,
+    val duration: Double? = null,
+    val resource_type: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -517,29 +493,6 @@ interface SupabaseApi {
         @QueryMap options: Map<String, String>
     ): Response<List<DiscoverableProfile>>
 
-    @GET("rest/v1/moments?select=id,user_id,content,image_urls,likes_count,comments_count,created_at")
-    suspend fun getMomentsByUserId(
-        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String,
-        @Query("user_id") userIdEq: String, // e.g. "eq.<uuid>"
-        @Query("order") order: String = "created_at.desc"
-    ): Response<List<SupabaseMoment>>
-
-    @GET("rest/v1/moments?select=id,user_id,content,image_urls,likes_count,comments_count,created_at")
-    suspend fun getMomentById(
-        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String,
-        @Query("id") idEq: String // e.g. "eq.<id>"
-    ): Response<List<SupabaseMoment>>
-
-    @GET("rest/v1/moments?select=id")
-    suspend fun countMomentsByUserId(
-        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String,
-        @Header("Prefer") prefer: String = "count=exact",
-        @Query("user_id") userIdEq: String // e.g. "eq.<uuid>"
-    ): Response<List<Map<String, Any>>>
-
     @GET("rest/v1/followers?select=*")
     suspend fun getFollowers(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
@@ -571,67 +524,6 @@ interface SupabaseApi {
         @Header("Prefer") prefer: String = "return=representation",
         @Body follower: SupabaseFollower
     ): Response<List<SupabaseFollower>>
-
-    @GET("rest/v1/moments?select=id,user_id,content,image_urls,likes_count,comments_count,created_at&order=created_at.desc")
-    suspend fun getAllMoments(
-        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String
-    ): Response<List<SupabaseMoment>>
-
-    @POST("rest/v1/moments")
-    suspend fun createMoment(
-        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String,
-        @Header("Prefer") prefer: String = "return=representation",
-        @Body moment: Map<String, @JvmSuppressWildcards Any?>
-    ): Response<List<SupabaseMoment>>
-
-    @GET("rest/v1/moment_likes?select=*")
-    suspend fun getMomentLikes(
-        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String,
-        @Query("moment_id") momentIdEq: String,
-        @Query("user_id") userIdEq: String
-    ): Response<List<SupabaseMomentLike>>
-
-    @POST("rest/v1/moment_likes")
-    suspend fun likeMoment(
-        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String,
-        @Header("Prefer") prefer: String = "return=representation",
-        @Body like: SupabaseMomentLike
-    ): Response<List<SupabaseMomentLike>>
-
-    @DELETE("rest/v1/moment_likes")
-    suspend fun unlikeMoment(
-        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String,
-        @Query("moment_id") momentIdEq: String,
-        @Query("user_id") userIdEq: String
-    ): Response<Unit>
-
-    @GET("rest/v1/moment_comments?select=*&order=created_at.asc")
-    suspend fun getMomentComments(
-        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String,
-        @Query("moment_id") momentIdEq: String
-    ): Response<List<SupabaseMomentComment>>
-
-    @POST("rest/v1/moment_comments")
-    suspend fun postMomentComment(
-        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String,
-        @Header("Prefer") prefer: String = "return=representation",
-        @Body comment: SupabaseMomentComment
-    ): Response<List<SupabaseMomentComment>>
-
-    @DELETE("rest/v1/moment_comments")
-    suspend fun deleteMomentComment(
-        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String,
-        @Query("id") idEq: String,
-        @Query("user_id") userIdEq: String
-    ): Response<Unit>
 
     @DELETE("rest/v1/followers")
     suspend fun unfollowUser(
@@ -1729,6 +1621,114 @@ interface SupabaseApi {
         @Header("Authorization") auth: String,
         @Body body: AiAssistRequest
     ): Response<AiAssistResponse>
+
+    // ----------------------------------------------------
+    // MOMENTS V2 RPCs
+    // ----------------------------------------------------
+    @POST("rest/v1/rpc/get_moment_options")
+    suspend fun getMomentOptions(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> = emptyMap()
+    ): Response<MomentOptionsResponse>
+
+    @POST("rest/v1/rpc/get_moments_feed")
+    suspend fun getMomentsFeed(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: GetMomentsFeedRequest
+    ): Response<List<MomentDto>>
+
+    @POST("rest/v1/rpc/get_user_moments")
+    suspend fun getUserMoments(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: GetUserMomentsRequest
+    ): Response<List<MomentDto>>
+
+    @POST("rest/v1/rpc/get_moment")
+    suspend fun getMomentRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: MomentIdRequest
+    ): Response<MomentDto>
+
+    @POST("rest/v1/rpc/create_moment")
+    suspend fun createMomentRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: CreateMomentRequest
+    ): Response<MomentDto>
+
+    @POST("rest/v1/rpc/delete_moment")
+    suspend fun deleteMomentRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: MomentIdRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/toggle_moment_like")
+    suspend fun toggleMomentLikeRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: MomentIdRequest
+    ): Response<ToggleLikeResponse>
+
+    @POST("rest/v1/rpc/get_moment_comments")
+    suspend fun getMomentCommentsRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: GetMomentCommentsRequest
+    ): Response<List<MomentCommentDto>>
+
+    @POST("rest/v1/rpc/get_comment_replies")
+    suspend fun getCommentRepliesRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: GetCommentRepliesRequest
+    ): Response<List<MomentCommentDto>>
+
+    @POST("rest/v1/rpc/add_moment_comment")
+    suspend fun addMomentCommentRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: AddMomentCommentRequest
+    ): Response<MomentCommentDto>
+
+    @POST("rest/v1/rpc/add_moment_correction")
+    suspend fun addMomentCorrectionRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: AddMomentCorrectionRequest
+    ): Response<MomentCommentDto>
+
+    @POST("rest/v1/rpc/toggle_comment_like")
+    suspend fun toggleCommentLikeRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: CommentIdRequest
+    ): Response<ToggleLikeResponse>
+
+    @POST("rest/v1/rpc/accept_correction")
+    suspend fun acceptCorrectionRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: CommentIdRequest
+    ): Response<AcceptCorrectionResponse>
+
+    @POST("rest/v1/rpc/delete_moment_comment")
+    suspend fun deleteMomentCommentRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: CommentIdRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/mark_moment_not_interested")
+    suspend fun markMomentNotInterestedRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: MomentIdRequest
+    ): Response<ResponseBody>
 }
 
 @JsonClass(generateAdapter = true)
@@ -2549,6 +2549,186 @@ data class DeletionStatusResponse(
     val status: String? = null,
     val scheduled_for: String? = null,
     val can_cancel: Boolean? = null
+)
+
+// ----------------------------------------------------
+// MOMENTS V2 RPC MODELS
+// ----------------------------------------------------
+@JsonClass(generateAdapter = true)
+data class MomentTopicDto(
+    val slug: String,
+    val label: String
+)
+
+@JsonClass(generateAdapter = true)
+data class MomentLimitsDto(
+    val title: Int = 60,
+    val content: Int = 500,
+    val translation: Int = 300,
+    val topics: Int = 3,
+    val media: Int = 10,
+    val location: Int = 80,
+    val comment: Int = 500,
+    val correction_text: Int = 300,
+    val language: Int = 40
+)
+
+@JsonClass(generateAdapter = true)
+data class MomentOptionsResponse(
+    val topics: List<MomentTopicDto> = emptyList(),
+    val limits: MomentLimitsDto = MomentLimitsDto()
+)
+
+@JsonClass(generateAdapter = true)
+data class MomentMediaDto(
+    val type: String = "image", // "image" | "video"
+    val url: String = "",
+    val thumb_url: String? = null,
+    val width: Int? = null,
+    val height: Int? = null,
+    val duration_sec: Int? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class MomentAuthorDto(
+    val id: String = "",
+    val username: String? = null,
+    val name: String? = null,
+    val avatar_url: String? = null,
+    val city: String? = null,
+    val country_code: String? = null,
+    val is_verified: Boolean = false,
+    val native_languages: List<String> = emptyList(),
+    val learning_languages: List<String> = emptyList(),
+    val is_native: Boolean = false,
+    val is_me: Boolean = false,
+    val following: Boolean = false
+)
+
+@JsonClass(generateAdapter = true)
+data class MomentDto(
+    val id: String = "",
+    val title: String? = null,
+    val content: String? = null,
+    val translation: String? = null,
+    val language: String = "English",
+    val bg_key: String? = null,
+    val media: List<MomentMediaDto> = emptyList(),
+    val topics: List<String> = emptyList(),
+    val location: String? = null,
+    val fix_requested: Boolean = true,
+    val status: String = "active",
+    val likes_count: Int = 0,
+    val comments_count: Int = 0,
+    val corrections_count: Int = 0,
+    val created_at: String? = null,
+    val liked_by_me: Boolean = false,
+    val author: MomentAuthorDto = MomentAuthorDto()
+)
+
+@JsonClass(generateAdapter = true)
+data class MomentCommentAuthorDto(
+    val id: String = "",
+    val username: String? = null,
+    val name: String? = null,
+    val avatar_url: String? = null,
+    val is_me: Boolean = false
+)
+
+@JsonClass(generateAdapter = true)
+data class MomentCommentDto(
+    val id: String = "",
+    val moment_id: String = "",
+    val parent_id: String? = null,
+    val kind: String = "comment", // "comment" | "correction"
+    val content: String? = null,
+    val original_text: String? = null,
+    val corrected_text: String? = null,
+    val by_native: Boolean = false,
+    val is_accepted: Boolean = false,
+    val likes_count: Int = 0,
+    val liked_by_me: Boolean = false,
+    val replies_count: Int = 0,
+    val created_at: String? = null,
+    val author: MomentCommentAuthorDto = MomentCommentAuthorDto()
+)
+
+@JsonClass(generateAdapter = true)
+data class ToggleLikeResponse(
+    val liked: Boolean = false,
+    val likes_count: Int = 0
+)
+
+@JsonClass(generateAdapter = true)
+data class AcceptCorrectionResponse(
+    val is_accepted: Boolean = false
+)
+
+@JsonClass(generateAdapter = true)
+data class GetMomentsFeedRequest(
+    val p_tab: String,
+    val p_limit: Int = 20,
+    val p_offset: Int = 0
+)
+
+@JsonClass(generateAdapter = true)
+data class GetUserMomentsRequest(
+    val p_user_id: String? = null,
+    val p_limit: Int = 20,
+    val p_offset: Int = 0
+)
+
+@JsonClass(generateAdapter = true)
+data class MomentIdRequest(
+    val p_moment_id: String
+)
+
+@JsonClass(generateAdapter = true)
+data class CommentIdRequest(
+    val p_comment_id: String
+)
+
+@JsonClass(generateAdapter = true)
+data class CreateMomentRequest(
+    val p_title: String? = null,
+    val p_content: String? = null,
+    val p_language: String,
+    val p_translation: String? = null,
+    val p_bg_key: String? = null,
+    val p_media: List<MomentMediaDto>? = null,
+    val p_topics: List<String>? = null,
+    val p_location: String? = null,
+    val p_fix_requested: Boolean = true
+)
+
+@JsonClass(generateAdapter = true)
+data class GetMomentCommentsRequest(
+    val p_moment_id: String,
+    val p_kind: String = "all",
+    val p_limit: Int = 30,
+    val p_offset: Int = 0
+)
+
+@JsonClass(generateAdapter = true)
+data class GetCommentRepliesRequest(
+    val p_comment_id: String,
+    val p_limit: Int = 30,
+    val p_offset: Int = 0
+)
+
+@JsonClass(generateAdapter = true)
+data class AddMomentCommentRequest(
+    val p_moment_id: String,
+    val p_content: String,
+    val p_parent_id: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class AddMomentCorrectionRequest(
+    val p_moment_id: String,
+    val p_original: String,
+    val p_corrected: String,
+    val p_explanation: String? = null
 )
 
 

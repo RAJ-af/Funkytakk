@@ -47,10 +47,11 @@ import com.example.ModerationManager
 import com.example.ReportMessageSnapshot
 import com.example.ReportSpeakerLogItem
 import com.example.RoomReportItem
+import com.example.MomentDto
 import com.example.SupabaseClient
-import com.example.SupabaseMoment
 import com.example.SupabaseSessionManager
 import com.example.UserProfile
+import com.example.repository.MomentsRepository
 import com.example.ui.components.*
 import com.example.ui.screens.home.models.DarkText
 import com.example.ui.screens.home.models.GraySubtitle
@@ -2107,31 +2108,16 @@ private fun ReportedMomentContentSection(
     onCopyText: (String, String) -> Unit
 ) {
     val context = LocalContext.current
-    var momentData by remember { mutableStateOf<SupabaseMoment?>(null) }
+    var momentData by remember { mutableStateOf<MomentDto?>(null) }
     var isFetchingMoment by remember { mutableStateOf(true) }
 
     LaunchedEffect(momentId) {
         if (momentId.isNotBlank()) {
             isFetchingMoment = true
-            withContext(Dispatchers.IO) {
-                try {
-                    val auth = SupabaseSessionManager.getAuthenticatedBearerToken(context) ?: BuildConfig.SUPABASE_ANON_KEY
-                    val res = SupabaseClient.api.getMomentById(
-                        auth = auth,
-                        idEq = "eq.$momentId"
-                    )
-                    if (res.isSuccessful && !res.body().isNullOrEmpty()) {
-                        withContext(Dispatchers.Main) {
-                            momentData = res.body()!!.first()
-                            isFetchingMoment = false
-                        }
-                    } else {
-                        withContext(Dispatchers.Main) { isFetchingMoment = false }
-                    }
-                } catch (_: Exception) {
-                    withContext(Dispatchers.Main) { isFetchingMoment = false }
-                }
+            MomentsRepository.getMoment(context, momentId).onSuccess { dto ->
+                momentData = dto
             }
+            isFetchingMoment = false
         } else {
             isFetchingMoment = false
         }
@@ -2206,17 +2192,21 @@ private fun ReportedMomentContentSection(
             } else if (momentData != null) {
                 val m = momentData!!
                 Column(modifier = Modifier.padding(12.dp)) {
+                    val displayText = listOfNotNull(
+                        m.title?.takeIf { it.isNotBlank() },
+                        m.content?.takeIf { it.isNotBlank() }
+                    ).joinToString("\n").ifBlank { "[No post text]" }
                     Text(
-                        text = m.content ?: "[No post text]",
+                        text = displayText,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
                         color = DarkText
                     )
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Image thumbnail if attached to the moment
-                    if (!m.image_urls.isNullOrEmpty()) {
-                        val firstImg = m.image_urls.first()
+                    val firstMedia = m.media.firstOrNull()
+                    val firstImg = firstMedia?.thumb_url?.takeIf { it.isNotBlank() } ?: firstMedia?.url
+                    if (!firstImg.isNullOrBlank()) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -2243,14 +2233,14 @@ private fun ReportedMomentContentSection(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             SoftHeartIcon(size = 14.dp, isLiked = true)
                             Spacer(modifier = Modifier.width(3.dp))
-                            Text("${m.likes_count ?: 0} likes", fontSize = 11.sp, color = Color(0xFF64748B))
+                            Text("${m.likes_count} likes", fontSize = 11.sp, color = Color(0xFF64748B))
                             Spacer(modifier = Modifier.width(10.dp))
                             SoftChatBubbleIcon(size = 14.dp, color = Color(0xFF64748B))
                             Spacer(modifier = Modifier.width(3.dp))
-                            Text("${m.comments_count ?: 0} comments", fontSize = 11.sp, color = Color(0xFF64748B))
+                            Text("${m.comments_count} comments", fontSize = 11.sp, color = Color(0xFF64748B))
                         }
                         Text(
-                            text = "Author: ${(m.user_id ?: reportedUserId).take(8)}...",
+                            text = "Author: ${(m.author.id.ifBlank { reportedUserId }).take(8)}...",
                             fontSize = 10.5.sp,
                             color = Color(0xFF94A3B8)
                         )

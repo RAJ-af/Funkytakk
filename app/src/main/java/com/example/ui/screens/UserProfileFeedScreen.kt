@@ -52,11 +52,12 @@ import com.example.gifting.GiftManager
 import com.example.gifting.SendGiftBottomSheet
 import com.example.moderation.ReportUserDialog
 import com.example.BuildConfig
+import com.example.MomentDto
 import com.example.SupabaseClient
 import com.example.SupabaseFollower
-import com.example.SupabaseMoment
 import com.example.SupabaseSessionManager
 import com.example.repository.EncryptedChatRepository
+import com.example.repository.MomentsRepository
 import com.example.ui.components.CircleFlag
 import com.example.ui.components.ProfileBadgesRow
 import com.example.ui.components.DynamicHobbyChip
@@ -65,9 +66,7 @@ import com.example.ui.components.LanguageResolver
 import com.example.ui.components.MultiLanguageExchangeCard
 import com.example.ui.screens.home.tabs.resolveCountryCode
 import com.example.ui.screens.post.DetailedPost
-import com.example.ui.screens.post.PostComment
 import com.example.ui.screens.post.PostDetailScreen
-import com.example.ui.screens.post.createDefaultSamplePost
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -91,11 +90,57 @@ data class FeedPost(
     val isVideo: Boolean = false,
     val isCarousel: Boolean = false,
     var isLikedByUser: Boolean = false,
-    var isBookmarkedByUser: Boolean = false
+    var isBookmarkedByUser: Boolean = false,
+    val status: String = "active",
+    val title: String? = null,
+    val bgKey: String? = null,
+    val isMe: Boolean = false,
+    val momentDto: MomentDto? = null
 )
 
 enum class PostType {
     IMAGE, TEXT
+}
+
+fun MomentDto.toFeedPost(): FeedPost {
+    val firstMedia = media.firstOrNull()
+    val hasVideo = media.any { it.type == "video" }
+    val visualUrls = media.mapNotNull { m ->
+        val resolved = if (m.type == "video") (m.thumb_url ?: m.url) else m.url
+        resolved.takeIf { it.isNotBlank() }
+    }
+    val firstVisual = if (firstMedia?.type == "video") {
+        (firstMedia.thumb_url ?: firstMedia.url).takeIf { it.isNotBlank() }
+    } else {
+        firstMedia?.url?.takeIf { it.isNotBlank() }
+    }
+    val preset = MomentsRepository.resolveBgPreset(bg_key)
+    val textSummary = listOfNotNull(
+        title?.takeIf { it.isNotBlank() },
+        content?.takeIf { it.isNotBlank() }
+    ).joinToString("\n")
+
+    return FeedPost(
+        id = id,
+        type = if (firstVisual != null) PostType.IMAGE else PostType.TEXT,
+        imageUrl = firstVisual,
+        allImages = visualUrls,
+        textContent = if (firstVisual == null) textSummary else null,
+        textBgColor = preset.colors.firstOrNull() ?: Color(0xFFFFF1F2),
+        textTextColor = if (preset.isDarkText) Color(0xFF0F172A) else Color.White,
+        caption = content.orEmpty(),
+        likesCount = likes_count,
+        commentsCount = comments_count + corrections_count,
+        timestamp = formatMomentTimestamp(created_at),
+        isVideo = hasVideo,
+        isCarousel = media.size > 1,
+        isLikedByUser = liked_by_me,
+        status = status,
+        title = title,
+        bgKey = bg_key,
+        isMe = author.is_me,
+        momentDto = this
+    )
 }
 
 // -----------------------------------------------------------------------------
@@ -272,22 +317,9 @@ fun UserProfileFeedScreen(
             if (!savedCover.isNullOrBlank()) currentCoverUrl = savedCover
         }
 
-        // B. Fetch stats counts (Posts / Followers / Following)
+        // B. Fetch follower/following stats counts
         try {
             withContext(Dispatchers.IO) {
-                // 1. Posts count
-                val postCountResp = SupabaseClient.api.countMomentsByUserId(
-                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
-                    auth = token,
-                    userIdEq = "eq.$userId"
-                )
-                if (postCountResp.isSuccessful) {
-                    val cr = postCountResp.headers()["Content-Range"]
-                    postsCount = cr?.substringAfter("/")?.toIntOrNull()
-                        ?: postCountResp.body()?.size ?: 0
-                }
-
-                // 2. Followers count
                 val followerCountResp = SupabaseClient.api.countFollowers(
                     apiKey = BuildConfig.SUPABASE_ANON_KEY,
                     auth = token,
@@ -299,7 +331,6 @@ fun UserProfileFeedScreen(
                         ?: followerCountResp.body()?.size ?: 0
                 }
 
-                // 3. Following count
                 val followingCountResp = SupabaseClient.api.countFollowing(
                     apiKey = BuildConfig.SUPABASE_ANON_KEY,
                     auth = token,
@@ -334,40 +365,19 @@ fun UserProfileFeedScreen(
             }
         }
 
-        // D. Fetch user's moments (Feed tab)
+        // D. Fetch user's moments via Moments v2 RPC
         try {
             isMomentsLoading = true
-            val momentsResp = withContext(Dispatchers.IO) {
-                SupabaseClient.api.getMomentsByUserId(
-                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
-                    auth = token,
-                    userIdEq = "eq.$userId"
-                )
-            }
-            if (momentsResp.isSuccessful) {
-                val moments = momentsResp.body().orEmpty()
-                momentsList.clear()
-                moments.forEach { m ->
-                    val firstImg = m.image_urls?.firstOrNull()
-                    momentsList.add(
-                        FeedPost(
-                            id = m.id,
-                            type = if (!firstImg.isNullOrBlank()) PostType.IMAGE else PostType.TEXT,
-                            imageUrl = firstImg,
-                            allImages = m.image_urls ?: emptyList(),
-                            textContent = if (firstImg.isNullOrBlank()) m.content else null,
-                            caption = m.content.orEmpty(),
-                            likesCount = m.likes_count ?: 0,
-                            commentsCount = m.comments_count ?: 0,
-                            timestamp = formatMomentTimestamp(m.created_at),
-                            isCarousel = (m.image_urls?.size ?: 0) > 1
-                        )
-                    )
-                }
-                if (postsCount == 0 && momentsList.isNotEmpty()) {
+            val targetUid = if (isSelfProfile) null else userId
+            MomentsRepository.getUserMoments(context, userId = targetUid, limit = 20, offset = 0)
+                .onSuccess { list ->
+                    momentsList.clear()
+                    momentsList.addAll(list.map { it.toFeedPost() })
                     postsCount = momentsList.size
                 }
-            }
+                .onFailure { err ->
+                    Log.e("UserProfileFeed", "Error fetching user moments: ${err.message}")
+                }
         } catch (e: Exception) {
             Log.e("UserProfileFeed", "Error fetching user moments", e)
         } finally {
@@ -1463,22 +1473,47 @@ fun UserProfileFeedScreen(
                                                 }
                                             }
                                         } else {
+                                            val preset = MomentsRepository.resolveBgPreset(post.bgKey)
                                             Box(
                                                 modifier = Modifier
                                                     .fillMaxSize()
-                                                    .background(post.textBgColor)
+                                                    .background(
+                                                        if (!post.bgKey.isNullOrBlank()) Brush.linearGradient(preset.colors)
+                                                        else Brush.linearGradient(listOf(post.textBgColor, post.textBgColor))
+                                                    )
                                                     .padding(8.dp),
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 Text(
                                                     text = post.textContent.orEmpty(),
-                                                    color = post.textTextColor,
+                                                    color = if (!post.bgKey.isNullOrBlank()) {
+                                                        if (preset.isDarkText) Color(0xFF0F172A) else Color.White
+                                                    } else post.textTextColor,
                                                     fontSize = 11.sp,
                                                     fontWeight = FontWeight.ExtraBold,
                                                     textAlign = TextAlign.Center,
                                                     maxLines = 5,
                                                     overflow = TextOverflow.Ellipsis,
                                                     lineHeight = 15.sp
+                                                )
+                                            }
+                                        }
+
+                                        if (isSelfProfile && post.status == "hidden") {
+                                            Box(
+                                                modifier = Modifier
+                                                    .align(Alignment.BottomStart)
+                                                    .padding(4.dp)
+                                                    .background(Color(0xCC0F172A), RoundedCornerShape(6.dp))
+                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(
+                                                    text = "Hidden by moderators",
+                                                    color = Color(0xFFFDE047),
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
                                                 )
                                             }
                                         }
@@ -1495,37 +1530,57 @@ fun UserProfileFeedScreen(
 
         // Full Screen Post Detail View when a feed post is clicked
         activeFullPost?.let { post ->
-            val detailedImages = if (post.allImages.isNotEmpty()) post.allImages else if (post.imageUrl != null) listOf(post.imageUrl) else emptyList()
+            val detailedImages = if (post.allImages.isNotEmpty()) post.allImages
+            else if (!post.imageUrl.isNullOrBlank()) listOf(post.imageUrl)
+            else emptyList()
+
             val detailedPost = DetailedPost(
                 id = post.id,
+                authorId = post.momentDto?.author?.id?.takeIf { it.isNotBlank() } ?: userId,
                 authorName = currentProfileName,
                 authorUsername = currentUsername,
                 authorAvatarUrl = currentAvatarUrl,
-                isAuthorVerified = false,
-                location = currentCountry.ifBlank { "Global" },
+                isAuthorVerified = isVerified,
+                location = post.momentDto?.location?.takeIf { it.isNotBlank() } ?: currentCountry,
                 timeAgo = post.timestamp,
-                images = if (detailedImages.isNotEmpty()) detailedImages else listOf(
-                    "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=1000"
-                ),
+                images = detailedImages,
                 caption = post.caption,
                 likesCount = post.likesCount,
                 isLiked = post.isLikedByUser,
                 isBookmarked = post.isBookmarkedByUser,
-                initialComments = listOf(
-                    PostComment("c1", "Minji", "minji", "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=300", "3 days ago", "So pretty!! 😍", 12, true),
-                    PostComment("c2", "Ken", "ken_02", "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300", "3 days ago", "Amazing photo! ✨", 8, false)
-                )
+                initialComments = emptyList(),
+                title = post.title,
+                bgKey = post.bgKey,
+                status = post.status,
+                isMe = post.isMe || isSelfProfile,
+                translation = post.momentDto?.translation,
+                language = post.momentDto?.language.orEmpty(),
+                topics = post.momentDto?.topics.orEmpty(),
+                media = post.momentDto?.media.orEmpty(),
+                commentsCount = post.momentDto?.comments_count ?: post.commentsCount,
+                correctionsCount = post.momentDto?.corrections_count ?: 0
             )
 
             PostDetailScreen(
                 post = detailedPost,
-                currentLoggedInAvatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300",
+                currentLoggedInAvatar = if (isSelfProfile) currentAvatarUrl else "",
                 onBack = { activeFullPost = null },
                 onLikePostToggle = { isLiked ->
                     post.isLikedByUser = isLiked
                 },
                 onBookmarkPostToggle = { isBookmarked ->
                     post.isBookmarkedByUser = isBookmarked
+                },
+                onPostUpdated = { updatedDto ->
+                    val idx = momentsList.indexOfFirst { it.id == updatedDto.id }
+                    if (idx >= 0) {
+                        momentsList[idx] = updatedDto.toFeedPost()
+                    }
+                },
+                onPostDeleted = { deletedId ->
+                    momentsList.removeAll { it.id == deletedId }
+                    postsCount = momentsList.size
+                    activeFullPost = null
                 }
             )
         }
@@ -1878,98 +1933,50 @@ fun FullscreenPostView(
     post: FeedPost,
     profileName: String,
     avatarUrl: String,
+    currentLoggedInAvatar: String = "",
     onBack: () -> Unit,
     onLikeToggle: () -> Unit,
-    onBookmarkToggle: () -> Unit
+    onBookmarkToggle: () -> Unit,
+    onPostUpdated: (MomentDto) -> Unit = {},
+    onPostDeleted: (String) -> Unit = {}
 ) {
-    val detailedPost = remember(post.id) {
-        val sampleImages = if (post.imageUrl != null) {
-            listOf(
-                post.imageUrl,
-                "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=1000",
-                "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=1000",
-                "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1000",
-                "https://images.unsplash.com/photo-1519681393784-d120267933ba?w=1000"
-            )
-        } else {
-            listOf(
-                "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=1000",
-                "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=1000",
-                "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=1000"
-            )
-        }
+    val detailedPost = remember(post.id, post.momentDto) {
+        val dto = post.momentDto
+        val realImages = if (post.allImages.isNotEmpty()) post.allImages
+        else if (!post.imageUrl.isNullOrBlank()) listOf(post.imageUrl)
+        else emptyList()
 
         DetailedPost(
             id = post.id,
-            authorName = profileName.ifBlank { "pikaa" },
-            authorUsername = "${profileName.lowercase().replace(" ", "")}_07",
-            authorAvatarUrl = avatarUrl,
-            isAuthorVerified = true,
-            location = "Seoul, South Korea",
+            authorId = dto?.author?.id.orEmpty(),
+            authorName = dto?.author?.name?.takeIf { it.isNotBlank() } ?: profileName.ifBlank { "Member" },
+            authorUsername = dto?.author?.username?.takeIf { it.isNotBlank() } ?: profileName.lowercase().replace(" ", ""),
+            authorAvatarUrl = dto?.author?.avatar_url?.takeIf { it.isNotBlank() } ?: avatarUrl,
+            isAuthorVerified = dto?.author?.is_verified ?: false,
+            location = dto?.location?.takeIf { it.isNotBlank() } ?: dto?.author?.city.orEmpty(),
             timeAgo = post.timestamp,
-            images = sampleImages,
-            caption = post.caption.ifBlank { "Beautiful sunset today! Nature always gives me so much peace. 🌅 💛" },
+            images = realImages,
+            caption = post.caption,
             likesCount = post.likesCount,
             isLiked = post.isLikedByUser,
             isBookmarked = post.isBookmarkedByUser,
-            initialComments = listOf(
-                PostComment(
-                    id = "c1",
-                    authorName = "Minji",
-                    username = "minji",
-                    avatarUrl = "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=300",
-                    timeAgo = "3 days ago",
-                    text = "So pretty!! 😍 Where is this place?",
-                    likesCount = 12,
-                    isLiked = true
-                ),
-                PostComment(
-                    id = "c2",
-                    authorName = "Ken",
-                    username = "ken_02",
-                    avatarUrl = "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300",
-                    timeAgo = "3 days ago",
-                    text = "The sky looks amazing! ✨",
-                    likesCount = 8,
-                    isLiked = false
-                ),
-                PostComment(
-                    id = "c3",
-                    authorName = "Sora",
-                    username = "sora_jp",
-                    avatarUrl = "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=300",
-                    timeAgo = "2 days ago",
-                    text = "I want to visit Korea someday! 🇰🇷 💛",
-                    likesCount = 5,
-                    isLiked = false
-                ),
-                PostComment(
-                    id = "c4",
-                    authorName = "Alex",
-                    username = "alex_99",
-                    avatarUrl = "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=300",
-                    timeAgo = "1 day ago",
-                    text = "Incredible photography angle! What camera did you use?",
-                    likesCount = 4,
-                    isLiked = false
-                ),
-                PostComment(
-                    id = "c5",
-                    authorName = "Yuki",
-                    username = "yuki_nihon",
-                    avatarUrl = "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=300",
-                    timeAgo = "18 hours ago",
-                    text = "Golden hour in Seoul is truly magical 🌇",
-                    likesCount = 3,
-                    isLiked = false
-                )
-            )
+            initialComments = emptyList(),
+            title = post.title ?: dto?.title,
+            bgKey = post.bgKey ?: dto?.bg_key,
+            status = post.status,
+            isMe = post.isMe || dto?.author?.is_me ?: true,
+            translation = dto?.translation,
+            language = dto?.language.orEmpty(),
+            topics = dto?.topics.orEmpty(),
+            media = dto?.media.orEmpty(),
+            commentsCount = dto?.comments_count ?: post.commentsCount,
+            correctionsCount = dto?.corrections_count ?: 0
         )
     }
 
     PostDetailScreen(
         post = detailedPost,
-        currentLoggedInAvatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300",
+        currentLoggedInAvatar = currentLoggedInAvatar.ifBlank { avatarUrl },
         onBack = onBack,
         onLikePostToggle = { isLiked ->
             post.isLikedByUser = isLiked
@@ -1978,7 +1985,9 @@ fun FullscreenPostView(
         onBookmarkPostToggle = { isBookmarked ->
             post.isBookmarkedByUser = isBookmarked
             onBookmarkToggle()
-        }
+        },
+        onPostUpdated = onPostUpdated,
+        onPostDeleted = onPostDeleted
     )
 }
 

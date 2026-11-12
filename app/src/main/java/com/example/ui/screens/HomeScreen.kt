@@ -346,45 +346,6 @@ fun HomeScreen(
         }
     }
 
-    // Social moments feed data
-    val momentsPosts = remember {
-        mutableStateListOf(
-            MomentPost(
-                id = "post_1",
-                author = "Sarah Jenkins",
-                username = "sarah_travels",
-                avatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
-                timeAgo = "2 hours ago",
-                content = "Just finished a wonderful Korean practice room on FunkyTalk! Loving the friendly nature of speakers here. Any suggestions to level up speaking quickly?",
-                imageUrl = "https://images.unsplash.com/photo-1484589065579-248adc015074?w=600",
-                initialLikes = 42,
-                commentsCount = 11
-            ),
-            MomentPost(
-                id = "post_2",
-                author = "Park Min-jun",
-                username = "minjun_seoul",
-                avatar = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150",
-                timeAgo = "4 hours ago",
-                content = "Beautiful sunset here in Seoul today! Hope everyone is having a fabulous language exchange. Ready for another English speech session later?",
-                imageUrl = "https://images.unsplash.com/photo-1538481199705-c710c4e965fc?w=600",
-                initialLikes = 89,
-                commentsCount = 24
-            ),
-            MomentPost(
-                id = "post_3",
-                author = "Kenji Sato",
-                username = "kenji_tokyo",
-                avatar = "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150",
-                timeAgo = "1 day ago",
-                content = "Enjoyed reading English materials together with friends in a listening room. Small steps everyday make the difference! Keep going guys!",
-                imageUrl = "https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?w=600",
-                initialLikes = 31,
-                commentsCount = 6
-            )
-        )
-    }
-
     // Real conversations list - user-initiated contacts from Discover or Empty
     val dynamicInitiatedChats = remember { mutableStateListOf<DirectChat>() }
     var activeGroupChat by remember { mutableStateOf<com.example.db.LocalGroupConversation?>(null) }
@@ -639,13 +600,7 @@ fun HomeScreen(
                     }
                     "moments" -> {
                         MomentsTabContent(
-                            momentsPosts = momentsPosts,
-                            onToggleLike = { post ->
-                                val index = momentsPosts.indexOf(post)
-                                if (index != -1) {
-                                    momentsPosts[index] = post.copy(isLiked = !post.isLiked)
-                                }
-                            }
+                            currentUserNativeLanguage = currentUserProfile.nativeLanguage.orEmpty()
                         )
                     }
                     "chats" -> {

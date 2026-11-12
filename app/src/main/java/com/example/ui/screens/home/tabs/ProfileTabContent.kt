@@ -31,6 +31,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -56,6 +57,7 @@ import com.example.UserProfile
 import com.example.gifting.AnimatedGiftMedia
 import com.example.gifting.CuteCoinIcon
 import com.example.gifting.GiftManager
+import com.example.repository.MomentsRepository
 import com.example.ui.components.CircleFlag
 import com.example.ui.components.DynamicHobbyChip
 import com.example.ui.components.LanguageItem
@@ -63,6 +65,7 @@ import com.example.ui.components.LanguageResolver
 import com.example.ui.components.MultiLanguageExchangeCard
 import com.example.ui.components.PresetAvatarList
 import com.example.ui.components.ProfileBadgesRow
+import com.example.ui.screens.toFeedPost
 import com.example.ui.components.SoftBlockIcon
 import com.example.ui.components.Soft3DCloudIcon
 import com.example.ui.components.resolveAvatarModel
@@ -308,17 +311,6 @@ fun ProfileTabContent(
 
         try {
             withContext(kotlinx.coroutines.Dispatchers.IO) {
-                val postCountResp = com.example.SupabaseClient.api.countMomentsByUserId(
-                    apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
-                    auth = token,
-                    userIdEq = "eq.$userId"
-                )
-                if (postCountResp.isSuccessful) {
-                    val cr = postCountResp.headers()["Content-Range"]
-                    postsCount = cr?.substringAfter("/")?.toIntOrNull()
-                        ?: postCountResp.body()?.size ?: 0
-                }
-
                 val followerCountResp = com.example.SupabaseClient.api.countFollowers(
                     apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
                     auth = token,
@@ -349,34 +341,15 @@ fun ProfileTabContent(
 
         try {
             isMomentsLoading = true
-            val momentsResp = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                com.example.SupabaseClient.api.getMomentsByUserId(
-                    apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
-                    auth = token,
-                    userIdEq = "eq.$userId"
-                )
-            }
-            if (momentsResp.isSuccessful) {
-                val moments = momentsResp.body().orEmpty()
-                momentsList.clear()
-                moments.forEach { m ->
-                    val firstImg = m.image_urls?.firstOrNull()
-                    momentsList.add(
-                        FeedPost(
-                            id = m.id,
-                            type = if (!firstImg.isNullOrBlank()) PostType.IMAGE else PostType.TEXT,
-                            imageUrl = firstImg,
-                            allImages = m.image_urls ?: emptyList(),
-                            textContent = if (firstImg.isNullOrBlank()) m.content else null,
-                            caption = m.content.orEmpty(),
-                            likesCount = m.likes_count ?: 0,
-                            commentsCount = m.comments_count ?: 0,
-                            timestamp = formatMomentTimestamp(m.created_at)
-                        )
-                    )
+            MomentsRepository.getUserMoments(context, userId = null, limit = 20, offset = 0)
+                .onSuccess { moments ->
+                    momentsList.clear()
+                    momentsList.addAll(moments.map { it.toFeedPost() })
+                    postsCount = momentsList.size
                 }
-                postsCount = momentsList.size
-            }
+                .onFailure { err ->
+                    android.util.Log.e("ProfileTabContent", "Error loading moments: ${err.message}")
+                }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -1329,22 +1302,47 @@ fun ProfileTabContent(
                                             }
                                         }
                                     } else {
+                                        val preset = MomentsRepository.resolveBgPreset(post.bgKey)
                                         Box(
                                             modifier = Modifier
                                                 .fillMaxSize()
-                                                .background(post.textBgColor)
+                                                .background(
+                                                    if (!post.bgKey.isNullOrBlank()) Brush.linearGradient(preset.colors)
+                                                    else Brush.linearGradient(listOf(post.textBgColor, post.textBgColor))
+                                                )
                                                 .padding(8.dp),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Text(
                                                 text = post.textContent.orEmpty(),
-                                                color = post.textTextColor,
+                                                color = if (!post.bgKey.isNullOrBlank()) {
+                                                    if (preset.isDarkText) Color(0xFF0F172A) else Color.White
+                                                } else post.textTextColor,
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.ExtraBold,
                                                 textAlign = TextAlign.Center,
                                                 maxLines = 5,
                                                 overflow = TextOverflow.Ellipsis,
                                                 lineHeight = 15.sp
+                                            )
+                                        }
+                                    }
+
+                                    if (post.status == "hidden") {
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.BottomStart)
+                                                .padding(4.dp)
+                                                .background(Color(0xCC0F172A), RoundedCornerShape(6.dp))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = "Hidden by moderators",
+                                                color = Color(0xFFFDE047),
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
                                             )
                                         }
                                     }
@@ -1364,12 +1362,24 @@ fun ProfileTabContent(
                 post = post,
                 profileName = profileDisplayName,
                 avatarUrl = profileAvatar,
+                currentLoggedInAvatar = profileAvatar,
                 onBack = { activeFullPost = null },
                 onLikeToggle = {
                     post.isLikedByUser = !post.isLikedByUser
                 },
                 onBookmarkToggle = {
                     post.isBookmarkedByUser = !post.isBookmarkedByUser
+                },
+                onPostUpdated = { updatedDto ->
+                    val idx = momentsList.indexOfFirst { it.id == updatedDto.id }
+                    if (idx >= 0) {
+                        momentsList[idx] = updatedDto.toFeedPost()
+                    }
+                },
+                onPostDeleted = { deletedId ->
+                    momentsList.removeAll { it.id == deletedId }
+                    postsCount = momentsList.size
+                    activeFullPost = null
                 }
             )
         }
