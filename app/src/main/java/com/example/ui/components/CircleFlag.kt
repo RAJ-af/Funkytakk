@@ -1,13 +1,9 @@
 package com.example.ui.components
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -37,49 +33,36 @@ fun flagEmojiToCountryCode(emoji: String): String {
     }
 }
 
-fun isProgrammingCode(code: String): Boolean {
+fun isProgrammingCode(code: String, allowShortCodes: Boolean = false): Boolean {
     val clean = code.lowercase().trim()
-    return clean.startsWith("http") || clean.startsWith("prog_") || clean in setOf(
-        "python", "javascript", "typescript", "kotlin", "java",
-        "cpp", "cplusplus", "csharp", "c", "rust", "golang", "go",
-        "swift", "dart", "php", "ruby", "sql", "postgresql", "html", "css", "html5", "r", "scala", "shell", "bash"
+    if (clean.startsWith("http://") || clean.startsWith("https://") || clean.startsWith("prog_")) return true
+    val fullNames = setOf(
+        "python", "javascript", "typescript", "kotlin",
+        "cpp", "cplusplus", "c++", "csharp", "c#", "rust", "golang",
+        "swift", "dart", "flutter", "php", "ruby", "sql", "postgresql",
+        "html", "css", "html5", "css3", "html/css", "html / css", "scala", "shell", "bash", "shell/bash", "shell / bash",
+        "r programming", "go (golang)"
     )
+    if (clean in fullNames) return true
+    if (allowShortCodes) {
+        return clean in setOf("c", "r", "go", "py", "js", "ts", "kt", "rb", "rs", "cs", "sh", "java")
+    }
+    return false
 }
 
-fun getProgrammingIconUrl(languageOrCode: String): String {
+fun getProgrammingIconUrl(languageOrCode: String, allowShortCodes: Boolean = false): String {
     val clean = languageOrCode.trim().lowercase()
     if (clean.startsWith("http://") || clean.startsWith("https://")) return languageOrCode
-    val slug = when {
-        clean.contains("python") || clean == "py" || clean == "prog_python" -> "python"
-        clean.contains("typescript") || clean == "ts" || clean == "prog_typescript" -> "typescript"
-        clean.contains("javascript") || clean == "js" || clean == "prog_javascript" -> "javascript"
-        clean.contains("kotlin") || clean == "kt" || clean == "prog_kotlin" -> "kotlin"
-        clean.contains("java") && !clean.contains("script") || clean == "prog_java" -> "java"
-        clean.contains("c++") || clean.contains("cpp") || clean.contains("cplusplus") || clean == "prog_cpp" -> "cplusplus"
-        clean.contains("c#") || clean.contains("csharp") || clean == "cs" || clean == "prog_csharp" -> "csharp"
-        clean == "c" || clean == "prog_c" -> "c"
-        clean.contains("rust") || clean == "rs" || clean == "prog_rust" -> "rust"
-        clean.contains("go") || clean == "golang" || clean == "prog_go" -> "go"
-        clean.contains("swift") || clean == "prog_swift" -> "swift"
-        clean.contains("dart") || clean.contains("flutter") || clean == "prog_dart" -> "dart"
-        clean.contains("php") || clean == "prog_php" -> "php"
-        clean.contains("ruby") || clean == "rb" || clean == "prog_ruby" -> "ruby"
-        clean.contains("sql") || clean.contains("postgres") || clean.contains("mysql") || clean == "prog_sql" -> "postgresql"
-        clean.contains("html") || clean.contains("css") || clean == "prog_html" || clean == "prog_css" -> "html5"
-        clean == "r" || clean == "prog_r" -> "r"
-        clean.contains("scala") || clean == "prog_scala" -> "scala"
-        clean.contains("shell") || clean.contains("bash") || clean == "sh" || clean == "prog_shell" -> "bash"
-        else -> null
-    }
-    return if (slug != null) {
+    val spec = ProgrammingLanguagesRegistry.findSpec(clean, allowShortCodes = allowShortCodes)
+    return spec?.deviconSlug?.let { slug ->
         "https://cdn.jsdelivr.net/gh/devicons/devicon/icons/$slug/$slug-original.svg"
-    } else ""
+    } ?: ""
 }
 
 fun getFlagOrDeviconUrl(code: String): String {
     val clean = code.lowercase().trim()
     if (clean.startsWith("http://") || clean.startsWith("https://")) return code
-    val devicon = getProgrammingIconUrl(clean)
+    val devicon = getProgrammingIconUrl(clean, allowShortCodes = false)
     if (devicon.isNotBlank()) return devicon
     return "https://hatscripts.github.io/circle-flags/flags/${clean}.svg"
 }
@@ -97,23 +80,26 @@ fun getStableColorForName(name: String): Color {
 fun countryNameToCode(country: String): String {
     val clean = country.trim().lowercase()
     if (clean.startsWith("http://") || clean.startsWith("https://")) return clean
-    if (clean.length == 2) return clean
+    if (clean.length == 2 && clean.all { it.isLetter() }) return clean
     return when (clean) {
         "india", "hindi" -> "in"
         "korea", "south korea", "republic of korea", "south_korea", "korean" -> "kr"
         "japan", "japanese" -> "jp"
         "malaysia", "malay" -> "my"
         "albania", "albanian" -> "al"
-        "united arab emirates", "uae", "arabic" -> "sa"
+        "united arab emirates", "uae", "arabic" -> "ae"
         "united states", "usa", "us", "united states of america", "english" -> "us"
         "united kingdom", "uk", "great britain" -> "gb"
         "canada" -> "ca"
+        "cameroon" -> "cm"
+        "central african republic" -> "cf"
+        "chile" -> "cl"
         "australia" -> "au"
         "germany", "german" -> "de"
         "france", "french" -> "fr"
         "spain", "spanish" -> "es"
         "italy", "italian" -> "it"
-        "china", "chinese" -> "cn"
+        "china", "chinese", "mandarin" -> "cn"
         "brazil", "portuguese" -> "br"
         "russia", "russian" -> "ru"
         "saudi arabia" -> "sa"
@@ -136,18 +122,21 @@ fun countryNameToCode(country: String): String {
         "cornish" -> "gb"
         "corsican" -> "fr"
         "cree" -> "ca"
-        "croatian" -> "hr"
-        "czech" -> "cz"
-        "danish" -> "dk"
+        "croatia", "croatian" -> "hr"
+        "czech", "czechia", "czech republic" -> "cz"
+        "denmark", "danish" -> "dk"
         "divehi" -> "mv"
-        "finnish" -> "fi"
-        "greek" -> "gr"
-        "hebrew" -> "il"
-        "hungarian" -> "hu"
-        "norwegian" -> "no"
-        "romanian" -> "ro"
-        "slovak" -> "sk"
-        else -> "us"
+        "finland", "finnish" -> "fi"
+        "greece", "greek" -> "gr"
+        "israel", "hebrew" -> "il"
+        "hungary", "hungarian" -> "hu"
+        "norway", "norwegian" -> "no"
+        "romania", "romanian" -> "ro"
+        "slovakia", "slovak" -> "sk"
+        "serbia", "serbian" -> "rs"
+        "paraguay" -> "py"
+        "afar" -> "et"
+        else -> "un"
     }
 }
 
@@ -155,36 +144,49 @@ fun countryNameToCode(country: String): String {
 fun CircleFlag(
     countryCode: String,
     modifier: Modifier = Modifier,
-    contentDescription: String? = null
+    contentDescription: String? = null,
+    allowProgramming: Boolean = false
 ) {
     val context = LocalContext.current
+    val trimmed = countryCode.trim()
 
-    val rawCode = if (countryCode.startsWith("http://") || countryCode.startsWith("https://")) {
-        countryCode
-    } else if (countryCode.any { it.code >= 0x1F1E6 }) {
-        flagEmojiToCountryCode(countryCode)
-    } else {
-        countryNameToCode(countryCode)
-    }
-    val cleanCode = if (rawCode.isBlank()) "in" else rawCode
+    val shouldRenderProgramming = ProgrammingLanguagesRegistry.isProgramming(
+        trimmed,
+        allowShortCodes = allowProgramming
+    ) || isProgrammingCode(trimmed, allowShortCodes = allowProgramming)
 
-    val isHttp = cleanCode.startsWith("http://") || cleanCode.startsWith("https://")
-    if (ProgrammingLanguagesRegistry.isProgramming(countryCode) || isProgrammingCode(countryCode)) {
+    if (shouldRenderProgramming) {
         LanguageIcon(
-            language = countryCode,
+            language = trimmed,
             modifier = modifier,
             contentDescription = contentDescription
         )
-    } else {
-        AsyncImage(
-            model = ImageRequest.Builder(context)
-                .data("https://hatscripts.github.io/circle-flags/flags/${cleanCode}.svg")
-                .crossfade(true)
-                .build(),
-            contentDescription = contentDescription,
-            modifier = modifier
-        )
+        return
     }
+
+    val rawCode = if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+        trimmed
+    } else if (trimmed.any { it.code >= 0x1F1E6 }) {
+        flagEmojiToCountryCode(trimmed)
+    } else {
+        countryNameToCode(trimmed)
+    }
+    val cleanCode = if (rawCode.isBlank()) "un" else rawCode
+
+    val flagUrl = if (cleanCode.startsWith("http://") || cleanCode.startsWith("https://")) {
+        cleanCode
+    } else {
+        "https://hatscripts.github.io/circle-flags/flags/${cleanCode}.svg"
+    }
+
+    AsyncImage(
+        model = ImageRequest.Builder(context)
+            .data(flagUrl)
+            .crossfade(true)
+            .build(),
+        contentDescription = contentDescription,
+        modifier = modifier
+    )
 }
 
 @Composable
@@ -192,14 +194,15 @@ fun AvatarWithCircularFlag(
     avatarUrl: String,
     countryCode: String,
     modifier: Modifier = Modifier,
-    avatarSize: androidx.compose.ui.unit.Dp = 48.dp,
-    flagSize: androidx.compose.ui.unit.Dp = 18.dp
+    avatarSize: Dp = 48.dp,
+    flagSize: Dp = 18.dp
 ) {
     PresenceAvatar(
         avatarUrl = avatarUrl,
         size = avatarSize,
         isOnline = true,
         countryCode = countryCode,
+        showFlagBadge = false,
         modifier = modifier
     )
 }
@@ -232,17 +235,6 @@ fun DiscoverSquareAvatarWithFlag(
                 .fillMaxSize()
                 .clip(RoundedCornerShape(20.dp))
                 .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(20.dp))
-        )
-
-        // Bottom-Right Circular Country Flag
-        CircleFlag(
-            countryCode = countryCode.trim().ifBlank { "in" },
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .offset(x = 4.dp, y = 4.dp)
-                .size(flagSize)
-                .clip(CircleShape)
-                .border(2.dp, Color.White, CircleShape)
         )
     }
 }

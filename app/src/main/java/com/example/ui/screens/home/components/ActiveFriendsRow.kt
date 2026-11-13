@@ -9,17 +9,15 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Surface
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -27,17 +25,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.components.CircleFlag
 import com.example.ui.components.FunJokeDialog
-import com.example.ui.components.OfflineMoonBadge
-import com.example.ui.components.UserAvatarImage
+import com.example.ui.components.PresenceAvatar
 import com.example.ui.screens.home.models.FollowedFriend
 import com.example.ui.screens.home.models.GoldDark
-import com.example.ui.theme.GoldAccent
+import com.example.ui.theme.LocalAppDarkTheme
+import com.example.ui.theme.LocalFunkyColors
 
 @Composable
 fun ActiveFriendsRow(
     activeFriendsList: List<FollowedFriend>
 ) {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
+    val isDark = LocalAppDarkTheme.current
     var showJokeDialog by remember { mutableStateOf(false) }
 
     if (showJokeDialog) {
@@ -65,22 +65,20 @@ fun ActiveFriendsRow(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text(
-                    text = "Friends you follow",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF64748B)
-                )
-            }
+            Text(
+                text = "Friends you follow",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = funkyColors.mute
+            )
 
             if (onlineCount > 0) {
                 Box(
                     modifier = Modifier
-                        .background(Color(0xFFEBFDF2), androidx.compose.foundation.shape.RoundedCornerShape(100.dp))
+                        .background(
+                            if (isDark) Color(0xFF143524) else Color(0xFFEBFDF2),
+                            RoundedCornerShape(100.dp)
+                        )
                         .padding(horizontal = 8.dp, vertical = 2.dp)
                 ) {
                     Row(
@@ -96,21 +94,21 @@ fun ActiveFriendsRow(
                             text = "$onlineCount Online",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF16A34A)
+                            color = if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A)
                         )
                     }
                 }
             } else if (activeFriendsList.isNotEmpty()) {
                 Box(
                     modifier = Modifier
-                        .background(Color(0xFFF1F5F9), androidx.compose.foundation.shape.RoundedCornerShape(100.dp))
+                        .background(funkyColors.soft, RoundedCornerShape(100.dp))
                         .padding(horizontal = 8.dp, vertical = 2.dp)
                 ) {
                     Text(
-                        text = "All offline 🌙",
+                        text = "All offline",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
-                        color = Color(0xFF64748B)
+                        color = funkyColors.mute
                     )
                 }
             }
@@ -121,7 +119,7 @@ fun ActiveFriendsRow(
             contentPadding = PaddingValues(horizontal = 2.dp),
             verticalAlignment = Alignment.Top
         ) {
-            // 1. DEDICATED FUN CIRCLE ICON: "Joke Hub / Smile Time"
+            // 1. DEDICATED FUN CIRCLE ICON: "Fun Jokes"
             item {
                 val infiniteTransition = rememberInfiniteTransition(label = "joke_shimmer")
                 val shimmerScale by infiniteTransition.animateFloat(
@@ -144,7 +142,6 @@ fun ActiveFriendsRow(
                         modifier = Modifier.size(68.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        // Vibrant animated gradient ring
                         Box(
                             modifier = Modifier
                                 .size(58.dp)
@@ -153,11 +150,11 @@ fun ActiveFriendsRow(
                                 .background(
                                     Brush.sweepGradient(
                                         listOf(
-                                            Color(0xFFFFD43B),
+                                            Color(0xFFFFB627),
                                             Color(0xFFFB923C),
                                             Color(0xFFF43F5E),
                                             Color(0xFF8B5CF6),
-                                            Color(0xFFFFD43B)
+                                            Color(0xFFFFB627)
                                         )
                                     )
                                 )
@@ -167,7 +164,7 @@ fun ActiveFriendsRow(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .clip(CircleShape)
-                                    .background(Color(0xFFFFFBEB)),
+                                    .background(if (isDark) funkyColors.soft else Color(0xFFFFFBEB)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
@@ -177,14 +174,13 @@ fun ActiveFriendsRow(
                             }
                         }
 
-                        // Floating laugh badge on corner
                         Box(
                             modifier = Modifier
                                 .size(20.dp)
                                 .align(Alignment.BottomEnd)
                                 .clip(CircleShape)
-                                .background(Color(0xFFFFD43B))
-                                .border(1.5.dp, Color.White, CircleShape),
+                                .background(Color(0xFFFFB627))
+                                .border(1.5.dp, funkyColors.surface, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
                             Text("😂", fontSize = 11.sp)
@@ -196,7 +192,7 @@ fun ActiveFriendsRow(
                         text = "Fun Jokes",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFF0F172A),
+                        color = funkyColors.ink,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -204,14 +200,14 @@ fun ActiveFriendsRow(
                         text = "Tap for Laugh",
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFFD97706),
+                        color = if (isDark) funkyColors.mango else Color(0xFFD97706),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
             }
 
-            // 2. FRIENDS LIST (Online or Offline with Moon Badge)
+            // 2. FRIENDS LIST with right-side flag & clean status text (no moons)
             itemsIndexed(activeFriendsList) { _, friend ->
                 val isOnlineUser = friend.isOnline
 
@@ -223,43 +219,58 @@ fun ActiveFriendsRow(
                                 val speakMsg = if (friend.isSpeaking) "Speaking in room now" else "Online now"
                                 Toast.makeText(context, "${friend.name} is online! ($speakMsg)", Toast.LENGTH_SHORT).show()
                             } else {
-                                Toast.makeText(context, "${friend.name} is currently offline (away sleeping 🌙)", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "${friend.name} is currently offline", Toast.LENGTH_SHORT).show()
                             }
                         }
-                        .width(74.dp)
+                        .width(78.dp)
                 ) {
-                    com.example.ui.components.PresenceAvatar(
+                    PresenceAvatar(
                         avatarUrl = friend.avatarUrl,
                         size = 56.dp,
                         isSpeaking = friend.isSpeaking,
                         isOnline = isOnlineUser,
                         countryCode = friend.flagCode,
+                        showFlagBadge = false,
                         userId = friend.id,
                         enableFrameAnimation = false
                     )
 
                     Spacer(modifier = Modifier.height(4.dp))
-                    com.example.store.DecoratedUserName(
-                        userId = friend.id,
-                        name = friend.name,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        defaultColor = if (isOnlineUser) Color.Black else Color(0xFF475569)
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Box(modifier = Modifier.weight(1f, fill = false)) {
+                            com.example.store.DecoratedUserName(
+                                userId = friend.id,
+                                name = friend.name,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                defaultColor = if (isOnlineUser) funkyColors.ink else funkyColors.mute
+                            )
+                        }
+                        if (friend.flagCode.isNotBlank()) {
+                            CircleFlag(
+                                countryCode = friend.flagCode,
+                                modifier = Modifier
+                                    .size(14.dp)
+                                    .clip(CircleShape)
+                            )
+                        }
+                    }
 
-                    // Subtitle text: ONLY say "Online" / "Speaking" if actually online! If offline, say "Offline 🌙"!
                     Text(
                         text = when {
                             isOnlineUser && friend.isSpeaking -> "Speaking 🎙️"
                             isOnlineUser -> "Online"
-                            else -> "Offline 🌙"
+                            else -> "Offline"
                         },
                         fontSize = 9.5.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = when {
                             isOnlineUser && friend.isSpeaking -> GoldDark
-                            isOnlineUser -> Color(0xFF16A34A)
-                            else -> Color(0xFF94A3B8)
+                            isOnlineUser -> if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A)
+                            else -> funkyColors.mute
                         },
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Verify account</title>
+<script src="./vendor/react.js"></script>
+<script src="./vendor/react-dom.js"></script>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@700;800&amp;family=Plus+Jakarta+Sans:wght@500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}button{font:inherit;color:inherit;cursor:pointer}h1,h2,h3,p{margin:0}
+.d{font-family:'Bricolage Grotesque',sans-serif;letter-spacing:-.02em}.mu{color:{{mu}}}
+.st{border:2px solid {{bd}};box-shadow:3px 3px 0 {{sh}};background:{{sf}}}
+.bt{border:2px solid #2A1B0E;box-shadow:3px 3px 0 #2A1B0E;background:#FFB400;color:#2A1B0E;font-weight:800;border-radius:18px}.bt:active{transform:translate(2px,2px);box-shadow:1px 1px 0 #2A1B0E}
+.ch{padding:8px 14px;border-radius:99px;border:2px solid {{bd}};background:{{sf}};color:{{ink}};font-size:13px;font-weight:700}
+.on{background:#FFB400;color:#2A1B0E;border-color:#2A1B0E}
+.ib{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:{{sf}};border:2px solid {{bd}};color:{{ink}}}
+.co{display:inline-block;width:13px;height:13px;border-radius:50%;background:#FFB400;border:1.5px solid #2A1B0E}
+.g{position:relative;display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 4px 8px;border-radius:20px;border:2px solid {{bd}};background:{{sf}};color:{{ink}};font-size:12.5px;font-weight:800;box-shadow:3px 3px 0 {{sh}}}
+.g[aria-pressed=true]{background:#FFE49A;color:#2A1B0E;border-color:#2A1B0E;box-shadow:3px 3px 0 #2A1B0E}
+.pr{display:flex;gap:4px;align-items:center;font-size:12px;font-weight:800}
+input{font-family:inherit}input:focus{outline:2px solid #FFB400}
+.sw{width:46px;height:28px;border-radius:99px;border:2px solid {{bd}};background:{{so}};padding:2px;display:flex}.sw[aria-checked=true]{background:#FFB400;border-color:#2A1B0E;justify-content:flex-end}.sw i{width:20px;height:20px;border-radius:50%;background:#2A1B0E}
+@keyframes b{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}.dot{width:14px;height:14px;border-radius:50%;background:#FFB400;border:2px solid #2A1B0E;animation:b .8s infinite}
+</style>
+</helmet>
+<div style="position:relative;width:390px;height:844px;overflow:hidden;box-sizing:border-box;background:{{bg}};color:{{ink}};font-family:'Plus Jakarta Sans',system-ui,sans-serif;font-size:14px">
+<div style="height:100%;box-sizing:border-box;padding:52px 24px 28px;display:flex;flex-direction:column"><div style="display:flex;justify-content:flex-end"><button class="ib" aria-label="Close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></div>
+<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center"><div style="width:150px;height:150px;border-radius:44px;transform:rotate(-6deg);background:#FFB400;border:3px solid #2A1B0E;box-shadow:6px 6px 0 {{sh}};display:grid;place-items:center;color:#2A1B0E"><svg width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 017.500-2M4 4l16 16"></path></svg></div>
+<h1 class="d" style="margin-top:32px;font-size:34px;font-weight:800;line-height:1.05">Hmm, we couldn’t verify you</h1><p class="mu" style="margin-top:12px;font-size:15px;font-weight:600;line-height:1.5">Your session may have expired or the connection dropped. Give it another go.</p><span style="margin-top:16px;padding:6px 14px;border-radius:99px;background:#FFD9D3;color:#9A2417;font-size:12px;font-weight:800;border:2px solid #9A2417">Error 401 · Unauthorized</span></div>
+<button class="bt" style="height:56px;font-size:16px">Try again</button><button class="st" style="margin-top:12px;height:56px;border-radius:18px;font-size:16px;font-weight:800;color:{{ink}}">Log out</button><p class="mu" style="margin-top:16px;text-align:center;font-size:13px;font-weight:600">Still stuck? <b style="color:{{ink}};text-decoration:underline">Contact support</b></p></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() {
+const d = this.props.dark ?? false;
+return d ? {bg:'#1B120B',sf:'#2A1D12',so:'#3B2A17',ink:'#FFF1D2',mu:'#C2AC8C',bd:'#5A4228',sh:'#000'} : {bg:'#FFF4D6',sf:'#FFFBEF',so:'#FFE49A',ink:'#2A1B0E',mu:'#6F5B45',bd:'#2A1B0E',sh:'#2A1B0E'};
+}
+}
+</script>
+</body>
+</html>

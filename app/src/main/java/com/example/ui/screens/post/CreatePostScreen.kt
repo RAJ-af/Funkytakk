@@ -1,7 +1,6 @@
 package com.example.ui.screens.post
 
 import android.net.Uri
-import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -39,17 +38,12 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
-import androidx.core.view.WindowCompat
 import coil.compose.AsyncImage
 import com.example.MomentDto
 import com.example.MomentLimitsDto
@@ -253,44 +247,21 @@ fun CreatePostScreen(
         job.start()
     }
 
-    Dialog(
-        onDismissRequest = {
-            if (activeDockPanel != null) {
-                activeDockPanel = null
-            } else if (!isUploading) {
-                onDismiss()
-            }
-        },
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false
-        )
-    ) {
-        val view = LocalView.current
-        SideEffect {
-            val window = (view.parent as? DialogWindowProvider)?.window
-            if (window != null) {
-                WindowCompat.setDecorFitsSystemWindows(window, false)
-                @Suppress("DEPRECATION")
-                window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-            }
+    BackHandler {
+        if (activeDockPanel != null) {
+            activeDockPanel = null
+        } else if (!isUploading) {
+            onDismiss()
         }
+    }
 
-        BackHandler {
-            if (activeDockPanel != null) {
-                activeDockPanel = null
-            } else if (!isUploading) {
-                onDismiss()
-            }
-        }
-
-        if (createdMoment != null) {
-            val posted = createdMoment!!
-            SuccessAnimationScreen(onComplete = {
-                createdMoment = null
-                onPostCreated(posted)
-            })
-        } else {
+    if (createdMoment != null) {
+        val posted = createdMoment!!
+        SuccessAnimationScreen(onComplete = {
+            createdMoment = null
+            onPostCreated(posted)
+        })
+    } else {
             val currentPreset = bgPresets.getOrElse(selectedBgIndex) { bgPresets.first() }
             val isDarkBg = !currentPreset.isDarkText || hasMedia
             val canvasTextColor = if (isDarkBg) Color.White else Color(0xFF1B1608)
@@ -346,7 +317,8 @@ fun CreatePostScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .statusBarsPadding()
-                    .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
+                    .navigationBarsPadding()
+                    .imePadding()
             ) {
                 // 1. TOP BAR: Close (X) glass button & Post CTA
                 Row(
@@ -743,6 +715,9 @@ fun CreatePostScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .verticalScroll(rememberScrollState())
+                            .navigationBarsPadding()
+                            .imePadding()
                             .padding(horizontal = 20.dp, vertical = 10.dp)
                     ) {
                         Row(
@@ -1104,7 +1079,6 @@ fun CreatePostScreen(
                 }
             }
         }
-    }
     }
 }
 

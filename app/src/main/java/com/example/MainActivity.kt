@@ -58,7 +58,7 @@ class MainActivity : FragmentActivity() {
             MyApplicationTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = Color(0xFFFAFAEE)
+                    color = com.example.ui.theme.LocalFunkyColors.current.bg
                 ) {
                     var currentScreen by rememberSaveable { mutableStateOf("splash") }
                     var minSplashElapsed by rememberSaveable { mutableStateOf(false) }
@@ -95,6 +95,7 @@ class MainActivity : FragmentActivity() {
                     }
 
                     val authState by authViewModel.authState.collectAsState()
+                    val sessionVerificationState by authViewModel.sessionVerificationState.collectAsState()
                     val myModerationStatus by authViewModel.myModerationStatus.collectAsState()
                     val isUnderReview by authViewModel.accountUnderReview.collectAsState()
                     val deletionStatus by authViewModel.deletionStatus.collectAsState()
@@ -103,9 +104,20 @@ class MainActivity : FragmentActivity() {
                     LaunchedEffect(Unit) {
                         com.example.ui.components.AppNetworkManager.startMonitoring(applicationContext)
                         authViewModel.runPendingEraseLocalChatsIfNeeded(applicationContext)
-                        if (SupabaseSessionManager.hasValidAuthenticatedSession(applicationContext)) {
-                            authViewModel.checkDeletionStatus(applicationContext)
+                    }
+
+                    // Only initialize authenticated services once session is verified during splash/login
+                    LaunchedEffect(authState, sessionVerificationState) {
+                        if (authViewModel.deletionReceipt.value != null) {
+                            return@LaunchedEffect
+                        }
+                        if (authState is AuthState.Success &&
+                            sessionVerificationState !is SessionVerificationState.Failed &&
+                            SupabaseSessionManager.hasValidAuthenticatedSession(applicationContext)
+                        ) {
+                            authViewModel.refreshModerationStatus(applicationContext)
                             authViewModel.checkAccountReview(applicationContext)
+                            authViewModel.checkDeletionStatus(applicationContext)
                             com.example.SupportChatManager.init(applicationContext)
                         }
                     }
@@ -122,10 +134,10 @@ class MainActivity : FragmentActivity() {
                     DisposableEffect(lifecycleOwner) {
                         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
                             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-                                authViewModel.refreshModerationStatus(applicationContext)
-                                authViewModel.checkAccountReview(applicationContext)
-                                com.example.SupportChatManager.fetchSupportSession(applicationContext)
-                                if (SupabaseSessionManager.getUserId(applicationContext) != null || authState is AuthState.Success) {
+                                if (SupabaseSessionManager.hasValidAuthenticatedSession(applicationContext) && authState is AuthState.Success) {
+                                    authViewModel.refreshModerationStatus(applicationContext)
+                                    authViewModel.checkAccountReview(applicationContext)
+                                    com.example.SupportChatManager.fetchSupportSession(applicationContext)
                                     authViewModel.checkDeletionStatus(applicationContext)
                                     com.example.service.PushNotificationManager.onUserLoggedIn(applicationContext)
                                     com.example.repository.GroupChatRepository.onAppResumed(applicationContext)
@@ -136,17 +148,6 @@ class MainActivity : FragmentActivity() {
                         lifecycleOwner.lifecycle.addObserver(observer)
                         onDispose {
                             lifecycleOwner.lifecycle.removeObserver(observer)
-                        }
-                    }
-
-                    // Check moderation and deletion status on auth state change
-                    LaunchedEffect(authState) {
-                        if (authViewModel.deletionReceipt.value != null) {
-                            return@LaunchedEffect
-                        }
-                        authViewModel.refreshModerationStatus(applicationContext)
-                        if (authState is AuthState.Success) {
-                            authViewModel.checkDeletionStatus(applicationContext)
                         }
                     }
 
@@ -173,8 +174,17 @@ class MainActivity : FragmentActivity() {
                     var endedRoomPeopleCount by rememberSaveable { mutableStateOf(12) }
                     var endedRoomTotalTime by rememberSaveable { mutableStateOf(28) }
 
-                    LaunchedEffect(authState, minSplashElapsed) {
+                    LaunchedEffect(authState, sessionVerificationState, minSplashElapsed) {
                         if (!minSplashElapsed && currentScreen == "splash") {
+                            return@LaunchedEffect
+                        }
+                        if (sessionVerificationState is SessionVerificationState.Verifying) {
+                            return@LaunchedEffect
+                        }
+                        if (sessionVerificationState is SessionVerificationState.Failed) {
+                            if (currentScreen != "support_chat") {
+                                currentScreen = "verify_error"
+                            }
                             return@LaunchedEffect
                         }
                         if (authState is AuthState.Success) {
@@ -326,6 +336,22 @@ class MainActivity : FragmentActivity() {
                             ) { screen ->
                         when (screen) {
                             "splash" -> SplashScreen()
+                            "verify_error" -> VerifyAccountErrorScreen(
+                                onRetry = {
+                                    authViewModel.retryBootSessionVerification(applicationContext)
+                                },
+                                onLogout = {
+                                    authViewModel.logout(applicationContext)
+                                    currentScreen = "welcome"
+                                },
+                                onContactSupport = {
+                                    currentScreen = "support_chat"
+                                },
+                                onClose = {
+                                    authViewModel.logout(applicationContext)
+                                    currentScreen = "welcome"
+                                }
+                            )
                             "welcome" -> WelcomeScreen(
                                 onGetStartedClick = {
                                     currentScreen = "privacy"
@@ -534,7 +560,13 @@ class MainActivity : FragmentActivity() {
                             )
                             "support_chat" -> SupportChatScreen(
                                 reportId = activeSupportReportId,
-                                onBack = { currentScreen = "home" }
+                                onBack = {
+                                    currentScreen = if (sessionVerificationState is SessionVerificationState.Failed) {
+                                        "verify_error"
+                                    } else {
+                                        "home"
+                                    }
+                                }
                             )
                             "voice_room" -> VoiceRoomScreen(
                                 viewModel = authViewModel,

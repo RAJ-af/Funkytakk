@@ -2,6 +2,7 @@ package com.example.ui.screens.store
 
 import android.content.Context
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -17,10 +18,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
@@ -29,10 +26,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -41,26 +43,44 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import com.example.R
 import com.example.StoreItemRow
+import com.example.gifting.CuteCoinIcon
 import com.example.store.*
+import com.example.ui.theme.AppThemeManager
+import com.example.ui.theme.LocalAppDarkTheme
+import com.example.ui.theme.LocalFunkyColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-// Design System Tokens (docs/DESIGN_SYSTEM.md)
-private val ColorBg = Color(0xFFFAFAEE)
-private val ColorSurface = Color(0xFFFFFFFF)
-private val ColorSurfaceTrack = Color(0xFFECE6D8)
-private val ColorPrimary = Color(0xFFFFC529)
-private val ColorPrimarySoft = Color(0xFFFFD43A)
-private val ColorPrimaryContainer = Color(0xFFFFE380)
-private val ColorOnPrimary = Color(0xFF523700)
-private val ColorTextPrimary = Color(0xFF1F1D14)
-private val ColorTextSecondary = Color(0xFF6B6A5E)
-private val ColorOutline = Color(0xFFE8E4D6)
-private val ColorSuccess = Color(0xFF10B982)
-private val ColorSuccessContainer = Color(0xFFEBFCF2)
-private val ColorError = Color(0xFFE5484D)
-private val ColorErrorContainer = Color(0xFFFDECEC)
+private val ColorBg: Color
+    @Composable get() = LocalFunkyColors.current.bg
+private val ColorSurface: Color
+    @Composable get() = LocalFunkyColors.current.surface
+private val ColorSurfaceTrack: Color
+    @Composable get() = LocalFunkyColors.current.soft
+private val ColorPrimary: Color
+    @Composable get() = LocalFunkyColors.current.mango
+private val ColorPrimarySoft: Color
+    @Composable get() = Color(0xFFFFD43A)
+private val ColorPrimaryContainer: Color
+    @Composable get() = LocalFunkyColors.current.soft
+private val ColorOnPrimary: Color
+    @Composable get() = LocalFunkyColors.current.onMango
+private val ColorTextPrimary: Color
+    @Composable get() = LocalFunkyColors.current.ink
+private val ColorTextSecondary: Color
+    @Composable get() = LocalFunkyColors.current.mute
+private val ColorOutline: Color
+    @Composable get() = LocalFunkyColors.current.line
+private val ColorSuccess: Color
+    @Composable get() = LocalFunkyColors.current.ok
+private val ColorSuccessContainer: Color
+    @Composable get() = if (LocalAppDarkTheme.current) Color(0xFF143523) else Color(0xFFEBFCF2)
+private val ColorError: Color
+    @Composable get() = LocalFunkyColors.current.danger
+private val ColorErrorContainer: Color
+    @Composable get() = if (LocalAppDarkTheme.current) Color(0xFF3A1818) else Color(0xFFFDECEC)
 
 enum class StoreTab(val displayName: String, val categoryType: String?) {
     ALL("All", null),
@@ -95,6 +115,8 @@ fun DecorationStoreScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    BackHandler { onDismiss() }
 
     val walletBalance by CosmeticsManager.userWalletBalance.collectAsState()
     val myCosmetics by CosmeticsManager.myCosmetics.collectAsState()
@@ -325,20 +347,17 @@ fun DecorationStoreScreen(
         )
     }
 
-    // Coin Store Dialog (when clicking "+" or on insufficient coins)
+    // Full-screen Coin Store (when clicking "+" or on insufficient coins)
     if (showCoinStoreDialog || insufficientCoinsError) {
-        CoinStoreDialog(
+        CoinStoreScreen(
             currentBalance = walletBalance,
-            isErrorTriggered = insufficientCoinsError,
+            insufficientCoinsAlert = insufficientCoinsError,
             onDismiss = {
                 showCoinStoreDialog = false
                 insufficientCoinsError = false
             },
-            onSimulateRecharge = { addedCoins ->
+            onPurchaseCoins = { addedCoins ->
                 CosmeticsManager.updateWalletBalance(walletBalance + addedCoins)
-                Toast.makeText(context, "Added $addedCoins coins to wallet! 🪙", Toast.LENGTH_SHORT).show()
-                showCoinStoreDialog = false
-                insufficientCoinsError = false
             }
         )
     }
@@ -359,9 +378,13 @@ private fun StoreTopBar(
     onBack: () -> Unit,
     onAddCoins: () -> Unit
 ) {
+    val context = LocalContext.current
+    val isDark = LocalAppDarkTheme.current
     Surface(
         color = ColorBg,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
     ) {
         Row(
             modifier = Modifier
@@ -371,6 +394,7 @@ private fun StoreTopBar(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(
+                modifier = Modifier.weight(1f),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
@@ -383,7 +407,7 @@ private fun StoreTopBar(
                         .border(1.dp, ColorOutline, CircleShape)
                 ) {
                     Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        painter = painterResource(id = R.drawable.ic_back),
                         contentDescription = "Back",
                         tint = ColorTextPrimary,
                         modifier = Modifier.size(20.dp)
@@ -393,9 +417,11 @@ private fun StoreTopBar(
                 Column {
                     Text(
                         text = "Decoration Store",
-                        fontSize = 20.sp,
+                        fontSize = 19.sp,
                         fontWeight = FontWeight.Bold,
-                        color = ColorTextPrimary
+                        color = ColorTextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         text = "Style your chat & profile",
@@ -405,40 +431,65 @@ private fun StoreTopBar(
                 }
             }
 
-            // Coins balance chip with "+" button
-            Surface(
-                shape = RoundedCornerShape(100.dp),
-                color = ColorSurface,
-                border = BorderStroke(1.dp, ColorOutline),
-                shadowElevation = 1.dp
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                // Theme switcher (Light / Dark)
+                IconButton(
+                    onClick = { AppThemeManager.toggleDarkTheme(context) },
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(ColorSurfaceTrack)
+                        .border(1.dp, ColorOutline, CircleShape)
+                        .testTag("store_theme_toggle")
                 ) {
-                    Text("🪙", fontSize = 16.sp)
-                    Text(
-                        text = String.format("%,d", coinsBalance),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = ColorTextPrimary
+                    Icon(
+                        painter = painterResource(id = if (isDark) R.drawable.ic_sun else R.drawable.ic_moon),
+                        contentDescription = if (isDark) "Switch to Light Theme" else "Switch to Dark Theme",
+                        tint = if (isDark) Color(0xFFFBBF24) else Color(0xFF7C3AED),
+                        modifier = Modifier.size(19.dp)
                     )
+                }
 
-                    // "+" button
-                    IconButton(
-                        onClick = onAddCoins,
+                // Coins balance chip with "+" button
+                Surface(
+                    shape = RoundedCornerShape(100.dp),
+                    color = ColorSurface,
+                    border = BorderStroke(1.dp, ColorOutline),
+                    shadowElevation = 1.dp
+                ) {
+                    Row(
                         modifier = Modifier
-                            .size(28.dp)
-                            .clip(CircleShape)
-                            .background(ColorPrimary)
+                            .clickable { onAddCoins() }
+                            .padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Add Coins",
-                            tint = ColorOnPrimary,
-                            modifier = Modifier.size(16.dp)
+                        CuteCoinIcon(modifier = Modifier.size(18.dp))
+                        Text(
+                            text = String.format("%,d", coinsBalance),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = ColorTextPrimary
                         )
+
+                        // "+" button
+                        IconButton(
+                            onClick = onAddCoins,
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(ColorPrimary)
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_plus),
+                                contentDescription = "Add Coins",
+                                tint = ColorOnPrimary,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -656,7 +707,7 @@ private fun StoreItemCard(
                     .fillMaxWidth()
                     .height(110.dp)
                     .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xFFF8FAFC)),
+                    .background(ColorBg),
                 contentAlignment = Alignment.Center
             ) {
                 // Item Preview Renderer
@@ -677,10 +728,10 @@ private fun StoreItemCard(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Check,
+                            painter = painterResource(id = R.drawable.ic_check),
                             contentDescription = "Selected",
                             tint = ColorOnPrimary,
-                            modifier = Modifier.size(15.dp)
+                            modifier = Modifier.size(14.dp)
                         )
                     }
                 }
@@ -813,10 +864,10 @@ private fun ItemThumbnailRenderer(
                 CosmeticsConfigParser.parseChatBg(item.config)
             }
             Box(modifier = Modifier.fillMaxSize()) {
-                ChatBackground(config = bgConfig, isDark = false, modifier = Modifier.fillMaxSize())
+                ChatBackground(config = bgConfig, isDark = LocalAppDarkTheme.current, modifier = Modifier.fillMaxSize())
                 Surface(
                     shape = RoundedCornerShape(6.dp),
-                    color = Color.White.copy(alpha = 0.85f),
+                    color = ColorSurface.copy(alpha = 0.88f),
                     modifier = Modifier
                         .align(Alignment.Center)
                         .padding(4.dp)
@@ -872,10 +923,10 @@ private fun BoxScope.PlayButtonOverlay(onClick: () -> Unit) {
             .background(Color.Black.copy(alpha = 0.55f))
     ) {
         Icon(
-            imageVector = Icons.Default.PlayArrow,
+            painter = painterResource(id = R.drawable.ic_play),
             contentDescription = "Play Preview",
             tint = Color.White,
-            modifier = Modifier.size(20.dp)
+            modifier = Modifier.size(18.dp)
         )
     }
 }
@@ -951,7 +1002,7 @@ private fun SelectedItemsTray(
                         modifier = Modifier
                             .size(52.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFFF1F5F9))
+                            .background(ColorBg)
                             .border(1.dp, ColorPrimary, RoundedCornerShape(12.dp))
                     ) {
                         Box(
@@ -974,10 +1025,10 @@ private fun SelectedItemsTray(
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Close,
+                                painter = painterResource(id = R.drawable.ic_close),
                                 contentDescription = "Remove",
                                 tint = Color.White,
-                                modifier = Modifier.size(11.dp)
+                                modifier = Modifier.size(10.dp)
                             )
                         }
                     }
@@ -1001,13 +1052,14 @@ private fun SelectedItemsTray(
                     border = BorderStroke(1.5.dp, ColorPrimary),
                     colors = ButtonDefaults.outlinedButtonColors(
                         containerColor = ColorSurface,
-                        contentColor = ColorOnPrimary
+                        contentColor = ColorTextPrimary
                     )
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Visibility,
+                        painter = painterResource(id = R.drawable.ic_sparkle),
                         contentDescription = "Preview",
-                        modifier = Modifier.size(18.dp)
+                        tint = ColorPrimary,
+                        modifier = Modifier.size(17.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
@@ -1115,9 +1167,10 @@ private fun DecorationPreviewDialog(
                             .border(1.dp, ColorOutline, CircleShape)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Close,
+                            painter = painterResource(id = R.drawable.ic_close),
                             contentDescription = "Close",
-                            tint = ColorTextPrimary
+                            tint = ColorTextPrimary,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
 
@@ -1177,7 +1230,7 @@ private fun DecorationPreviewDialog(
                 TabRow(
                     selectedTabIndex = pagerState.currentPage,
                     containerColor = ColorSurface,
-                    contentColor = ColorOnPrimary,
+                    contentColor = ColorTextPrimary,
                     divider = {},
                     indicator = { tabPositions ->
                         TabRowDefaults.SecondaryIndicator(
@@ -1195,7 +1248,7 @@ private fun DecorationPreviewDialog(
                                     text = tabTitle,
                                     fontSize = 13.5.sp,
                                     fontWeight = if (pagerState.currentPage == index) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (pagerState.currentPage == index) ColorOnPrimary else ColorTextSecondary
+                                    color = if (pagerState.currentPage == index) ColorTextPrimary else ColorTextSecondary
                                 )
                             }
                         )
@@ -1393,7 +1446,11 @@ private fun PreviewEntryPage(selectedEntry: StoreItemRow?, userName: String) {
                     colors = ButtonDefaults.buttonColors(containerColor = ColorPrimary, contentColor = ColorOnPrimary),
                     shape = RoundedCornerShape(100.dp)
                 ) {
-                    Icon(imageVector = Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_refresh),
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("Replay Entry Effect", fontWeight = FontWeight.Bold)
                 }
@@ -1411,7 +1468,7 @@ private fun PreviewBubblePage(selectedBubble: StoreItemRow?) {
         modifier = Modifier
             .fillMaxSize()
             .clip(RoundedCornerShape(20.dp))
-            .background(Color(0xFFF6F4EE))
+            .background(ColorBg)
             .border(1.dp, ColorOutline, RoundedCornerShape(20.dp))
             .padding(16.dp)
     ) {
@@ -1471,7 +1528,7 @@ private fun PreviewThemePage(selectedTheme: StoreItemRow?) {
                 CosmeticsConfigParser.parseChatBg(selectedTheme.config)
             }
 
-            ChatBackground(config = bgConfig, isDark = false, modifier = Modifier.fillMaxSize())
+            ChatBackground(config = bgConfig, isDark = LocalAppDarkTheme.current, modifier = Modifier.fillMaxSize())
 
             // Sample floating chat bubbles over wallpaper
             Column(
@@ -1543,7 +1600,12 @@ private fun EntryAnimationMiniPreviewDialog(
                         color = ColorTextPrimary
                     )
                     IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
-                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = ColorTextSecondary)
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_close),
+                            contentDescription = "Close",
+                            tint = ColorTextSecondary,
+                            modifier = Modifier.size(16.dp)
+                        )
                     }
                 }
 
@@ -1564,8 +1626,8 @@ private fun EntryAnimationMiniPreviewDialog(
 
                 Surface(
                     shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFFFEF3C7),
-                    border = BorderStroke(1.dp, Color(0xFFFDE047)),
+                    color = ColorSurfaceTrack,
+                    border = BorderStroke(1.dp, ColorPrimary.copy(alpha = 0.5f)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -1573,15 +1635,15 @@ private fun EntryAnimationMiniPreviewDialog(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            text = "🚀 $userName entered the room!",
+                            text = "$userName entered the room!",
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF92400E)
+                            color = ColorTextPrimary
                         )
                         Text(
                             text = "Special ${entryConfig.effectType} entrance effect",
                             fontSize = 12.sp,
-                            color = Color(0xFFB45309)
+                            color = ColorTextSecondary
                         )
                     }
                 }
@@ -1595,128 +1657,6 @@ private fun EntryAnimationMiniPreviewDialog(
                     modifier = Modifier.fillMaxWidth().height(44.dp)
                 ) {
                     Text("Got It", fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-    }
-}
-
-// -----------------------------------------------------------------------------
-// COIN STORE DIALOG (When clicking "+" or insufficient coins)
-// -----------------------------------------------------------------------------
-@Composable
-private fun CoinStoreDialog(
-    currentBalance: Int,
-    isErrorTriggered: Boolean,
-    onDismiss: () -> Unit,
-    onSimulateRecharge: (Int) -> Unit
-) {
-    val coinPacks = remember {
-        listOf(
-            Pair(100, "$0.99"),
-            Pair(500, "$4.99"),
-            Pair(1200, "$9.99"),
-            Pair(3000, "$19.99")
-        )
-    }
-
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = ColorSurface,
-            border = BorderStroke(1.dp, ColorOutline),
-            shadowElevation = 8.dp,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("🪙", fontSize = 20.sp)
-                        Text("Coin Store", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = ColorTextPrimary)
-                    }
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
-                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = ColorTextSecondary)
-                    }
-                }
-
-                if (isErrorTriggered) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = ColorErrorContainer,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = "Coins कम हैं! Recharge more coins to continue.",
-                            color = ColorError,
-                            fontSize = 12.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Text(
-                    text = "Current Balance: $currentBalance Coins",
-                    fontSize = 13.5.sp,
-                    color = ColorTextSecondary
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Coin packs grid
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
-                    modifier = Modifier.height(200.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(coinPacks) { pack ->
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
-                                .clickable { onSimulateRecharge(pack.first) },
-                            shape = RoundedCornerShape(16.dp),
-                            color = Color(0xFFFEF9C3),
-                            border = BorderStroke(1.dp, Color(0xFFFDE047))
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(12.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Text("🪙", fontSize = 24.sp)
-                                Text(
-                                    text = "${pack.first} Coins",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF92400E)
-                                )
-                                Text(
-                                    text = pack.second,
-                                    fontSize = 12.sp,
-                                    color = ColorTextSecondary
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                TextButton(onClick = onDismiss) {
-                    Text("Cancel", color = ColorTextSecondary)
                 }
             }
         }

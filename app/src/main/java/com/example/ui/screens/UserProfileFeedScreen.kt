@@ -712,8 +712,9 @@ fun UserProfileFeedScreen(
                 ) {
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Row: Name and "Online" / "Offline" Pill Badge (Verified badge hidden per requirement)
+                    // Row: Name, Verified/Badges, Online Pill, and right-aligned normal Flag
                     Row(
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -722,7 +723,7 @@ fun UserProfileFeedScreen(
                             name = currentProfileName.ifBlank { "User" },
                             fontSize = 24.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            defaultColor = Color(0xFF0F172A)
+                            defaultColor = com.example.ui.theme.LocalFunkyColors.current.ink
                         )
 
                         if (isVerified) {
@@ -758,6 +759,18 @@ fun UserProfileFeedScreen(
                                     )
                                 }
                             }
+                        }
+
+                        Spacer(modifier = Modifier.weight(1f))
+
+                        if (currentCountryCode.isNotBlank()) {
+                            CircleFlag(
+                                countryCode = currentCountryCode,
+                                allowProgramming = false,
+                                modifier = Modifier
+                                    .size(22.dp)
+                                    .clip(CircleShape)
+                            )
                         }
                     }
 
@@ -1840,11 +1853,12 @@ fun ProfileCardContainer(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val funkyColors = com.example.ui.theme.LocalFunkyColors.current
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .background(Color.White, RoundedCornerShape(20.dp))
-            .border(1.dp, Color(0xFFEDE8DC), RoundedCornerShape(20.dp))
+            .background(funkyColors.surface, RoundedCornerShape(20.dp))
+            .border(1.dp, funkyColors.line, RoundedCornerShape(20.dp))
             .padding(16.dp)
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
@@ -1856,13 +1870,13 @@ fun ProfileCardContainer(
                     modifier = Modifier
                         .width(3.5.dp)
                         .height(14.dp)
-                        .background(Color(0xFFFFD43B), RoundedCornerShape(2.dp))
+                        .background(funkyColors.mango, RoundedCornerShape(2.dp))
                 )
                 Text(
                     text = title,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF0F172A)
+                    color = funkyColors.ink
                 )
             }
 
@@ -1884,6 +1898,7 @@ fun StatItemExact(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null
 ) {
+    val funkyColors = com.example.ui.theme.LocalFunkyColors.current
     Column(
         modifier = modifier
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
@@ -1893,13 +1908,13 @@ fun StatItemExact(
             text = count,
             fontSize = 17.sp,
             fontWeight = FontWeight.Black,
-            color = Color(0xFF0F172A)
+            color = funkyColors.ink
         )
         Spacer(modifier = Modifier.height(1.dp))
         Text(
             text = label,
             fontSize = 11.5.sp,
-            color = Color(0xFF64748B),
+            color = funkyColors.mute,
             fontWeight = FontWeight.Medium
         )
     }

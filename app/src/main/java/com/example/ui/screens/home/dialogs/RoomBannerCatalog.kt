@@ -3,24 +3,33 @@ package com.example.ui.screens.home.dialogs
 data class BannerOption(val name: String, val url: String)
 
 val languageBanners = mapOf(
+    "Hindi" to listOf(
+        BannerOption("Taj Mahal Sunrise", "https://images.unsplash.com/photo-1564507592333-c60657eea523?w=800"),
+        BannerOption("Jaipur Pink City", "https://images.unsplash.com/photo-1477587458883-47145ed94245?w=800"),
+        BannerOption("Kerala Backwaters", "https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?w=800"),
+        BannerOption("Varanasi Evening Aarti", "https://images.unsplash.com/photo-1561361513-2d000a50f0dc?w=800"),
+        BannerOption("Festive Lights GIF", "https://i.giphy.com/media/26tOZ42Mg6pbTUPHW/giphy.gif")
+    ),
     "Japanese" to listOf(
         BannerOption("Sakura Street", "https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?w=800"),
         BannerOption("Mount Fuji", "https://images.unsplash.com/photo-1524413840807-0c3cb6fa808d?w=800"),
         BannerOption("Tokyo Night", "https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=800"),
-        BannerOption("Kyoto Temple", "https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?w=800"),
-        BannerOption("Anime Style", "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=800")
+        BannerOption("Kyoto Fushimi Inari", "https://images.unsplash.com/photo-1545569341-9eb8b30979d9?w=800"),
+        BannerOption("Sakura Petals GIF", "https://i.giphy.com/media/3o7TKSjRrfIPjeiVyM/giphy.gif")
     ),
     "English" to listOf(
         BannerOption("London Big Ben", "https://images.unsplash.com/photo-1513635269975-59663e0ca1ad?w=800"),
         BannerOption("New York Skyline", "https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?w=800"),
-        BannerOption("Stonehenge Sunset", "https://images.unsplash.com/photo-1447752875215-b2761acb3c5d?w=800"),
-        BannerOption("Hollywood Streets", "https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?w=800")
+        BannerOption("Misty Woodland", "https://images.unsplash.com/photo-1447752875215-b2761acb3c5d?w=800"),
+        BannerOption("Cozy Coffee Lounge", "https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?w=800"),
+        BannerOption("Rainy Window GIF", "https://i.giphy.com/media/Lmq2eMv782q88/giphy.gif")
     ),
     "Korean" to listOf(
         BannerOption("Seoul Sunset", "https://images.unsplash.com/photo-1538481199705-c710c4e965fc?w=800"),
         BannerOption("Jeonju Hanok", "https://images.unsplash.com/photo-1538669715515-5c3756c07bae?w=800"),
         BannerOption("Jeju Island Beach", "https://images.unsplash.com/photo-1504609773096-104ff2c73ba4?w=800"),
-        BannerOption("Gyeongju Palace", "https://images.unsplash.com/photo-1525373612132-b3e820780006?w=800")
+        BannerOption("Gyeongju Palace", "https://images.unsplash.com/photo-1525373612132-b3e820780006?w=800"),
+        BannerOption("Neon Seoul GIF", "https://i.giphy.com/media/26tn33aiTi1jkl6H6/giphy.gif")
     ),
     "Spanish" to listOf(
         BannerOption("Barcelona Cathedral", "https://images.unsplash.com/photo-1509840144506-2c990f23a7f7?w=800"),
@@ -30,18 +39,61 @@ val languageBanners = mapOf(
     "Chinese" to listOf(
         BannerOption("Shanghai Bund Sunset", "https://images.unsplash.com/photo-1474181487882-5abf3f016c2d?w=800"),
         BannerOption("The Great Wall", "https://images.unsplash.com/photo-1508504509543-191d5ac64987?w=800"),
-        BannerOption("Beijing Forbidden City", "https://images.unsplash.com/photo-1490730141103-6cac27aaab94?w=800")
+        BannerOption("Beijing Dusk", "https://images.unsplash.com/photo-1490730141103-6cac27aaab94?w=800")
+    ),
+    "French" to listOf(
+        BannerOption("Eiffel Tower Dusk", "https://images.unsplash.com/photo-1502602898657-3e91760cbb34?w=800"),
+        BannerOption("Parisian Cafe", "https://images.unsplash.com/photo-1509439581779-6298f75bf6e5?w=800"),
+        BannerOption("Louvre Courtyard", "https://images.unsplash.com/photo-1499856871958-5b9627545d1a?w=800")
+    ),
+    "Arabic" to listOf(
+        BannerOption("Desert Dunes Sunset", "https://images.unsplash.com/photo-1509316785289-025f5b846b35?w=800"),
+        BannerOption("Dubai Marina Night", "https://images.unsplash.com/photo-1512453979798-5ea266f8880c?w=800"),
+        BannerOption("Historic Souk Lanterns", "https://images.unsplash.com/photo-1548013146-72479768bada?w=800")
+    ),
+    "German" to listOf(
+        BannerOption("Berlin Skyline", "https://images.unsplash.com/photo-1599946347371-68eb71b16afc?w=800"),
+        BannerOption("Bavarian Alps", "https://images.unsplash.com/photo-1467269204594-9661b134dd2b?w=800"),
+        BannerOption("Historic Castle", "https://images.unsplash.com/photo-1534313314376-a72289b6181e?w=800")
     )
 )
 
 val defaultBannersList = listOf(
+    BannerOption("Taj Mahal Agra", "https://images.unsplash.com/photo-1564507592333-c60657eea523?w=800"),
     BannerOption("Scenic Mountains", "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=800"),
     BannerOption("Golden Shoreline", "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800"),
+    BannerOption("Lo-fi Study GIF", "https://i.giphy.com/media/Lmq2eMv782q88/giphy.gif"),
     BannerOption("Cyberpunk Highway", "https://images.unsplash.com/photo-1515621061946-eff1c2a352bd?w=800"),
     BannerOption("Historic Library", "https://images.unsplash.com/photo-1521587760476-6c12a4b040da?w=800")
 )
 
 object BannerPack {
+    val indianScenics = listOf(
+        BannerOption("Taj Mahal Sunrise", "https://images.unsplash.com/photo-1564507592333-c60657eea523?w=800"),
+        BannerOption("Hawa Mahal Jaipur", "https://images.unsplash.com/photo-1477587458883-47145ed94245?w=800"),
+        BannerOption("Kerala Backwaters", "https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?w=800"),
+        BannerOption("Mumbai Marine Drive", "https://images.unsplash.com/photo-1529253355930-ddbe423a2ac7?w=800"),
+        BannerOption("Varanasi River Ghats", "https://images.unsplash.com/photo-1561361513-2d000a50f0dc?w=800"),
+        BannerOption("Goa Sunset Palms", "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?w=800"),
+        BannerOption("Pangong Lake Ladakh", "https://images.unsplash.com/photo-1589793907316-f94025b46850?w=800"),
+        BannerOption("Udaipur Lake Palace", "https://images.unsplash.com/photo-1599661046289-e31897846e41?w=800"),
+        BannerOption("Amber Fort Rajasthan", "https://images.unsplash.com/photo-1473163928189-364b2c4e1135?w=800"),
+        BannerOption("Himalayan Morning Peaks", "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800")
+    )
+
+    val animatedGifs = listOf(
+        BannerOption("Lo-fi Study Rain", "https://i.giphy.com/media/Lmq2eMv782q88/giphy.gif"),
+        BannerOption("Sakura Breeze", "https://i.giphy.com/media/3o7TKSjRrfIPjeiVyM/giphy.gif"),
+        BannerOption("Neon Cyberpunk City", "https://i.giphy.com/media/xT9IgzoKnwFNmISR8I/giphy.gif"),
+        BannerOption("Sunset Express Train", "https://i.giphy.com/media/3oKIPnAiaMCws8nOsE/giphy.gif"),
+        BannerOption("Festive Fireworks", "https://i.giphy.com/media/26tOZ42Mg6pbTUPHW/giphy.gif"),
+        BannerOption("Synthwave Horizon", "https://i.giphy.com/media/26tn33aiTi1jkl6H6/giphy.gif"),
+        BannerOption("Kyoto Shrine Lanterns", "https://i.giphy.com/media/l41K3o5fA88P3A156/giphy.gif"),
+        BannerOption("Rainy Tokyo Night", "https://i.giphy.com/media/xUPGcJ9uOAL2h28vMG/giphy.gif"),
+        BannerOption("Starry Night Sky", "https://i.giphy.com/media/3oKIPmuu8WUKRM77vG/giphy.gif"),
+        BannerOption("Ocean Twilight Waves", "https://i.giphy.com/media/l0ExdMHUDKteztyfe/giphy.gif")
+    )
+
     val worldwideScenics = listOf(
         BannerOption("Tokyo Akihabara Night", "https://images.unsplash.com/photo-1542051841857-5f90071e7989?w=800"),
         BannerOption("Kyoto Red Toriis", "https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?w=800"),
@@ -49,7 +101,6 @@ object BannerPack {
         BannerOption("Eiffel Tower Paris", "https://images.unsplash.com/photo-1502602898657-3e91760cbb34?w=800"),
         BannerOption("London Thames Big Ben", "https://images.unsplash.com/photo-1513635269975-59663e0ca1ad?w=800"),
         BannerOption("New York Central Park", "https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?w=800"),
-        BannerOption("Taj Mahal Sunrise", "https://images.unsplash.com/photo-1564507592333-c60657eea523?w=800"),
         BannerOption("Seoul Han River Bridge", "https://images.unsplash.com/photo-1538481199705-c710c4e965fc?w=800"),
         BannerOption("Sydney Opera House", "https://images.unsplash.com/photo-1506973035872-a4ec16b8e8d9?w=800"),
         BannerOption("Rome Colosseum Dusk", "https://images.unsplash.com/photo-1552832230-c0197dd311b5?w=800"),
@@ -64,7 +115,6 @@ object BannerPack {
         BannerOption("Great Wall Wilderness", "https://images.unsplash.com/photo-1508504509543-191d5ac64987?w=800"),
         BannerOption("Amalfi Coast Pastel Towns", "https://images.unsplash.com/photo-1486016006115-74a41448aea2?w=800"),
         BannerOption("Singapore Marina Sands", "https://images.unsplash.com/photo-1525596667581-2b083dc3954f?w=800"),
-        BannerOption("Indian Amber Palace", "https://images.unsplash.com/photo-1473163928189-364b2c4e1135?w=800"),
         BannerOption("Venice Scenic Canal", "https://images.unsplash.com/photo-1527631746610-bca00a040d60?w=800"),
         BannerOption("Iceland Northern Lights", "https://images.unsplash.com/photo-1483168527879-c66136b56105?w=800")
     )
@@ -116,6 +166,7 @@ object BannerPack {
         BannerOption("Cyber Anime Skyline", "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=800"),
         BannerOption("Cherry Blossom Sky", "https://images.unsplash.com/photo-1524413840807-0c3cb6fa808d?w=800")
     )
+
 
     val gradients: List<BannerOption> = listOf(
         BannerOption("Sunset Bliss (#1)", "gradient:#FF4500,#FF8C00,#FFD700"),

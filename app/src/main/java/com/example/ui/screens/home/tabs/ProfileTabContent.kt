@@ -77,6 +77,9 @@ import com.example.ui.screens.home.models.DarkText
 import com.example.ui.screens.profile.EditProfileScreen
 import com.example.ui.screens.home.models.GraySubtitle
 import com.example.ui.theme.GoldAccent
+import com.example.ui.screens.profile.SettingsScreen
+import com.example.ui.screens.store.CoinStoreScreen
+import com.example.ui.theme.LocalFunkyColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
@@ -88,9 +91,11 @@ fun ProfileTabContent(
     onLogoutClick: () -> Unit,
     viewModel: AuthViewModel? = null,
     onOpenSupportChat: (reportId: String?) -> Unit = {},
-    onDeleteAccountClick: () -> Unit = {}
+    onDeleteAccountClick: () -> Unit = {},
+    onOverlayVisibilityChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
     var selectedMainTab by remember { mutableStateOf(0) } // 0 = About Me, 1 = Feed
     var selectedFeedTab by remember { mutableStateOf(0) } // 0 = Grid, 1 = Video, 2 = Tagged
     var activeFullPost by remember { mutableStateOf<FeedPost?>(null) }
@@ -103,13 +108,36 @@ fun ProfileTabContent(
     var showChatBackupScreen by remember { mutableStateOf(false) }
     var showChatAppearanceSheet by remember { mutableStateOf(false) }
     var showThemeStoreSheet by remember { mutableStateOf(false) }
+    var showCoinStoreScreen by remember { mutableStateOf(false) }
     var showChatKitGalleryDebug by remember { mutableStateOf(false) }
-    var showOptionsMenuSheet by remember { mutableStateOf(false) }
+    var showSettingsScreen by remember { mutableStateOf(false) }
     var isAdmin by remember { mutableStateOf(false) }
 
     var activeFollowerUserId by remember { mutableStateOf<String?>(null) }
     var activeFollowersMode by remember { mutableStateOf(true) } // true = followers, false = following
     var activeClickedProfile by remember { mutableStateOf<com.example.DiscoverableProfile?>(null) }
+
+    val anyOverlayOpen = showEditProfileDialog ||
+        showSettingsScreen ||
+        showModerationDialog ||
+        showBlockedUsersSheet ||
+        showBlockedGroupsSheet ||
+        showChatBackupScreen ||
+        showChatAppearanceSheet ||
+        showThemeStoreSheet ||
+        showCoinStoreScreen ||
+        showChatKitGalleryDebug ||
+        activeFullPost != null ||
+        activeFollowerUserId != null ||
+        activeClickedProfile != null
+
+    LaunchedEffect(anyOverlayOpen) {
+        onOverlayVisibilityChange(anyOverlayOpen)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { onOverlayVisibilityChange(false) }
+    }
 
     val userId = currentUserProfile.uid
     val prefs = remember { context.getSharedPreferences("funky_talk_prefs", android.content.Context.MODE_PRIVATE) }
@@ -424,12 +452,12 @@ fun ProfileTabContent(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFFAFAEE))
+            .background(funkyColors.bg)
     ) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFFFAFAEE)),
+                .background(funkyColors.bg),
             contentPadding = PaddingValues(bottom = 90.dp)
         ) {
             // -----------------------------------------------------------------
@@ -454,7 +482,7 @@ fun ProfileTabContent(
                             .height(185.dp)
                     )
 
-                    // Floating Round Actions (Share & Menu) (Top Right)
+                    // Floating Round Actions (Share & Settings Menu) (Top Right)
                     Row(
                         modifier = Modifier
                             .padding(end = 16.dp, top = 16.dp)
@@ -466,27 +494,27 @@ fun ProfileTabContent(
                         Box(
                             modifier = Modifier
                                 .size(38.dp)
-                                .background(Color.White, CircleShape)
                                 .shadow(elevation = 3.dp, shape = CircleShape)
+                                .background(funkyColors.surface, CircleShape)
                                 .clickable {
                                     Toast.makeText(context, "Profile link copied to clipboard!", Toast.LENGTH_SHORT).show()
                                 },
                             contentAlignment = Alignment.Center
                         ) {
-                            ProfileShareIcon(modifier = Modifier.size(16.dp), color = Color(0xFF1E293B))
+                            ProfileShareIcon(modifier = Modifier.size(16.dp), color = funkyColors.ink)
                         }
 
-                        // Three Dots Menu Button (opens bottom sheet for Edit, Admin, Support, Logout)
+                        // Three Dots Menu Button (opens full-screen SettingsScreen)
                         Box(
                             modifier = Modifier
                                 .size(38.dp)
-                                .background(Color.White, CircleShape)
                                 .shadow(elevation = 3.dp, shape = CircleShape)
-                                .clickable { showOptionsMenuSheet = true }
+                                .background(funkyColors.surface, CircleShape)
+                                .clickable { showSettingsScreen = true }
                                 .testTag("profile_more_options_button"),
                             contentAlignment = Alignment.Center
                         ) {
-                            ProfileMoreDotsIcon(modifier = Modifier.size(16.dp), color = Color(0xFF1E293B))
+                            ProfileMoreDotsIcon(modifier = Modifier.size(16.dp), color = funkyColors.ink)
                         }
                     }
 
@@ -521,68 +549,91 @@ fun ProfileTabContent(
                 ) {
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Row: Name "pikaa", Blue Verified Tick, and "Online" Pill Badge
+                    // Row: Name, Verified Tick, "Online" Pill Badge, and Right-aligned Country Flag
                     Row(
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        val myUid = SupabaseSessionManager.getUserId(context)
-                        com.example.store.DecoratedUserName(
-                            userId = myUid,
-                            name = profileDisplayName,
-                            fontSize = 24.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            defaultColor = Color(0xFF0F172A)
-                        )
-
-                        // Blue Verified Badge (Custom Canvas Drawn)
-                        if (isVerified) {
-                            ProfileVerifiedBadge(modifier = Modifier.size(18.dp))
-                        }
-
-                        // Profile Badges (e.g. Founder, Early Adopter, etc.)
-                        if (userBadges.isNotEmpty()) {
-                            ProfileBadgesRow(badges = userBadges, badgeSize = 20.dp)
-                        }
-
-                        // Green "🟢 Online" Status Pill
-                        Box(
-                            modifier = Modifier
-                                .background(Color(0xFFEBFDF2), RoundedCornerShape(100.dp))
-                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(5.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(6.dp)
-                                        .background(Color(0xFF16A34A), CircleShape)
-                                )
-                                Text(
-                                    text = "Online",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF16A34A)
-                                )
+                            val myUid = SupabaseSessionManager.getUserId(context)
+                            com.example.store.DecoratedUserName(
+                                userId = myUid,
+                                name = profileDisplayName,
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                defaultColor = funkyColors.ink
+                            )
+
+                            // Blue Verified Badge (Custom Canvas Drawn)
+                            if (isVerified) {
+                                ProfileVerifiedBadge(modifier = Modifier.size(18.dp))
                             }
+
+                            // Profile Badges (e.g. Founder, Early Adopter, etc.)
+                            if (userBadges.isNotEmpty()) {
+                                ProfileBadgesRow(badges = userBadges, badgeSize = 20.dp)
+                            }
+
+                            // Green "Online" Status Pill
+                            Box(
+                                modifier = Modifier
+                                    .background(
+                                        if (funkyColors.isDark) Color(0xFF143523) else Color(0xFFEBFDF2),
+                                        RoundedCornerShape(100.dp)
+                                    )
+                                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .background(Color(0xFF16A34A), CircleShape)
+                                    )
+                                    Text(
+                                        text = "Online",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF22C55E)
+                                    )
+                                }
+                            }
+                        }
+
+                        if (profileCountryCode.isNotBlank() && profileCountryCode.lowercase() != "un") {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            CircleFlag(
+                                countryCode = profileCountryCode,
+                                allowProgramming = false,
+                                contentDescription = profileCountry,
+                                modifier = Modifier
+                                    .size(22.dp)
+                                    .clip(CircleShape)
+                                    .border(1.dp, funkyColors.line, CircleShape)
+                            )
                         }
                     }
 
                     Spacer(modifier = Modifier.height(2.dp))
 
-                    // Handle: @pikaa_07
+                    // Handle
                     Text(
                         text = "@${profileUsername}_07",
                         fontSize = 13.sp,
-                        color = Color(0xFF64748B),
+                        color = funkyColors.mute,
                         fontWeight = FontWeight.Medium
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Location & Join Date Row: 📍 Seoul, South Korea · 📅 Joined 3 months ago
+                    // Location & Join Date Row
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -591,11 +642,11 @@ fun ProfileTabContent(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            ProfileLocationPinIcon(modifier = Modifier.size(13.dp), color = Color(0xFF64748B))
+                            ProfileLocationPinIcon(modifier = Modifier.size(13.dp), color = funkyColors.mute)
                             Text(
                                 text = profileCity,
                                 fontSize = 12.sp,
-                                color = Color(0xFF64748B),
+                                color = funkyColors.mute,
                                 fontWeight = FontWeight.Normal
                             )
                         }
@@ -603,7 +654,7 @@ fun ProfileTabContent(
                         Text(
                             text = "·",
                             fontSize = 14.sp,
-                            color = Color(0xFF94A3B8),
+                            color = funkyColors.mute,
                             fontWeight = FontWeight.Bold
                         )
 
@@ -611,11 +662,11 @@ fun ProfileTabContent(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            ProfileCalendarIcon(modifier = Modifier.size(13.dp), color = Color(0xFF64748B))
+                            ProfileCalendarIcon(modifier = Modifier.size(13.dp), color = funkyColors.mute)
                             Text(
                                 text = currentJoinedText,
                                 fontSize = 12.sp,
-                                color = Color(0xFF64748B),
+                                color = funkyColors.mute,
                                 fontWeight = FontWeight.Normal
                             )
                         }
@@ -637,7 +688,7 @@ fun ProfileTabContent(
                             modifier = Modifier
                                 .width(1.dp)
                                 .height(28.dp)
-                                .background(Color(0xFFE2E8F0))
+                                .background(funkyColors.line)
                         )
                         StatItemExact(
                             count = followersCount.toString(),
@@ -652,7 +703,7 @@ fun ProfileTabContent(
                             modifier = Modifier
                                 .width(1.dp)
                                 .height(28.dp)
-                                .background(Color(0xFFE2E8F0))
+                                .background(funkyColors.line)
                         )
                         StatItemExact(
                             count = followingCount.toString(),
@@ -668,7 +719,7 @@ fun ProfileTabContent(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // ---------------------------------------------------------
-                    // 4. ACTION BUTTONS: "👋 Say Hi" & "👤+ Follow / Edit"
+                    // 4. ACTION BUTTONS: "Say Hi" & "Edit Profile"
                     // ---------------------------------------------------------
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -679,9 +730,9 @@ fun ProfileTabContent(
                             modifier = Modifier
                                 .weight(1f)
                                 .height(46.dp)
-                                .background(Color(0xFFFFD43B), RoundedCornerShape(100.dp))
+                                .background(funkyColors.mango, RoundedCornerShape(100.dp))
                                 .clickable {
-                                    Toast.makeText(context, "👋 Sent a friendly wave!", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Sent a friendly wave!", Toast.LENGTH_SHORT).show()
                                 }
                                 .testTag("profile_say_hi_button"),
                             contentAlignment = Alignment.Center
@@ -690,25 +741,25 @@ fun ProfileTabContent(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                ProfileWavingHandIcon(modifier = Modifier.size(18.dp), color = Color(0xFF0F172A))
+                                ProfileWavingHandIcon(modifier = Modifier.size(18.dp), color = funkyColors.onMango)
                                 Text(
                                     text = "Say Hi",
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.ExtraBold,
-                                    color = Color(0xFF0F172A)
+                                    color = funkyColors.onMango
                                 )
                             }
                         }
 
-                        // Outlined Pill Button: Edit Profile / Follow
+                        // Outlined Pill Button: Edit Profile
                         Box(
                             modifier = Modifier
                                 .weight(1f)
                                 .height(46.dp)
-                                .background(Color.White, RoundedCornerShape(100.dp))
+                                .background(funkyColors.surface, RoundedCornerShape(100.dp))
                                 .border(
                                     width = 1.dp,
-                                    color = Color(0xFFCBD5E1),
+                                    color = funkyColors.line,
                                     shape = RoundedCornerShape(100.dp)
                                 )
                                 .clickable { showEditProfileDialog = true }
@@ -721,13 +772,13 @@ fun ProfileTabContent(
                             ) {
                                 ProfileAddPersonIcon(
                                     modifier = Modifier.size(18.dp),
-                                    color = Color(0xFF0F172A)
+                                    color = funkyColors.ink
                                 )
                                 Text(
                                     text = "Edit Profile",
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF0F172A)
+                                    color = funkyColors.ink
                                 )
                             }
                         }
@@ -735,15 +786,15 @@ fun ProfileTabContent(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // 🎨 Chat Theme Store & Bubbles Banner Card
+                    // Chat Theme Store & Bubbles Banner Card
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(18.dp))
                             .clickable { showThemeStoreSheet = true },
                         shape = RoundedCornerShape(18.dp),
-                        color = Color(0xFFFEF9C3),
-                        border = BorderStroke(1.dp, Color(0xFFFDE047)),
+                        color = funkyColors.soft,
+                        border = BorderStroke(1.dp, funkyColors.mango.copy(alpha = 0.55f)),
                         shadowElevation = 1.dp
                     ) {
                         Row(
@@ -754,33 +805,47 @@ fun ProfileTabContent(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Row(
+                                modifier = Modifier.weight(1f),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Text("🎨", fontSize = 22.sp)
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(funkyColors.mango.copy(alpha = 0.22f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = com.example.R.drawable.ic_palette),
+                                        contentDescription = null,
+                                        tint = Color(0xFFD97706),
+                                        modifier = Modifier.size(21.dp)
+                                    )
+                                }
                                 Column {
                                     Text(
                                         text = "Funky Theme & Cosmetics Store",
-                                        fontSize = 15.sp,
+                                        fontSize = 14.5.sp,
                                         fontWeight = FontWeight.ExtraBold,
-                                        color = Color(0xFF78350F)
+                                        color = funkyColors.ink
                                     )
                                     Text(
-                                        text = "Customize bubbles, frames, effects & stickers",
-                                        fontSize = 12.sp,
-                                        color = Color(0xFF92400E)
+                                        text = "Customize bubbles, frames, effects & app theme",
+                                        fontSize = 11.5.sp,
+                                        color = funkyColors.mute
                                     )
                                 }
                             }
                             Surface(
                                 shape = RoundedCornerShape(100.dp),
-                                color = Color(0xFFFFC629)
+                                color = funkyColors.mango
                             ) {
                                 Text(
                                     text = "Open Store",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF0F172A),
+                                    color = funkyColors.onMango,
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                                 )
                             }
@@ -796,7 +861,7 @@ fun ProfileTabContent(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(46.dp)
-                            .background(Color(0xFFEBE6D8), RoundedCornerShape(100.dp))
+                            .background(funkyColors.soft, RoundedCornerShape(100.dp))
                             .padding(3.5.dp)
                     ) {
                         // About Me Tab
@@ -805,10 +870,10 @@ fun ProfileTabContent(
                                 .weight(1f)
                                 .fillMaxHeight()
                                 .clip(RoundedCornerShape(100.dp))
-                                .background(if (selectedMainTab == 0) Color.White else Color.Transparent)
+                                .background(if (selectedMainTab == 0) funkyColors.surface else Color.Transparent)
                                 .border(
                                     width = if (selectedMainTab == 0) 1.dp else 0.dp,
-                                    color = if (selectedMainTab == 0) Color(0xFFFDE68A) else Color.Transparent,
+                                    color = if (selectedMainTab == 0) funkyColors.mango.copy(alpha = 0.6f) else Color.Transparent,
                                     shape = RoundedCornerShape(100.dp)
                                 )
                                 .clickable { selectedMainTab = 0 }
@@ -819,7 +884,7 @@ fun ProfileTabContent(
                                 text = "About Me",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (selectedMainTab == 0) Color(0xFF0F172A) else Color(0xFF64748B)
+                                color = if (selectedMainTab == 0) funkyColors.ink else funkyColors.mute
                             )
                         }
 
@@ -829,10 +894,10 @@ fun ProfileTabContent(
                                 .weight(1f)
                                 .fillMaxHeight()
                                 .clip(RoundedCornerShape(100.dp))
-                                .background(if (selectedMainTab == 1) Color.White else Color.Transparent)
+                                .background(if (selectedMainTab == 1) funkyColors.surface else Color.Transparent)
                                 .border(
                                     width = if (selectedMainTab == 1) 1.dp else 0.dp,
-                                    color = if (selectedMainTab == 1) Color(0xFFFDE68A) else Color.Transparent,
+                                    color = if (selectedMainTab == 1) funkyColors.mango.copy(alpha = 0.6f) else Color.Transparent,
                                     shape = RoundedCornerShape(100.dp)
                                 )
                                 .clickable { selectedMainTab = 1 }
@@ -843,7 +908,7 @@ fun ProfileTabContent(
                                 text = "Feed",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (selectedMainTab == 1) Color(0xFF0F172A) else Color(0xFF64748B)
+                                color = if (selectedMainTab == 1) funkyColors.ink else funkyColors.mute
                             )
                         }
                     }
@@ -868,7 +933,7 @@ fun ProfileTabContent(
                             text = profileBio,
                             fontSize = 13.5.sp,
                             lineHeight = 20.sp,
-                            color = Color(0xFF334155),
+                            color = funkyColors.ink.copy(alpha = 0.85f),
                             fontWeight = FontWeight.Normal
                         )
                     }
@@ -932,15 +997,15 @@ fun ProfileTabContent(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
-                                ProfileCakeIcon(modifier = Modifier.size(20.dp), color = Color(0xFF64748B))
+                                ProfileCakeIcon(modifier = Modifier.size(20.dp), color = funkyColors.mute)
                                 Column {
-                                    Text("Age", fontSize = 11.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.Medium)
-                                    Text(profileAge, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0F172A))
+                                    Text("Age", fontSize = 11.sp, color = funkyColors.mute, fontWeight = FontWeight.Medium)
+                                    Text(profileAge, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = funkyColors.ink)
                                 }
                             }
 
                             // Divider
-                            Box(modifier = Modifier.width(1.dp).height(24.dp).background(Color(0xFFEDE8DC)))
+                            Box(modifier = Modifier.width(1.dp).height(24.dp).background(funkyColors.line))
 
                             // Gender
                             Row(
@@ -948,15 +1013,15 @@ fun ProfileTabContent(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.weight(1.2f).padding(horizontal = 8.dp)
                             ) {
-                                ProfileGenderFemaleIcon(modifier = Modifier.size(20.dp), color = Color(0xFF64748B))
+                                ProfileGenderFemaleIcon(modifier = Modifier.size(20.dp), color = funkyColors.mute)
                                 Column {
-                                    Text("Gender", fontSize = 11.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.Medium)
-                                    Text(profileGender, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0F172A))
+                                    Text("Gender", fontSize = 11.sp, color = funkyColors.mute, fontWeight = FontWeight.Medium)
+                                    Text(profileGender, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold, color = funkyColors.ink)
                                 }
                             }
 
                             // Divider
-                            Box(modifier = Modifier.width(1.dp).height(24.dp).background(Color(0xFFEDE8DC)))
+                            Box(modifier = Modifier.width(1.dp).height(24.dp).background(funkyColors.line))
 
                             // Location
                             Row(
@@ -964,14 +1029,14 @@ fun ProfileTabContent(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.weight(1.8f).padding(start = 8.dp)
                             ) {
-                                ProfileLocationPinIcon(modifier = Modifier.size(20.dp), color = Color(0xFF64748B))
+                                ProfileLocationPinIcon(modifier = Modifier.size(20.dp), color = funkyColors.mute)
                                 Column {
-                                    Text("Location", fontSize = 11.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.Medium)
+                                    Text("Location", fontSize = 11.sp, color = funkyColors.mute, fontWeight = FontWeight.Medium)
                                     Text(
                                         profileCity,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.ExtraBold,
-                                        color = Color(0xFF0F172A),
+                                        color = funkyColors.ink,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -982,11 +1047,11 @@ fun ProfileTabContent(
                 }
 
                 // -------------------------------------------------------------
-                // CARD 5: COIN WALLET & REWARDS
+                // CARD 5: COIN WALLET & REWARDS (Tap to open CoinStoreScreen)
                 // -------------------------------------------------------------
                 item {
                     ProfileCardContainer(
-                        title = "Coin Wallet 🪙",
+                        title = "Coin Wallet",
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 5.dp)
                     ) {
                         Column(modifier = Modifier.fillMaxWidth()) {
@@ -994,9 +1059,11 @@ fun ProfileTabContent(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(14.dp))
-                                    .background(Color(0xFFFFFBEB))
-                                    .border(BorderStroke(1.dp, Color(0xFFFDE68A)), RoundedCornerShape(14.dp))
-                                    .padding(14.dp),
+                                    .background(funkyColors.soft)
+                                    .border(BorderStroke(1.dp, funkyColors.mango.copy(alpha = 0.5f)), RoundedCornerShape(14.dp))
+                                    .clickable { showCoinStoreScreen = true }
+                                    .padding(14.dp)
+                                    .testTag("profile_coin_wallet_card"),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
@@ -1008,26 +1075,26 @@ fun ProfileTabContent(
                                             text = "$walletBalance coins",
                                             fontSize = 16.sp,
                                             fontWeight = FontWeight.ExtraBold,
-                                            color = Color(0xFF92400E)
+                                            color = funkyColors.ink
                                         )
                                         Text(
-                                            text = "100 free starter coins included",
+                                            text = "Tap to open Coin Store",
                                             fontSize = 11.5.sp,
-                                            color = Color(0xFFB45309)
+                                            color = funkyColors.mute
                                         )
                                     }
                                 }
 
                                 Surface(
                                     shape = RoundedCornerShape(50.dp),
-                                    color = Color(0xFFFEF3C7)
+                                    color = funkyColors.mango
                                 ) {
                                     Text(
-                                        text = "Active",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF92400E),
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                        text = "+ Top Up",
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = funkyColors.onMango,
+                                        modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp)
                                     )
                                 }
                             }
@@ -1035,9 +1102,9 @@ fun ProfileTabContent(
                             Spacer(modifier = Modifier.height(8.dp))
 
                             Text(
-                                text = "✨ More ways to get coins coming soon (payment gateway is deferred). Use coins to send animated gifts to your language exchange partners!",
+                                text = "Use coins to send animated gifts, unlock avatar frames, entry rockets & chat themes!",
                                 fontSize = 12.sp,
-                                color = Color(0xFF64748B),
+                                color = funkyColors.mute,
                                 lineHeight = 17.sp
                             )
                         }
@@ -1451,373 +1518,72 @@ fun ProfileTabContent(
         }
     }
 
-    // Options Bottom Sheet (Triggered by 3 dots on top right)
-    if (showOptionsMenuSheet) {
-        val pushDebugState by com.example.service.PushNotificationManager.debugState.collectAsState()
-        ModalBottomSheet(
-            onDismissRequest = { showOptionsMenuSheet = false },
-            containerColor = Color.White,
-            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 24.dp, vertical = 12.dp)
-                    .padding(bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = "Profile Settings & Actions",
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF0F172A),
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-
-                // 1. Edit Profile
-                Surface(
-                    onClick = {
-                        showOptionsMenuSheet = false
-                        showEditProfileDialog = true
-                    },
-                    shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFFF8FAFC),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        ProfileAddPersonIcon(modifier = Modifier.size(20.dp), color = Color(0xFF0F172A))
-                        Text("Edit Profile & Avatar", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
-                    }
-                }
-
-                // 2. Official Support Chat
-                Surface(
-                    onClick = {
-                        showOptionsMenuSheet = false
-                        onOpenSupportChat(null)
-                    },
-                    shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFFFFFBEB),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        ProfileWavingHandIcon(modifier = Modifier.size(20.dp), color = Color(0xFFB45309))
-                        Column {
-                            Text("24/7 Official Support Chat", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB45309))
-                            Text("Get help or appeal reports", fontSize = 11.sp, color = Color(0xFF92400E))
-                        }
-                    }
-                }
-
-                // 3. Admin Moderation Hub (if Admin)
-                if (isAdmin) {
-                    Surface(
-                        onClick = {
-                            showOptionsMenuSheet = false
-                            showModerationDialog = true
-                        },
-                        shape = RoundedCornerShape(14.dp),
-                        color = Color(0xFFECFDF5),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            ProfileVerifiedBadge(modifier = Modifier.size(20.dp))
-                            Column {
-                                Text("Safety & Moderation Hub", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF047857))
-                                Text("Admin Review Dashboard", fontSize = 11.sp, color = Color(0xFF065F46))
-                            }
-                        }
-                    }
-                }
-
-                // 4. Blocked Users
-                Surface(
-                    onClick = {
-                        showOptionsMenuSheet = false
-                        showBlockedUsersSheet = true
-                    },
-                    shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFFF1F5F9),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        SoftBlockIcon(size = 18.dp, color = Color(0xFF475569))
-                        Text("Blocked Users", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
-                    }
-                }
-
-                // 4b. Privacy > Blocked groups
-                Surface(
-                    onClick = {
-                        showOptionsMenuSheet = false
-                        showBlockedGroupsSheet = true
-                    },
-                    shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFFF1F5F9),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        SoftBlockIcon(size = 18.dp, color = Color(0xFF475569))
-                        Column {
-                            Text("Blocked groups", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
-                            Text("Privacy · View and unblock groups", fontSize = 11.sp, color = Color(0xFF64748B))
-                        }
-                    }
-                }
-
-                // 5. Encrypted Chat Backup & Recovery
-                Surface(
-                    onClick = {
-                        showOptionsMenuSheet = false
-                        showChatBackupScreen = true
-                    },
-                    shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFFFEF3C7),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Soft3DCloudIcon(size = 20.dp)
-                        Column {
-                            Text("Chat Backup & Recovery", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB45309))
-                            Text("Encrypted Google Drive backup", fontSize = 11.sp, color = Color(0xFF92400E))
-                        }
-                    }
-                }
-
-                // 6. Settings > Chat appearance & AI
-                Surface(
-                    onClick = {
-                        showOptionsMenuSheet = false
-                        showChatAppearanceSheet = true
-                    },
-                    shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFFEFF6FF),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Soft3DCloudIcon(size = 20.dp)
-                        Column {
-                            Text("Chat appearance & AI", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1D4ED8))
-                            Text("Presets (Butter, Sky, Mint, Graphite) · Text size · Cloud AI", fontSize = 11.sp, color = Color(0xFF1E40AF))
-                        }
-                    }
-                }
-
-                // 7. Delete Account (Red)
-                Surface(
-                    onClick = {
-                        showOptionsMenuSheet = false
-                        onDeleteAccountClick()
-                    },
-                    shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFFFEF2F2),
-                    border = BorderStroke(1.dp, Color(0xFFFCA5A5)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(
-                            painter = painterResource(id = com.example.R.drawable.ic_alert),
-                            contentDescription = "Delete Account",
-                            tint = Color(0xFFDC2626),
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Column {
-                            Text("Delete Account", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFDC2626))
-                            Text("Permanently erase profile, chats and data", fontSize = 11.sp, color = Color(0xFF991B1B))
-                        }
-                    }
-                }
-
-                // 8. Logout
-                Surface(
-                    onClick = {
-                        showOptionsMenuSheet = false
-                        onLogoutClick()
-                    },
-                    shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFFFFF1F2),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        ProfileSwapIcon(modifier = Modifier.size(18.dp), color = Color(0xFFE11D48))
-                        Text("Log Out of Account", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE11D48))
-                    }
-                }
-
-                // 8. Settings > About (Long-press version opens hidden ChatKitGallery debug screen)
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFFF8FAFC),
-                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 4.dp)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .combinedClickable(
-                                onClick = {},
-                                onLongClick = {
-                                    showOptionsMenuSheet = false
-                                    showChatKitGalleryDebug = true
-                                }
-                            )
-                            .padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(
-                            text = "About",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF0F172A)
-                        )
-                        Text(
-                            text = "FunkyTalk v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
-                            fontSize = 12.sp,
-                            color = Color(0xFF64748B),
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text = "Animated emoji by Google, licensed CC BY 4.0",
-                            fontSize = 11.sp,
-                            color = Color(0xFF94A3B8)
-                        )
-
-                        if (BuildConfig.DEBUG) {
-                            val permAndChannelLine = remember(pushDebugState) {
-                                com.example.service.PushNotificationManager.getPermissionAndChannelDebugLine(context)
-                            }
-                            val inboxStats by com.example.repository.InboxDrainTracker.stats.collectAsState()
-                            val formattedDrainTime = remember(inboxStats.lastDrainTime) {
-                                if (inboxStats.lastDrainTime > 0) {
-                                    java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(inboxStats.lastDrainTime))
-                                } else "Never"
-                            }
-
-                            HorizontalDivider(
-                                modifier = Modifier.padding(vertical = 4.dp),
-                                color = Color(0xFFE2E8F0)
-                            )
-                            Text(
-                                text = "Inbox: fetched ${inboxStats.fetchedCount}, saved ${inboxStats.savedCount}, failed ${inboxStats.failedCount}",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0F172A),
-                                modifier = Modifier.testTag("inbox_drain_debug_stats")
-                            )
-                            Text(
-                                text = "Last drain: $formattedDrainTime",
-                                fontSize = 11.sp,
-                                color = Color(0xFF475569),
-                                modifier = Modifier.testTag("inbox_drain_debug_time")
-                            )
-                            if (!inboxStats.lastFailureReason.isNullOrBlank()) {
-                                Text(
-                                    text = "Last failure: ${inboxStats.lastFailureReason}",
-                                    fontSize = 11.sp,
-                                    color = Color(0xFFDC2626),
-                                    modifier = Modifier.testTag("inbox_drain_debug_error")
-                                )
-                            }
-                            HorizontalDivider(
-                                modifier = Modifier.padding(vertical = 4.dp),
-                                color = Color(0xFFE2E8F0)
-                            )
-                            Text(
-                                text = pushDebugState.summaryLine,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (pushDebugState.isRegistered) Color(0xFF059669) else Color(0xFFDC2626),
-                                modifier = Modifier.testTag("push_debug_status_text")
-                            )
-                            Text(
-                                text = pushDebugState.httpStatusLine,
-                                fontSize = 11.sp,
-                                color = if (!pushDebugState.lastError.isNullOrBlank() && !pushDebugState.isRegistered) {
-                                    Color(0xFFB91C1C)
-                                } else {
-                                    Color(0xFF475569)
-                                },
-                                modifier = Modifier.testTag("push_debug_http_status_text")
-                            )
-                            Text(
-                                text = permAndChannelLine,
-                                fontSize = 11.sp,
-                                color = Color(0xFF475569),
-                                modifier = Modifier.testTag("push_debug_perm_channel_text")
-                            )
-                            OutlinedButton(
-                                onClick = {
-                                    coroutineScope.launch {
-                                        val ok = com.example.service.PushNotificationManager.forceReregisterPush(context)
-                                        Toast.makeText(
-                                            context,
-                                            if (ok) "Push token re-registered!" else "Re-register push failed",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    }
-                                },
-                                enabled = !pushDebugState.isReRegistering,
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("reregister_push_button")
-                            ) {
-                                if (pushDebugState.isReRegistering) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(16.dp),
-                                        strokeWidth = 2.dp
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Re-registering…", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                } else {
-                                    Text("Re-register push", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-                    }
-                }
+    // Full-screen Settings Screen (Triggered by 3 dots on top right)
+    if (showSettingsScreen) {
+        SettingsScreen(
+            walletBalance = walletBalance,
+            isAdmin = isAdmin,
+            onBack = { showSettingsScreen = false },
+            onEditProfile = {
+                showSettingsScreen = false
+                showEditProfileDialog = true
+            },
+            onOpenCoinStore = {
+                showSettingsScreen = false
+                showCoinStoreScreen = true
+            },
+            onOpenDecorationStore = {
+                showSettingsScreen = false
+                showThemeStoreSheet = true
+            },
+            onOpenSupportChat = {
+                showSettingsScreen = false
+                onOpenSupportChat(null)
+            },
+            onOpenModerationHub = {
+                showSettingsScreen = false
+                showModerationDialog = true
+            },
+            onOpenBlockedUsers = {
+                showSettingsScreen = false
+                showBlockedUsersSheet = true
+            },
+            onOpenBlockedGroups = {
+                showSettingsScreen = false
+                showBlockedGroupsSheet = true
+            },
+            onOpenChatBackup = {
+                showSettingsScreen = false
+                showChatBackupScreen = true
+            },
+            onOpenChatAppearance = {
+                showSettingsScreen = false
+                showChatAppearanceSheet = true
+            },
+            onOpenDebugGallery = {
+                showSettingsScreen = false
+                showChatKitGalleryDebug = true
+            },
+            onLogout = {
+                showSettingsScreen = false
+                onLogoutClick()
+            },
+            onDeleteAccount = {
+                showSettingsScreen = false
+                onDeleteAccountClick()
             }
-        }
+        )
+    }
+
+    // Full-screen Coin Store Screen
+    if (showCoinStoreScreen) {
+        CoinStoreScreen(
+            currentBalance = walletBalance,
+            onDismiss = { showCoinStoreScreen = false },
+            onPurchaseCoins = { addedCoins ->
+                com.example.store.CosmeticsManager.updateWalletBalance(walletBalance + addedCoins)
+            }
+        )
     }
 
     if (showChatAppearanceSheet) {

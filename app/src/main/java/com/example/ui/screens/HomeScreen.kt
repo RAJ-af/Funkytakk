@@ -101,6 +101,9 @@ fun HomeScreen(
     // Dynamic state trackers
     var activeTab by remember { mutableStateOf("home") } // "home", "rooms", "moments", "chats", "profile"
     var hideBottomBarForMomentsOverlay by remember { mutableStateOf(false) }
+    var hideBottomBarForDiscoverOverlay by remember { mutableStateOf(false) }
+    var hideBottomBarForChatsOverlay by remember { mutableStateOf(false) }
+    var hideBottomBarForProfileOverlay by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var selectedLanguageFilter by remember { mutableStateOf("All") }
 
@@ -513,13 +516,53 @@ fun HomeScreen(
         )
     }
 
+    val dmUnreadCount by com.example.repository.EncryptedChatRepository.totalUnreadCount.collectAsState()
+    val joinedGroupsForBadge by com.example.repository.GroupChatRepository.joinedGroups.collectAsState()
+    val totalUnreadChatsBadge = remember(dmUnreadCount, joinedGroupsForBadge) {
+        dmUnreadCount + joinedGroupsForBadge.sumOf { it.unreadCount.coerceAtLeast(0) }
+    }
+
+    val shouldHideBottomBar = remember(
+        activeTab,
+        hideBottomBarForMomentsOverlay,
+        hideBottomBarForDiscoverOverlay,
+        hideBottomBarForChatsOverlay,
+        hideBottomBarForProfileOverlay,
+        activeChatWindowContact,
+        activeGroupChat,
+        showCreateRoomBottomSheet,
+        showFilterDialog,
+        showAmusementEventsDialog,
+        selectedAmusementEvent,
+        showJoinCodeDialog
+    ) {
+        val tabOverlayOpen = when (activeTab) {
+            "moments" -> hideBottomBarForMomentsOverlay
+            "discover", "rooms" -> hideBottomBarForDiscoverOverlay
+            "chats" -> hideBottomBarForChatsOverlay
+            "profile" -> hideBottomBarForProfileOverlay
+            else -> false
+        }
+        tabOverlayOpen ||
+            activeChatWindowContact != null ||
+            activeGroupChat != null ||
+            showCreateRoomBottomSheet ||
+            showFilterDialog ||
+            showAmusementEventsDialog ||
+            selectedAmusementEvent != null ||
+            showJoinCodeDialog
+    }
+
+    val funkyColors = com.example.ui.theme.LocalFunkyColors.current
+
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
-            containerColor = if (activeTab == "moments") Color.Black else Color(0xFFFAFAEE),
+            containerColor = if (activeTab == "moments") Color.Black else funkyColors.bg,
             bottomBar = {
-                if (!(activeTab == "moments" && hideBottomBarForMomentsOverlay)) {
+                if (!shouldHideBottomBar) {
                     HomeBottomBar(
                         activeTab = activeTab,
+                        unreadChatCount = totalUnreadChatsBadge,
                         onTabSelected = { activeTab = it }
                     )
                 }
@@ -529,7 +572,7 @@ fun HomeScreen(
                 targetState = activeTab,
                 label = "HomeSubNavigation",
                 modifier = Modifier.padding(
-                    if (activeTab == "moments") PaddingValues(bottom = 0.dp) else innerPadding
+                    if (activeTab == "moments" || shouldHideBottomBar) PaddingValues(bottom = 0.dp) else innerPadding
                 )
             ) { currentTab ->
                 when (currentTab) {
@@ -604,7 +647,8 @@ fun HomeScreen(
                                         }
                                     }
                                 }
-                            }
+                            },
+                            onOverlayVisibilityChange = { hideBottomBarForDiscoverOverlay = it }
                         )
                     }
                     "moments" -> {
@@ -623,7 +667,8 @@ fun HomeScreen(
                             onNavigateToDiscover = { activeTab = "rooms" },
                             onOpenGroupChat = { grp ->
                                 activeGroupChat = grp
-                            }
+                            },
+                            onOverlayVisibilityChange = { hideBottomBarForChatsOverlay = it }
                         )
                     }
                     "profile" -> {
@@ -632,7 +677,8 @@ fun HomeScreen(
                             onLogoutClick = { showLogoutDialog = true },
                             viewModel = viewModel,
                             onOpenSupportChat = onOpenSupportChat,
-                            onDeleteAccountClick = onDeleteAccountClick
+                            onDeleteAccountClick = onDeleteAccountClick,
+                            onOverlayVisibilityChange = { hideBottomBarForProfileOverlay = it }
                         )
                     }
                 }

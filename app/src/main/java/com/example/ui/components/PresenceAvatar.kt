@@ -7,9 +7,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Nightlight
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -58,6 +55,7 @@ fun PresenceAvatar(
     userId: String? = null,
     frameConfig: com.example.store.AvatarFrameConfig? = null,
     enableFrameAnimation: Boolean = false,
+    showFlagBadge: Boolean = false,
     onClick: (() -> Unit)? = null
 ) {
     val finalCountryCode = (flagCountryCode ?: countryCode)?.trim()?.ifBlank { null }
@@ -319,38 +317,15 @@ fun PresenceAvatar(
                 )
             }
 
-            // 2. Offline State: Moon icon overlay at TopEnd (Top Right)
-            if (!isSpeaking && !isOnline) {
-                val moonBadgeSize = (size.value * 0.28f).dp.coerceAtLeast(14.dp)
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .offset(x = 2.dp, y = (-2).dp)
-                        .zIndex(4f)
-                        .size(moonBadgeSize)
-                        .background(Color.Black.copy(alpha = 0.7f), CircleShape)
-                        .border(1.5.dp, Color.White, CircleShape)
-                        .padding(2.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Nightlight,
-                        contentDescription = "Offline Moon",
-                        tint = Color.White,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-            }
-
-            // 3. Country Flag Badge Overlay at BottomStart (Bottom Left)
-            if (!finalCountryCode.isNullOrBlank()) {
+            // Country Flag Badge Overlay only if explicitly requested
+            if (showFlagBadge && !finalCountryCode.isNullOrBlank()) {
                 val flagBadgeSize = (size.value * 0.28f).dp.coerceAtLeast(14.dp)
                 val surfaceColor = MaterialTheme.colorScheme.surface
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
                         .offset(x = (-3).dp, y = 3.dp)
-                        .zIndex(5f) // High zIndex over ring & avatar
+                        .zIndex(5f)
                         .size(flagBadgeSize)
                         .background(surfaceColor, CircleShape)
                         .border(2.dp, Color.White, CircleShape),

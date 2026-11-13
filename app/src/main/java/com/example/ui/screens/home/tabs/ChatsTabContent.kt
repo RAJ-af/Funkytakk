@@ -20,11 +20,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.VolumeOff
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import com.example.ui.theme.LocalFunkyColors
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -75,9 +73,11 @@ fun ChatsTabContent(
     onSelectChat: (DirectChat) -> Unit,
     onOpenSupportChat: (reportId: String?) -> Unit = {},
     onNavigateToDiscover: () -> Unit = {},
-    onOpenGroupChat: (com.example.db.LocalGroupConversation) -> Unit = {}
+    onOpenGroupChat: (com.example.db.LocalGroupConversation) -> Unit = {},
+    onOverlayVisibilityChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
     val scope = rememberCoroutineScope()
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf("All") } // "All", "Unread", "Language", "Groups"
@@ -214,10 +214,26 @@ fun ChatsTabContent(
 
     val isVaultUnlocked = vaultStatus == VaultStatus.UNLOCKED
 
+    LaunchedEffect(
+        showCreateGroupSheet,
+        showPendingInvitesSheet,
+        showBlockedUsersSheet,
+        showBlockedGroupsSheet,
+        selectedPendingInvite
+    ) {
+        onOverlayVisibilityChange(
+            showCreateGroupSheet ||
+                showPendingInvitesSheet ||
+                showBlockedUsersSheet ||
+                showBlockedGroupsSheet ||
+                selectedPendingInvite != null
+        )
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFFCFBF7))
+            .background(funkyColors.bg)
     ) {
         // --- 1. Main Chat Content (BLURRED when password has not been entered) ---
         LazyColumn(
@@ -1151,35 +1167,38 @@ fun ChatsTabContent(
 
                                     Spacer(modifier = Modifier.width(8.dp))
 
-                                    Text(
-                                        text = chat.time,
-                                        fontSize = if (isMinimalistMode) 11.5.sp else 12.sp,
-                                        color = Color(0xFF9CA3AF),
-                                        fontWeight = FontWeight.Normal
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        if (!isGroup && flagCode.isNotBlank()) {
+                                            CircleFlag(
+                                                countryCode = flagCode,
+                                                allowProgramming = false,
+                                                modifier = Modifier
+                                                    .size(16.dp)
+                                                    .clip(CircleShape)
+                                            )
+                                        }
+                                        Text(
+                                            text = chat.time,
+                                            fontSize = if (isMinimalistMode) 11.5.sp else 12.sp,
+                                            color = Color(0xFF9CA3AF),
+                                            fontWeight = FontWeight.Normal
+                                        )
+                                    }
                                 }
 
                                 if (!isMinimalistMode) {
                                     Spacer(modifier = Modifier.height(2.dp))
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        if (!isGroup) {
-                                            CircleFlag(
-                                                countryCode = flagCode,
-                                                modifier = Modifier
-                                                    .size(13.dp)
-                                                    .clip(CircleShape)
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                        }
-                                        Text(
-                                            text = chat.isNativeLanguage,
-                                            color = Color(0xFF6B7280),
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Normal,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
+                                    Text(
+                                        text = chat.isNativeLanguage,
+                                        color = Color(0xFF6B7280),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Normal,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                     Spacer(modifier = Modifier.height(4.dp))
                                 } else {
                                     Spacer(modifier = Modifier.height(2.dp))

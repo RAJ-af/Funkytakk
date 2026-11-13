@@ -13,8 +13,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -22,6 +20,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import com.example.R
+import com.example.ui.theme.LocalAppDarkTheme
+import com.example.ui.theme.LocalFunkyColors
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -183,9 +185,12 @@ fun resolveCountryCode(countryName: String?, dbCountryCode: String?): String {
 fun DiscoverTabContent(
     supabaseProfiles: List<UserProfile> = emptyList(),
     onCreateRoom: () -> Unit = {},
-    onStartDirectChat: (userId: String, name: String, avatarUrl: String, flagCode: String) -> Unit = { _, _, _, _ -> }
+    onStartDirectChat: (userId: String, name: String, avatarUrl: String, flagCode: String) -> Unit = { _, _, _, _ -> },
+    onOverlayVisibilityChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
+    val isDark = LocalAppDarkTheme.current
 
     // Interactive States
     var isSearchActive by remember { mutableStateOf(false) }
@@ -319,7 +324,7 @@ fun DiscoverTabContent(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFFAFAEE))
+            .background(funkyColors.bg)
     ) {
         Column(
             modifier = Modifier.fillMaxSize()
@@ -339,20 +344,20 @@ fun DiscoverTabContent(
                             text = "Funky",
                             fontSize = 25.sp,
                             fontWeight = FontWeight.Black,
-                            color = Color(0xFF1E1E1E)
+                            color = funkyColors.ink
                         )
                         Text(
                             text = "Talk.",
                             fontSize = 25.sp,
                             fontWeight = FontWeight.Black,
-                            color = Color(0xFFF59E0B)
+                            color = funkyColors.mango
                         )
                     }
                     Text(
                         text = "Real People. Real Conversations.",
                         fontSize = 12.sp,
                         fontStyle = FontStyle.Italic,
-                        color = Color(0xFF64748B),
+                        color = funkyColors.mute,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -367,13 +372,13 @@ fun DiscoverTabContent(
                         modifier = Modifier
                             .size(40.dp)
                             .clip(CircleShape)
-                            .background(Color.White)
-                            .border(1.dp, Color(0xFFE5E7EB), CircleShape)
+                            .background(funkyColors.surface)
+                            .border(1.dp, funkyColors.line, CircleShape)
                             .clickable { isSearchActive = !isSearchActive },
                         contentAlignment = Alignment.Center
                     ) {
                         FunkySearchIcon(
-                            color = if (isSearchActive) Color(0xFFD97706) else Color.Black,
+                            color = if (isSearchActive) funkyColors.mango else funkyColors.ink,
                             modifier = Modifier.size(19.dp)
                         )
                     }
@@ -383,13 +388,13 @@ fun DiscoverTabContent(
                         modifier = Modifier
                             .size(40.dp)
                             .clip(CircleShape)
-                            .background(Color.White)
-                            .border(1.dp, Color(0xFFE5E7EB), CircleShape)
+                            .background(funkyColors.surface)
+                            .border(1.dp, funkyColors.line, CircleShape)
                             .clickable { showFilterSettingsSheet = true },
                         contentAlignment = Alignment.Center
                     ) {
                         FunkySlidersIcon(
-                            color = Color.Black,
+                            color = funkyColors.ink,
                             modifier = Modifier.size(19.dp)
                         )
                     }
@@ -419,7 +424,7 @@ fun DiscoverTabContent(
                         trailingIcon = {
                             if (searchQuery.isNotEmpty()) {
                                 IconButton(onClick = { searchQuery = "" }) {
-                                    Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color(0xFF64748B), modifier = Modifier.size(18.dp))
+                                    SoftCloseIcon(color = funkyColors.mute, size = 16.dp)
                                 }
                             }
                         },
@@ -899,7 +904,12 @@ fun DiscoverTabContent(
                         shape = RoundedCornerShape(16.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Chat, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_chats),
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Message", color = Color.White, fontWeight = FontWeight.Bold)
                         }
@@ -909,6 +919,10 @@ fun DiscoverTabContent(
                 Spacer(modifier = Modifier.height(16.dp))
             }
         }
+    }
+
+    LaunchedEffect(showFullProfileScreenWithFeed) {
+        onOverlayVisibilityChange(showFullProfileScreenWithFeed != null)
     }
 
     // Full Screen Profile Feed View
@@ -1502,14 +1516,17 @@ fun DiscoverUserCard(
     onCardClick: () -> Unit,
     onWaveClick: () -> Unit
 ) {
+    val funkyColors = LocalFunkyColors.current
+    val isDark = LocalAppDarkTheme.current
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onCardClick() },
         shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        border = BorderStroke(1.dp, Color(0xFFF1F5F9))
+        colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isDark) 0.dp else 1.dp),
+        border = BorderStroke(1.dp, funkyColors.line)
     ) {
         Box(modifier = Modifier.fillMaxWidth()) {
             Row(
@@ -1518,13 +1535,13 @@ fun DiscoverUserCard(
                     .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Large Rounded-Square Avatar with Flag & Online Dot
+                // Clean Rounded-Square Avatar (flag rendered on right side of card)
                 DiscoverSquareAvatarWithFlag(
                     avatarUrl = partner.avatarUrl,
                     countryCode = partner.countryCode,
                     isOnline = partner.isOnline,
-                    avatarSize = 82.dp,
-                    flagSize = 24.dp
+                    avatarSize = 80.dp,
+                    flagSize = 20.dp
                 )
 
                 Spacer(modifier = Modifier.width(14.dp))
@@ -1542,46 +1559,56 @@ fun DiscoverUserCard(
                             text = partner.name,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF0F172A),
+                            color = funkyColors.ink,
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
                         )
                         Text(
                             text = "${partner.age}",
                             fontSize = 13.sp,
-                            color = Color(0xFF64748B),
+                            color = funkyColors.mute,
                             fontWeight = FontWeight.Medium
                         )
-                        // Online / Offline Status Badge with dot inside and increased roundness
                         Box(
                             modifier = Modifier
                                 .clip(CircleShape)
-                                .background(if (partner.isOnline) Color(0xFFE6F4EA) else Color(0xFFF1F5F9))
-                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                                .background(
+                                    if (partner.isOnline) {
+                                        if (isDark) Color(0xFF143524) else Color(0xFFE6F4EA)
+                                    } else {
+                                        funkyColors.soft
+                                    }
+                                )
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(7.dp)
+                                        .size(6.dp)
                                         .clip(CircleShape)
-                                        .background(if (partner.isOnline) Color(0xFF22C55E) else Color(0xFF94A3B8))
+                                        .background(if (partner.isOnline) Color(0xFF22C55E) else funkyColors.mute)
                                 )
                                 Text(
                                     text = if (partner.isOnline) "Online" else "Offline",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Black,
-                                    color = if (partner.isOnline) Color(0xFF137333) else Color(0xFF64748B)
+                                    color = if (partner.isOnline) {
+                                        if (isDark) Color(0xFF4ADE80) else Color(0xFF137333)
+                                    } else {
+                                        funkyColors.mute
+                                    }
                                 )
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(2.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
 
-                    // Language Exchange: e.g., hi en mr → zh ko jp
+                    // Language Exchange: e.g., hi en mr -> zh ko jp
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -1590,76 +1617,91 @@ fun DiscoverUserCard(
                             text = partner.nativeLang.lowercase(),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF475569) // slate gray
+                            color = funkyColors.mute
                         )
                         Text(
                             text = "→",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF94A3B8) // light gray
+                            color = funkyColors.mute
                         )
                         Text(
                             text = partner.learningLang.lowercase(),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFFD97706) // FunkyTalk warm yellow/amber
+                            color = funkyColors.mango
                         )
                     }
 
                     Spacer(modifier = Modifier.height(3.dp))
 
-                     // Bio
+                    // Bio
                     Text(
                         text = partner.bio,
                         fontSize = 12.sp,
-                        color = Color(0xFF475569),
+                        color = funkyColors.mute,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         lineHeight = 16.sp
                     )
                 }
 
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(10.dp))
 
-                // Action: "Hi" Button on the RIGHT
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(
-                            if (partner.isWaved) Color(0xFFDCFCE7) else Color(0xFFFFD43B)
-                        )
-                        .clickable { onWaveClick() }
-                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                // Right Side Column: Normal Country Flag + Hi Action Button
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
+                    if (partner.countryCode.isNotBlank()) {
+                        CircleFlag(
+                            countryCode = partner.countryCode,
+                            allowProgramming = false,
+                            modifier = Modifier
+                                .size(22.dp)
+                                .clip(CircleShape)
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(
+                                if (partner.isWaved) Color(0xFFDCFCE7) else funkyColors.mango
+                            )
+                            .clickable { onWaveClick() }
+                            .padding(horizontal = 14.dp, vertical = 8.dp)
                     ) {
-                        if (partner.isWaved) {
-                            SoftCheckmarkBadge(
-                                size = 15.dp,
-                                badgeColor = Color(0xFF15803D),
-                                checkColor = Color.White
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Sent",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color(0xFF15803D)
-                            )
-                        } else {
-                            SoftWavingHandIcon(
-                                color = Color(0xFF1E293B),
-                                size = 15.dp
-                            )
-                            Spacer(modifier = Modifier.width(5.dp))
-                            Text(
-                                text = "Hi",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color(0xFF1E293B)
-                            )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            if (partner.isWaved) {
+                                SoftCheckmarkBadge(
+                                    size = 15.dp,
+                                    badgeColor = Color(0xFF15803D),
+                                    checkColor = Color.White
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Sent",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color(0xFF15803D)
+                                )
+                            } else {
+                                SoftWavingHandIcon(
+                                    color = Color(0xFF1E170B),
+                                    size = 15.dp
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(
+                                    text = "Hi",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color(0xFF1E170B)
+                                )
+                            }
                         }
                     }
                 }

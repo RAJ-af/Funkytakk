@@ -9,9 +9,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,19 +16,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
 import com.example.ui.components.CircleFlag
 import com.example.ui.screens.Country
 import com.example.ui.screens.CountryData
-
-private val TextPrimary = Color(0xFF111827)
-private val TextSecondary = Color(0xFF4B5563)
-private val TextPlaceholder = Color(0xFF9CA3AF)
-private val PrimaryYellow = Color(0xFFF8C63D)
-private val BorderInactive = Color(0xFFD1D5DB)
+import com.example.ui.theme.LocalFunkyColors
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,6 +34,7 @@ fun ChooseCountrySheet(
     onCountrySelected: (name: String, code: String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val funkyColors = LocalFunkyColors.current
     var searchQuery by remember { mutableStateOf("") }
     var currentSelection by remember {
         mutableStateOf(
@@ -65,14 +60,14 @@ fun ChooseCountrySheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Color.White,
+        containerColor = funkyColors.surface,
         dragHandle = {
             Box(
                 modifier = Modifier
                     .padding(vertical = 10.dp)
                     .width(44.dp)
                     .height(4.dp)
-                    .background(Color(0xFFE5E7EB), RoundedCornerShape(2.dp))
+                    .background(funkyColors.line, RoundedCornerShape(2.dp))
             )
         },
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
@@ -96,7 +91,7 @@ fun ChooseCountrySheet(
                     text = "Choose country",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
-                    color = TextPrimary
+                    color = funkyColors.ink
                 )
 
                 Button(
@@ -105,8 +100,8 @@ fun ChooseCountrySheet(
                         onDismiss()
                     },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = PrimaryYellow,
-                        contentColor = TextPrimary
+                        containerColor = funkyColors.mango,
+                        contentColor = Color(0xFF1F1607)
                     ),
                     shape = RoundedCornerShape(20.dp),
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
@@ -117,7 +112,7 @@ fun ChooseCountrySheet(
                         text = "Done",
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp,
-                        color = TextPrimary
+                        color = Color(0xFF1F1607)
                     )
                 }
             }
@@ -127,8 +122,8 @@ fun ChooseCountrySheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp)
-                    .background(Color(0xFFF9FAFB), RoundedCornerShape(14.dp))
-                    .border(1.dp, Color(0xFFE5E7EB), RoundedCornerShape(14.dp))
+                    .background(funkyColors.soft, RoundedCornerShape(14.dp))
+                    .border(1.dp, funkyColors.line, RoundedCornerShape(14.dp))
                     .padding(horizontal = 14.dp),
                 contentAlignment = Alignment.CenterStart
             ) {
@@ -137,10 +132,10 @@ fun ChooseCountrySheet(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Search,
+                        painter = painterResource(id = R.drawable.ic_search),
                         contentDescription = "Search",
-                        tint = TextPlaceholder,
-                        modifier = Modifier.size(20.dp)
+                        tint = funkyColors.mute,
+                        modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     BasicTextField(
@@ -149,10 +144,10 @@ fun ChooseCountrySheet(
                         singleLine = true,
                         textStyle = TextStyle(
                             fontSize = 15.sp,
-                            color = TextPrimary,
+                            color = funkyColors.ink,
                             fontWeight = FontWeight.Normal
                         ),
-                        cursorBrush = SolidColor(TextPrimary),
+                        cursorBrush = SolidColor(funkyColors.ink),
                         modifier = Modifier.weight(1f),
                         decorationBox = { innerTextField ->
                             if (searchQuery.isEmpty()) {
@@ -160,7 +155,7 @@ fun ChooseCountrySheet(
                                     text = "Search country...",
                                     style = TextStyle(
                                         fontSize = 15.sp,
-                                        color = TextPlaceholder
+                                        color = funkyColors.mute
                                     )
                                 )
                             }
@@ -186,7 +181,7 @@ fun ChooseCountrySheet(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
-                            .background(if (isSelected) Color(0xFFFFF9E6) else Color.Transparent)
+                            .background(if (isSelected) funkyColors.soft else Color.Transparent)
                             .clickable {
                                 currentSelection = country
                             }
@@ -206,6 +201,7 @@ fun ChooseCountrySheet(
                             ) {
                                 CircleFlag(
                                     countryCode = country.flagCode,
+                                    allowProgramming = false,
                                     modifier = Modifier.fillMaxSize()
                                 )
                             }
@@ -216,22 +212,21 @@ fun ChooseCountrySheet(
                                 text = country.name,
                                 fontSize = 16.sp,
                                 fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                                color = TextPrimary
+                                color = funkyColors.ink
                             )
                         }
 
-                        // Radio checkmark indicator
                         if (isSelected) {
                             Box(
                                 modifier = Modifier
                                     .size(22.dp)
-                                    .background(PrimaryYellow, CircleShape),
+                                    .background(funkyColors.mango, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.Check,
+                                    painter = painterResource(id = R.drawable.ic_check),
                                     contentDescription = "Selected",
-                                    tint = TextPrimary,
+                                    tint = Color(0xFF1F1607),
                                     modifier = Modifier.size(14.dp)
                                 )
                             }
@@ -239,7 +234,7 @@ fun ChooseCountrySheet(
                             Box(
                                 modifier = Modifier
                                     .size(22.dp)
-                                    .border(1.5.dp, BorderInactive, CircleShape)
+                                    .border(1.5.dp, funkyColors.line, CircleShape)
                             )
                         }
                     }

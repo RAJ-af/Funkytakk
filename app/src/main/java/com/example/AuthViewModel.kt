@@ -38,6 +38,13 @@ sealed class AuthState {
     data class AccountCollision(val email: String, val message: String) : AuthState()
 }
 
+sealed class SessionVerificationState {
+    object Idle : SessionVerificationState()
+    object Verifying : SessionVerificationState()
+    object Verified : SessionVerificationState()
+    data class Failed(val reason: String? = null) : SessionVerificationState()
+}
+
 data class UserProfile(
     val uid: String,
     val email: String,
@@ -92,8 +99,16 @@ class AuthViewModel : ViewModel() {
     private val _authState = MutableStateFlow<AuthState>(AuthState.Idle)
     val authState: StateFlow<AuthState> = _authState
 
+    private val _sessionVerificationState = MutableStateFlow<SessionVerificationState>(SessionVerificationState.Idle)
+    val sessionVerificationState: StateFlow<SessionVerificationState> = _sessionVerificationState.asStateFlow()
+
     fun resetAuthState() {
         _authState.value = AuthState.Idle
+    }
+
+    fun retryBootSessionVerification(context: Context) {
+        initializeFirebaseIfNeeded(context)
+        checkCurrentUser(context)
     }
 
     private val _supabaseProfiles = MutableStateFlow<List<UserProfile>>(emptyList())
@@ -1632,17 +1647,34 @@ class AuthViewModel : ViewModel() {
 
     private fun checkCurrentUser(context: Context? = null) {
         val authUser = firebaseAuth?.currentUser
-        if (authUser != null) {
-            if (context != null) {
+        if (authUser == null) {
+            _sessionVerificationState.value = SessionVerificationState.Idle
+            return
+        }
+
+        if (context != null) {
+            _sessionVerificationState.value = SessionVerificationState.Verifying
+            _authState.value = AuthState.Loading
+            viewModelScope.launch {
                 val isGoogleAccount = authUser.providerData.any { it.providerId == "google.com" }
-                val effectiveUid = SupabaseSessionManager.getUserId(context) ?: authUser.uid
-                if (SupabaseSessionManager.getUserId(context).isNullOrBlank()) {
-                    SupabaseSessionManager.setSession(
-                        context = context,
-                        accessToken = SupabaseSessionManager.getAccessToken(context) ?: BuildConfig.SUPABASE_ANON_KEY,
-                        userId = effectiveUid
-                    )
+                val hasLocalSession = SupabaseSessionManager.hasValidAuthenticatedSession(context)
+                val verifiedUid = if (hasLocalSession) {
+                    SupabaseSessionManager.getUserId(context)
+                } else {
+                    SupabaseSessionManager.ensureActiveSession(context)
+                        ?: SupabaseSessionManager.forceRefreshSession(context)
                 }
+
+                if (verifiedUid.isNullOrBlank()) {
+                    Log.w("AuthViewModel", "Boot session verification failed (401/unverified)")
+                    _sessionVerificationState.value = SessionVerificationState.Failed("Session could not be verified")
+                    _authState.value = AuthState.Error("Error 401 · Unauthorized")
+                    return@launch
+                }
+
+                _sessionVerificationState.value = SessionVerificationState.Verified
+                val effectiveUid = verifiedUid
+
                 checkAndCleanupUnverifiedAccount(context, authUser) {
                     val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
                     val isCustomVerified = if (isGoogleAccount) true else prefs.getBoolean("custom_email_verified_${effectiveUid}", false)
@@ -1656,10 +1688,10 @@ class AuthViewModel : ViewModel() {
                                 isEmailVerified = initialVerified
                             )
                         )
-                        
+
                         // Start real-time session tracking on boot for secure single active device enforcement
                         startSessionListener(context, effectiveUid)
-                        
+
                         // Concurrent secure validation & auto-detection on boot (only for password accounts)
                         if (!isGoogleAccount) {
                             viewModelScope.launch {
@@ -1676,17 +1708,17 @@ class AuthViewModel : ViewModel() {
                         }
                     }
                 }
-            } else {
-                // If context is null, emit what we have.
-                _authState.value = AuthState.Success(
-                    UserProfile(
-                        uid = authUser.uid,
-                        email = authUser.email ?: "",
-                        displayName = authUser.displayName,
-                        isEmailVerified = false
-                    )
-                )
             }
+        } else {
+            _sessionVerificationState.value = SessionVerificationState.Verified
+            _authState.value = AuthState.Success(
+                UserProfile(
+                    uid = authUser.uid,
+                    email = authUser.email ?: "",
+                    displayName = authUser.displayName,
+                    isEmailVerified = false
+                )
+            )
         }
     }
 
@@ -2543,6 +2575,7 @@ class AuthViewModel : ViewModel() {
         val effectiveUid = supabaseUid ?: currentProfileUid ?: firebaseAuth?.currentUser?.uid.orEmpty()
 
         _authState.value = AuthState.Idle
+        _sessionVerificationState.value = SessionVerificationState.Idle
 
         if (context != null) {
             com.example.service.PushNotificationManager.launchApplicationLogoutCleanup(

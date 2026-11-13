@@ -1,253 +1,256 @@
 package com.example.ui.screens
 
-import androidx.compose.animation.core.*
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ExitToApp
-import androidx.compose.material.icons.filled.NightlightRound
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.WbSunny
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.theme.LocalAppDarkTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+/**
+ * 401 Session Verification Failed screen built to match Verify.dc_0b7f08e7.html.
+ * Uses neo-brutalist comic cards & custom vector Canvas artwork with zero Material Icons.
+ */
 @Composable
 fun VerifyAccountErrorScreen(
     onRetry: () -> Unit = {},
     onLogout: () -> Unit = {},
-    onContactSupport: () -> Unit = {}
+    onContactSupport: () -> Unit = {},
+    onClose: () -> Unit = onLogout
 ) {
-    val systemIsDark = isSystemInDarkTheme()
-    var isDarkTheme by remember { mutableStateOf(systemIsDark) }
+    val isDark = LocalAppDarkTheme.current
     var retryCount by remember { mutableIntStateOf(0) }
     var isChecking by remember { mutableStateOf(false) }
     var subtitleText by remember {
         mutableStateOf("Your session may have expired or the connection dropped. Give it another go.")
     }
-
     val coroutineScope = rememberCoroutineScope()
 
-    // Color definitions according to reference HTML spec
-    val bgColor = if (isDarkTheme) Color(0xFF16120D) else Color(0xFFFFF8E7)
-    val surfaceColor = if (isDarkTheme) Color(0xFF231D15) else Color(0xFFFFFFFF)
-    val softColor = if (isDarkTheme) Color(0xFF3A2D12) else Color(0xFFFFEFC2)
-    val inkColor = if (isDarkTheme) Color(0xFFFFF3DC) else Color(0xFF2B2118)
-    val muteColor = if (isDarkTheme) Color(0xFFA89A82) else Color(0xFF8A7B66)
-    val mangoColor = Color(0xFFFFB627)
-    val onMangoColor = Color(0xFF2B2118)
-    val lineColor = if (isDarkTheme) Color(0xFF34291A) else Color(0xFFF0E3C4)
-    val badColor = Color(0xFFFF5A4D)
+    // Exact palette from Verify.dc_0b7f08e7.html
+    val bgColor = if (isDark) Color(0xFF1B120B) else Color(0xFFFFF4D6)
+    val surfaceColor = if (isDark) Color(0xFF2A1D12) else Color(0xFFFFFBEF)
+    val inkColor = if (isDark) Color(0xFFFFF1D2) else Color(0xFF2A1B0E)
+    val mutedColor = if (isDark) Color(0xFFC2AC8C) else Color(0xFF6F5B45)
+    val borderColor = if (isDark) Color(0xFF5A4228) else Color(0xFF2A1B0E)
+    val shadowColor = if (isDark) Color(0xFF000000) else Color(0xFF2A1B0E)
 
-    // Animated pulsing ring effect
-    val infiniteTransition = rememberInfiniteTransition(label = "ring_pulse")
-    val ringScale by infiniteTransition.animateFloat(
-        initialValue = 0.85f,
-        targetValue = 1.25f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2400, easing = FastOutLinearInEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "scale"
-    )
-    val ringOpacity by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2400, easing = FastOutLinearInEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "opacity"
-    )
+    val mangoColor = Color(0xFFFFB400)
+    val onMangoColor = Color(0xFF2A1B0E)
+    val coralBg = Color(0xFFFFD9D3)
+    val coralInk = Color(0xFF9A2417)
 
-    // Core wobble rotation animation (-8deg to 7deg)
-    val coreWobble by infiniteTransition.animateFloat(
-        initialValue = -8f,
-        targetValue = 7f,
+    val infiniteTransition = rememberInfiniteTransition(label = "verify_badge_anim")
+    val gentleFloat by infiniteTransition.animateFloat(
+        initialValue = -7.5f,
+        targetValue = -4.5f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1500, easing = LinearOutSlowInEasing),
+            animation = tween(1600, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "wobble"
+        label = "tilt"
     )
-
-    // Spinner rotation during checking
     val spinAngle by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(
-            animation = tween(800, easing = LinearEasing)
+            animation = tween(750, easing = LinearEasing)
         ),
         label = "spin"
     )
 
-    Surface(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .testTag("verify_account_error_screen"),
-        color = bgColor,
-        contentColor = inkColor
+            .background(bgColor)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(horizontal = 24.dp, vertical = 20.dp)
+            .testTag("verify_account_error_screen")
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(horizontal = 24.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top Bar: Theme Toggle
+            // Top Bar: Close Button Top-Right (.ib 44dp circular)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End
             ) {
-                Box(
+                Surface(
+                    onClick = onClose,
+                    shape = CircleShape,
+                    color = surfaceColor,
+                    border = BorderStroke(2.dp, borderColor),
                     modifier = Modifier
                         .size(44.dp)
-                        .clip(CircleShape)
-                        .background(softColor)
-                        .clickable { isDarkTheme = !isDarkTheme },
-                    contentAlignment = Alignment.Center
+                        .testTag("verify_close_button")
                 ) {
-                    Icon(
-                        imageVector = if (isDarkTheme) Icons.Default.WbSunny else Icons.Default.NightlightRound,
-                        contentDescription = "Toggle Theme",
-                        tint = inkColor,
-                        modifier = Modifier.size(22.dp)
-                    )
+                    Box(contentAlignment = Alignment.Center) {
+                        CloseCrossVector(
+                            color = inkColor,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
 
-            // Mid Section: Orb with Warning Badge, Title, Subtitle, Error 401 Badge
+            // Center Hero Section
             Column(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                // Orb with pulsing rings
+                // -6deg Tilted 150.dp Mango Broken-Lock Card with hard offset shadow
                 Box(
-                    modifier = Modifier.size(190.dp),
+                    modifier = Modifier
+                        .size(156.dp)
+                        .rotate(gentleFloat),
                     contentAlignment = Alignment.Center
                 ) {
-                    // Ring pulse 1
+                    // Hard offset comic shadow (+6dp, +6dp)
                     Box(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .scale(ringScale)
-                            .graphicsLayer(alpha = ringOpacity)
-                            .border(2.dp, lineColor, CircleShape)
+                            .size(150.dp)
+                            .offset(x = 6.dp, y = 6.dp)
+                            .background(shadowColor, RoundedCornerShape(44.dp))
                     )
-
-                    // Soft background circle
-                    Box(
-                        modifier = Modifier
-                            .size(190.dp)
-                            .clip(CircleShape)
-                            .background(softColor)
-                    )
-
-                    // Core warning box with wobble rotation
-                    Box(
-                        modifier = Modifier
-                            .size(104.dp)
-                            .rotate(coreWobble)
-                            .clip(RoundedCornerShape(34.dp))
-                            .background(mangoColor),
-                        contentAlignment = Alignment.Center
+                    // Mango Card with 3dp border
+                    Surface(
+                        shape = RoundedCornerShape(44.dp),
+                        color = mangoColor,
+                        border = BorderStroke(3.dp, Color(0xFF2A1B0E)),
+                        modifier = Modifier.size(150.dp)
                     ) {
-                        // Warning Triangle Icon (Custom canvas line drawing)
-                        WarningAlertIcon(modifier = Modifier.size(56.dp), color = onMangoColor)
+                        Box(contentAlignment = Alignment.Center) {
+                            BrokenLockVector(
+                                color = onMangoColor,
+                                modifier = Modifier.size(72.dp)
+                            )
+                        }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(28.dp))
+                Spacer(modifier = Modifier.height(32.dp))
 
-                // Heading Title
                 Text(
-                    text = "Hmm, we couldn’t verify you",
-                    fontSize = 28.sp,
+                    text = "Hmm, we couldn’t\nverify you",
+                    fontSize = 32.sp,
                     fontWeight = FontWeight.Black,
+                    lineHeight = 35.sp,
+                    letterSpacing = (-0.6).sp,
                     color = inkColor,
                     textAlign = TextAlign.Center,
-                    letterSpacing = (-0.5).sp,
                     modifier = Modifier.testTag("error_title")
                 )
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                // Subtitle
                 Text(
                     text = subtitleText,
                     fontSize = 15.sp,
-                    color = muteColor,
-                    textAlign = TextAlign.Center,
+                    fontWeight = FontWeight.SemiBold,
                     lineHeight = 22.sp,
+                    color = mutedColor,
+                    textAlign = TextAlign.Center,
                     modifier = Modifier
-                        .widthIn(max = 300.dp)
+                        .widthIn(max = 310.dp)
                         .testTag("error_subtitle")
                 )
 
-                Spacer(modifier = Modifier.height(18.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-                // Error Code Pill Badge
+                // Error 401 · Unauthorized coral badge
                 Surface(
                     shape = RoundedCornerShape(99.dp),
-                    color = softColor
+                    color = coralBg,
+                    border = BorderStroke(2.dp, coralInk)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(badColor)
-                        )
-                        Text(
-                            text = "Error 401 · Unauthorized",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = inkColor
-                        )
-                    }
+                    Text(
+                        text = "Error 401 · Unauthorized",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = coralInk,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                    )
                 }
             }
 
-            // Bottom Section: Action Buttons & Help Link
+            // Bottom Actions
             Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Try again Button (Mango Yellow Main CTA)
-                Surface(
+                NeoBrutalistButton(
+                    text = if (isChecking) "Checking…" else "Try again",
+                    bgColor = mangoColor,
+                    textColor = onMangoColor,
+                    borderColor = Color(0xFF2A1B0E),
+                    shadowColor = Color(0xFF2A1B0E),
+                    isSpinning = isChecking,
+                    spinAngle = spinAngle,
                     onClick = {
                         if (!isChecking) {
                             isChecking = true
                             coroutineScope.launch {
-                                delay(1200)
+                                onRetry()
+                                delay(1400)
                                 isChecking = false
                                 retryCount++
                                 subtitleText = if (retryCount > 1) {
@@ -255,139 +258,197 @@ fun VerifyAccountErrorScreen(
                                 } else {
                                     "Still can’t reach your account. Check your connection and retry."
                                 }
-                                onRetry()
                             }
                         }
                     },
-                    color = mangoColor,
-                    shape = RoundedCornerShape(99.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(58.dp)
                         .testTag("retry_button")
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Refresh",
-                            tint = onMangoColor,
-                            modifier = Modifier
-                                .size(22.dp)
-                                .rotate(if (isChecking) spinAngle else 0f)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (isChecking) "Checking…" else "Try again",
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Black,
-                            color = onMangoColor
-                        )
-                    }
-                }
+                )
 
-                // Log out Ghost Button
-                Surface(
+                Spacer(modifier = Modifier.height(12.dp))
+
+                NeoBrutalistButton(
+                    text = "Log out",
+                    bgColor = surfaceColor,
+                    textColor = inkColor,
+                    borderColor = borderColor,
+                    shadowColor = shadowColor,
                     onClick = onLogout,
-                    color = Color.Transparent,
-                    shape = RoundedCornerShape(99.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(58.dp)
-                        .border(2.dp, lineColor, RoundedCornerShape(99.dp))
                         .testTag("logout_button")
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ExitToApp,
-                            contentDescription = "Log out",
-                            tint = inkColor,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Log out",
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Black,
-                            color = inkColor
-                        )
-                    }
-                }
+                )
 
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-                // Footer Help Link
-                Row(
+                Text(
+                    text = buildAnnotatedString {
+                        withStyle(SpanStyle(color = mutedColor, fontWeight = FontWeight.SemiBold)) {
+                            append("Still stuck? ")
+                        }
+                        withStyle(
+                            SpanStyle(
+                                color = inkColor,
+                                fontWeight = FontWeight.ExtraBold,
+                                textDecoration = TextDecoration.Underline
+                            )
+                        ) {
+                            append("Contact support")
+                        }
+                    },
+                    fontSize = 13.sp,
                     modifier = Modifier
                         .clickable { onContactSupport() }
-                        .padding(vertical = 6.dp, horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Still stuck? ",
-                        fontSize = 13.sp,
-                        color = muteColor
-                    )
-                    Text(
-                        text = "Contact support",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = inkColor
-                    )
-                }
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                        .testTag("contact_support_link")
+                )
             }
         }
     }
 }
 
 @Composable
-private fun WarningAlertIcon(modifier: Modifier = Modifier, color: Color = Color(0xFF2B2118)) {
-    androidx.compose.foundation.Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        val strokeWidth = 3.dp.toPx()
+private fun NeoBrutalistButton(
+    text: String,
+    bgColor: Color,
+    textColor: Color,
+    borderColor: Color,
+    shadowColor: Color,
+    isSpinning: Boolean = false,
+    spinAngle: Float = 0f,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val shift = if (isPressed) 2.dp else 0.dp
+    val shadowShift = if (isPressed) 1.dp else 3.dp
 
-        val trianglePath = androidx.compose.ui.graphics.Path().apply {
-            moveTo(w * 0.5f, h * 0.15f)
-            lineTo(w * 0.88f, h * 0.82f)
-            lineTo(w * 0.12f, h * 0.82f)
-            close()
+    Box(modifier = modifier.height(59.dp)) {
+        // Hard bottom-right offset shadow
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .offset(x = shadowShift, y = shadowShift)
+                .background(shadowColor, RoundedCornerShape(18.dp))
+        )
+        Surface(
+            color = bgColor,
+            shape = RoundedCornerShape(18.dp),
+            border = BorderStroke(2.dp, borderColor),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .offset(x = shift, y = shift)
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = onClick
+                )
+        ) {
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (isSpinning) {
+                    SpinnerArcVector(
+                        color = textColor,
+                        modifier = Modifier
+                            .size(18.dp)
+                            .rotate(spinAngle)
+                    )
+                    Spacer(modifier = Modifier.size(8.dp))
+                }
+                Text(
+                    text = text,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = textColor
+                )
+            }
         }
+    }
+}
 
-        drawPath(
-            path = trianglePath,
-            color = color.copy(alpha = 0.25f)
-        )
-        drawPath(
-            path = trianglePath,
+@Composable
+private fun CloseCrossVector(color: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val stroke = Stroke(width = 2.4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+        val p = size.width * 0.25f
+        val q = size.width * 0.75f
+        drawLine(color, Offset(p, p), Offset(q, q), strokeWidth = stroke.width, cap = StrokeCap.Round)
+        drawLine(color, Offset(q, p), Offset(p, q), strokeWidth = stroke.width, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+private fun SpinnerArcVector(color: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        drawArc(
             color = color,
-            style = androidx.compose.ui.graphics.drawscope.Stroke(
-                width = strokeWidth,
-                cap = androidx.compose.ui.graphics.StrokeCap.Round,
-                join = androidx.compose.ui.graphics.StrokeJoin.Round
-            )
+            startAngle = 0f,
+            sweepAngle = 260f,
+            useCenter = false,
+            style = Stroke(width = 2.4.dp.toPx(), cap = StrokeCap.Round)
+        )
+    }
+}
+
+/**
+ * Custom Canvas Broken Lock matching the exact SVG in Verify.dc_0b7f08e7.html:
+ * rect(5,11,14,9,rx=2) + shackle path + diagonal strike-through (4,4 -> 20,20)
+ */
+@Composable
+private fun BrokenLockVector(color: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val sx = size.width / 24f
+        val sy = size.height / 24f
+        val sw = (2.4f * sx).coerceAtLeast(2.2.dp.toPx())
+        val stroke = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
+
+        // Lock body rect(5, 11, 14, 9, rx=2)
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(5f * sx, 11f * sy),
+            size = Size(14f * sx, 9f * sy),
+            cornerRadius = CornerRadius(2f * sx, 2f * sy),
+            style = stroke
         )
 
-        // Draw warning exclamation mark inside triangle
+        // Shackle path: M8 11V8a4 4 0 0 1 7.5 -2
+        val shackle = Path().apply {
+            moveTo(8f * sx, 11f * sy)
+            lineTo(8f * sx, 8f * sy)
+            cubicTo(
+                8f * sx, 5.4f * sy,
+                10.1f * sx, 4f * sy,
+                12f * sx, 4f * sy
+            )
+            cubicTo(
+                13.7f * sx, 4f * sy,
+                15f * sx, 4.9f * sy,
+                15.5f * sx, 6f * sy
+            )
+        }
+        drawPath(shackle, color = color, style = stroke)
+
+        // Diagonal slash: M4 4 L20 20 (with subtle mango gap shadow first so it reads cleanly)
+        drawLine(
+            color = Color(0xFFFFB400),
+            start = Offset(4f * sx, 3.5f * sy),
+            end = Offset(20f * sx, 19.5f * sy),
+            strokeWidth = sw * 1.9f,
+            cap = StrokeCap.Round
+        )
         drawLine(
             color = color,
-            start = androidx.compose.ui.geometry.Offset(w * 0.5f, h * 0.38f),
-            end = androidx.compose.ui.geometry.Offset(w * 0.5f, h * 0.6f),
-            strokeWidth = strokeWidth,
-            cap = androidx.compose.ui.graphics.StrokeCap.Round
-        )
-
-        drawCircle(
-            color = color,
-            radius = strokeWidth * 0.7f,
-            center = androidx.compose.ui.geometry.Offset(w * 0.5f, h * 0.71f)
+            start = Offset(4f * sx, 4f * sy),
+            end = Offset(20f * sx, 20f * sy),
+            strokeWidth = sw,
+            cap = StrokeCap.Round
         )
     }
 }

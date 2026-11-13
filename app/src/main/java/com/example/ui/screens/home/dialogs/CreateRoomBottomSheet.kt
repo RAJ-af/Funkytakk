@@ -14,7 +14,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -58,6 +57,7 @@ import com.example.ui.components.LanguageIcon
 import com.example.ui.components.RoomLanguageSelectionSheet
 import com.example.ui.components.getProgrammingIconUrl
 import com.example.ui.screens.LanguageData
+import com.example.ui.theme.LocalAppDarkTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -91,7 +91,7 @@ fun CreateRoomBottomSheet(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val isDark = isSystemInDarkTheme()
+    val isDark = LocalAppDarkTheme.current
 
     val bgColor = if (isDark) Color(0xFF16120D) else Color(0xFFFFF8E7)
     val surfColor = if (isDark) Color(0xFF231D15) else Color.White
@@ -155,10 +155,11 @@ fun CreateRoomBottomSheet(
 
     val activeBannerCatalog = remember(selectedBannerTab, suggestedBanners) {
         when (selectedBannerTab) {
-            "Scenics" -> BannerPack.worldwideScenics
+            "India" -> BannerPack.indianScenics
+            "GIFs" -> BannerPack.animatedGifs
+            "World" -> BannerPack.worldwideScenics
             "Cozy" -> BannerPack.cozyVibes
             "Anime" -> BannerPack.animeAndAnimated
-            "Gradients" -> BannerPack.gradients
             else -> suggestedBanners
         }
     }
@@ -430,7 +431,7 @@ fun CreateRoomBottomSheet(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 // Category Tabs
-                val bannerTabs = listOf("Suggested", "Scenics", "Cozy", "Anime", "Gradients")
+                val bannerTabs = listOf("Suggested", "India", "GIFs", "World", "Cozy", "Anime")
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = PaddingValues(horizontal = 2.dp)
@@ -576,6 +577,24 @@ fun CreateRoomBottomSheet(
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize()
                                 )
+                            }
+
+                            if (banner.url.contains(".gif", ignoreCase = true)) {
+                                Surface(
+                                    shape = RoundedCornerShape(99.dp),
+                                    color = Color(0xBA16120D),
+                                    modifier = Modifier
+                                        .align(Alignment.BottomStart)
+                                        .padding(6.dp)
+                                ) {
+                                    Text(
+                                        text = "GIF",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = mangoColor,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
                             }
 
                             if (isSelected) {
@@ -1425,7 +1444,7 @@ fun CreateRoomBottomSheet(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FunkyTalkVipModalSheet(
-    isDark: Boolean = isSystemInDarkTheme(),
+    isDark: Boolean = LocalAppDarkTheme.current,
     onDismiss: () -> Unit,
     onUnlockVip: () -> Unit
 ) {

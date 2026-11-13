@@ -2,21 +2,29 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val AppBackground = Color(0xFFFAFAEE) // Warm off-white requested by user
-val GoldPrimary = Color(0xFFFFC529) // Warm honey gold for primary buttons / actions
-val GoldAccent = Color(0xFFFFC529) // FunkyTalk signature gold accent
+val AppBackground = Color(0xFFFFF8E7) // Warm cream white default
+val GoldPrimary = Color(0xFFFFB627) // Mango gold for primary buttons / actions
+val GoldAccent = Color(0xFFFFB627) // FunkyTalk signature mango gold accent
 val GoldSecondary = Color(0xFFFFB300) // Rich amber for active items
-val GoldContainer = Color(0xFFFFF3D1) // Light warm gold container background
-val AmbientBlue = Color(0xFFE1EBF9) // Light ice/sky blue for the welcome gradient
+val GoldContainer = Color(0xFFFFEFC2) // Light warm cream gold container
+val AmbientBlue = Color(0xFFE1EBF9) // Light ice/sky blue for welcome gradient
 val AmbientGoldLight = Color(0xFFFFFCEE) // Very light warm amber
-val TextPrimary = Color(0xFF1E1E24) // Soft black for high contrast readability
-val TextSecondary = Color(0xFF6B6E7B) // Muted charcoal for descriptions
-val BorderColor = Color(0xFFEBECEF) // Subtle line/box divisions
+val TextPrimary = Color(0xFF2B2118) // Warm deep brown ink for high contrast readability
+val TextSecondary = Color(0xFF8A7B66) // Muted warm taupe for descriptions
+val BorderColor = Color(0xFFF0E3C4) // Subtle warm line/box divisions
+
+// Dark Brownish + Mango Palette
+val DarkBg = Color(0xFF16120D)
+val DarkSurface = Color(0xFF231D15)
+val DarkSoft = Color(0xFF3A2D12)
+val DarkInk = Color(0xFFFFF3DC)
+val DarkMute = Color(0xFFA89A82)
+val DarkLine = Color(0xFF34291A)
 
 val LiveRed = Color(0xFFEF4444)
 val GoldDark = Color(0xFFD97706)
-val DarkText = Color(0xFF1E1E24)
-val GraySubtitle = Color(0xFF6B6E7B)
+val DarkText = Color(0xFF2B2118)
+val GraySubtitle = Color(0xFF8A7B66)
 
 val Purple80 = Color(0xFFD0BCFF)
 val PurpleGrey80 = Color(0xFFCCC2DC)

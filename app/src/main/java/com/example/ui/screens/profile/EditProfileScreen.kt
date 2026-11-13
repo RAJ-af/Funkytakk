@@ -3,6 +3,7 @@ package com.example.ui.screens.profile
 import android.content.Context
 import android.util.Log
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -16,10 +17,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,34 +28,25 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.AuthViewModel
+import com.example.R
 import com.example.UserProfile
 import com.example.ui.components.CircleFlag
 import com.example.ui.components.resolveAvatarModel
 import com.example.ui.screens.CountryData
 import com.example.ui.screens.LanguageData
+import com.example.ui.screens.ProfileCalendarIcon
 import com.example.ui.screens.profile.components.*
+import com.example.ui.theme.LocalFunkyColors
 import kotlinx.coroutines.launch
-
-// High-contrast tokens ensuring NO white-on-white text issues
-private val AppBackground = Color(0xFFFAFAEE)
-private val SurfaceCard = Color.White
-private val InputCardBg = Color(0xFFF8F9FA)
-private val PrimaryYellow = Color(0xFFF8C63D)
-private val AccentGold = Color(0xFFEAB308)
-private val TextPrimary = Color(0xFF111827)     // Deep rich black
-private val TextSecondary = Color(0xFF4B5563)   // Readable slate gray
-private val TextPlaceholder = Color(0xFF9CA3AF) // Muted hint
-private val BorderLight = Color(0xFFE5E7EB)
-private val BorderActive = Color(0xFFF8C63D)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -69,6 +57,9 @@ fun EditProfileScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val funkyColors = LocalFunkyColors.current
+
+    BackHandler { onDismiss() }
 
     val prefs = remember { context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE) }
     val savedBio = remember { prefs.getString("profile_bio_${currentUserProfile.uid}", null) }
@@ -264,42 +255,49 @@ fun EditProfileScreen(
         }
     }
 
-    // Helper to extract country flag from language string e.g. "Hindi (Advanced)" -> "in"
+    // Helper to extract country/programming flag from language string e.g. "Hindi (Advanced)" -> "in"
     fun getFlagForLanguage(langStr: String): String {
-        val rawName = langStr.substringBefore("(").trim()
+        val withoutLevel = langStr.replace(
+            Regex("\\s*\\((?:Beginner|Elementary|Intermediate|Upper Intermediate|Advanced|Native / Fluent|Native|Fluent)\\)\\s*$", RegexOption.IGNORE_CASE),
+            ""
+        ).trim()
+        val rawName = if (withoutLevel != langStr) withoutLevel else langStr.substringBefore("(").trim()
         val match = LanguageData.popularLanguages.find { it.name.equals(rawName, ignoreCase = true) }
+            ?: LanguageData.programmingLanguages.find { it.name.equals(rawName, ignoreCase = true) }
             ?: LanguageData.allLanguages.find { it.name.equals(rawName, ignoreCase = true) }
         return match?.flagCode ?: "un"
     }
 
-    // Helper for category vector icon
-    fun getInterestIcon(interest: String): ImageVector {
+    // Helper for colorful interest emoji badge (zero Material Icons)
+    fun getInterestEmoji(interest: String): String {
         return when (interest.lowercase()) {
-            "technology" -> Icons.Default.Code
-            "writing" -> Icons.Default.Edit
-            "cooking" -> Icons.Default.Restaurant
-            "k-drama", "movies" -> Icons.Default.Tv
-            "fitness", "gym" -> Icons.Default.FitnessCenter
-            "reading", "books" -> Icons.Default.MenuBook
-            "art" -> Icons.Default.Palette
-            "nature" -> Icons.Default.Eco
-            "pets", "animals" -> Icons.Default.Pets
-            "coding" -> Icons.Default.Favorite
-            "music" -> Icons.Default.MusicNote
-            "travel" -> Icons.Default.Flight
-            else -> Icons.Default.LocalOffer
+            "technology" -> "💻"
+            "writing" -> "✍️"
+            "cooking" -> "🍳"
+            "k-drama", "movies" -> "🎬"
+            "fitness", "gym" -> "💪"
+            "reading", "books" -> "📚"
+            "art" -> "🎨"
+            "nature" -> "🌿"
+            "pets", "animals" -> "🐾"
+            "coding" -> "⚡"
+            "music" -> "🎵"
+            "travel" -> "✈️"
+            else -> "✨"
         }
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(AppBackground)
+            .background(funkyColors.bg)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
+                .navigationBarsPadding()
+                .imePadding()
         ) {
             // ----------------------------------------------------
             // 1. TOP BAR
@@ -316,14 +314,14 @@ fun EditProfileScreen(
                     modifier = Modifier
                         .size(42.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFFEAEAE0))
+                        .background(funkyColors.soft)
                         .clickable { onDismiss() },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        painter = painterResource(id = R.drawable.ic_back),
                         contentDescription = "Back",
-                        tint = TextPrimary,
+                        tint = funkyColors.ink,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -333,7 +331,7 @@ fun EditProfileScreen(
                     text = "Edit profile",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
-                    color = TextPrimary
+                    color = funkyColors.ink
                 )
 
                 // Save Checkmark Button
@@ -341,21 +339,21 @@ fun EditProfileScreen(
                     modifier = Modifier
                         .size(42.dp)
                         .clip(CircleShape)
-                        .background(PrimaryYellow)
+                        .background(funkyColors.mango)
                         .clickable(enabled = !isSaving) { saveProfileChanges() },
                     contentAlignment = Alignment.Center
                 ) {
                     if (isSaving) {
                         CircularProgressIndicator(
-                            color = TextPrimary,
+                            color = funkyColors.onMango,
                             strokeWidth = 2.5.dp,
                             modifier = Modifier.size(20.dp)
                         )
                     } else {
                         Icon(
-                            imageVector = Icons.Default.Check,
+                            painter = painterResource(id = R.drawable.ic_check),
                             contentDescription = "Save profile",
-                            tint = TextPrimary,
+                            tint = funkyColors.onMango,
                             modifier = Modifier.size(22.dp)
                         )
                     }
@@ -418,7 +416,7 @@ fun EditProfileScreen(
                                         .padding(horizontal = 12.dp, vertical = 6.dp)
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.AddPhotoAlternate,
+                                        painter = painterResource(id = R.drawable.ic_photo),
                                         contentDescription = "Add Cover",
                                         tint = Color.White,
                                         modifier = Modifier.size(16.dp)
@@ -453,7 +451,7 @@ fun EditProfileScreen(
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.PhotoCamera,
+                                    painter = painterResource(id = R.drawable.ic_photo),
                                     contentDescription = "Change Cover",
                                     tint = Color.White,
                                     modifier = Modifier.size(14.dp)
@@ -482,7 +480,7 @@ fun EditProfileScreen(
                             modifier = Modifier
                                 .size(92.dp)
                                 .clip(CircleShape)
-                                .border(3.dp, Color.White, CircleShape)
+                                .border(3.dp, funkyColors.surface, CircleShape)
                                 .clickable {
                                     avatarPickerLauncher.launch(
                                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
@@ -496,8 +494,8 @@ fun EditProfileScreen(
                                 .size(30.dp)
                                 .align(Alignment.BottomEnd)
                                 .clip(CircleShape)
-                                .background(Color(0xFF1F2937))
-                                .border(2.dp, Color.White, CircleShape)
+                                .background(funkyColors.ink)
+                                .border(2.dp, funkyColors.surface, CircleShape)
                                 .clickable {
                                     avatarPickerLauncher.launch(
                                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
@@ -506,9 +504,9 @@ fun EditProfileScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Default.PhotoCamera,
+                                painter = painterResource(id = R.drawable.ic_photo),
                                 contentDescription = "Change Avatar",
-                                tint = Color.White,
+                                tint = funkyColors.bg,
                                 modifier = Modifier.size(15.dp)
                             )
                         }
@@ -523,7 +521,7 @@ fun EditProfileScreen(
                         text = "Display name",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
-                        color = TextSecondary,
+                        color = funkyColors.mute,
                         modifier = Modifier.padding(bottom = 6.dp)
                     )
                     Box(
@@ -531,8 +529,8 @@ fun EditProfileScreen(
                             .fillMaxWidth()
                             .height(52.dp)
                             .clip(RoundedCornerShape(14.dp))
-                            .background(Color(0xFFF3F4ED))
-                            .border(1.dp, Color(0xFFE5E7DE), RoundedCornerShape(14.dp))
+                            .background(funkyColors.surface)
+                            .border(1.dp, funkyColors.line, RoundedCornerShape(14.dp))
                             .padding(horizontal = 16.dp),
                         contentAlignment = Alignment.CenterStart
                     ) {
@@ -543,9 +541,9 @@ fun EditProfileScreen(
                             textStyle = TextStyle(
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = TextPrimary
+                                color = funkyColors.ink
                             ),
-                            cursorBrush = SolidColor(TextPrimary),
+                            cursorBrush = SolidColor(funkyColors.mango),
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
@@ -566,12 +564,12 @@ fun EditProfileScreen(
                             text = "Username",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Medium,
-                            color = TextSecondary
+                            color = funkyColors.mute
                         )
                         Text(
                             text = "${editUsername.length}/30",
                             fontSize = 12.sp,
-                            color = TextPlaceholder
+                            color = funkyColors.mute
                         )
                     }
                     Box(
@@ -579,8 +577,8 @@ fun EditProfileScreen(
                             .fillMaxWidth()
                             .height(52.dp)
                             .clip(RoundedCornerShape(14.dp))
-                            .background(Color(0xFFF3F4ED))
-                            .border(1.dp, Color(0xFFE5E7DE), RoundedCornerShape(14.dp))
+                            .background(funkyColors.surface)
+                            .border(1.dp, funkyColors.line, RoundedCornerShape(14.dp))
                             .padding(horizontal = 16.dp),
                         contentAlignment = Alignment.CenterStart
                     ) {
@@ -593,9 +591,9 @@ fun EditProfileScreen(
                             textStyle = TextStyle(
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = TextPrimary
+                                color = funkyColors.ink
                             ),
-                            cursorBrush = SolidColor(TextPrimary),
+                            cursorBrush = SolidColor(funkyColors.mango),
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
@@ -616,12 +614,12 @@ fun EditProfileScreen(
                             text = "Bio",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Medium,
-                            color = TextSecondary
+                            color = funkyColors.mute
                         )
                         Text(
                             text = "${editBio.length}/150",
                             fontSize = 12.sp,
-                            color = TextPlaceholder
+                            color = funkyColors.mute
                         )
                     }
                     Box(
@@ -629,8 +627,8 @@ fun EditProfileScreen(
                             .fillMaxWidth()
                             .heightIn(min = 88.dp)
                             .clip(RoundedCornerShape(14.dp))
-                            .background(Color(0xFFF3F4ED))
-                            .border(1.dp, Color(0xFFE5E7DE), RoundedCornerShape(14.dp))
+                            .background(funkyColors.surface)
+                            .border(1.dp, funkyColors.line, RoundedCornerShape(14.dp))
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                         contentAlignment = Alignment.TopStart
                     ) {
@@ -641,10 +639,10 @@ fun EditProfileScreen(
                             },
                             textStyle = TextStyle(
                                 fontSize = 14.sp,
-                                color = TextPrimary,
+                                color = funkyColors.ink,
                                 lineHeight = 20.sp
                             ),
-                            cursorBrush = SolidColor(TextPrimary),
+                            cursorBrush = SolidColor(funkyColors.mango),
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
@@ -663,14 +661,14 @@ fun EditProfileScreen(
                         modifier = Modifier
                             .width(4.dp)
                             .height(16.dp)
-                            .background(AccentGold, RoundedCornerShape(2.dp))
+                            .background(funkyColors.mango, RoundedCornerShape(2.dp))
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "Personal Details",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
-                        color = TextPrimary
+                        color = funkyColors.ink
                     )
                 }
 
@@ -684,15 +682,15 @@ fun EditProfileScreen(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(14.dp))
-                            .background(Color(0xFFF3F4ED))
-                            .border(1.dp, Color(0xFFE5E7DE), RoundedCornerShape(14.dp))
+                            .background(funkyColors.surface)
+                            .border(1.dp, funkyColors.line, RoundedCornerShape(14.dp))
                             .clickable { showAgeSheet = true }
                             .padding(horizontal = 14.dp, vertical = 10.dp)
                     ) {
                         Text(
                             text = "Age",
                             fontSize = 11.sp,
-                            color = TextSecondary,
+                            color = funkyColors.mute,
                             fontWeight = FontWeight.Medium
                         )
                         Spacer(modifier = Modifier.height(4.dp))
@@ -702,24 +700,22 @@ fun EditProfileScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.CalendarToday,
-                                    contentDescription = "Age",
-                                    tint = TextSecondary,
-                                    modifier = Modifier.size(16.dp)
+                                ProfileCalendarIcon(
+                                    modifier = Modifier.size(16.dp),
+                                    color = Color(0xFFD97706)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = "$editAge",
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = TextPrimary
+                                    color = funkyColors.ink
                                 )
                             }
                             Icon(
-                                imageVector = Icons.Default.KeyboardArrowDown,
+                                painter = painterResource(id = R.drawable.ic_chevron_down),
                                 contentDescription = null,
-                                tint = TextSecondary,
+                                tint = funkyColors.mute,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -730,15 +726,15 @@ fun EditProfileScreen(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(14.dp))
-                            .background(Color(0xFFF3F4ED))
-                            .border(1.dp, Color(0xFFE5E7DE), RoundedCornerShape(14.dp))
+                            .background(funkyColors.surface)
+                            .border(1.dp, funkyColors.line, RoundedCornerShape(14.dp))
                             .clickable { showGenderSheet = true }
                             .padding(horizontal = 14.dp, vertical = 10.dp)
                     ) {
                         Text(
                             text = "Gender",
                             fontSize = 11.sp,
-                            color = TextSecondary,
+                            color = funkyColors.mute,
                             fontWeight = FontWeight.Medium
                         )
                         Spacer(modifier = Modifier.height(4.dp))
@@ -749,9 +745,9 @@ fun EditProfileScreen(
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
-                                    imageVector = Icons.Default.Person,
+                                    painter = painterResource(id = R.drawable.ic_profile),
                                     contentDescription = "Gender",
-                                    tint = TextSecondary,
+                                    tint = Color(0xFF0284C7),
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
@@ -759,13 +755,13 @@ fun EditProfileScreen(
                                     text = editGender,
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = TextPrimary
+                                    color = funkyColors.ink
                                 )
                             }
                             Icon(
-                                imageVector = Icons.Default.KeyboardArrowDown,
+                                painter = painterResource(id = R.drawable.ic_chevron_down),
                                 contentDescription = null,
-                                tint = TextSecondary,
+                                tint = funkyColors.mute,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -784,15 +780,15 @@ fun EditProfileScreen(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(14.dp))
-                            .background(Color(0xFFF3F4ED))
-                            .border(1.dp, Color(0xFFE5E7DE), RoundedCornerShape(14.dp))
+                            .background(funkyColors.surface)
+                            .border(1.dp, funkyColors.line, RoundedCornerShape(14.dp))
                             .clickable { showCountrySheet = true }
                             .padding(horizontal = 14.dp, vertical = 10.dp)
                     ) {
                         Text(
                             text = "Country",
                             fontSize = 11.sp,
-                            color = TextSecondary,
+                            color = funkyColors.mute,
                             fontWeight = FontWeight.Medium
                         )
                         Spacer(modifier = Modifier.height(4.dp))
@@ -801,14 +797,18 @@ fun EditProfileScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(16.dp)
+                                        .size(18.dp)
                                         .clip(CircleShape)
                                 ) {
                                     CircleFlag(
                                         countryCode = editCountryCode,
+                                        allowProgramming = false,
                                         modifier = Modifier.fillMaxSize()
                                     )
                                 }
@@ -817,14 +817,14 @@ fun EditProfileScreen(
                                     text = editCountry,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = TextPrimary,
+                                    color = funkyColors.ink,
                                     maxLines = 1
                                 )
                             }
                             Icon(
-                                imageVector = Icons.Default.KeyboardArrowDown,
+                                painter = painterResource(id = R.drawable.ic_chevron_down),
                                 contentDescription = null,
-                                tint = TextSecondary,
+                                tint = funkyColors.mute,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -835,15 +835,15 @@ fun EditProfileScreen(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(14.dp))
-                            .background(Color(0xFFF3F4ED))
-                            .border(1.dp, Color(0xFFE5E7DE), RoundedCornerShape(14.dp))
+                            .background(funkyColors.surface)
+                            .border(1.dp, funkyColors.line, RoundedCornerShape(14.dp))
                             .clickable { showCitySheet = true }
                             .padding(horizontal = 14.dp, vertical = 10.dp)
                     ) {
                         Text(
                             text = "City",
                             fontSize = 11.sp,
-                            color = TextSecondary,
+                            color = funkyColors.mute,
                             fontWeight = FontWeight.Medium
                         )
                         Spacer(modifier = Modifier.height(4.dp))
@@ -852,11 +852,14 @@ fun EditProfileScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Icon(
-                                    imageVector = Icons.Default.LocationOn,
+                                    painter = painterResource(id = R.drawable.ic_pin),
                                     contentDescription = "City",
-                                    tint = TextSecondary,
+                                    tint = Color(0xFF10B981),
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
@@ -864,14 +867,14 @@ fun EditProfileScreen(
                                     text = editCity,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = TextPrimary,
+                                    color = funkyColors.ink,
                                     maxLines = 1
                                 )
                             }
                             Icon(
-                                imageVector = Icons.Default.KeyboardArrowDown,
+                                painter = painterResource(id = R.drawable.ic_chevron_down),
                                 contentDescription = null,
-                                tint = TextSecondary,
+                                tint = funkyColors.mute,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -895,14 +898,14 @@ fun EditProfileScreen(
                             modifier = Modifier
                                 .width(4.dp)
                                 .height(16.dp)
-                                .background(AccentGold, RoundedCornerShape(2.dp))
+                                .background(funkyColors.mango, RoundedCornerShape(2.dp))
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "Languages",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
-                            color = TextPrimary
+                            color = funkyColors.ink
                         )
                     }
 
@@ -910,7 +913,7 @@ fun EditProfileScreen(
                         text = "Edit",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFFB45309),
+                        color = Color(0xFFD97706),
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
                             .clickable { showLanguagesSheet = true }
@@ -943,6 +946,7 @@ fun EditProfileScreen(
                             ) {
                                 CircleFlag(
                                     countryCode = flagCode,
+                                    allowProgramming = flagCode.startsWith("prog_"),
                                     modifier = Modifier.fillMaxSize()
                                 )
                             }
@@ -959,11 +963,11 @@ fun EditProfileScreen(
                             Spacer(modifier = Modifier.width(8.dp))
 
                             Icon(
-                                imageVector = Icons.Default.Close,
+                                painter = painterResource(id = R.drawable.ic_close),
                                 contentDescription = "Remove",
-                                tint = TextSecondary,
+                                tint = funkyColors.mute,
                                 modifier = Modifier
-                                    .size(16.dp)
+                                    .size(14.dp)
                                     .clickable {
                                         userLanguages.remove(langItem)
                                     }
@@ -985,14 +989,14 @@ fun EditProfileScreen(
                         modifier = Modifier
                             .width(4.dp)
                             .height(16.dp)
-                            .background(AccentGold, RoundedCornerShape(2.dp))
+                            .background(funkyColors.mango, RoundedCornerShape(2.dp))
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "Interests",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
-                        color = TextPrimary
+                        color = funkyColors.ink
                     )
                 }
 
@@ -1012,10 +1016,10 @@ fun EditProfileScreen(
                         Row(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(20.dp))
-                                .background(if (isSelected) Color(0xFFFFF7ED) else Color(0xFFF3F4ED))
+                                .background(if (isSelected) funkyColors.soft else funkyColors.surface)
                                 .border(
                                     width = 1.dp,
-                                    color = if (isSelected) Color(0xFFF97316) else Color(0xFFE5E7DE),
+                                    color = if (isSelected) funkyColors.mango else funkyColors.line,
                                     shape = RoundedCornerShape(20.dp)
                                 )
                                 .clickable {
@@ -1028,11 +1032,9 @@ fun EditProfileScreen(
                                 .padding(horizontal = 14.dp, vertical = 9.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = getInterestIcon(interest),
-                                contentDescription = null,
-                                tint = if (isSelected) Color(0xFFEA580C) else TextSecondary,
-                                modifier = Modifier.size(16.dp)
+                            Text(
+                                text = getInterestEmoji(interest),
+                                fontSize = 14.sp
                             )
 
                             Spacer(modifier = Modifier.width(6.dp))
@@ -1041,17 +1043,25 @@ fun EditProfileScreen(
                                 text = interest,
                                 fontSize = 13.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) Color(0xFFC2410C) else TextPrimary
+                                color = funkyColors.ink
                             )
 
                             if (isSelected) {
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Icon(
-                                    imageVector = Icons.Default.CheckCircle,
-                                    contentDescription = "Selected",
-                                    tint = Color(0xFFEA580C),
-                                    modifier = Modifier.size(14.dp)
-                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(16.dp)
+                                        .clip(CircleShape)
+                                        .background(funkyColors.mango),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ic_check),
+                                        contentDescription = "Selected",
+                                        tint = funkyColors.onMango,
+                                        modifier = Modifier.size(10.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -1066,7 +1076,7 @@ fun EditProfileScreen(
                                     pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 8f), 0f)
                                 )
                                 drawRoundRect(
-                                    color = Color(0xFFD1D5DB),
+                                    color = funkyColors.line,
                                     style = stroke,
                                     cornerRadius = CornerRadius(20.dp.toPx())
                                 )
@@ -1076,17 +1086,17 @@ fun EditProfileScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Add,
+                            painter = painterResource(id = R.drawable.ic_plus),
                             contentDescription = "Add custom interest",
-                            tint = TextSecondary,
-                            modifier = Modifier.size(16.dp)
+                            tint = funkyColors.mute,
+                            modifier = Modifier.size(15.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "Add Interest",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Medium,
-                            color = TextSecondary
+                            color = funkyColors.mute
                         )
                     }
                 }
