@@ -173,6 +173,33 @@ fun ProfileTabContent(
         }
     }
 
+    val refreshUserMoments: suspend () -> Unit = {
+        try {
+            isMomentsLoading = true
+            MomentsRepository.getUserMoments(context, userId = null, limit = 20, offset = 0)
+                .onSuccess { moments ->
+                    momentsList.clear()
+                    momentsList.addAll(moments.map { it.toFeedPost() })
+                    postsCount = momentsList.size
+                }
+                .onFailure { err ->
+                    android.util.Log.e("ProfileTabContent", "Error loading moments: ${err.message}")
+                }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.e("ProfileTabContent", "Error loading moments", e)
+        } finally {
+            isMomentsLoading = false
+        }
+    }
+
+    LaunchedEffect(selectedMainTab) {
+        if (selectedMainTab == 1) {
+            refreshUserMoments()
+        }
+    }
+
     val refreshProfileData: suspend () -> Unit = {
         val supaUid = com.example.SupabaseSessionManager.getUserId(context) ?: userId
         val effectiveUid = supaUid.takeIf { com.example.SupabaseSessionManager.isValidUuid(it) }
@@ -339,24 +366,7 @@ fun ProfileTabContent(
             android.util.Log.e("ProfileTabContent", "Error loading stats counts", e)
         }
 
-        try {
-            isMomentsLoading = true
-            MomentsRepository.getUserMoments(context, userId = null, limit = 20, offset = 0)
-                .onSuccess { moments ->
-                    momentsList.clear()
-                    momentsList.addAll(moments.map { it.toFeedPost() })
-                    postsCount = momentsList.size
-                }
-                .onFailure { err ->
-                    android.util.Log.e("ProfileTabContent", "Error loading moments: ${err.message}")
-                }
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            android.util.Log.e("ProfileTabContent", "Error loading moments", e)
-        } finally {
-            isMomentsLoading = false
-        }
+        refreshUserMoments()
     }
 
     val profileDisplayName = currentProfileName
@@ -401,15 +411,13 @@ fun ProfileTabContent(
 
     val profileBio = currentBio
 
-    val posts = remember(momentsList) {
-        if (momentsList.isNotEmpty()) momentsList else emptyList()
-    }
-
-    val displayedPosts = remember(selectedFeedTab, posts) {
-        when (selectedFeedTab) {
-            1 -> posts.filter { it.isVideo }
-            2 -> posts.take(4)
-            else -> posts
+    val displayedPosts by remember {
+        derivedStateOf {
+            when (selectedFeedTab) {
+                1 -> momentsList.filter { it.isVideo }
+                2 -> momentsList.toList()
+                else -> momentsList.toList()
+            }
         }
     }
 
@@ -1225,6 +1233,37 @@ fun ProfileTabContent(
                     }
                 }
 
+                if (isMomentsLoading && displayedPosts.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(160.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                color = Color(0xFFFFD43B),
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
+                    }
+                } else if (displayedPosts.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(160.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "No posts shared yet",
+                                fontSize = 14.sp,
+                                color = Color(0xFF64748B),
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                } else {
                 // Photo Grid in chunks of 3 for LazyColumn
                 val chunkedPosts = displayedPosts.chunked(3)
                 items(chunkedPosts.size) { chunkIndex ->
@@ -1352,6 +1391,7 @@ fun ProfileTabContent(
                             }
                         }
                     }
+                }
                 }
             }
         }

@@ -389,8 +389,9 @@ interface SupabaseApi {
     @POST("functions/v1/get-cloudinary-signature")
     suspend fun getCloudinarySignature(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String
-    ): Response<CloudinarySignatureResponse>
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> = emptyMap()
+    ): Response<ResponseBody>
 
     @PATCH("rest/v1/users")
     suspend fun updateEmailVerification(
@@ -1637,28 +1638,28 @@ interface SupabaseApi {
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String,
         @Body body: GetMomentsFeedRequest
-    ): Response<List<MomentDto>>
+    ): Response<ResponseBody>
 
     @POST("rest/v1/rpc/get_user_moments")
     suspend fun getUserMoments(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String,
         @Body body: GetUserMomentsRequest
-    ): Response<List<MomentDto>>
+    ): Response<ResponseBody>
 
     @POST("rest/v1/rpc/get_moment")
     suspend fun getMomentRpc(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String,
         @Body body: MomentIdRequest
-    ): Response<MomentDto>
+    ): Response<ResponseBody>
 
     @POST("rest/v1/rpc/create_moment")
     suspend fun createMomentRpc(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String,
         @Body body: CreateMomentRequest
-    ): Response<MomentDto>
+    ): Response<ResponseBody>
 
     @POST("rest/v1/rpc/delete_moment")
     suspend fun deleteMomentRpc(

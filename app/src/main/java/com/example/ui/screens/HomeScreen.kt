@@ -94,6 +94,7 @@ fun HomeScreen(
 
     // Dynamic state trackers
     var activeTab by remember { mutableStateOf("home") } // "home", "rooms", "moments", "chats", "profile"
+    var hideBottomBarForMomentsOverlay by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var selectedLanguageFilter by remember { mutableStateOf("All") }
 
@@ -510,10 +511,12 @@ fun HomeScreen(
         Scaffold(
             containerColor = if (activeTab == "moments") Color.Black else Color(0xFFFAFAEE),
             bottomBar = {
-                HomeBottomBar(
-                    activeTab = activeTab,
-                    onTabSelected = { activeTab = it }
-                )
+                if (!(activeTab == "moments" && hideBottomBarForMomentsOverlay)) {
+                    HomeBottomBar(
+                        activeTab = activeTab,
+                        onTabSelected = { activeTab = it }
+                    )
+                }
             }
         ) { innerPadding ->
             Crossfade(
@@ -600,7 +603,8 @@ fun HomeScreen(
                     }
                     "moments" -> {
                         MomentsTabContent(
-                            currentUserNativeLanguage = currentUserProfile.nativeLanguage.orEmpty()
+                            currentUserNativeLanguage = currentUserProfile.nativeLanguage.orEmpty(),
+                            onCreatePostVisibilityChange = { hideBottomBarForMomentsOverlay = it }
                         )
                     }
                     "chats" -> {

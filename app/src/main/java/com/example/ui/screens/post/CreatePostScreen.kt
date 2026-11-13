@@ -1,7 +1,8 @@
 package com.example.ui.screens.post
 
 import android.net.Uri
-import android.widget.Toast
+import android.view.WindowManager
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -38,12 +39,17 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
 import coil.compose.AsyncImage
 import com.example.MomentDto
 import com.example.MomentLimitsDto
@@ -53,6 +59,8 @@ import com.example.repository.MomentsRepository
 import com.example.ui.components.AppLoadingManager
 import com.example.ui.components.CircleFlag
 import com.example.ui.screens.LanguageData
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -86,7 +94,8 @@ fun CreatePostScreen(
         val raw = defaultLanguage.takeIf { it.isNotBlank() }
             ?: prefs.getString("profile_nativeLanguage_${selfUserId}", null)
             ?: "Hindi"
-        raw.split(",").firstOrNull()?.trim()?.takeIf { it.isNotBlank() } ?: "Hindi"
+        val firstEntry = raw.split(",").firstOrNull()?.trim()
+        MomentsRepository.stripLanguageLevel(firstEntry).ifBlank { "Hindi" }
     }
 
     var selectedBgIndex by remember { mutableIntStateOf(0) }
@@ -108,7 +117,17 @@ fun CreatePostScreen(
     // Active bottom sheet panel ("media", "bg", "lang", "topics", "loc", or null)
     var activeDockPanel by remember { mutableStateOf<String?>(null) }
     var isUploading by remember { mutableStateOf(false) }
+    var publishJob by remember { mutableStateOf<Job?>(null) }
     var createdMoment by remember { mutableStateOf<MomentDto?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    var topicLimitWarning by remember { mutableStateOf<String?>(null) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            publishJob?.cancel()
+            AppLoadingManager.hide()
+        }
+    }
 
     val multiplePhotosLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 10)
@@ -150,63 +169,141 @@ fun CreatePostScreen(
 
     fun handlePublish() {
         if (!canPost || isUploading) return
-        if (selectedLanguage.isBlank()) {
-            Toast.makeText(context, "Choose the post language", Toast.LENGTH_SHORT).show()
+        val normalizedLanguage = MomentsRepository.stripLanguageLevel(selectedLanguage)
+        if (normalizedLanguage.isBlank()) {
+            coroutineScope.launch {
+                snackbarHostState.currentSnackbarData?.dismiss()
+                snackbarHostState.showSnackbar("Choose the post language")
+            }
             return
         }
         isUploading = true
-        AppLoadingManager.show("Publishing your moment...")
-        coroutineScope.launch {
+        val job = coroutineScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
             try {
                 val presetKey = bgPresets.getOrElse(selectedBgIndex) { bgPresets.first() }.key
                 val result = MomentsRepository.createMoment(
                     context = context,
                     title = titleText.takeIf { it.isNotBlank() },
                     content = bodyText.takeIf { it.isNotBlank() },
-                    language = selectedLanguage,
+                    language = normalizedLanguage,
                     translation = if (showTranslationLine) translationText.takeIf { it.isNotBlank() } else null,
                     bgKey = if (hasMedia) null else presetKey,
                     mediaUris = selectedMediaUris.toList(),
                     topics = selectedTopicSlugs.toList(),
                     location = selectedLocation.takeIf { it.isNotBlank() },
-                    fixRequested = askCorrection
+                    fixRequested = askCorrection,
+                    onUploadProgress = { index, total, pct, isVideo ->
+                        if (isVideo && pct != null) {
+                            AppLoadingManager.updateProgress(
+                                percent = pct,
+                                message = "Uploading video... $pct%"
+                            )
+                        } else if (total > 1) {
+                            AppLoadingManager.updateProgress(
+                                percent = null,
+                                message = "Uploading photo $index/$total..."
+                            )
+                        } else if (total == 1) {
+                            AppLoadingManager.updateProgress(
+                                percent = null,
+                                message = "Uploading photo..."
+                            )
+                        }
+                    }
                 )
                 result.onSuccess { dto ->
                     createdMoment = dto
                 }.onFailure { err ->
-                    Toast.makeText(
-                        context,
-                        err.message ?: "Something went wrong. Try again",
-                        Toast.LENGTH_LONG
-                    ).show()
+                    // TODO remove detail before release
+                    val msg = err.message ?: "Upload failed (${err.javaClass.simpleName}: unknown error)"
+                    snackbarHostState.currentSnackbarData?.dismiss()
+                    snackbarHostState.showSnackbar(
+                        message = msg,
+                        duration = SnackbarDuration.Long
+                    )
                 }
+            } catch (_: CancellationException) {
+                snackbarHostState.currentSnackbarData?.dismiss()
+                snackbarHostState.showSnackbar("Upload cancelled")
+            } catch (t: Throwable) {
+                // TODO remove detail before release
+                val msg = "Upload failed (${t.javaClass.simpleName}: ${t.message ?: "unknown error"})"
+                snackbarHostState.currentSnackbarData?.dismiss()
+                snackbarHostState.showSnackbar(
+                    message = msg,
+                    duration = SnackbarDuration.Long
+                )
             } finally {
                 AppLoadingManager.hide()
                 isUploading = false
+                publishJob = null
             }
         }
+        publishJob = job
+        AppLoadingManager.show(
+            message = if (hasMedia) {
+                if (isVideoMedia) "Preparing video..." else "Uploading media..."
+            } else "Publishing your moment...",
+            progressPercent = if (hasMedia && isVideoMedia) 0 else null,
+            onCancel = {
+                publishJob?.cancel()
+                AppLoadingManager.hide()
+            }
+        )
+        job.start()
     }
 
-    if (createdMoment != null) {
-        val posted = createdMoment!!
-        SuccessAnimationScreen(onComplete = {
-            createdMoment = null
-            onPostCreated(posted)
-        })
-    } else {
-        val currentPreset = bgPresets.getOrElse(selectedBgIndex) { bgPresets.first() }
-        val isDarkBg = !currentPreset.isDarkText || hasMedia
-        val canvasTextColor = if (isDarkBg) Color.White else Color(0xFF1B1608)
+    Dialog(
+        onDismissRequest = {
+            if (activeDockPanel != null) {
+                activeDockPanel = null
+            } else if (!isUploading) {
+                onDismiss()
+            }
+        },
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
+    ) {
+        val view = LocalView.current
+        SideEffect {
+            val window = (view.parent as? DialogWindowProvider)?.window
+            if (window != null) {
+                WindowCompat.setDecorFitsSystemWindows(window, false)
+                @Suppress("DEPRECATION")
+                window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+            }
+        }
 
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    if (hasMedia) Brush.linearGradient(listOf(Color(0xFF0F172A), Color.Black))
-                    else Brush.linearGradient(currentPreset.colors)
-                )
-                .testTag("create_post_screen")
-        ) {
+        BackHandler {
+            if (activeDockPanel != null) {
+                activeDockPanel = null
+            } else if (!isUploading) {
+                onDismiss()
+            }
+        }
+
+        if (createdMoment != null) {
+            val posted = createdMoment!!
+            SuccessAnimationScreen(onComplete = {
+                createdMoment = null
+                onPostCreated(posted)
+            })
+        } else {
+            val currentPreset = bgPresets.getOrElse(selectedBgIndex) { bgPresets.first() }
+            val isDarkBg = !currentPreset.isDarkText || hasMedia
+            val canvasTextColor = if (isDarkBg) Color.White else Color(0xFF1B1608)
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        if (hasMedia) Brush.linearGradient(listOf(Color(0xFF0F172A), Color.Black))
+                        else Brush.linearGradient(currentPreset.colors)
+                    )
+                    .testTag("create_post_screen")
+            ) {
             // Background Media Preview if photo(s) or video selected
             if (hasMedia) {
                 if (!isVideoMedia && selectedMediaUris.size > 1) {
@@ -249,7 +346,7 @@ fun CreatePostScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .statusBarsPadding()
-                    .navigationBarsPadding()
+                    .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
             ) {
                 // 1. TOP BAR: Close (X) glass button & Post CTA
                 Row(
@@ -469,6 +566,28 @@ fun CreatePostScreen(
                     }
                 }
 
+                // Snackbar banner anchored above Meta Tags & Bottom Dock Toolbar
+                SnackbarHost(
+                    hostState = snackbarHostState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                ) { data ->
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color(0xFF1B1608).copy(alpha = 0.94f),
+                        shadowElevation = 6.dp
+                    ) {
+                        Text(
+                            text = data.visuals.message,
+                            color = Color.White,
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                        )
+                    }
+                }
+
                 // 3. META TAGS BAR: selected pills
                 FlowRow(
                     modifier = Modifier
@@ -487,12 +606,13 @@ fun CreatePostScreen(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp)
                         ) {
+                            val displayLanguageChip = MomentsRepository.stripLanguageLevel(selectedLanguage)
                             CircleFlag(
-                                countryCode = LanguageData.getFlagCodeForLanguage(selectedLanguage),
+                                countryCode = LanguageData.getFlagCodeForLanguage(displayLanguageChip),
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
-                                text = selectedLanguage,
+                                text = displayLanguageChip,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color(0xFF1B1608)
@@ -883,9 +1003,10 @@ fun CreatePostScreen(
 
                             "topics" -> {
                                 Text(
-                                    text = "Pick up to ${limits.topics} so the right people find it.",
+                                    text = topicLimitWarning ?: "Pick up to ${limits.topics} so the right people find it.",
                                     fontSize = 14.sp,
-                                    color = Color(0xFF7A7260),
+                                    color = if (topicLimitWarning != null) Color(0xFFDC2626) else Color(0xFF7A7260),
+                                    fontWeight = if (topicLimitWarning != null) FontWeight.SemiBold else FontWeight.Normal,
                                     modifier = Modifier.padding(bottom = 12.dp)
                                 )
                                 FlowRow(
@@ -898,14 +1019,12 @@ fun CreatePostScreen(
                                             onClick = {
                                                 if (isSelected) {
                                                     selectedTopicSlugs.remove(topic.slug)
+                                                    topicLimitWarning = null
                                                 } else if (selectedTopicSlugs.size < limits.topics) {
                                                     selectedTopicSlugs.add(topic.slug)
+                                                    topicLimitWarning = null
                                                 } else {
-                                                    Toast.makeText(
-                                                        context,
-                                                        "Choose up to ${limits.topics} topics",
-                                                        Toast.LENGTH_SHORT
-                                                    ).show()
+                                                    topicLimitWarning = "Choose up to ${limits.topics} topics"
                                                 }
                                             },
                                             color = if (isSelected) Color(0xFFFFC21A).copy(alpha = 0.35f) else Color(0xFFF6EBCB),
@@ -917,7 +1036,7 @@ fun CreatePostScreen(
                                             )
                                         ) {
                                             Text(
-                                                text = "#${topic.label.replace(" ", "")}",
+                                                text = MomentsRepository.formatTopicLabelToHashtag(topic.label),
                                                 fontSize = 15.sp,
                                                 fontWeight = FontWeight.SemiBold,
                                                 modifier = Modifier.padding(horizontal = 15.dp, vertical = 10.dp)
@@ -985,6 +1104,7 @@ fun CreatePostScreen(
                 }
             }
         }
+    }
     }
 }
 

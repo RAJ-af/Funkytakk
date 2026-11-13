@@ -56,8 +56,20 @@ object AppLoadingManager {
     private val _loadingMessage = MutableStateFlow("Loading...")
     val loadingMessage = _loadingMessage.asStateFlow()
 
-    fun show(message: String = "Please wait...") {
+    private val _progressPercent = MutableStateFlow<Int?>(null)
+    val progressPercent = _progressPercent.asStateFlow()
+
+    private val _cancelAction = MutableStateFlow<(() -> Unit)?>(null)
+    val cancelAction = _cancelAction.asStateFlow()
+
+    fun show(
+        message: String = "Please wait...",
+        progressPercent: Int? = null,
+        onCancel: (() -> Unit)? = null
+    ) {
         _loadingMessage.value = message
+        _progressPercent.value = progressPercent
+        _cancelAction.value = onCancel
         _isLoading.value = true
     }
 
@@ -65,8 +77,17 @@ object AppLoadingManager {
         _loadingMessage.value = message
     }
 
+    fun updateProgress(percent: Int?, message: String? = null) {
+        _progressPercent.value = percent?.coerceIn(0, 100)
+        if (message != null) {
+            _loadingMessage.value = message
+        }
+    }
+
     fun hide() {
         _isLoading.value = false
+        _progressPercent.value = null
+        _cancelAction.value = null
     }
 }
 
@@ -139,6 +160,8 @@ object AppNetworkManager {
 fun AppLoadingHUDOverlay() {
     val isLoading by AppLoadingManager.isLoading.collectAsState()
     val loadingMessage by AppLoadingManager.loadingMessage.collectAsState()
+    val progressPercent by AppLoadingManager.progressPercent.collectAsState()
+    val cancelAction by AppLoadingManager.cancelAction.collectAsState()
 
     if (isLoading) {
         Dialog(
@@ -169,6 +192,7 @@ fun AppLoadingHUDOverlay() {
                     Column(
                         modifier = Modifier
                             .padding(horizontal = 28.dp, vertical = 24.dp)
+                            .widthIn(min = 210.dp)
                             .wrapContentWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
@@ -188,15 +212,55 @@ fun AppLoadingHUDOverlay() {
                             modifier = Modifier.testTag("loading_message_text")
                         )
 
-                        Spacer(modifier = Modifier.height(4.dp))
+                        if (progressPercent != null) {
+                            val pct = progressPercent!!.coerceIn(0, 100)
+                            Spacer(modifier = Modifier.height(12.dp))
+                            androidx.compose.material3.LinearProgressIndicator(
+                                progress = { pct / 100f },
+                                modifier = Modifier
+                                    .width(180.dp)
+                                    .height(7.dp)
+                                    .clip(RoundedCornerShape(4.dp)),
+                                color = Color(0xFFFFB800),
+                                trackColor = Color(0xFFEADFC4)
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "$pct%",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF7A5A00)
+                            )
+                        } else {
+                            Spacer(modifier = Modifier.height(4.dp))
 
-                        Text(
-                            text = "Please hold on a moment",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color(0xFF7A7260),
-                            textAlign = TextAlign.Center
-                        )
+                            Text(
+                                text = "Please hold on a moment",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF7A7260),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+
+                        if (cancelAction != null) {
+                            Spacer(modifier = Modifier.height(14.dp))
+                            androidx.compose.material3.OutlinedButton(
+                                onClick = { cancelAction?.invoke() },
+                                shape = RoundedCornerShape(18.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFD6C8A5)),
+                                modifier = Modifier
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .testTag("loading_cancel_button")
+                            ) {
+                                Text(
+                                    text = "Cancel",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF2A1E00)
+                                )
+                            }
+                        }
                     }
                 }
             }

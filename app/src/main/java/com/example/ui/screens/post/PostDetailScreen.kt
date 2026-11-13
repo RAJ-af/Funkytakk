@@ -756,7 +756,7 @@ fun PostDetailScreen(
                                                 .padding(horizontal = 9.dp, vertical = 3.dp)
                                         ) {
                                             Text(
-                                                text = currentPost.language,
+                                                text = MomentsRepository.stripLanguageLevel(currentPost.language),
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = Color(0xFF854D0E)

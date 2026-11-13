@@ -88,7 +88,8 @@ private fun tokenizeWordsWithSpans(text: String): List<WordSpan> {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MomentsTabContent(
-    currentUserNativeLanguage: String = ""
+    currentUserNativeLanguage: String = "",
+    onCreatePostVisibilityChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -111,6 +112,13 @@ fun MomentsTabContent(
     var showCreatePostSheet by remember { mutableStateOf(false) }
     var reportingMoment by remember { mutableStateOf<MomentDto?>(null) }
     var activeVideoUrl by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(showCreatePostSheet) {
+        onCreatePostVisibilityChange(showCreatePostSheet)
+    }
+    DisposableEffect(Unit) {
+        onDispose { onCreatePostVisibilityChange(false) }
+    }
 
     fun removeMomentEverywhere(momentId: String) {
         trendingFeed.items.removeAll { it.id == momentId }
@@ -242,6 +250,7 @@ fun MomentsTabContent(
                 }
 
                 activeFeed.items.isEmpty() -> {
+                    val isErrorState = !activeFeed.errorMessage.isNullOrBlank()
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -253,14 +262,21 @@ fun MomentsTabContent(
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             Text(
-                                text = activeFeed.errorMessage
-                                    ?: if (selectedTab == 1) "No moments in your language yet" else "No moments yet",
+                                text = when {
+                                    isErrorState -> activeFeed.errorMessage!!
+                                    selectedTab == 1 -> "No posts in your languages yet"
+                                    else -> "No moments yet. Be the first to post!"
+                                },
                                 color = Color.White,
                                 fontSize = 17.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Pull down to refresh or share your own language moment.",
+                                text = if (isErrorState) {
+                                    "Could not load the feed right now."
+                                } else {
+                                    "Pull down to refresh or share your own language moment."
+                                },
                                 color = Color.White.copy(alpha = 0.7f),
                                 fontSize = 13.sp
                             )
@@ -271,7 +287,7 @@ fun MomentsTabContent(
                                     },
                                     border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f))
                                 ) {
-                                    Text("Refresh", color = Color.White)
+                                    Text(if (isErrorState) "Retry" else "Refresh", color = Color.White)
                                 }
                                 Button(
                                     onClick = { showCreatePostSheet = true },
@@ -1074,11 +1090,12 @@ private fun MomentPageItem(
             ) {
                 item {
                     val isNative = moment.author.is_native
-                    val nativeLang = moment.author.native_languages.firstOrNull()
+                    val cleanMomentLang = MomentsRepository.stripLanguageLevel(moment.language).ifBlank { "English" }
+                    val nativeLang = MomentsRepository.stripLanguageLevel(moment.author.native_languages.firstOrNull())
                     val langBadgeText = when {
                         isNative -> "Native"
-                        !nativeLang.isNullOrBlank() -> "$nativeLang → ${moment.language}"
-                        else -> moment.language
+                        nativeLang.isNotBlank() -> "$nativeLang → $cleanMomentLang"
+                        else -> cleanMomentLang
                     }
 
                     Surface(
@@ -1092,7 +1109,7 @@ private fun MomentPageItem(
                             modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp)
                         ) {
                             CircleFlag(
-                                countryCode = LanguageData.getFlagCodeForLanguage(moment.language),
+                                countryCode = LanguageData.getFlagCodeForLanguage(cleanMomentLang),
                                 modifier = Modifier.size(13.dp)
                             )
                             Text(

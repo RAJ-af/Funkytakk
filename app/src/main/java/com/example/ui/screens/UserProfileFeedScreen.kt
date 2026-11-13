@@ -201,6 +201,35 @@ fun UserProfileFeedScreen(
     val momentsList = remember { mutableStateListOf<FeedPost>() }
     var isMomentsLoading by remember { mutableStateOf(false) }
 
+    suspend fun refreshUserMoments() {
+        if (userId.isBlank()) return
+        try {
+            isMomentsLoading = true
+            val targetUid = if (isSelfProfile) null else userId
+            MomentsRepository.getUserMoments(context, userId = targetUid, limit = 20, offset = 0)
+                .onSuccess { list ->
+                    momentsList.clear()
+                    momentsList.addAll(list.map { it.toFeedPost() })
+                    postsCount = momentsList.size
+                }
+                .onFailure { err ->
+                    Log.e("UserProfileFeed", "Error fetching user moments: ${err.message}")
+                }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e("UserProfileFeed", "Error fetching user moments", e)
+        } finally {
+            isMomentsLoading = false
+        }
+    }
+
+    LaunchedEffect(selectedMainTab, userId) {
+        if (selectedMainTab == 1 && userId.isNotBlank()) {
+            refreshUserMoments()
+        }
+    }
+
     // Say Hi & Wave Dialog State
     var showWaveDialog by remember { mutableStateOf(false) }
     var waveCustomMessage by remember { mutableStateOf("") }
@@ -366,23 +395,7 @@ fun UserProfileFeedScreen(
         }
 
         // D. Fetch user's moments via Moments v2 RPC
-        try {
-            isMomentsLoading = true
-            val targetUid = if (isSelfProfile) null else userId
-            MomentsRepository.getUserMoments(context, userId = targetUid, limit = 20, offset = 0)
-                .onSuccess { list ->
-                    momentsList.clear()
-                    momentsList.addAll(list.map { it.toFeedPost() })
-                    postsCount = momentsList.size
-                }
-                .onFailure { err ->
-                    Log.e("UserProfileFeed", "Error fetching user moments: ${err.message}")
-                }
-        } catch (e: Exception) {
-            Log.e("UserProfileFeed", "Error fetching user moments", e)
-        } finally {
-            isMomentsLoading = false
-        }
+        refreshUserMoments()
 
         // D. Fetch gifts received for profile
         try {
@@ -527,11 +540,13 @@ fun UserProfileFeedScreen(
         }
     }
 
-    val displayedPosts = remember(selectedFeedTab, momentsList) {
-        when (selectedFeedTab) {
-            1 -> momentsList.filter { it.isVideo }
-            2 -> momentsList.take(4)
-            else -> momentsList
+    val displayedPosts by remember {
+        derivedStateOf {
+            when (selectedFeedTab) {
+                1 -> momentsList.filter { it.isVideo }
+                2 -> momentsList.toList()
+                else -> momentsList.toList()
+            }
         }
     }
 

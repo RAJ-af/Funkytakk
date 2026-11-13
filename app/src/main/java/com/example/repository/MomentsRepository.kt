@@ -5,8 +5,11 @@ import android.net.Uri
 import android.util.Log
 import androidx.compose.ui.graphics.Color
 import com.example.*
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.ResponseBody
+import org.json.JSONArray
 import org.json.JSONObject
 import retrofit2.Response
 
@@ -24,6 +27,7 @@ class MomentRpcException(
 
 object MomentsRepository {
     private const val TAG = "MomentsRepository"
+    private const val FEED_TAG = "MomentsFeed"
 
     val bgPresets: List<MomentBgPreset> = listOf(
         MomentBgPreset("cream", listOf(Color(0xFFFFFBF0), Color(0xFFFFEFC2)), isDarkText = true),
@@ -64,14 +68,32 @@ object MomentsRepository {
         limits = MomentLimitsDto()
     )
 
+    fun stripLanguageLevel(raw: String?): String {
+        if (raw.isNullOrBlank()) return ""
+        return raw.trim().replace(Regex("\\s*\\([^)]*\\)\\s*$"), "").trim()
+    }
+
+    fun formatTopicLabelToHashtag(rawLabel: String): String {
+        val clean = rawLabel.trim().removePrefix("#")
+        if (clean.isBlank()) return ""
+        val joined = clean
+            .split(Regex("[\\s_]+"))
+            .filter { it.isNotBlank() }
+            .joinToString("") { word ->
+                word.replaceFirstChar { ch ->
+                    if (ch.isLowerCase()) ch.titlecase(java.util.Locale.ROOT) else ch.toString()
+                }
+            }
+        return "#$joined"
+    }
+
     fun resolveTopicChipText(slugOrLabel: String): String {
         val topics = getCachedOptions().topics
         val match = topics.firstOrNull {
             it.slug.equals(slugOrLabel, ignoreCase = true) ||
                 it.label.equals(slugOrLabel, ignoreCase = true)
         }
-        val label = (match?.label ?: slugOrLabel).replace(" ", "")
-        return if (label.startsWith("#")) label else "#$label"
+        return formatTopicLabelToHashtag(match?.label ?: slugOrLabel)
     }
 
     fun isNotFoundErrorCode(raw: String?): Boolean {
@@ -107,6 +129,127 @@ object MomentsRepository {
                 lower.contains("correction_required") -> "Select the part of the post you want to fix and write the corrected version"
             else -> "Something went wrong. Try again"
         }
+    }
+
+    private fun JSONObject.optStringOrNull(key: String): String? {
+        if (!has(key) || isNull(key)) return null
+        val v = opt(key)?.toString()?.trim()
+        return if (v.isNullOrEmpty() || v == "null") null else v
+    }
+
+    private fun JSONObject.optIntCoerced(key: String, default: Int = 0): Int {
+        if (!has(key) || isNull(key)) return default
+        return when (val v = opt(key)) {
+            is Number -> v.toInt()
+            is String -> v.toIntOrNull() ?: default
+            else -> default
+        }
+    }
+
+    private fun JSONObject.optBooleanCoerced(key: String, default: Boolean = false): Boolean {
+        if (!has(key) || isNull(key)) return default
+        return when (val v = opt(key)) {
+            is Boolean -> v
+            is String -> v.equals("true", ignoreCase = true)
+            is Number -> v.toInt() != 0
+            else -> default
+        }
+    }
+
+    private fun JSONArray?.toStringList(): List<String> {
+        if (this == null) return emptyList()
+        val list = ArrayList<String>(length())
+        for (i in 0 until length()) {
+            if (!isNull(i)) {
+                val s = optString(i, "").trim()
+                if (s.isNotEmpty() && s != "null") list.add(s)
+            }
+        }
+        return list
+    }
+
+    private fun parseMomentMediaList(arr: JSONArray?): List<MomentMediaDto> {
+        if (arr == null) return emptyList()
+        val out = ArrayList<MomentMediaDto>(arr.length())
+        for (i in 0 until arr.length()) {
+            val obj = arr.optJSONObject(i) ?: continue
+            val url = obj.optStringOrNull("url") ?: continue
+            out.add(
+                MomentMediaDto(
+                    type = obj.optStringOrNull("type") ?: "image",
+                    url = url,
+                    thumb_url = obj.optStringOrNull("thumb_url"),
+                    width = if (obj.has("width") && !obj.isNull("width")) obj.optIntCoerced("width").takeIf { it > 0 } else null,
+                    height = if (obj.has("height") && !obj.isNull("height")) obj.optIntCoerced("height").takeIf { it > 0 } else null,
+                    duration_sec = if (obj.has("duration_sec") && !obj.isNull("duration_sec")) obj.optIntCoerced("duration_sec").takeIf { it >= 0 } else null
+                )
+            )
+        }
+        return out
+    }
+
+    private fun parseMomentAuthor(obj: JSONObject?): MomentAuthorDto {
+        if (obj == null) return MomentAuthorDto()
+        return MomentAuthorDto(
+            id = obj.optStringOrNull("id") ?: "",
+            username = obj.optStringOrNull("username"),
+            name = obj.optStringOrNull("name"),
+            avatar_url = obj.optStringOrNull("avatar_url"),
+            city = obj.optStringOrNull("city"),
+            country_code = obj.optStringOrNull("country_code"),
+            is_verified = obj.optBooleanCoerced("is_verified", false),
+            native_languages = obj.optJSONArray("native_languages").toStringList(),
+            learning_languages = obj.optJSONArray("learning_languages").toStringList(),
+            is_native = obj.optBooleanCoerced("is_native", false),
+            is_me = obj.optBooleanCoerced("is_me", false),
+            following = obj.optBooleanCoerced("following", false)
+        )
+    }
+
+    private fun parseMomentDto(obj: JSONObject): MomentDto {
+        val rawId = obj.opt("id")?.toString()?.takeIf { it.isNotBlank() && it != "null" }
+            ?: throw IllegalArgumentException("Missing moment id")
+        val rawLang = stripLanguageLevel(obj.optStringOrNull("language")).ifBlank { "English" }
+        return MomentDto(
+            id = rawId,
+            title = obj.optStringOrNull("title"),
+            content = obj.optStringOrNull("content"),
+            translation = obj.optStringOrNull("translation"),
+            language = rawLang,
+            bg_key = obj.optStringOrNull("bg_key"),
+            media = parseMomentMediaList(obj.optJSONArray("media")),
+            topics = obj.optJSONArray("topics").toStringList(),
+            location = obj.optStringOrNull("location"),
+            fix_requested = obj.optBooleanCoerced("fix_requested", true),
+            status = obj.optStringOrNull("status") ?: "active",
+            likes_count = obj.optIntCoerced("likes_count", 0),
+            comments_count = obj.optIntCoerced("comments_count", 0),
+            corrections_count = obj.optIntCoerced("corrections_count", 0),
+            created_at = obj.optStringOrNull("created_at"),
+            liked_by_me = obj.optBooleanCoerced("liked_by_me", false),
+            author = parseMomentAuthor(obj.optJSONObject("author"))
+        )
+    }
+
+    private fun parseMomentListResilient(rawBody: String?): List<MomentDto> {
+        val trimmed = rawBody?.trim().orEmpty()
+        if (trimmed.isEmpty() || trimmed == "null") return emptyList()
+        val array = JSONArray(trimmed)
+        val result = ArrayList<MomentDto>(array.length())
+        for (i in 0 until array.length()) {
+            val rawItem = array.opt(i)
+            val obj = array.optJSONObject(i)
+            if (obj == null) {
+                Log.e(FEED_TAG, "Skipping non-object item at index $i: raw=$rawItem")
+                continue
+            }
+            try {
+                result.add(parseMomentDto(obj))
+            } catch (e: Exception) {
+                Log.e(FEED_TAG, "Failed decoding moment item at index $i: ${e.javaClass.simpleName}: ${e.message} raw=$obj", e)
+            }
+        }
+        return result
     }
 
     private fun extractRawError(code: Int, errorBody: String?): String {
@@ -165,10 +308,65 @@ object MomentsRepository {
                     )
                 )
             }
-        } catch (e: kotlinx.coroutines.CancellationException) {
+        } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "RPC exception: ${e.message}", e)
+            Result.failure(MomentRpcException("network_error", mapMomentError(e.message)))
+        }
+    }
+
+    private suspend fun <T> executeRawJsonRpc(
+        context: Context,
+        logTag: String = TAG,
+        call: suspend (token: String) -> Response<ResponseBody>,
+        parser: (rawBody: String) -> T
+    ): Result<T> = withContext(Dispatchers.IO) {
+        try {
+            val uid = SupabaseSessionManager.ensureActiveSession(context)
+            var token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+            if (uid.isNullOrBlank() || token.isNullOrBlank()) {
+                return@withContext Result.failure(
+                    MomentRpcException("not_authenticated", mapMomentError("not_authenticated"))
+                )
+            }
+
+            var response = call(token)
+            if (response.code() == 401) {
+                val refreshedUid = SupabaseSessionManager.forceRefreshSession(context)
+                val refreshedToken = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                if (!refreshedUid.isNullOrBlank() && !refreshedToken.isNullOrBlank()) {
+                    token = refreshedToken
+                    response = call(token)
+                }
+            }
+
+            if (response.isSuccessful) {
+                val rawBody = response.body()?.string() ?: ""
+                try {
+                    Result.success(parser(rawBody))
+                } catch (e: Exception) {
+                    Log.e(logTag, "JSON decode failed: ${e.javaClass.simpleName}: ${e.message} raw=$rawBody", e)
+                    Result.failure(
+                        MomentRpcException("decode_error", mapMomentError(null))
+                    )
+                }
+            } else {
+                val errStr = response.errorBody()?.string()
+                val raw = extractRawError(response.code(), errStr)
+                Log.w(logTag, "RPC error code=${response.code()} raw=$raw")
+                Result.failure(
+                    MomentRpcException(
+                        rawCode = raw,
+                        message = mapMomentError(raw),
+                        isNotFound = isNotFoundErrorCode(raw)
+                    )
+                )
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(logTag, "RPC exception: ${e.javaClass.simpleName}: ${e.message}", e)
             Result.failure(MomentRpcException("network_error", mapMomentError(e.message)))
         }
     }
@@ -190,16 +388,20 @@ object MomentsRepository {
         limit: Int = 20,
         offset: Int = 0
     ): Result<List<MomentDto>> {
-        // Warm options cache in background/parallel on first load so topic labels are available
         if (cachedOptions == null) {
             getMomentOptions(context)
         }
-        return executeAuthenticatedRpc(context) { token ->
-            SupabaseClient.api.getMomentsFeed(
-                auth = token,
-                body = GetMomentsFeedRequest(p_tab = tab, p_limit = limit, p_offset = offset)
-            )
-        }
+        return executeRawJsonRpc(
+            context = context,
+            logTag = FEED_TAG,
+            call = { token ->
+                SupabaseClient.api.getMomentsFeed(
+                    auth = token,
+                    body = GetMomentsFeedRequest(p_tab = tab, p_limit = limit, p_offset = offset)
+                )
+            },
+            parser = { raw -> parseMomentListResilient(raw) }
+        )
     }
 
     suspend fun getUserMoments(
@@ -211,21 +413,39 @@ object MomentsRepository {
         if (cachedOptions == null) {
             getMomentOptions(context)
         }
-        return executeAuthenticatedRpc(context) { token ->
-            SupabaseClient.api.getUserMoments(
-                auth = token,
-                body = GetUserMomentsRequest(p_user_id = userId, p_limit = limit, p_offset = offset)
-            )
-        }
+        return executeRawJsonRpc(
+            context = context,
+            logTag = FEED_TAG,
+            call = { token ->
+                SupabaseClient.api.getUserMoments(
+                    auth = token,
+                    body = GetUserMomentsRequest(p_user_id = userId, p_limit = limit, p_offset = offset)
+                )
+            },
+            parser = { raw -> parseMomentListResilient(raw) }
+        )
     }
 
     suspend fun getMoment(context: Context, momentId: String): Result<MomentDto> {
-        return executeAuthenticatedRpc(context) { token ->
-            SupabaseClient.api.getMomentRpc(
-                auth = token,
-                body = MomentIdRequest(p_moment_id = momentId)
-            )
-        }
+        return executeRawJsonRpc(
+            context = context,
+            logTag = FEED_TAG,
+            call = { token ->
+                SupabaseClient.api.getMomentRpc(
+                    auth = token,
+                    body = MomentIdRequest(p_moment_id = momentId)
+                )
+            },
+            parser = { raw ->
+                val trimmed = raw.trim()
+                if (trimmed.startsWith("[")) {
+                    val arr = JSONArray(trimmed)
+                    parseMomentDto(arr.getJSONObject(0))
+                } else {
+                    parseMomentDto(JSONObject(trimmed))
+                }
+            }
+        )
     }
 
     suspend fun createMoment(
@@ -238,7 +458,8 @@ object MomentsRepository {
         mediaUris: List<Uri>,
         topics: List<String>,
         location: String?,
-        fixRequested: Boolean
+        fixRequested: Boolean,
+        onUploadProgress: (index: Int, total: Int, percent: Int?, isVideo: Boolean) -> Unit = { _, _, _, _ -> }
     ): Result<MomentDto> = withContext(Dispatchers.IO) {
         val uid = SupabaseSessionManager.ensureActiveSession(context)
         val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
@@ -248,34 +469,70 @@ object MomentsRepository {
             )
         }
 
+        val cleanLanguage = stripLanguageLevel(language)
+        if (cleanLanguage.isBlank()) {
+            return@withContext Result.failure(
+                MomentRpcException("language_required", mapMomentError("language_required"))
+            )
+        }
+
         val uploadedMedia = mutableListOf<MomentMediaDto>()
-        for (uri in mediaUris) {
-            val uploaded = CloudinaryUploader.uploadMomentMedia(context, token, uri)
-            if (uploaded == null) {
+        val totalMedia = mediaUris.size
+        for ((index, uri) in mediaUris.withIndex()) {
+            val mime = context.contentResolver.getType(uri).orEmpty()
+            val isVideo = mime.startsWith("video", ignoreCase = true)
+            onUploadProgress(index + 1, totalMedia, if (isVideo) 0 else null, isVideo)
+
+            val uploadRes = CloudinaryUploader.uploadMomentMedia(
+                context = context,
+                token = token,
+                uri = uri,
+                onProgress = { pct ->
+                    if (isVideo) {
+                        onUploadProgress(index + 1, totalMedia, pct, true)
+                    }
+                }
+            )
+            val uploaded = uploadRes.getOrElse { err ->
+                // TODO remove detail before release
+                val msg = err.message ?: "Upload failed (${err.javaClass.simpleName}: unknown error)"
                 return@withContext Result.failure(
-                    MomentRpcException("invalid_media", mapMomentError("invalid_media"))
+                    MomentRpcException(rawCode = "invalid_media", message = msg)
                 )
             }
             uploadedMedia.add(uploaded)
         }
 
         val hasMedia = uploadedMedia.isNotEmpty()
-        executeAuthenticatedRpc(context) { authToken ->
-            SupabaseClient.api.createMomentRpc(
-                auth = authToken,
-                body = CreateMomentRequest(
-                    p_title = title?.trim()?.takeIf { it.isNotEmpty() },
-                    p_content = content?.trim()?.takeIf { it.isNotEmpty() },
-                    p_language = language.trim(),
-                    p_translation = translation?.trim()?.takeIf { it.isNotEmpty() },
-                    p_bg_key = if (hasMedia) null else bgKey,
-                    p_media = if (hasMedia) uploadedMedia else null,
-                    p_topics = topics.takeIf { it.isNotEmpty() },
-                    p_location = location?.trim()?.takeIf { it.isNotEmpty() },
-                    p_fix_requested = fixRequested
+        executeRawJsonRpc(
+            context = context,
+            logTag = FEED_TAG,
+            call = { authToken ->
+                SupabaseClient.api.createMomentRpc(
+                    auth = authToken,
+                    body = CreateMomentRequest(
+                        p_title = title?.trim()?.takeIf { it.isNotEmpty() },
+                        p_content = content?.trim()?.takeIf { it.isNotEmpty() },
+                        p_language = cleanLanguage,
+                        p_translation = translation?.trim()?.takeIf { it.isNotEmpty() },
+                        p_bg_key = if (hasMedia) null else bgKey,
+                        p_media = if (hasMedia) uploadedMedia else null,
+                        p_topics = topics.takeIf { it.isNotEmpty() },
+                        p_location = location?.trim()?.takeIf { it.isNotEmpty() },
+                        p_fix_requested = fixRequested
+                    )
                 )
-            )
-        }
+            },
+            parser = { raw ->
+                val trimmed = raw.trim()
+                if (trimmed.startsWith("[")) {
+                    val arr = JSONArray(trimmed)
+                    parseMomentDto(arr.getJSONObject(0))
+                } else {
+                    parseMomentDto(JSONObject(trimmed))
+                }
+            }
+        )
     }
 
     suspend fun deleteMoment(context: Context, momentId: String): Result<Unit> {
@@ -435,7 +692,7 @@ object MomentsRepository {
             }
             if (resp) Result.success(!currentlyFollowing)
             else Result.failure(MomentRpcException("follow_failed", mapMomentError(null)))
-        } catch (e: kotlinx.coroutines.CancellationException) {
+        } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Result.failure(MomentRpcException("follow_failed", mapMomentError(e.message)))
