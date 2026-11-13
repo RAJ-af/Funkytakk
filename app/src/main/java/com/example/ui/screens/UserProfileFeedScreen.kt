@@ -64,9 +64,9 @@ import com.example.ui.components.DynamicHobbyChip
 import com.example.ui.components.LanguageItem
 import com.example.ui.components.LanguageResolver
 import com.example.ui.components.MultiLanguageExchangeCard
+import com.example.ui.components.MomentsV2FeedViewerDialog
+import com.example.ui.components.toFallbackMomentDto
 import com.example.ui.screens.home.tabs.resolveCountryCode
-import com.example.ui.screens.post.DetailedPost
-import com.example.ui.screens.post.PostDetailScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -1543,59 +1543,56 @@ fun UserProfileFeedScreen(
             }
         }
 
-        // Full Screen Post Detail View when a feed post is clicked
+        // Full Screen Moments v2 Feed Viewer when a feed post is clicked
         activeFullPost?.let { post ->
-            val detailedImages = if (post.allImages.isNotEmpty()) post.allImages
-            else if (!post.imageUrl.isNullOrBlank()) listOf(post.imageUrl)
-            else emptyList()
+            val feedMoments = remember(momentsList.toList(), selectedFeedTab) {
+                val subset = if (selectedFeedTab == 1) momentsList.filter { it.isVideo } else momentsList
+                subset.map { fp ->
+                    fp.toFallbackMomentDto(
+                        fallbackAuthorId = userId,
+                        fallbackAuthorName = currentProfileName,
+                        fallbackAvatarUrl = currentAvatarUrl,
+                        fallbackCountryCode = currentCountryCode,
+                        isSelfAuthor = isSelfProfile
+                    )
+                }.ifEmpty {
+                    listOf(
+                        post.toFallbackMomentDto(
+                            fallbackAuthorId = userId,
+                            fallbackAuthorName = currentProfileName,
+                            fallbackAvatarUrl = currentAvatarUrl,
+                            fallbackCountryCode = currentCountryCode,
+                            isSelfAuthor = isSelfProfile
+                        )
+                    )
+                }
+            }
 
-            val detailedPost = DetailedPost(
-                id = post.id,
-                authorId = post.momentDto?.author?.id?.takeIf { it.isNotBlank() } ?: userId,
-                authorName = currentProfileName,
-                authorUsername = currentUsername,
-                authorAvatarUrl = currentAvatarUrl,
-                isAuthorVerified = isVerified,
-                location = post.momentDto?.location?.takeIf { it.isNotBlank() } ?: currentCountry,
-                timeAgo = post.timestamp,
-                images = detailedImages,
-                caption = post.caption,
-                likesCount = post.likesCount,
-                isLiked = post.isLikedByUser,
-                isBookmarked = post.isBookmarkedByUser,
-                initialComments = emptyList(),
-                title = post.title,
-                bgKey = post.bgKey,
-                status = post.status,
-                isMe = post.isMe || isSelfProfile,
-                translation = post.momentDto?.translation,
-                language = post.momentDto?.language.orEmpty(),
-                topics = post.momentDto?.topics.orEmpty(),
-                media = post.momentDto?.media.orEmpty(),
-                commentsCount = post.momentDto?.comments_count ?: post.commentsCount,
-                correctionsCount = post.momentDto?.corrections_count ?: 0
-            )
-
-            PostDetailScreen(
-                post = detailedPost,
-                currentLoggedInAvatar = if (isSelfProfile) currentAvatarUrl else "",
-                onBack = { activeFullPost = null },
-                onLikePostToggle = { isLiked ->
-                    post.isLikedByUser = isLiked
-                },
-                onBookmarkPostToggle = { isBookmarked ->
-                    post.isBookmarkedByUser = isBookmarked
-                },
-                onPostUpdated = { updatedDto ->
+            MomentsV2FeedViewerDialog(
+                moments = feedMoments,
+                initialMomentId = post.id,
+                currentUserNativeLanguage = nativeLanguages,
+                isSelfProfile = isSelfProfile,
+                onDismiss = { activeFullPost = null },
+                onMomentUpdated = { updatedDto ->
                     val idx = momentsList.indexOfFirst { it.id == updatedDto.id }
                     if (idx >= 0) {
-                        momentsList[idx] = updatedDto.toFeedPost()
+                        val existingBookmark = momentsList[idx].isBookmarkedByUser
+                        momentsList[idx] = updatedDto.toFeedPost().copy(isBookmarkedByUser = existingBookmark)
                     }
                 },
-                onPostDeleted = { deletedId ->
+                onMomentDeleted = { deletedId ->
                     momentsList.removeAll { it.id == deletedId }
                     postsCount = momentsList.size
-                    activeFullPost = null
+                    if (activeFullPost?.id == deletedId) {
+                        activeFullPost = null
+                    }
+                },
+                onBookmarkToggled = { momentId, isBookmarked ->
+                    val idx = momentsList.indexOfFirst { it.id == momentId }
+                    if (idx >= 0) {
+                        momentsList[idx] = momentsList[idx].copy(isBookmarkedByUser = isBookmarked)
+                    }
                 }
             )
         }
@@ -1955,54 +1952,33 @@ fun FullscreenPostView(
     onPostUpdated: (MomentDto) -> Unit = {},
     onPostDeleted: (String) -> Unit = {}
 ) {
-    val detailedPost = remember(post.id, post.momentDto) {
-        val dto = post.momentDto
-        val realImages = if (post.allImages.isNotEmpty()) post.allImages
-        else if (!post.imageUrl.isNullOrBlank()) listOf(post.imageUrl)
-        else emptyList()
-
-        DetailedPost(
-            id = post.id,
-            authorId = dto?.author?.id.orEmpty(),
-            authorName = dto?.author?.name?.takeIf { it.isNotBlank() } ?: profileName.ifBlank { "Member" },
-            authorUsername = dto?.author?.username?.takeIf { it.isNotBlank() } ?: profileName.lowercase().replace(" ", ""),
-            authorAvatarUrl = dto?.author?.avatar_url?.takeIf { it.isNotBlank() } ?: avatarUrl,
-            isAuthorVerified = dto?.author?.is_verified ?: false,
-            location = dto?.location?.takeIf { it.isNotBlank() } ?: dto?.author?.city.orEmpty(),
-            timeAgo = post.timestamp,
-            images = realImages,
-            caption = post.caption,
-            likesCount = post.likesCount,
-            isLiked = post.isLikedByUser,
-            isBookmarked = post.isBookmarkedByUser,
-            initialComments = emptyList(),
-            title = post.title ?: dto?.title,
-            bgKey = post.bgKey ?: dto?.bg_key,
-            status = post.status,
-            isMe = post.isMe || dto?.author?.is_me ?: true,
-            translation = dto?.translation,
-            language = dto?.language.orEmpty(),
-            topics = dto?.topics.orEmpty(),
-            media = dto?.media.orEmpty(),
-            commentsCount = dto?.comments_count ?: post.commentsCount,
-            correctionsCount = dto?.corrections_count ?: 0
+    val fallbackMoment = remember(post.id, post.momentDto) {
+        post.toFallbackMomentDto(
+            fallbackAuthorName = profileName.ifBlank { "Member" },
+            fallbackAvatarUrl = avatarUrl,
+            isSelfAuthor = post.isMe
         )
     }
 
-    PostDetailScreen(
-        post = detailedPost,
-        currentLoggedInAvatar = currentLoggedInAvatar.ifBlank { avatarUrl },
-        onBack = onBack,
-        onLikePostToggle = { isLiked ->
-            post.isLikedByUser = isLiked
-            onLikeToggle()
+    MomentsV2FeedViewerDialog(
+        moments = listOf(fallbackMoment),
+        initialMomentId = fallbackMoment.id,
+        isSelfProfile = post.isMe,
+        onDismiss = onBack,
+        onMomentUpdated = { updated ->
+            if (updated.liked_by_me != post.isLikedByUser) {
+                post.isLikedByUser = updated.liked_by_me
+                onLikeToggle()
+            }
+            onPostUpdated(updated)
         },
-        onBookmarkPostToggle = { isBookmarked ->
-            post.isBookmarkedByUser = isBookmarked
-            onBookmarkToggle()
-        },
-        onPostUpdated = onPostUpdated,
-        onPostDeleted = onPostDeleted
+        onMomentDeleted = onPostDeleted,
+        onBookmarkToggled = { _, isBookmarked ->
+            if (isBookmarked != post.isBookmarkedByUser) {
+                post.isBookmarkedByUser = isBookmarked
+                onBookmarkToggle()
+            }
+        }
     )
 }
 

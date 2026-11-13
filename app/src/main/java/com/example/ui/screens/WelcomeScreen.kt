@@ -7,12 +7,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.outlined.ChatBubbleOutline
-import androidx.compose.material.icons.outlined.Explore
-import androidx.compose.material.icons.outlined.PeopleOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,7 +17,6 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -113,19 +108,19 @@ fun WelcomeScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 SubtleFeatureChip(
-                    icon = Icons.Outlined.ChatBubbleOutline,
+                    iconRes = R.drawable.ic_comment,
                     label = "Chat",
                     backgroundColor = Color(0xFFFFF9E4),
                     modifier = Modifier.weight(1f)
                 )
                 SubtleFeatureChip(
-                    icon = Icons.Outlined.PeopleOutline,
+                    iconRes = R.drawable.ic_discover,
                     label = "Make Friends",
                     backgroundColor = Color(0xFFFDF0F2),
                     modifier = Modifier.weight(1.35f)
                 )
                 SubtleFeatureChip(
-                    icon = Icons.Outlined.Explore,
+                    iconRes = R.drawable.ic_globe,
                     label = "Explore",
                     backgroundColor = Color(0xFFF0F4FF),
                     modifier = Modifier.weight(1.15f)
@@ -167,7 +162,7 @@ fun WelcomeScreen(
 
 @Composable
 private fun SubtleFeatureChip(
-    icon: ImageVector,
+    @DrawableRes iconRes: Int,
     label: String,
     backgroundColor: Color,
     modifier: Modifier = Modifier
@@ -186,7 +181,7 @@ private fun SubtleFeatureChip(
             horizontalArrangement = Arrangement.Center
         ) {
             Icon(
-                imageVector = icon,
+                painter = painterResource(id = iconRes),
                 contentDescription = null,
                 tint = Color(0xFF2C2C2C),
                 modifier = Modifier.size(13.dp)
@@ -334,10 +329,10 @@ private fun SlideToConnectButton(
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                painter = painterResource(id = R.drawable.ic_chevron_right),
                 contentDescription = "Slide to Connect",
                 tint = Color.Black,
-                modifier = Modifier.size(26.dp)
+                modifier = Modifier.size(22.dp)
             )
         }
     }

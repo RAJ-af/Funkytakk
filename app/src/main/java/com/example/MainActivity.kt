@@ -60,7 +60,14 @@ class MainActivity : FragmentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = Color(0xFFFAFAEE)
                 ) {
-                    var currentScreen by rememberSaveable { mutableStateOf("welcome") }
+                    var currentScreen by rememberSaveable { mutableStateOf("splash") }
+                    var minSplashElapsed by rememberSaveable { mutableStateOf(false) }
+                    LaunchedEffect(Unit) {
+                        if (!minSplashElapsed) {
+                            kotlinx.coroutines.delay(950)
+                            minSplashElapsed = true
+                        }
+                    }
 
                     LaunchedEffect(pendingNavigateTo) {
                         pendingNavigateTo?.let { target ->
@@ -160,13 +167,16 @@ class MainActivity : FragmentActivity() {
                     var tempNativeLanguage by rememberSaveable { mutableStateOf("") }
                     var tempLearningLanguage by rememberSaveable { mutableStateOf("") }
                     var tempHobbies by remember { mutableStateOf<List<String>>(emptyList()) }
-                    var createRoomIsPrivate by rememberSaveable { mutableStateOf(false) }
+                    var openCreateRoomTrigger by rememberSaveable { mutableStateOf(false) }
                     var activeSupportReportId by rememberSaveable { mutableStateOf<String?>(null) }
                     var pendingBackupStatus by remember { mutableStateOf<ChatBackupStatusResponse?>(null) }
                     var endedRoomPeopleCount by rememberSaveable { mutableStateOf(12) }
                     var endedRoomTotalTime by rememberSaveable { mutableStateOf(28) }
 
-                    LaunchedEffect(authState) {
+                    LaunchedEffect(authState, minSplashElapsed) {
+                        if (!minSplashElapsed && currentScreen == "splash") {
+                            return@LaunchedEffect
+                        }
                         if (authState is AuthState.Success) {
                             val user = (authState as AuthState.Success).user
                             if (!user.username.isNullOrBlank()) tempUsername = user.username
@@ -221,6 +231,8 @@ class MainActivity : FragmentActivity() {
                             com.example.crypto.E2EEManager.ensureIdentityKeyInitialized(applicationContext)
                             com.example.repository.EncryptedChatRepository.init(applicationContext)
                             com.example.service.PushNotificationManager.registerCurrentToken(applicationContext, force = true)
+                        } else if (minSplashElapsed && currentScreen == "splash" && authState !is AuthState.Loading) {
+                            currentScreen = "welcome"
                         }
                     }
 
@@ -313,6 +325,7 @@ class MainActivity : FragmentActivity() {
                                 label = "screen_routing"
                             ) { screen ->
                         when (screen) {
+                            "splash" -> SplashScreen()
                             "welcome" -> WelcomeScreen(
                                 onGetStartedClick = {
                                     currentScreen = "privacy"
@@ -489,9 +502,9 @@ class MainActivity : FragmentActivity() {
                                 onLogoutSuccess = {
                                     currentScreen = "welcome"
                                 },
-                                onCreateLanguageRoom = { isPrivate ->
-                                    createRoomIsPrivate = isPrivate
-                                    currentScreen = "create_language_room"
+                                openCreateRoomTrigger = openCreateRoomTrigger,
+                                onConsumeCreateRoomTrigger = {
+                                    openCreateRoomTrigger = false
                                 },
                                 onRoomClick = {
                                     currentScreen = "voice_room"
@@ -523,12 +536,6 @@ class MainActivity : FragmentActivity() {
                                 reportId = activeSupportReportId,
                                 onBack = { currentScreen = "home" }
                             )
-                            "create_language_room" -> CreateLanguageRoomScreen(
-                                viewModel = authViewModel,
-                                initialIsPrivate = createRoomIsPrivate,
-                                onBack = { currentScreen = "home" },
-                                onCreate = { currentScreen = "voice_room" }
-                            )
                             "voice_room" -> VoiceRoomScreen(
                                 viewModel = authViewModel,
                                 onBack = {
@@ -544,8 +551,8 @@ class MainActivity : FragmentActivity() {
                                 peopleJoinedCount = endedRoomPeopleCount,
                                 totalTimeMinutes = endedRoomTotalTime,
                                 onCreateAnotherRoom = {
-                                    createRoomIsPrivate = false
-                                    currentScreen = "create_language_room"
+                                    openCreateRoomTrigger = true
+                                    currentScreen = "home"
                                 },
                                 onBackToHome = {
                                     currentScreen = "home"
@@ -565,7 +572,7 @@ class MainActivity : FragmentActivity() {
                         }
                     }
 
-                    if (activeRoomId != null && currentScreen != "voice_room") {
+                    if (activeRoomId != null && currentScreen != "voice_room" && currentScreen != "splash") {
                         FloatingBubbleOverlay(
                             viewModel = authViewModel,
                             onNavigateToRoom = {

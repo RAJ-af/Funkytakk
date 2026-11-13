@@ -32,7 +32,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -62,14 +64,26 @@ object AppLoadingManager {
     private val _cancelAction = MutableStateFlow<(() -> Unit)?>(null)
     val cancelAction = _cancelAction.asStateFlow()
 
+    private val _isSuccess = MutableStateFlow(false)
+    val isSuccess = _isSuccess.asStateFlow()
+
     fun show(
         message: String = "Please wait...",
         progressPercent: Int? = null,
         onCancel: (() -> Unit)? = null
     ) {
+        _isSuccess.value = false
         _loadingMessage.value = message
         _progressPercent.value = progressPercent
         _cancelAction.value = onCancel
+        _isLoading.value = true
+    }
+
+    fun showSuccess(message: String = "Done") {
+        _isSuccess.value = true
+        _loadingMessage.value = message
+        _progressPercent.value = null
+        _cancelAction.value = null
         _isLoading.value = true
     }
 
@@ -86,6 +100,7 @@ object AppLoadingManager {
 
     fun hide() {
         _isLoading.value = false
+        _isSuccess.value = false
         _progressPercent.value = null
         _cancelAction.value = null
     }
@@ -153,7 +168,7 @@ object AppNetworkManager {
 }
 
 /**
- * Cute, Soft Loading Popup HUD
+ * Cute Bouncing Mango Dot Loading Popup HUD matching Loading_popup spec.
  * Rendered centrally over the active screen when AppLoadingManager.isLoading is true.
  */
 @Composable
@@ -162,6 +177,14 @@ fun AppLoadingHUDOverlay() {
     val loadingMessage by AppLoadingManager.loadingMessage.collectAsState()
     val progressPercent by AppLoadingManager.progressPercent.collectAsState()
     val cancelAction by AppLoadingManager.cancelAction.collectAsState()
+    val isSuccess by AppLoadingManager.isSuccess.collectAsState()
+
+    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val scrimColor = if (isDark) Color(10, 8, 5).copy(alpha = 0.56f) else Color(20, 14, 6).copy(alpha = 0.38f)
+    val cardBg = if (isDark) Color(0xFF231D15) else Color.White
+    val inkColor = if (isDark) Color(0xFFFFF3DC) else Color(0xFF2B2118)
+    val muteColor = if (isDark) Color(0xFFA89A82) else Color(0xFF8A7B66)
+    val borderColor = if (isDark) Color(0xFF34291A) else Color(0xFFF0E3C4)
 
     if (isLoading) {
         Dialog(
@@ -175,7 +198,7 @@ fun AppLoadingHUDOverlay() {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.35f))
+                    .background(scrimColor)
                     .testTag("app_loading_hud_overlay"),
                 contentAlignment = Alignment.Center
             ) {
@@ -184,71 +207,75 @@ fun AppLoadingHUDOverlay() {
                         .wrapContentSize()
                         .padding(horizontal = 32.dp),
                     shape = RoundedCornerShape(28.dp),
-                    color = Color(0xFFFFFBF0), // Warm soft cream card
-                    tonalElevation = 10.dp,
-                    shadowElevation = 20.dp,
-                    border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFFEADFC4))
+                    color = cardBg,
+                    tonalElevation = 8.dp,
+                    shadowElevation = 24.dp,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, borderColor)
                 ) {
                     Column(
                         modifier = Modifier
-                            .padding(horizontal = 28.dp, vertical = 24.dp)
-                            .widthIn(min = 210.dp)
-                            .wrapContentWidth(),
+                            .padding(horizontal = 28.dp, vertical = 26.dp)
+                            .widthIn(min = 150.dp, max = 260.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
-                        // Cute Animated Loading Spinner Badge
-                        CuteSpinningLoaderBadge(modifier = Modifier.size(64.dp))
+                        if (isSuccess) {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF22C55E).copy(alpha = 0.16f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                androidx.compose.material3.Icon(
+                                    painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.ic_check),
+                                    contentDescription = "Success",
+                                    tint = Color(0xFF16A34A),
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        } else {
+                            BouncingMangoDotHUD(inkColor = inkColor)
+                        }
 
-                        Spacer(modifier = Modifier.height(18.dp))
+                        Spacer(modifier = Modifier.height(14.dp))
 
-                        // Soft Loading Message
                         Text(
                             text = loadingMessage,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF2A1E00),
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = muteColor,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.testTag("loading_message_text")
                         )
 
-                        if (progressPercent != null) {
+                        if (progressPercent != null && !isSuccess) {
                             val pct = progressPercent!!.coerceIn(0, 100)
                             Spacer(modifier = Modifier.height(12.dp))
                             androidx.compose.material3.LinearProgressIndicator(
                                 progress = { pct / 100f },
                                 modifier = Modifier
-                                    .width(180.dp)
-                                    .height(7.dp)
+                                    .width(170.dp)
+                                    .height(6.dp)
                                     .clip(RoundedCornerShape(4.dp)),
-                                color = Color(0xFFFFB800),
-                                trackColor = Color(0xFFEADFC4)
+                                color = Color(0xFFFFB627),
+                                trackColor = if (isDark) Color(0xFF3A2D12) else Color(0xFFFFEFC2)
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
                                 text = "$pct%",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF7A5A00)
-                            )
-                        } else {
-                            Spacer(modifier = Modifier.height(4.dp))
-
-                            Text(
-                                text = "Please hold on a moment",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = Color(0xFF7A7260),
-                                textAlign = TextAlign.Center
+                                color = inkColor
                             )
                         }
 
-                        if (cancelAction != null) {
+                        if (cancelAction != null && !isSuccess) {
                             Spacer(modifier = Modifier.height(14.dp))
                             androidx.compose.material3.OutlinedButton(
                                 onClick = { cancelAction?.invoke() },
                                 shape = RoundedCornerShape(18.dp),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFD6C8A5)),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, borderColor),
                                 modifier = Modifier
                                     .defaultMinSize(minHeight = 48.dp)
                                     .testTag("loading_cancel_button")
@@ -257,7 +284,7 @@ fun AppLoadingHUDOverlay() {
                                     text = "Cancel",
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF2A1E00)
+                                    color = inkColor
                                 )
                             }
                         }
@@ -265,6 +292,115 @@ fun AppLoadingHUDOverlay() {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun BouncingMangoDotHUD(inkColor: Color) {
+    val infiniteTransition = rememberInfiniteTransition(label = "hud_mango_dot")
+
+    val jumpDp by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 720
+                0f at 0 using FastOutSlowInEasing
+                -30f at 320 using LinearOutSlowInEasing
+                0f at 720 using FastOutLinearInEasing
+            },
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "hud_jump"
+    )
+
+    val scaleX by infiniteTransition.animateFloat(
+        initialValue = 1.22f,
+        targetValue = 1.22f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 720
+                1.22f at 0
+                0.92f at 320
+                1.22f at 720
+            },
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "hud_sx"
+    )
+
+    val scaleY by infiniteTransition.animateFloat(
+        initialValue = 0.78f,
+        targetValue = 0.78f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 720
+                0.78f at 0
+                1.08f at 320
+                0.78f at 720
+            },
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "hud_sy"
+    )
+
+    val shadowScale by infiniteTransition.animateFloat(
+        initialValue = 1.15f,
+        targetValue = 1.15f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 720
+                1.15f at 0
+                0.55f at 320
+                1.15f at 720
+            },
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "hud_shadow_scale"
+    )
+
+    val shadowAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.20f,
+        targetValue = 0.20f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 720
+                0.20f at 0
+                0.08f at 320
+                0.20f at 720
+            },
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "hud_shadow_alpha"
+    )
+
+    Box(
+        modifier = Modifier.size(60.dp),
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        // Ground shadow ellipse
+        Box(
+            modifier = Modifier
+                .padding(bottom = 4.dp)
+                .size(width = (18f * shadowScale).dp, height = 5.dp)
+                .clip(CircleShape)
+                .background(inkColor.copy(alpha = shadowAlpha))
+        )
+
+        // Bouncing 16dp mango dot
+        Box(
+            modifier = Modifier
+                .padding(bottom = 6.dp)
+                .offset(y = jumpDp.dp)
+                .graphicsLayer {
+                    this.scaleX = scaleX
+                    this.scaleY = scaleY
+                    this.transformOrigin = TransformOrigin(0.5f, 1f)
+                }
+                .size(16.dp)
+                .clip(CircleShape)
+                .background(Color(0xFFFFB627))
+        )
     }
 }
 

@@ -3,27 +3,28 @@ package com.example.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
 import com.example.ui.screens.Language
 import com.example.ui.screens.LanguageData
 
@@ -31,7 +32,7 @@ import com.example.ui.screens.LanguageData
 @Composable
 fun RoomLanguageSelectionSheet(
     selectedLanguageName: String,
-    isDark: Boolean = false,
+    isDark: Boolean = isSystemInDarkTheme(),
     onLanguageSelected: (Language) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -51,20 +52,22 @@ fun RoomLanguageSelectionSheet(
             baseList
         } else {
             val q = searchQuery.trim()
-            // When user types a search query, search across all languages including programming
             LanguageData.allLanguages.filter {
                 it.name.contains(q, ignoreCase = true) ||
-                it.nativeName.contains(q, ignoreCase = true) ||
-                it.code.contains(q, ignoreCase = true)
+                    it.nativeName.contains(q, ignoreCase = true) ||
+                    it.code.contains(q, ignoreCase = true)
             }
         }
     }
 
-    val sheetBg = if (isDark) Color(0xFF0F172A) else Color.White
-    val contentTextColor = if (isDark) Color.White else Color(0xFF111827)
-    val subtitleTextColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF6B7280)
-    val inputBg = if (isDark) Color(0xFF1E293B) else Color(0xFFF9FAFB)
-    val dividerColor = if (isDark) Color.White.copy(alpha = 0.08f) else Color(0xFFF3F4F6)
+    // Warm Cream / Dark FunkyTalk Palette
+    val sheetBg = if (isDark) Color(0xFF231D15) else Color(0xFFFFF8E7)
+    val inkColor = if (isDark) Color(0xFFFFF3DC) else Color(0xFF2B2118)
+    val muteColor = if (isDark) Color(0xFFA89A82) else Color(0xFF8A7B66)
+    val softSurface = if (isDark) Color(0xFF3A2D12) else Color(0xFFFFEFC2)
+    val cardSurface = if (isDark) Color(0xFF2B2118) else Color.White
+    val dividerColor = if (isDark) Color(0xFF34291A) else Color(0xFFF0E3C4)
+    val mangoColor = Color(0xFFFFB627)
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -73,14 +76,19 @@ fun RoomLanguageSelectionSheet(
         sheetState = sheetState,
         containerColor = sheetBg,
         tonalElevation = 4.dp,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         dragHandle = {
-            BottomSheetDefaults.DragHandle(
-                color = if (isDark) Color.White.copy(alpha = 0.3f) else Color.Gray.copy(alpha = 0.4f)
+            Box(
+                modifier = Modifier
+                    .padding(top = 10.dp, bottom = 4.dp)
+                    .width(38.dp)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(dividerColor)
             )
         }
     ) {
-        CompositionLocalProvider(LocalContentColor provides contentTextColor) {
+        CompositionLocalProvider(LocalContentColor provides inkColor) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -89,66 +97,92 @@ fun RoomLanguageSelectionSheet(
                     .padding(horizontal = 20.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // Title
-                Text(
-                    text = "Select Language",
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 18.sp,
-                    color = contentTextColor,
+                // Header Row
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Center
-                )
-
-                // Search box with explicit high-contrast text color
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { 
-                        Text(
-                            "Search language or tech (e.g. Python)...", 
-                            color = subtitleTextColor, 
-                            fontSize = 13.sp
-                        ) 
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    singleLine = true,
-                    textStyle = TextStyle(
-                        color = contentTextColor,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium
-                    ),
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = "Search",
-                            tint = subtitleTextColor
-                        )
-                    },
-                    trailingIcon = {
-                        if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Clear search",
-                                    tint = subtitleTextColor,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
-                    },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = contentTextColor,
-                        unfocusedTextColor = contentTextColor,
-                        focusedContainerColor = inputBg,
-                        unfocusedContainerColor = inputBg,
-                        focusedBorderColor = Color(0xFFFFC107),
-                        unfocusedBorderColor = if (isDark) Color.White.copy(alpha = 0.15f) else Color(0xFFE5E7EB),
-                        cursorColor = Color(0xFFD97706),
-                        focusedPlaceholderColor = subtitleTextColor,
-                        unfocusedPlaceholderColor = subtitleTextColor
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Spacer(modifier = Modifier.size(36.dp))
+                    Text(
+                        text = "Select Language",
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 19.sp,
+                        color = inkColor,
+                        textAlign = TextAlign.Center
                     )
-                )
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(softSurface)
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_close),
+                            contentDescription = "Close",
+                            tint = inkColor,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+
+                // Warm Cream Search Pill
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(softSurface)
+                        .border(1.dp, dividerColor, RoundedCornerShape(18.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_search),
+                        contentDescription = "Search",
+                        tint = muteColor,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Box(modifier = Modifier.weight(1f)) {
+                        BasicTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            textStyle = TextStyle(
+                                color = inkColor,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
+                            ),
+                            singleLine = true,
+                            cursorBrush = SolidColor(mangoColor),
+                            decorationBox = { inner ->
+                                if (searchQuery.isEmpty()) {
+                                    Text(
+                                        text = "Search language or tech (e.g. Python)...",
+                                        color = muteColor,
+                                        fontSize = 13.5.sp
+                                    )
+                                }
+                                inner()
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("language_search_input")
+                        )
+                    }
+                    if (searchQuery.isNotEmpty()) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_close),
+                            contentDescription = "Clear search",
+                            tint = muteColor,
+                            modifier = Modifier
+                                .size(18.dp)
+                                .clickable { searchQuery = "" }
+                        )
+                    }
+                }
 
                 // Category Tabs ("All", "Spoken", "Programming")
                 Row(
@@ -160,24 +194,15 @@ fun RoomLanguageSelectionSheet(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(20.dp))
-                                .background(
-                                    if (isSelected) (if (isDark) Color(0xFF78350F).copy(alpha = 0.5f) else Color(0xFFFEF3C7))
-                                    else (if (isDark) Color(0xFF1E293B) else Color(0xFFF3F4F6))
-                                )
-                                .border(
-                                    width = 1.dp,
-                                    color = if (isSelected) Color(0xFFF59E0B) else (if (isDark) Color.White.copy(alpha = 0.1f) else Color.Transparent),
-                                    shape = RoundedCornerShape(20.dp)
-                                )
+                                .background(if (isSelected) mangoColor else softSurface)
                                 .clickable { selectedCategory = cat }
-                                .padding(horizontal = 14.dp, vertical = 6.dp)
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
                         ) {
                             Text(
                                 text = cat,
-                                fontSize = 12.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) (if (isDark) Color(0xFFFBBF24) else Color(0xFFB45309))
-                                else (if (isDark) Color(0xFFCBD5E1) else Color(0xFF4B5563))
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isSelected) Color(0xFF2B2118) else muteColor
                             )
                         }
                     }
@@ -208,8 +233,8 @@ fun RoomLanguageSelectionSheet(
                         Text(
                             text = if (selectedCategory == "Programming") "Popular Tech" else "Popular Languages",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            color = contentTextColor
+                            fontSize = 13.5.sp,
+                            color = inkColor
                         )
 
                         Row(
@@ -222,8 +247,15 @@ fun RoomLanguageSelectionSheet(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     modifier = Modifier
                                         .clickable {
-                                            val matchedLang = LanguageData.allLanguages.firstOrNull { it.name.equals(name, ignoreCase = true) }
-                                                ?: Language(name = name, nativeName = name, flagCode = code, code = code, initials = name.take(2))
+                                            val matchedLang = LanguageData.allLanguages.firstOrNull {
+                                                it.name.equals(name, ignoreCase = true)
+                                            } ?: Language(
+                                                name = name,
+                                                nativeName = name,
+                                                flagCode = code,
+                                                code = code,
+                                                initials = name.take(2)
+                                            )
                                             onLanguageSelected(matchedLang)
                                             onDismiss()
                                         }
@@ -231,18 +263,15 @@ fun RoomLanguageSelectionSheet(
                                 ) {
                                     Box(
                                         modifier = Modifier
-                                            .size(52.dp)
-                                            .background(
-                                                if (isSelected) (if (isDark) Color(0xFF78350F).copy(alpha = 0.45f) else Color(0xFFFFFBEB))
-                                                else (if (isDark) Color(0xFF1E293B) else Color(0xFFF9FAFB)),
-                                                RoundedCornerShape(16.dp)
-                                            )
+                                            .size(54.dp)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(if (isSelected) softSurface else cardSurface)
                                             .border(
-                                                1.5.dp,
-                                                if (isSelected) Color(0xFFFFC107) else (if (isDark) Color.White.copy(alpha = 0.1f) else Color(0xFFF3F4F6)),
-                                                RoundedCornerShape(16.dp)
+                                                width = if (isSelected) 2.dp else 1.dp,
+                                                color = if (isSelected) mangoColor else dividerColor,
+                                                shape = RoundedCornerShape(16.dp)
                                             )
-                                            .padding(8.dp),
+                                            .padding(9.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         LanguageIcon(
@@ -250,13 +279,12 @@ fun RoomLanguageSelectionSheet(
                                             modifier = Modifier.fillMaxSize()
                                         )
                                     }
-                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Spacer(modifier = Modifier.height(5.dp))
                                     Text(
                                         text = name,
-                                        fontSize = 11.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
-                                        color = if (isSelected) (if (isDark) Color(0xFFFBBF24) else Color(0xFFD97706))
-                                        else contentTextColor
+                                        fontSize = 11.5.sp,
+                                        fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.SemiBold,
+                                        color = if (isSelected) Color(0xFFD97706) else inkColor
                                     )
                                 }
                             }
@@ -270,8 +298,8 @@ fun RoomLanguageSelectionSheet(
                 Text(
                     text = if (selectedCategory == "Programming") "Programming Languages (${filteredLanguages.size})" else "All Languages (${filteredLanguages.size})",
                     fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp,
-                    color = contentTextColor
+                    fontSize = 13.5.sp,
+                    color = inkColor
                 )
 
                 LazyColumn(
@@ -285,16 +313,18 @@ fun RoomLanguageSelectionSheet(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(
-                                    if (isChosen) (if (isDark) Color(0xFF78350F).copy(alpha = 0.35f) else Color(0xFFFFFBEB))
-                                    else Color.Transparent
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(if (isChosen) softSurface else cardSurface.copy(alpha = 0.7f))
+                                .border(
+                                    width = if (isChosen) 1.5.dp else 1.dp,
+                                    color = if (isChosen) mangoColor else dividerColor,
+                                    shape = RoundedCornerShape(16.dp)
                                 )
                                 .clickable {
                                     onLanguageSelected(language)
                                     onDismiss()
                                 }
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
@@ -306,7 +336,7 @@ fun RoomLanguageSelectionSheet(
                                     language = language.flagCode.ifBlank { language.name },
                                     modifier = Modifier
                                         .size(34.dp)
-                                        .clip(RoundedCornerShape(8.dp))
+                                        .clip(RoundedCornerShape(9.dp))
                                 )
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
@@ -314,25 +344,31 @@ fun RoomLanguageSelectionSheet(
                                         text = language.name,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (isChosen) (if (isDark) Color(0xFFFBBF24) else Color(0xFFD97706))
-                                        else contentTextColor
+                                        color = inkColor
                                     )
                                     Text(
                                         text = "${language.nativeName} · ${language.code}",
                                         fontSize = 12.sp,
-                                        color = if (isChosen) (if (isDark) Color(0xFFFCD34D) else Color(0xFFD97706).copy(alpha = 0.85f))
-                                        else subtitleTextColor
+                                        color = muteColor
                                     )
                                 }
                             }
 
                             if (isChosen) {
-                                Icon(
-                                    imageVector = Icons.Default.CheckCircle,
-                                    contentDescription = "Selected",
-                                    tint = Color(0xFFFFC107),
-                                    modifier = Modifier.size(22.dp)
-                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .clip(CircleShape)
+                                        .background(mangoColor),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ic_check),
+                                        contentDescription = "Selected",
+                                        tint = Color(0xFF2B2118),
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
                             }
                         }
                     }

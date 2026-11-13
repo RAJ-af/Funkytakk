@@ -20,9 +20,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
+import androidx.compose.ui.res.painterResource
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,7 +64,8 @@ import com.example.ui.components.LanguageResolver
 import com.example.ui.components.MultiLanguageExchangeCard
 import com.example.ui.components.PresetAvatarList
 import com.example.ui.components.ProfileBadgesRow
-import com.example.ui.screens.toFeedPost
+import com.example.ui.components.MomentsV2FeedViewerDialog
+import com.example.ui.components.toFallbackMomentDto
 import com.example.ui.components.SoftBlockIcon
 import com.example.ui.components.Soft3DCloudIcon
 import com.example.ui.components.resolveAvatarModel
@@ -1396,30 +1396,56 @@ fun ProfileTabContent(
             }
         }
 
-        // Full Screen Post View when a feed post is clicked
+        // Full Screen Moments v2 Feed Viewer when a feed post is clicked
         activeFullPost?.let { post ->
-            FullscreenPostView(
-                post = post,
-                profileName = profileDisplayName,
-                avatarUrl = profileAvatar,
-                currentLoggedInAvatar = profileAvatar,
-                onBack = { activeFullPost = null },
-                onLikeToggle = {
-                    post.isLikedByUser = !post.isLikedByUser
-                },
-                onBookmarkToggle = {
-                    post.isBookmarkedByUser = !post.isBookmarkedByUser
-                },
-                onPostUpdated = { updatedDto ->
+            val feedMoments = remember(momentsList.toList(), selectedFeedTab) {
+                val subset = if (selectedFeedTab == 1) momentsList.filter { it.isVideo } else momentsList
+                subset.map { fp ->
+                    fp.toFallbackMomentDto(
+                        fallbackAuthorId = supaUid,
+                        fallbackAuthorName = profileDisplayName,
+                        fallbackAvatarUrl = profileAvatar,
+                        fallbackCountryCode = currentUserProfile.countryCode.orEmpty(),
+                        isSelfAuthor = true
+                    )
+                }.ifEmpty {
+                    listOf(
+                        post.toFallbackMomentDto(
+                            fallbackAuthorId = supaUid,
+                            fallbackAuthorName = profileDisplayName,
+                            fallbackAvatarUrl = profileAvatar,
+                            fallbackCountryCode = currentUserProfile.countryCode.orEmpty(),
+                            isSelfAuthor = true
+                        )
+                    )
+                }
+            }
+
+            MomentsV2FeedViewerDialog(
+                moments = feedMoments,
+                initialMomentId = post.id,
+                currentUserNativeLanguage = currentUserProfile.nativeLanguage.orEmpty(),
+                isSelfProfile = true,
+                onDismiss = { activeFullPost = null },
+                onMomentUpdated = { updatedDto ->
                     val idx = momentsList.indexOfFirst { it.id == updatedDto.id }
                     if (idx >= 0) {
-                        momentsList[idx] = updatedDto.toFeedPost()
+                        val existingBookmark = momentsList[idx].isBookmarkedByUser
+                        momentsList[idx] = updatedDto.toFeedPost().copy(isBookmarkedByUser = existingBookmark)
                     }
                 },
-                onPostDeleted = { deletedId ->
+                onMomentDeleted = { deletedId ->
                     momentsList.removeAll { it.id == deletedId }
                     postsCount = momentsList.size
-                    activeFullPost = null
+                    if (activeFullPost?.id == deletedId) {
+                        activeFullPost = null
+                    }
+                },
+                onBookmarkToggled = { momentId, isBookmarked ->
+                    val idx = momentsList.indexOfFirst { it.id == momentId }
+                    if (idx >= 0) {
+                        momentsList[idx] = momentsList[idx].copy(isBookmarkedByUser = isBookmarked)
+                    }
                 }
             )
         }
@@ -1624,7 +1650,7 @@ fun ProfileTabContent(
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Warning,
+                            painter = painterResource(id = com.example.R.drawable.ic_alert),
                             contentDescription = "Delete Account",
                             tint = Color(0xFFDC2626),
                             modifier = Modifier.size(18.dp)

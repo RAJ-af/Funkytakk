@@ -40,9 +40,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Warning
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight
@@ -55,7 +53,8 @@ import com.example.ui.theme.GoldAccent
 fun HomeScreen(
     viewModel: AuthViewModel,
     onLogoutSuccess: () -> Unit,
-    onCreateLanguageRoom: (isPrivate: Boolean) -> Unit = {},
+    openCreateRoomTrigger: Boolean = false,
+    onConsumeCreateRoomTrigger: () -> Unit = {},
     onRoomClick: () -> Unit = {},
     onOpenNotifications: () -> Unit = {},
     onOpenSupportChat: (reportId: String?) -> Unit = {},
@@ -85,6 +84,13 @@ fun HomeScreen(
 
     LaunchedEffect(Unit) {
         myModerationStatus = com.example.ModerationManager.fetchMyModerationStatus(context)
+    }
+
+    LaunchedEffect(openCreateRoomTrigger) {
+        if (openCreateRoomTrigger) {
+            showCreateRoomBottomSheet = true
+            onConsumeCreateRoomTrigger()
+        }
     }
 
     // Join Code Dialog States
@@ -685,28 +691,29 @@ fun HomeScreen(
         }
     }
 
+    val isAccountSuspended = myModerationStatus?.action_type == "suspend" &&
+        com.example.ModerationManager.isActionActive(myModerationStatus)
+
     // Modal Sheet to Create Language / Private Rooms
     if (showCreateRoomBottomSheet) {
         CreateRoomBottomSheet(
+            viewModel = viewModel,
+            isSuspended = isAccountSuspended,
             onDismiss = { showCreateRoomBottomSheet = false },
-            onCreateRoom = { isPrivate ->
-                if (myModerationStatus?.action_type == "suspend" && com.example.ModerationManager.isActionActive(myModerationStatus)) {
-                    Toast.makeText(context, "Cannot create room: Your account is currently suspended.", Toast.LENGTH_LONG).show()
-                } else {
-                    showCreateRoomBottomSheet = false
-                    onCreateLanguageRoom(isPrivate)
-                }
+            onRoomCreated = {
+                showCreateRoomBottomSheet = false
+                onRoomClick()
             }
         )
     }
 
     // Active Suspension Alert on Home Screen
-    if (myModerationStatus?.action_type == "suspend" && com.example.ModerationManager.isActionActive(myModerationStatus)) {
+    if (isAccountSuspended) {
         AlertDialog(
             onDismissRequest = { /* Cannot dismiss without resolving */ },
             icon = {
                 Icon(
-                    imageVector = Icons.Default.Warning,
+                    painter = painterResource(id = com.example.R.drawable.ic_alert),
                     contentDescription = "Suspended",
                     tint = Color(0xFFDC2626),
                     modifier = Modifier.size(36.dp)

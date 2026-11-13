@@ -3,16 +3,16 @@ package com.example.ui.screens.home.tabs
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.R
 import com.example.UserProfile
 import com.example.ui.screens.home.components.*
 import com.example.ui.screens.home.models.CustomRoom
@@ -93,7 +93,12 @@ fun HomeTabContent(
                 "All" -> true
                 "Beginner" -> it.tag.contains("Beginner", ignoreCase = true) || it.subtitle.contains("Beginner", ignoreCase = true) || it.title.contains("Beginner", ignoreCase = true)
                 "Intermediate" -> it.tag.contains("Intermediate", ignoreCase = true) || it.subtitle.contains("Intermediate", ignoreCase = true) || it.title.contains("Intermediate", ignoreCase = true)
-                "Advanced" -> it.tag.contains("Fluent", ignoreCase = true) || it.title.contains("Idioms", ignoreCase = true) || it.tag.contains("hospitality", ignoreCase = true)
+                "Advanced" -> it.tag.contains("Advanced", ignoreCase = true) ||
+                    it.subtitle.contains("Advanced", ignoreCase = true) ||
+                    it.title.contains("Advanced", ignoreCase = true) ||
+                    it.tag.contains("Fluent", ignoreCase = true) ||
+                    it.title.contains("Idioms", ignoreCase = true) ||
+                    it.tag.contains("hospitality", ignoreCase = true)
                 else -> true
             }
             matchesLang && matchesQuery && matchesLive && matchesLevel
@@ -115,7 +120,7 @@ fun HomeTabContent(
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
-                            imageVector = Icons.Default.SearchOff,
+                            painter = painterResource(id = R.drawable.ic_search_off),
                             contentDescription = null,
                             modifier = Modifier.size(48.dp),
                             tint = Color.LightGray
