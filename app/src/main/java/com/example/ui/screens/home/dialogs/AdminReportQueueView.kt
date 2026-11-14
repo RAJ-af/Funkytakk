@@ -24,9 +24,7 @@ import androidx.compose.ui.unit.sp
 import com.example.AdminReportQueueItem
 import com.example.ModerationManager
 import com.example.ui.components.*
-import com.example.ui.screens.home.models.DarkText
-import com.example.ui.screens.home.models.GraySubtitle
-import com.example.ui.theme.GoldPrimary
+import com.example.ui.theme.LocalFunkyColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -42,6 +40,7 @@ fun AdminReportQueueView(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val funkyColors = LocalFunkyColors.current
 
     // 3 Tabs: "Free" (pending), "Taken" (in_review), "Mine" (mine)
     val tabs = remember { listOf("Free", "Taken", "Mine") }
@@ -89,16 +88,20 @@ fun AdminReportQueueView(
         loadQueue()
     }
 
-    Column(modifier = modifier.fillMaxSize()) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(funkyColors.bg)
+    ) {
         // Tab row: Free, Taken, Mine
         Surface(
-            color = Color.White,
+            color = funkyColors.surface,
             modifier = Modifier.fillMaxWidth()
         ) {
             TabRow(
                 selectedTabIndex = selectedTabIdx,
-                containerColor = Color.White,
-                contentColor = Color(0xFFD97706)
+                containerColor = funkyColors.surface,
+                contentColor = funkyColors.mango
             ) {
                 tabs.forEachIndexed { index, tabTitle ->
                     val isSelected = selectedTabIdx == index
@@ -114,12 +117,13 @@ fun AdminReportQueueView(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 when (index) {
                                     0 -> Soft3DRulesActionIcon(modifier = Modifier.size(16.dp))
-                                    1 -> SoftShieldIcon(size = 16.dp, color = if (isSelected) Color(0xFFD97706) else Color(0xFF6B7280))
-                                    2 -> SoftCheckIcon(size = 14.dp, color = if (isSelected) Color(0xFFD97706) else Color(0xFF6B7280))
+                                    1 -> SoftShieldIcon(size = 16.dp, color = if (isSelected) funkyColors.mango else funkyColors.mute)
+                                    2 -> SoftCheckIcon(size = 14.dp, color = if (isSelected) funkyColors.mango else funkyColors.mute)
                                 }
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = tabTitle,
+                                    color = if (isSelected) funkyColors.ink else funkyColors.mute,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                     fontSize = 13.sp
                                 )
@@ -147,7 +151,7 @@ fun AdminReportQueueView(
                 },
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFF334155)
+                color = funkyColors.ink
             )
 
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -155,7 +159,7 @@ fun AdminReportQueueView(
                     onClick = { loadQueue() },
                     modifier = Modifier.size(32.dp)
                 ) {
-                    SoftRefreshIcon(size = 15.dp, color = Color(0xFF64748B))
+                    SoftRefreshIcon(size = 15.dp, color = funkyColors.mute)
                 }
             }
         }
@@ -168,7 +172,7 @@ fun AdminReportQueueView(
         ) {
             if (isLoading && queueItems.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = GoldPrimary, modifier = Modifier.size(32.dp))
+                    CircularProgressIndicator(color = funkyColors.mango, modifier = Modifier.size(32.dp))
                 }
             } else if (errorMessage != null && queueItems.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -176,20 +180,23 @@ fun AdminReportQueueView(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier.padding(24.dp)
                     ) {
-                        SoftWarningIcon(size = 32.dp, color = Color(0xFFDC2626))
+                        SoftWarningIcon(size = 32.dp, color = funkyColors.danger)
                         Spacer(modifier = Modifier.height(10.dp))
                         Text(
                             text = errorMessage ?: "Failed to load reports",
-                            color = Color(0xFF991B1B),
+                            color = funkyColors.danger,
                             fontSize = 13.5.sp
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Button(
                             onClick = { loadQueue() },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B)),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = funkyColors.mango,
+                                contentColor = funkyColors.onMango
+                            ),
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Text("Retry", fontSize = 12.5.sp)
+                            Text("Retry", fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -203,10 +210,10 @@ fun AdminReportQueueView(
                             modifier = Modifier
                                 .size(56.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFFECFDF5)),
+                                .background(funkyColors.ok.copy(alpha = 0.14f)),
                             contentAlignment = Alignment.Center
                         ) {
-                            SoftCheckIcon(size = 28.dp, color = Color(0xFF10B981))
+                            SoftCheckIcon(size = 28.dp, color = funkyColors.ok)
                         }
                         Spacer(modifier = Modifier.height(14.dp))
                         Text(
@@ -218,7 +225,7 @@ fun AdminReportQueueView(
                             },
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.sp,
-                            color = DarkText
+                            color = funkyColors.ink
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
@@ -229,7 +236,7 @@ fun AdminReportQueueView(
                                 else -> "Everything is up to date."
                             },
                             fontSize = 12.5.sp,
-                            color = GraySubtitle
+                            color = funkyColors.mute
                         )
                     }
                 }
@@ -257,19 +264,19 @@ fun AdminReportQueueView(
                         ) {
                             if (pageOffset > 0) {
                                 TextButton(onClick = { pageOffset = maxOf(0, pageOffset - pageLimit) }) {
-                                    Text("Previous", fontSize = 12.sp, color = Color(0xFF2563EB))
+                                    Text("Previous", fontSize = 12.sp, color = funkyColors.mango)
                                 }
                                 Spacer(modifier = Modifier.width(16.dp))
                             }
                             Text(
                                 text = "Showing ${pageOffset + 1} - ${pageOffset + queueItems.size}",
                                 fontSize = 11.5.sp,
-                                color = Color(0xFF64748B)
+                                color = funkyColors.mute
                             )
                             if (queueItems.size >= pageLimit) {
                                 Spacer(modifier = Modifier.width(16.dp))
                                 TextButton(onClick = { pageOffset += pageLimit }) {
-                                    Text("Next", fontSize = 12.sp, color = Color(0xFF2563EB))
+                                    Text("Next", fontSize = 12.sp, color = funkyColors.mango)
                                 }
                             }
                         }
@@ -285,6 +292,7 @@ fun AdminReportQueueRow(
     item: AdminReportQueueItem,
     onClick: () -> Unit
 ) {
+    val funkyColors = LocalFunkyColors.current
     val contextType = item.context_type ?: "room"
     val reportedName = item.reported_name?.takeIf { it.isNotBlank() } ?: "User #${item.reported_user_id?.take(6) ?: "N/A"}"
     val category = item.category ?: "Violation"
@@ -308,21 +316,21 @@ fun AdminReportQueueRow(
     }
 
     val scoreBadgeColor = when {
-        score >= 80 -> Color(0xFFDCFCE7)
-        score >= 50 -> Color(0xFFFEF3C7)
-        else -> Color(0xFFFEE2E2)
+        score >= 80 -> funkyColors.ok.copy(alpha = 0.16f)
+        score >= 50 -> funkyColors.soft
+        else -> funkyColors.danger.copy(alpha = 0.16f)
     }
     val scoreTextColor = when {
-        score >= 80 -> Color(0xFF15803D)
-        score >= 50 -> Color(0xFFB45309)
-        else -> Color(0xFFB91C1C)
+        score >= 80 -> funkyColors.ok
+        score >= 50 -> funkyColors.mango
+        else -> funkyColors.danger
     }
 
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(16.dp),
-        color = Color.White,
-        border = BorderStroke(1.dp, if (isMine) Color(0xFFFCD34D) else Color(0xFFE2E8F0)),
+        color = funkyColors.surface,
+        border = BorderStroke(1.dp, if (isMine) funkyColors.mango else funkyColors.line),
         shadowElevation = 1.dp,
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -339,25 +347,21 @@ fun AdminReportQueueRow(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    val contextTint = when (contextType.lowercase()) {
+                        "room" -> Color(0xFF3B82F6)
+                        "dm" -> Color(0xFFA855F7)
+                        "moment" -> Color(0xFFF97316)
+                        else -> funkyColors.mute
+                    }
                     Surface(
-                        color = when (contextType.lowercase()) {
-                            "room" -> Color(0xFFEFF6FF)
-                            "dm" -> Color(0xFFFAF5FF)
-                            "moment" -> Color(0xFFFFF7ED)
-                            else -> Color(0xFFF1F5F9)
-                        },
+                        color = contextTint.copy(alpha = 0.14f),
                         shape = RoundedCornerShape(8.dp)
                     ) {
                         Text(
                             text = contextType.uppercase(),
                             fontSize = 10.5.sp,
                             fontWeight = FontWeight.Bold,
-                            color = when (contextType.lowercase()) {
-                                "room" -> Color(0xFF2563EB)
-                                "dm" -> Color(0xFF9333EA)
-                                "moment" -> Color(0xFFEA580C)
-                                else -> Color(0xFF475569)
-                            },
+                            color = contextTint,
                             modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.5.dp)
                         )
                     }
@@ -365,14 +369,14 @@ fun AdminReportQueueRow(
                     if (!item.reopen_status.isNullOrBlank()) {
                         Spacer(modifier = Modifier.width(6.dp))
                         Surface(
-                            color = Color(0xFFFFFBEB),
+                            color = funkyColors.soft,
                             shape = RoundedCornerShape(8.dp)
                         ) {
                             Text(
                                 text = "REOPEN: ${item.reopen_status.uppercase()}",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFFB45309),
+                                color = funkyColors.mango,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
                         }
@@ -404,14 +408,14 @@ fun AdminReportQueueRow(
                         text = reportedName,
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp,
-                        color = DarkText,
+                        color = funkyColors.ink,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         text = category,
                         fontSize = 12.sp,
-                        color = Color(0xFF64748B)
+                        color = funkyColors.mute
                     )
                 }
 
@@ -419,14 +423,14 @@ fun AdminReportQueueRow(
                 val pendingAgainst = item.reports_against_pending ?: 0L
                 if (pendingAgainst > 1) {
                     Surface(
-                        color = Color(0xFFFEF2F2),
+                        color = funkyColors.danger.copy(alpha = 0.14f),
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Text(
                             text = "$pendingAgainst reports against user",
                             fontSize = 10.5.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFFDC2626),
+                            color = funkyColors.danger,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         )
                     }
@@ -439,14 +443,14 @@ fun AdminReportQueueRow(
                 Text(
                     text = reason,
                     fontSize = 12.sp,
-                    color = Color(0xFF475569),
+                    color = funkyColors.mute,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     lineHeight = 16.sp
                 )
             }
 
-            HorizontalDivider(color = Color(0xFFF1F5F9))
+            HorizontalDivider(color = funkyColors.line)
 
             // Row 4: Claim status footer
             Row(
@@ -459,14 +463,14 @@ fun AdminReportQueueRow(
                         text = if (isMine) "In your charge ($countdownText)" else "In charge: $claimedByName ($countdownText)",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = if (isMine) Color(0xFFB45309) else Color(0xFF64748B)
+                        color = if (isMine) funkyColors.mango else funkyColors.mute
                     )
                 } else {
                     Text(
                         text = "Status: Free to claim",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF16A34A)
+                        color = funkyColors.ok
                     )
                 }
 
@@ -474,7 +478,7 @@ fun AdminReportQueueRow(
                     text = "View Details →",
                     fontSize = 11.5.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF2563EB)
+                    color = funkyColors.mango
                 )
             }
         }

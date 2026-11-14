@@ -8,14 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -24,7 +17,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Brush
@@ -37,8 +29,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.components.CircleFlag
+import com.example.ui.components.FunkyChevronRightIcon
+import com.example.ui.components.FunkyLockIcon
 import com.example.ui.components.LanguageIcon
 import com.example.ui.components.RoomLanguageSelectionSheet
+import com.example.ui.components.SoftCheckIcon
+import com.example.ui.components.SoftCloseIcon
+import com.example.ui.components.SoftPlusIcon
 
 @Composable
 fun EditRoomBottomSheetContent(
@@ -122,11 +119,9 @@ fun EditRoomBottomSheetContent(
                     .clip(CircleShape)
                     .background(if (isDark) Color.White.copy(alpha = 0.15f) else Color(0xFFF3F4F6))
             ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Close",
-                    tint = if (isDark) Color.White else Color.DarkGray,
-                    modifier = Modifier.size(16.dp)
+                SoftCloseIcon(
+                    size = 16.dp,
+                    color = if (isDark) Color.White else Color.DarkGray
                 )
             }
         }
@@ -256,13 +251,9 @@ fun EditRoomBottomSheetContent(
                     )
                 }
             }
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                contentDescription = "Expand Language",
-                tint = if (isDark) Color.White.copy(alpha = 0.5f) else Color.Gray,
-                modifier = Modifier
-                    .size(24.dp)
-                    .scale(-1f, 1f) // flip arrow horizontally to make it point right
+            FunkyChevronRightIcon(
+                color = if (isDark) Color.White.copy(alpha = 0.5f) else Color.Gray,
+                modifier = Modifier.size(18.dp)
             )
         }
 
@@ -325,13 +316,9 @@ fun EditRoomBottomSheetContent(
                         .border(1.dp, Color.LightGray.copy(alpha = 0.5f), CircleShape)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                    contentDescription = "Expand Theme",
-                    tint = if (isDark) Color.White.copy(alpha = 0.5f) else Color.Gray,
-                    modifier = Modifier
-                        .size(24.dp)
-                        .scale(-1f, 1f) // point right
+                FunkyChevronRightIcon(
+                    color = if (isDark) Color.White.copy(alpha = 0.5f) else Color.Gray,
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }
@@ -406,14 +393,17 @@ fun EditRoomBottomSheetContent(
                                 fontWeight = FontWeight.Bold
                             )
                             Spacer(modifier = Modifier.width(6.dp))
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Clear Tag",
-                                tint = if (isDark) Color.White else Color(0xFFD97706),
+                            Box(
                                 modifier = Modifier
-                                    .size(14.dp)
                                     .clickable(enabled = isHost) { onTagsChange("") }
-                            )
+                                    .padding(2.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                SoftCloseIcon(
+                                    size = 14.dp,
+                                    color = if (isDark) Color.White else Color(0xFFD97706)
+                                )
+                            }
                         }
                     }
                 }
@@ -438,11 +428,9 @@ fun EditRoomBottomSheetContent(
                     contentAlignment = Alignment.Center
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Add Icon",
-                            tint = if (isDark) Color.White else Color(0xFFF59E0B),
-                            modifier = Modifier.size(14.dp)
+                        SoftPlusIcon(
+                            size = 14.dp,
+                            color = if (isDark) Color.White else Color(0xFFF59E0B)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
@@ -469,10 +457,8 @@ fun EditRoomBottomSheetContent(
                         .background(if (isDark) Color.White.copy(alpha = 0.12f) else Color(0xFFFEF3C7)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Lock,
-                        contentDescription = "Lock Icon",
-                        tint = if (isDark) Color.White else Color(0xFFD97706),
+                    FunkyLockIcon(
+                        color = if (isDark) Color.White else Color(0xFFD97706),
                         modifier = Modifier.size(18.dp)
                     )
                 }
@@ -632,7 +618,7 @@ fun EditRoomBottomSheetContent(
                             .clip(CircleShape)
                             .background(closeBtnBg)
                     ) {
-                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = closeBtnTint, modifier = Modifier.size(16.dp))
+                        SoftCloseIcon(size = 16.dp, color = closeBtnTint)
                     }
                 }
             },
@@ -699,11 +685,9 @@ fun EditRoomBottomSheetContent(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     if (isSelected) {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = "Selected",
-                                            tint = if (isDark) Color(0xFF451A03) else Color.White,
-                                            modifier = Modifier.size(12.dp)
+                                        SoftCheckIcon(
+                                            size = 12.dp,
+                                            color = if (isDark) Color(0xFF451A03) else Color.White
                                         )
                                     }
                                 }
@@ -751,7 +735,7 @@ fun EditRoomBottomSheetContent(
                             .clip(CircleShape)
                             .background(closeBtnBg)
                     ) {
-                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = closeBtnTint, modifier = Modifier.size(16.dp))
+                        SoftCloseIcon(size = 16.dp, color = closeBtnTint)
                     }
                 }
             },

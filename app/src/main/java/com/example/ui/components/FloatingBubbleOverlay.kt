@@ -16,11 +16,6 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MicOff
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -376,12 +371,17 @@ private fun SatelliteOptions(
                     .clickable { onToggleMic() },
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = if (isMicEnabled) Icons.Default.Mic else Icons.Default.MicOff,
-                    contentDescription = if (isMicEnabled) "Mute Microphone" else "Unmute Microphone",
-                    tint = if (isMicEnabled) Color.White else Color(0xFF8C7A58),
-                    modifier = Modifier.size(22.dp)
-                )
+                if (isMicEnabled) {
+                    SoftMicIcon(
+                        size = 22.dp,
+                        color = Color.White
+                    )
+                } else {
+                    SoftMicOffIcon(
+                        size = 22.dp,
+                        color = Color(0xFF8C7A58)
+                    )
+                }
             }
 
             // Satellite 2: Leave / Close (Red X Circle - Lower Circle)
@@ -395,11 +395,9 @@ private fun SatelliteOptions(
                     .clickable { onLeaveRoom() },
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Leave Voice Room",
-                    tint = Color.White,
-                    modifier = Modifier.size(22.dp)
+                SoftCloseIcon(
+                    size = 20.dp,
+                    color = Color.White
                 )
             }
         }

@@ -47,6 +47,7 @@ import com.example.R
 import com.example.StoreItemRow
 import com.example.gifting.CuteCoinIcon
 import com.example.store.*
+import com.example.ui.components.SoftWarningIcon
 import com.example.ui.theme.AppThemeManager
 import com.example.ui.theme.LocalAppDarkTheme
 import com.example.ui.theme.LocalFunkyColors
@@ -127,7 +128,7 @@ fun DecorationStoreScreen(
     var allItems by remember { mutableStateOf<List<StoreItemRow>>(emptyList()) }
 
     // Selected items map: Category Type -> StoreItemRow
-    // Ensuring "एक वर्ग में एक ही item चुना जा सके (दूसरा चुनने पर पहला बदल जाए)"
+    // Ensuring only one item can be selected per category (selecting another replaces the previous one)
     var selectedItems by remember { mutableStateOf<Map<String, StoreItemRow>>(emptyMap()) }
 
     // Modals and dialog states
@@ -186,10 +187,10 @@ fun DecorationStoreScreen(
                         insufficientCoinsError = true
                     }
                     raw.contains("item_not_found", ignoreCase = true) -> {
-                        generalErrorDialogMessage = "यह item अब उपलब्ध नहीं"
+                        generalErrorDialogMessage = "This item is no longer available"
                     }
                     else -> {
-                        generalErrorDialogMessage = "फिर कोशिश करो"
+                        generalErrorDialogMessage = "Please try again"
                     }
                 }
             }
@@ -204,7 +205,7 @@ fun DecorationStoreScreen(
                 Toast.makeText(context, "Decoration removed", Toast.LENGTH_SHORT).show()
                 loadStoreData()
             }.onFailure {
-                Toast.makeText(context, "फिर कोशिश करो", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Please try again", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -1770,7 +1771,7 @@ private fun StoreErrorState(message: String, onRetry: () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.padding(24.dp)
         ) {
-            Text("⚠️", fontSize = 36.sp)
+            SoftWarningIcon(size = 38.dp, color = ColorError)
             Spacer(modifier = Modifier.height(10.dp))
             Text(
                 text = "Could not load store items",
@@ -1791,7 +1792,7 @@ private fun StoreErrorState(message: String, onRetry: () -> Unit) {
                 colors = ButtonDefaults.buttonColors(containerColor = ColorPrimary, contentColor = ColorOnPrimary),
                 shape = RoundedCornerShape(100.dp)
             ) {
-                Text("फिर कोशिश करो", fontWeight = FontWeight.Bold)
+                Text("Try Again", fontWeight = FontWeight.Bold)
             }
         }
     }

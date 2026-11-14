@@ -164,6 +164,8 @@ fun UserProfileFeedScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val funkyColors = com.example.ui.theme.LocalFunkyColors.current
+    val isDark = funkyColors.isDark
 
     val selfUserId = remember(context) { SupabaseSessionManager.getUserId(context) ?: "" }
     val isSelfProfile = remember(userId, selfUserId) { userId.isNotBlank() && userId == selfUserId }
@@ -561,13 +563,13 @@ fun UserProfileFeedScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFFAFAEE))
+            .background(funkyColors.bg)
     ) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
-                .background(Color(0xFFFAFAEE)),
+                .background(funkyColors.bg),
             contentPadding = PaddingValues(bottom = 36.dp)
         ) {
             // -----------------------------------------------------------------
@@ -607,12 +609,12 @@ fun UserProfileFeedScreen(
                         Box(
                             modifier = Modifier
                                 .size(38.dp)
-                                .background(Color.White, CircleShape)
                                 .shadow(elevation = 2.dp, shape = CircleShape)
+                                .background(funkyColors.surface, CircleShape)
                                 .clickable { onBack() },
                             contentAlignment = Alignment.Center
                         ) {
-                            ProfileBackArrowIcon(modifier = Modifier.size(16.dp), color = Color(0xFF1E293B))
+                            ProfileBackArrowIcon(modifier = Modifier.size(16.dp), color = funkyColors.ink)
                         }
 
                         // Floating Round Actions (Share & Menu) (Top Right)
@@ -624,64 +626,66 @@ fun UserProfileFeedScreen(
                             Box(
                                 modifier = Modifier
                                     .size(38.dp)
-                                    .background(Color.White, CircleShape)
                                     .shadow(elevation = 2.dp, shape = CircleShape)
+                                    .background(funkyColors.surface, CircleShape)
                                     .clickable {
                                         Toast.makeText(context, "Shared profile link", Toast.LENGTH_SHORT).show()
                                     },
                                 contentAlignment = Alignment.Center
                             ) {
-                                ProfileShareIcon(modifier = Modifier.size(16.dp), color = Color(0xFF1E293B))
+                                ProfileShareIcon(modifier = Modifier.size(16.dp), color = funkyColors.ink)
                             }
 
                             // Three Dots Menu Button
                             Box(
                                 modifier = Modifier
                                     .size(38.dp)
-                                    .background(Color.White, CircleShape)
                                     .shadow(elevation = 2.dp, shape = CircleShape)
+                                    .background(funkyColors.surface, CircleShape)
                                     .clickable {
                                         showMoreOptionsMenu = true
                                     },
                                 contentAlignment = Alignment.Center
                             ) {
-                                ProfileMoreDotsIcon(modifier = Modifier.size(16.dp), color = Color(0xFF1E293B))
+                                ProfileMoreDotsIcon(modifier = Modifier.size(16.dp), color = funkyColors.ink)
 
                                 DropdownMenu(
                                     expanded = showMoreOptionsMenu,
                                     onDismissRequest = { showMoreOptionsMenu = false },
-                                modifier = Modifier.background(Color.White, RoundedCornerShape(14.dp))
-                            ) {
-                                if (!isSelfProfile) {
-                                    DropdownMenuItem(
-                                        text = { Text("Send Gift 🎁", fontWeight = FontWeight.Bold, color = Color(0xFFB45309)) },
-                                        onClick = {
-                                            showMoreOptionsMenu = false
-                                            showSendGiftSheet = true
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Report Profile 🚩", fontWeight = FontWeight.Medium, color = Color(0xFFEF4444)) },
-                                        onClick = {
-                                            showMoreOptionsMenu = false
-                                            showReportDialog = true
-                                        }
-                                    )
-                                } else {
-                                    DropdownMenuItem(
-                                        text = { Text("Share Profile 🔗", fontWeight = FontWeight.Medium, color = Color(0xFF0F172A)) },
-                                        onClick = {
-                                            showMoreOptionsMenu = false
-                                            Toast.makeText(context, "Profile link copied", Toast.LENGTH_SHORT).show()
-                                        }
-                                    )
+                                    modifier = Modifier
+                                        .background(funkyColors.surface, RoundedCornerShape(14.dp))
+                                        .border(1.dp, funkyColors.line, RoundedCornerShape(14.dp))
+                                ) {
+                                    if (!isSelfProfile) {
+                                        DropdownMenuItem(
+                                            text = { Text("Send Gift", fontWeight = FontWeight.Bold, color = funkyColors.mango) },
+                                            onClick = {
+                                                showMoreOptionsMenu = false
+                                                showSendGiftSheet = true
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Report Profile", fontWeight = FontWeight.Medium, color = funkyColors.danger) },
+                                            onClick = {
+                                                showMoreOptionsMenu = false
+                                                showReportDialog = true
+                                            }
+                                        )
+                                    } else {
+                                        DropdownMenuItem(
+                                            text = { Text("Share Profile", fontWeight = FontWeight.Medium, color = funkyColors.ink) },
+                                            onClick = {
+                                                showMoreOptionsMenu = false
+                                                Toast.makeText(context, "Profile link copied", Toast.LENGTH_SHORT).show()
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                    // Circular Avatar with Online Dot & Flag
+                    // Circular Avatar with Online Ring & Bottom-Right Overlapping Flag
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomStart)
@@ -695,6 +699,7 @@ fun UserProfileFeedScreen(
                             isOnline = isOnline,
                             countryCode = currentCountryCode,
                             userId = userId,
+                            showFlagBadge = true,
                             enableFrameAnimation = true
                         )
                     }
@@ -712,7 +717,7 @@ fun UserProfileFeedScreen(
                 ) {
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Row: Name, Verified/Badges, Online Pill, and right-aligned normal Flag
+                    // Row: Name, Verified/Badges & Online Pill
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -723,7 +728,7 @@ fun UserProfileFeedScreen(
                             name = currentProfileName.ifBlank { "User" },
                             fontSize = 24.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            defaultColor = com.example.ui.theme.LocalFunkyColors.current.ink
+                            defaultColor = funkyColors.ink
                         )
 
                         if (isVerified) {
@@ -739,7 +744,10 @@ fun UserProfileFeedScreen(
                         if (isOnline) {
                             Box(
                                 modifier = Modifier
-                                    .background(Color(0xFFEBFDF2), RoundedCornerShape(100.dp))
+                                    .background(
+                                        if (isDark) Color(0xFF143523) else Color(0xFFEBFDF2),
+                                        RoundedCornerShape(100.dp)
+                                    )
                                     .padding(horizontal = 8.dp, vertical = 3.dp)
                             ) {
                                 Row(
@@ -755,22 +763,10 @@ fun UserProfileFeedScreen(
                                         text = "Online",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF16A34A)
+                                        color = if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A)
                                     )
                                 }
                             }
-                        }
-
-                        Spacer(modifier = Modifier.weight(1f))
-
-                        if (currentCountryCode.isNotBlank()) {
-                            CircleFlag(
-                                countryCode = currentCountryCode,
-                                allowProgramming = false,
-                                modifier = Modifier
-                                    .size(22.dp)
-                                    .clip(CircleShape)
-                            )
                         }
                     }
 
@@ -780,7 +776,7 @@ fun UserProfileFeedScreen(
                     Text(
                         text = "@$currentUsername",
                         fontSize = 13.sp,
-                        color = Color(0xFF64748B),
+                        color = funkyColors.mute,
                         fontWeight = FontWeight.Medium
                     )
 
@@ -808,11 +804,11 @@ fun UserProfileFeedScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                ProfileLocationPinIcon(modifier = Modifier.size(13.dp), color = Color(0xFF64748B))
+                                ProfileLocationPinIcon(modifier = Modifier.size(13.dp), color = funkyColors.mute)
                                 Text(
                                     text = locationDisplay,
                                     fontSize = 12.sp,
-                                    color = Color(0xFF64748B),
+                                    color = funkyColors.mute,
                                     fontWeight = FontWeight.Normal
                                 )
                             }
@@ -820,7 +816,7 @@ fun UserProfileFeedScreen(
                             Text(
                                 text = "·",
                                 fontSize = 14.sp,
-                                color = Color(0xFF94A3B8),
+                                color = funkyColors.mute,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -829,14 +825,14 @@ fun UserProfileFeedScreen(
                             Text(
                                 text = "${currentAge} yrs",
                                 fontSize = 12.sp,
-                                color = Color(0xFF64748B),
+                                color = funkyColors.mute,
                                 fontWeight = FontWeight.Medium
                             )
 
                             Text(
                                 text = "·",
                                 fontSize = 14.sp,
-                                color = Color(0xFF94A3B8),
+                                color = funkyColors.mute,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -845,11 +841,11 @@ fun UserProfileFeedScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            ProfileCalendarIcon(modifier = Modifier.size(13.dp), color = Color(0xFF64748B))
+                            ProfileCalendarIcon(modifier = Modifier.size(13.dp), color = funkyColors.mute)
                             Text(
                                 text = currentJoinedText,
                                 fontSize = 12.sp,
-                                color = Color(0xFF64748B),
+                                color = funkyColors.mute,
                                 fontWeight = FontWeight.Normal
                             )
                         }
@@ -871,7 +867,7 @@ fun UserProfileFeedScreen(
                             modifier = Modifier
                                 .width(1.dp)
                                 .height(28.dp)
-                                .background(Color(0xFFE2E8F0))
+                                .background(funkyColors.line)
                         )
                         StatItemExact(
                             count = formatStatsCount(followersCount),
@@ -886,7 +882,7 @@ fun UserProfileFeedScreen(
                             modifier = Modifier
                                 .width(1.dp)
                                 .height(28.dp)
-                                .background(Color(0xFFE2E8F0))
+                                .background(funkyColors.line)
                         )
                         StatItemExact(
                             count = formatStatsCount(followingCount),
@@ -902,7 +898,7 @@ fun UserProfileFeedScreen(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // ---------------------------------------------------------
-                    // 4. ACTION BUTTONS: "👋 Say Hi", "🎁 Gift", "👤+ Follow / Following"
+                    // 4. ACTION BUTTONS: "Say Hi", "Send Gift", "Follow / Following"
                     // ---------------------------------------------------------
                     if (!isSelfProfile) {
                         Row(
@@ -914,7 +910,7 @@ fun UserProfileFeedScreen(
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(46.dp)
-                                    .background(Color(0xFFFFD43B), RoundedCornerShape(100.dp))
+                                    .background(funkyColors.mango, RoundedCornerShape(100.dp))
                                     .clickable { showWaveDialog = true },
                                 contentAlignment = Alignment.Center
                             ) {
@@ -922,12 +918,12 @@ fun UserProfileFeedScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(5.dp)
                                 ) {
-                                    ProfileWavingHandIcon(modifier = Modifier.size(16.dp), color = Color(0xFF0F172A))
+                                    ProfileWavingHandIcon(modifier = Modifier.size(16.dp), color = funkyColors.onMango)
                                     Text(
                                         text = "Say Hi",
                                         fontSize = 13.5.sp,
                                         fontWeight = FontWeight.ExtraBold,
-                                        color = Color(0xFF0F172A)
+                                        color = funkyColors.onMango
                                     )
                                 }
                             }
@@ -937,8 +933,8 @@ fun UserProfileFeedScreen(
                                 modifier = Modifier
                                     .weight(1.1f)
                                     .height(46.dp)
-                                    .background(Color(0xFFFFFBEB), RoundedCornerShape(100.dp))
-                                    .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(100.dp))
+                                    .background(funkyColors.soft, RoundedCornerShape(100.dp))
+                                    .border(1.dp, funkyColors.mango.copy(alpha = 0.55f), RoundedCornerShape(100.dp))
                                     .clickable { showSendGiftSheet = true },
                                 contentAlignment = Alignment.Center
                             ) {
@@ -946,12 +942,11 @@ fun UserProfileFeedScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(5.dp)
                                 ) {
-                                    Text("🎁", fontSize = 15.sp)
                                     Text(
                                         text = "Send Gift",
                                         fontSize = 13.5.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color(0xFFB45309)
+                                        color = if (isDark) funkyColors.mango else Color(0xFFB45309)
                                     )
                                 }
                             }
@@ -961,10 +956,17 @@ fun UserProfileFeedScreen(
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(46.dp)
-                                    .background(if (isFollowing) Color(0xFFEBFDF2) else Color.White, RoundedCornerShape(100.dp))
+                                    .background(
+                                        if (isFollowing) {
+                                            if (isDark) Color(0xFF143523) else Color(0xFFEBFDF2)
+                                        } else {
+                                            funkyColors.surface
+                                        },
+                                        RoundedCornerShape(100.dp)
+                                    )
                                     .border(
                                         width = 1.dp,
-                                        color = if (isFollowing) Color(0xFF22C55E) else Color(0xFFCBD5E1),
+                                        color = if (isFollowing) funkyColors.ok else funkyColors.line,
                                         shape = RoundedCornerShape(100.dp)
                                     )
                                     .clickable { handleFollowToggle() },
@@ -976,13 +978,21 @@ fun UserProfileFeedScreen(
                                 ) {
                                     ProfileAddPersonIcon(
                                         modifier = Modifier.size(16.dp),
-                                        color = if (isFollowing) Color(0xFF16A34A) else Color(0xFF0F172A)
+                                        color = if (isFollowing) {
+                                            if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A)
+                                        } else {
+                                            funkyColors.ink
+                                        }
                                     )
                                     Text(
                                         text = if (isFollowing) "Following" else "Follow",
                                         fontSize = 13.5.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (isFollowing) Color(0xFF16A34A) else Color(0xFF0F172A)
+                                        color = if (isFollowing) {
+                                            if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A)
+                                        } else {
+                                            funkyColors.ink
+                                        }
                                     )
                                 }
                             }
@@ -998,7 +1008,7 @@ fun UserProfileFeedScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(46.dp)
-                            .background(Color(0xFFEBE6D8), RoundedCornerShape(100.dp))
+                            .background(funkyColors.soft, RoundedCornerShape(100.dp))
                             .padding(3.5.dp)
                     ) {
                         // About Me Tab
@@ -1007,10 +1017,10 @@ fun UserProfileFeedScreen(
                                 .weight(1f)
                                 .fillMaxHeight()
                                 .clip(RoundedCornerShape(100.dp))
-                                .background(if (selectedMainTab == 0) Color.White else Color.Transparent)
+                                .background(if (selectedMainTab == 0) funkyColors.surface else Color.Transparent)
                                 .border(
                                     width = if (selectedMainTab == 0) 1.dp else 0.dp,
-                                    color = if (selectedMainTab == 0) Color(0xFFFDE68A) else Color.Transparent,
+                                    color = if (selectedMainTab == 0) funkyColors.mango.copy(alpha = 0.6f) else Color.Transparent,
                                     shape = RoundedCornerShape(100.dp)
                                 )
                                 .clickable { selectedMainTab = 0 },
@@ -1020,7 +1030,7 @@ fun UserProfileFeedScreen(
                                 text = "About Me",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (selectedMainTab == 0) Color(0xFF0F172A) else Color(0xFF64748B)
+                                color = if (selectedMainTab == 0) funkyColors.ink else funkyColors.mute
                             )
                         }
 
@@ -1030,10 +1040,10 @@ fun UserProfileFeedScreen(
                                 .weight(1f)
                                 .fillMaxHeight()
                                 .clip(RoundedCornerShape(100.dp))
-                                .background(if (selectedMainTab == 1) Color.White else Color.Transparent)
+                                .background(if (selectedMainTab == 1) funkyColors.surface else Color.Transparent)
                                 .border(
                                     width = if (selectedMainTab == 1) 1.dp else 0.dp,
-                                    color = if (selectedMainTab == 1) Color(0xFFFDE68A) else Color.Transparent,
+                                    color = if (selectedMainTab == 1) funkyColors.mango.copy(alpha = 0.6f) else Color.Transparent,
                                     shape = RoundedCornerShape(100.dp)
                                 )
                                 .clickable { selectedMainTab = 1 },
@@ -1043,7 +1053,7 @@ fun UserProfileFeedScreen(
                                 text = "Feed",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (selectedMainTab == 1) Color(0xFF0F172A) else Color(0xFF64748B)
+                                color = if (selectedMainTab == 1) funkyColors.ink else funkyColors.mute
                             )
                         }
                     }
@@ -1068,7 +1078,7 @@ fun UserProfileFeedScreen(
                             text = currentBio.ifBlank { "Excited to practice languages and make new friends!" },
                             fontSize = 13.5.sp,
                             lineHeight = 20.sp,
-                            color = Color(0xFF334155),
+                            color = funkyColors.ink.copy(alpha = 0.85f),
                             fontWeight = FontWeight.Normal
                         )
                     }
@@ -1094,7 +1104,7 @@ fun UserProfileFeedScreen(
                 // -------------------------------------------------------------
                 item {
                     ProfileCardContainer(
-                        title = "Gifts Received (${giftsReceived.size}) 🎁",
+                        title = "Gifts Received (${giftsReceived.size})",
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 5.dp)
                     ) {
                         if (isGiftsLoading && giftsReceived.isEmpty()) {
@@ -1104,7 +1114,7 @@ fun UserProfileFeedScreen(
                                     .padding(vertical = 16.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                CircularProgressIndicator(color = Color(0xFFFFC529), modifier = Modifier.size(24.dp))
+                                CircularProgressIndicator(color = funkyColors.mango, modifier = Modifier.size(24.dp))
                             }
                         } else if (giftsReceived.isEmpty()) {
                             Column(
@@ -1116,22 +1126,22 @@ fun UserProfileFeedScreen(
                                 Text(
                                     text = if (isSelfProfile) "You haven't received any gifts yet." else "Be the first to send a gift to $currentProfileName!",
                                     fontSize = 13.sp,
-                                    color = Color(0xFF64748B),
+                                    color = funkyColors.mute,
                                     textAlign = TextAlign.Center
                                 )
                                 if (!isSelfProfile) {
                                     Spacer(modifier = Modifier.height(10.dp))
                                     Surface(
                                         onClick = { showSendGiftSheet = true },
-                                        color = Color(0xFFFFFBEB),
-                                        border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+                                        color = funkyColors.soft,
+                                        border = BorderStroke(1.dp, funkyColors.mango.copy(alpha = 0.5f)),
                                         shape = RoundedCornerShape(100.dp)
                                     ) {
                                         Text(
-                                            text = "Send a Gift 🎁",
+                                            text = "Send a Gift",
                                             fontSize = 12.5.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = Color(0xFFB45309),
+                                            color = if (isDark) funkyColors.mango else Color(0xFFB45309),
                                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
                                         )
                                     }
@@ -1149,8 +1159,8 @@ fun UserProfileFeedScreen(
                                     val firstItem = items.first()
                                     Surface(
                                         shape = RoundedCornerShape(14.dp),
-                                        color = Color(0xFFF8FAFC),
-                                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                                        color = funkyColors.soft,
+                                        border = BorderStroke(1.dp, funkyColors.line),
                                         modifier = Modifier.weight(1f)
                                     ) {
                                         Column(
@@ -1170,7 +1180,7 @@ fun UserProfileFeedScreen(
                                                         modifier = Modifier.fillMaxSize()
                                                     )
                                                 } else {
-                                                    Text("🎁", fontSize = 24.sp)
+                                                    Text("Gift", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = funkyColors.mango)
                                                 }
                                             }
                                             Spacer(modifier = Modifier.height(4.dp))
@@ -1178,7 +1188,7 @@ fun UserProfileFeedScreen(
                                                 text = name,
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold,
-                                                color = Color(0xFF0F172A),
+                                                color = funkyColors.ink,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
@@ -1186,7 +1196,7 @@ fun UserProfileFeedScreen(
                                                 text = "x${items.size}",
                                                 fontSize = 10.5.sp,
                                                 fontWeight = FontWeight.ExtraBold,
-                                                color = Color(0xFFD97706)
+                                                color = funkyColors.mango
                                             )
                                         }
                                     }
@@ -1239,20 +1249,20 @@ fun UserProfileFeedScreen(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
-                                ProfileCakeIcon(modifier = Modifier.size(20.dp), color = Color(0xFF64748B))
+                                ProfileCakeIcon(modifier = Modifier.size(20.dp), color = funkyColors.mute)
                                 Column {
-                                    Text("Age", fontSize = 11.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.Medium)
+                                    Text("Age", fontSize = 11.sp, color = funkyColors.mute, fontWeight = FontWeight.Medium)
                                     Text(
                                         text = currentAge?.let { "$it" } ?: "—",
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.ExtraBold,
-                                        color = Color(0xFF0F172A)
+                                        color = funkyColors.ink
                                     )
                                 }
                             }
 
                             // Divider
-                            Box(modifier = Modifier.width(1.dp).height(24.dp).background(Color(0xFFEDE8DC)))
+                            Box(modifier = Modifier.width(1.dp).height(24.dp).background(funkyColors.line))
 
                             // Gender
                             Row(
@@ -1262,23 +1272,23 @@ fun UserProfileFeedScreen(
                             ) {
                                 val isMale = currentGender?.equals("Male", ignoreCase = true) == true
                                 if (isMale) {
-                                    ProfileGenderMaleIcon(modifier = Modifier.size(20.dp), color = Color(0xFF64748B))
+                                    ProfileGenderMaleIcon(modifier = Modifier.size(20.dp), color = funkyColors.mute)
                                 } else {
-                                    ProfileGenderFemaleIcon(modifier = Modifier.size(20.dp), color = Color(0xFF64748B))
+                                    ProfileGenderFemaleIcon(modifier = Modifier.size(20.dp), color = funkyColors.mute)
                                 }
                                 Column {
-                                    Text("Gender", fontSize = 11.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.Medium)
+                                    Text("Gender", fontSize = 11.sp, color = funkyColors.mute, fontWeight = FontWeight.Medium)
                                     Text(
                                         text = currentGender?.capitalize() ?: "—",
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.ExtraBold,
-                                        color = Color(0xFF0F172A)
+                                        color = funkyColors.ink
                                     )
                                 }
                             }
 
                             // Divider
-                            Box(modifier = Modifier.width(1.dp).height(24.dp).background(Color(0xFFEDE8DC)))
+                            Box(modifier = Modifier.width(1.dp).height(24.dp).background(funkyColors.line))
 
                             // Location (Country only)
                             Row(
@@ -1286,14 +1296,14 @@ fun UserProfileFeedScreen(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.weight(1.8f).padding(start = 8.dp)
                             ) {
-                                ProfileLocationPinIcon(modifier = Modifier.size(20.dp), color = Color(0xFF64748B))
+                                ProfileLocationPinIcon(modifier = Modifier.size(20.dp), color = funkyColors.mute)
                                 Column {
-                                    Text("Country", fontSize = 11.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.Medium)
+                                    Text("Country", fontSize = 11.sp, color = funkyColors.mute, fontWeight = FontWeight.Medium)
                                     Text(
                                         text = currentCountry.ifBlank { "—" },
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.ExtraBold,
-                                        color = Color(0xFF0F172A),
+                                        color = funkyColors.ink,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -1312,7 +1322,7 @@ fun UserProfileFeedScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(46.dp)
-                                .border(width = 0.5.dp, color = Color(0xFFE2E8F0)),
+                                .border(width = 0.5.dp, color = funkyColors.line),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             // 1. Grid icon for Posts
@@ -1324,14 +1334,14 @@ fun UserProfileFeedScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    CustomGridIcon(color = if (selectedFeedTab == 0) Color(0xFFFFD43B) else Color(0xFF475569))
+                                    CustomGridIcon(color = if (selectedFeedTab == 0) funkyColors.mango else funkyColors.mute)
                                     Spacer(modifier = Modifier.height(3.dp))
                                     if (selectedFeedTab == 0) {
                                         Box(
                                             modifier = Modifier
                                                 .width(20.dp)
                                                 .height(2.5.dp)
-                                                .background(Color(0xFFFFD43B), CircleShape)
+                                                .background(funkyColors.mango, CircleShape)
                                         )
                                     } else {
                                         Spacer(modifier = Modifier.height(2.5.dp))
@@ -1348,14 +1358,14 @@ fun UserProfileFeedScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    CustomReelsIcon(color = if (selectedFeedTab == 1) Color(0xFFFFD43B) else Color(0xFF475569))
+                                    CustomReelsIcon(color = if (selectedFeedTab == 1) funkyColors.mango else funkyColors.mute)
                                     Spacer(modifier = Modifier.height(3.dp))
                                     if (selectedFeedTab == 1) {
                                         Box(
                                             modifier = Modifier
                                                 .width(20.dp)
                                                 .height(2.5.dp)
-                                                .background(Color(0xFFFFD43B), CircleShape)
+                                                .background(funkyColors.mango, CircleShape)
                                         )
                                     } else {
                                         Spacer(modifier = Modifier.height(2.5.dp))
@@ -1372,14 +1382,14 @@ fun UserProfileFeedScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    CustomTaggedIcon(color = if (selectedFeedTab == 2) Color(0xFFFFD43B) else Color(0xFF475569))
+                                    CustomTaggedIcon(color = if (selectedFeedTab == 2) funkyColors.mango else funkyColors.mute)
                                     Spacer(modifier = Modifier.height(3.dp))
                                     if (selectedFeedTab == 2) {
                                         Box(
                                             modifier = Modifier
                                                 .width(20.dp)
                                                 .height(2.5.dp)
-                                                .background(Color(0xFFFFD43B), CircleShape)
+                                                .background(funkyColors.mango, CircleShape)
                                         )
                                     } else {
                                         Spacer(modifier = Modifier.height(2.5.dp))
@@ -1400,7 +1410,7 @@ fun UserProfileFeedScreen(
                                 .height(160.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            CircularProgressIndicator(color = Color(0xFFFFD43B), modifier = Modifier.size(32.dp))
+                            CircularProgressIndicator(color = funkyColors.mango, modifier = Modifier.size(32.dp))
                         }
                     }
                 } else if (displayedPosts.isEmpty()) {
@@ -1412,12 +1422,12 @@ fun UserProfileFeedScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("📸", fontSize = 32.sp)
-                                Spacer(modifier = Modifier.height(6.dp))
+                                ProfileCameraIcon(modifier = Modifier.size(28.dp), color = funkyColors.mute)
+                                Spacer(modifier = Modifier.height(8.dp))
                                 Text(
                                     text = "No posts shared yet",
                                     fontSize = 14.sp,
-                                    color = Color(0xFF64748B),
+                                    color = funkyColors.mute,
                                     fontWeight = FontWeight.Medium
                                 )
                             }
@@ -1614,12 +1624,12 @@ fun UserProfileFeedScreen(
         if (showWaveDialog) {
             AlertDialog(
                 onDismissRequest = { showWaveDialog = false },
-                containerColor = Color.White,
+                containerColor = funkyColors.surface,
                 shape = RoundedCornerShape(24.dp),
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         ProfileWavingHandIcon(
-                            color = Color(0xFFD97706),
+                            color = funkyColors.mango,
                             modifier = Modifier.size(22.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
@@ -1627,7 +1637,7 @@ fun UserProfileFeedScreen(
                             text = "Say Hi to $currentProfileName",
                             fontWeight = FontWeight.Bold,
                             fontSize = 18.sp,
-                            color = Color(0xFF1E293B)
+                            color = funkyColors.ink
                         )
                     }
                 },
@@ -1636,7 +1646,7 @@ fun UserProfileFeedScreen(
                         Text(
                             text = "Pick an icebreaker or write your own message to start a friendly conversation!",
                             fontSize = 13.sp,
-                            color = Color(0xFF64748B)
+                            color = funkyColors.mute
                         )
                         Spacer(modifier = Modifier.height(14.dp))
 
@@ -1647,21 +1657,26 @@ fun UserProfileFeedScreen(
                         )
 
                         quickPrompts.forEach { prompt ->
+                            val isPromptSelected = waveCustomMessage == prompt
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(vertical = 4.dp)
                                     .clip(RoundedCornerShape(12.dp))
-                                    .background(Color(0xFFF8FAFC))
-                                    .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(12.dp))
+                                    .background(if (isPromptSelected) funkyColors.soft else funkyColors.bg)
+                                    .border(
+                                        1.dp,
+                                        if (isPromptSelected) funkyColors.mango else funkyColors.line,
+                                        RoundedCornerShape(12.dp)
+                                    )
                                     .clickable { waveCustomMessage = prompt }
                                     .padding(horizontal = 12.dp, vertical = 10.dp)
                             ) {
                                 Text(
                                     text = prompt,
                                     fontSize = 12.sp,
-                                    color = if (waveCustomMessage == prompt) Color(0xFFD97706) else Color(0xFF334155),
-                                    fontWeight = if (waveCustomMessage == prompt) FontWeight.Bold else FontWeight.Normal
+                                    color = if (isPromptSelected) funkyColors.mango else funkyColors.ink,
+                                    fontWeight = if (isPromptSelected) FontWeight.Bold else FontWeight.Normal
                                 )
                             }
                         }
@@ -1671,16 +1686,18 @@ fun UserProfileFeedScreen(
                         OutlinedTextField(
                             value = waveCustomMessage,
                             onValueChange = { waveCustomMessage = it },
-                            placeholder = { Text("Or type a custom greeting...", fontSize = 12.sp, color = Color(0xFF94A3B8)) },
+                            placeholder = { Text("Or type a custom greeting...", fontSize = 12.sp, color = funkyColors.mute) },
                             minLines = 2,
                             maxLines = 3,
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(14.dp),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = Color(0xFFFAFAFA),
-                                unfocusedContainerColor = Color(0xFFFAFAFA),
-                                focusedBorderColor = Color(0xFFFFD43B),
-                                unfocusedBorderColor = Color(0xFFE2E8F0)
+                                focusedContainerColor = funkyColors.bg,
+                                unfocusedContainerColor = funkyColors.bg,
+                                focusedTextColor = funkyColors.ink,
+                                unfocusedTextColor = funkyColors.ink,
+                                focusedBorderColor = funkyColors.mango,
+                                unfocusedBorderColor = funkyColors.line
                             )
                         )
                     }
@@ -1688,18 +1705,18 @@ fun UserProfileFeedScreen(
                 confirmButton = {
                     Button(
                         onClick = {
-                            val greeting = waveCustomMessage.ifBlank { "👋 Hi!" }
+                            val greeting = waveCustomMessage.ifBlank { "Hi!" }
                             handleSendWave(greeting)
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD43B)),
+                        colors = ButtonDefaults.buttonColors(containerColor = funkyColors.mango),
                         shape = RoundedCornerShape(16.dp)
                     ) {
-                        Text("Send & Chat", color = Color(0xFF0F172A), fontWeight = FontWeight.Bold)
+                        Text("Send & Chat", color = funkyColors.onMango, fontWeight = FontWeight.Bold)
                     }
                 },
                 dismissButton = {
                     TextButton(onClick = { showWaveDialog = false }) {
-                        Text("Cancel", color = Color(0xFF64748B))
+                        Text("Cancel", color = funkyColors.mute)
                     }
                 }
             )

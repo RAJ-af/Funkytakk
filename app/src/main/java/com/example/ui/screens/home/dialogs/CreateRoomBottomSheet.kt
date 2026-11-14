@@ -251,9 +251,18 @@ fun CreateRoomBottomSheet(
                             )
                         }
                         else -> {
+                            val resolvedModel: Any = remember(selectedBannerOption.url, context) {
+                                if (selectedBannerOption.url.startsWith("drawable://")) {
+                                    val resName = selectedBannerOption.url.removePrefix("drawable://")
+                                    val resId = context.resources.getIdentifier(resName, "drawable", context.packageName)
+                                    if (resId != 0) resId else R.drawable.img_room_ended_hero
+                                } else {
+                                    selectedBannerOption.url
+                                }
+                            }
                             AsyncImage(
                                 model = ImageRequest.Builder(context)
-                                    .data(selectedBannerOption.url)
+                                    .data(resolvedModel)
                                     .crossfade(true)
                                     .build(),
                                 contentDescription = selectedBannerOption.name,
@@ -568,9 +577,18 @@ fun CreateRoomBottomSheet(
                                         .background(Brush.linearGradient(colors))
                                 )
                             } else {
+                                val resolvedSwatchModel: Any = remember(banner.url, context) {
+                                    if (banner.url.startsWith("drawable://")) {
+                                        val resName = banner.url.removePrefix("drawable://")
+                                        val resId = context.resources.getIdentifier(resName, "drawable", context.packageName)
+                                        if (resId != 0) resId else R.drawable.img_room_ended_hero
+                                    } else {
+                                        banner.url
+                                    }
+                                }
                                 AsyncImage(
                                     model = ImageRequest.Builder(context)
-                                        .data(banner.url)
+                                        .data(resolvedSwatchModel)
                                         .crossfade(true)
                                         .build(),
                                     contentDescription = banner.name,

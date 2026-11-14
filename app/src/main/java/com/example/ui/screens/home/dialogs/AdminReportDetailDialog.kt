@@ -32,11 +32,6 @@ import coil.compose.AsyncImage
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Collections
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.ui.platform.testTag
 import com.example.AdminSendSupportMessageRequest
 import com.example.AdminSupportManager
@@ -50,6 +45,7 @@ import com.example.ui.components.*
 import com.example.ui.screens.home.models.DarkText
 import com.example.ui.screens.home.models.GraySubtitle
 import com.example.ui.theme.GoldPrimary
+import com.example.ui.theme.LocalFunkyColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -74,6 +70,7 @@ fun AdminReportDetailDialog(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val clipboardManager = LocalClipboardManager.current
+    val funkyColors = LocalFunkyColors.current
 
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -147,13 +144,13 @@ fun AdminReportDetailDialog(
                 .fillMaxWidth(0.96f)
                 .fillMaxHeight(0.94f)
                 .clip(RoundedCornerShape(24.dp)),
-            color = Color(0xFFF9FAFB),
+            color = funkyColors.bg,
             shadowElevation = 12.dp
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 // Header Bar
                 Surface(
-                    color = Color.White,
+                    color = funkyColors.surface,
                     shadowElevation = 2.dp,
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -169,10 +166,10 @@ fun AdminReportDetailDialog(
                                 modifier = Modifier
                                     .size(38.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFFFEF3C7)),
+                                    .background(funkyColors.soft),
                                 contentAlignment = Alignment.Center
                             ) {
-                                SoftShieldIcon(size = 20.dp, color = Color(0xFFD97706))
+                                SoftShieldIcon(size = 20.dp, color = if (funkyColors.isDark) funkyColors.mango else Color(0xFFD97706))
                             }
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
@@ -180,12 +177,12 @@ fun AdminReportDetailDialog(
                                     text = "Report #${reportId.take(8)}",
                                     fontWeight = FontWeight.Black,
                                     fontSize = 17.sp,
-                                    color = DarkText
+                                    color = funkyColors.ink
                                 )
                                 Text(
                                     text = "Moderation Investigation & Workflow",
                                     fontSize = 11.5.sp,
-                                    color = GraySubtitle
+                                    color = funkyColors.mute
                                 )
                             }
                         }
@@ -196,9 +193,9 @@ fun AdminReportDetailDialog(
                                 modifier = Modifier
                                     .size(36.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFFF3F4F6))
+                                    .background(funkyColors.bg)
                             ) {
-                                SoftRefreshIcon(size = 16.dp, color = Color(0xFF374151))
+                                SoftRefreshIcon(size = 16.dp, color = funkyColors.ink)
                             }
                             Spacer(modifier = Modifier.width(8.dp))
                             IconButton(
@@ -206,9 +203,9 @@ fun AdminReportDetailDialog(
                                 modifier = Modifier
                                     .size(36.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFFF3F4F6))
+                                    .background(funkyColors.bg)
                             ) {
-                                SoftCloseIcon(size = 14.dp, color = Color(0xFF374151))
+                                SoftCloseIcon(size = 14.dp, color = funkyColors.ink)
                             }
                         }
                     }
@@ -216,25 +213,25 @@ fun AdminReportDetailDialog(
 
                 if (isLoading) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = GoldPrimary)
+                        CircularProgressIndicator(color = funkyColors.mango)
                     }
                 } else if (errorMessage != null || detailJson == null) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
-                            SoftWarningIcon(size = 32.dp, color = Color(0xFFDC2626))
+                            SoftWarningIcon(size = 32.dp, color = funkyColors.danger)
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
                                 text = errorMessage ?: "Unable to fetch report details",
-                                color = Color(0xFF991B1B),
+                                color = funkyColors.danger,
                                 fontSize = 14.sp,
                                 textAlign = TextAlign.Center
                             )
                             Spacer(modifier = Modifier.height(16.dp))
                             Button(
                                 onClick = { loadDetail() },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B))
+                                colors = ButtonDefaults.buttonColors(containerColor = funkyColors.mango, contentColor = funkyColors.onMango)
                             ) {
-                                Text("Retry")
+                                Text("Retry", fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -301,10 +298,33 @@ fun AdminReportDetailDialog(
                     ) {
                         // 1. Claim Status & Countdown Banner
                         if (isClaimActive) {
+                            val claimBg = when {
+                                isMine && funkyColors.isDark -> funkyColors.mango.copy(alpha = 0.16f)
+                                isMine -> Color(0xFFFEF3C7)
+                                funkyColors.isDark -> funkyColors.soft
+                                else -> Color(0xFFF1F5F9)
+                            }
+                            val claimBorder = when {
+                                isMine && funkyColors.isDark -> funkyColors.mango.copy(alpha = 0.45f)
+                                isMine -> Color(0xFFFCD34D)
+                                funkyColors.isDark -> funkyColors.line
+                                else -> Color(0xFFCBD5E1)
+                            }
+                            val claimTitleColor = when {
+                                isMine && funkyColors.isDark -> funkyColors.mango
+                                isMine -> Color(0xFF92400E)
+                                funkyColors.isDark -> funkyColors.ink
+                                else -> Color(0xFF334155)
+                            }
+                            val claimSubColor = when {
+                                isMine && funkyColors.isDark -> funkyColors.ink.copy(alpha = 0.85f)
+                                isMine -> Color(0xFFB45309)
+                                else -> funkyColors.mute
+                            }
                             Surface(
                                 shape = RoundedCornerShape(16.dp),
-                                color = if (isMine) Color(0xFFFEF3C7) else Color(0xFFF1F5F9),
-                                border = BorderStroke(1.dp, if (isMine) Color(0xFFFCD34D) else Color(0xFFCBD5E1)),
+                                color = claimBg,
+                                border = BorderStroke(1.dp, claimBorder),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Row(
@@ -317,10 +337,10 @@ fun AdminReportDetailDialog(
                                             modifier = Modifier
                                                 .size(34.dp)
                                                 .clip(CircleShape)
-                                                .background(if (isMine) Color(0xFFF59E0B) else Color(0xFF64748B)),
+                                                .background(if (isMine) funkyColors.mango else funkyColors.mute),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            SoftShieldIcon(size = 18.dp, color = Color.White)
+                                            SoftShieldIcon(size = 18.dp, color = if (isMine) funkyColors.onMango else funkyColors.surface)
                                         }
                                         Spacer(modifier = Modifier.width(10.dp))
                                         Column {
@@ -328,12 +348,12 @@ fun AdminReportDetailDialog(
                                                 text = if (isMine) "In your charge (Claimed)" else "In charge: $claimedByName",
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 13.5.sp,
-                                                color = if (isMine) Color(0xFF92400E) else Color(0xFF334155)
+                                                color = claimTitleColor
                                             )
                                             Text(
                                                 text = if (isMine) "Time left: $remainingTimeFormatted" else "Time remaining: $remainingTimeFormatted (Read-Only)",
                                                 fontSize = 12.sp,
-                                                color = if (isMine) Color(0xFFB45309) else Color(0xFF64748B)
+                                                color = claimSubColor
                                             )
                                         }
                                     }
@@ -355,7 +375,7 @@ fun AdminReportDetailDialog(
                                                 }
                                             }
                                         ) {
-                                            Text("Release", color = Color(0xFFDC2626), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                            Text("Release", color = funkyColors.danger, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                         }
                                     }
                                 }
@@ -364,8 +384,8 @@ fun AdminReportDetailDialog(
                             // Free / Unclaimed banner with "Take charge" button
                             Surface(
                                 shape = RoundedCornerShape(16.dp),
-                                color = Color(0xFFEFF6FF),
-                                border = BorderStroke(1.dp, Color(0xFFBFDBFE)),
+                                color = if (funkyColors.isDark) Color(0xFF3B82F6).copy(alpha = 0.14f) else Color(0xFFEFF6FF),
+                                border = BorderStroke(1.dp, if (funkyColors.isDark) Color(0xFF3B82F6).copy(alpha = 0.35f) else Color(0xFFBFDBFE)),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Row(
@@ -378,12 +398,12 @@ fun AdminReportDetailDialog(
                                             text = "Report is Free to Review",
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 14.sp,
-                                            color = Color(0xFF1E3A8A)
+                                            color = if (funkyColors.isDark) Color(0xFF93C5FD) else Color(0xFF1E3A8A)
                                         )
                                         Text(
                                             text = "Take charge to reserve this report for 48 hours and begin moderation.",
                                             fontSize = 12.sp,
-                                            color = Color(0xFF3B82F6),
+                                            color = if (funkyColors.isDark) Color(0xFFBFDBFE) else Color(0xFF3B82F6),
                                             lineHeight = 16.sp
                                         )
                                     }
@@ -403,7 +423,7 @@ fun AdminReportDetailDialog(
                                                 }
                                             }
                                         },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB), contentColor = Color.White),
                                         shape = RoundedCornerShape(12.dp)
                                     ) {
                                         Text("Take Charge", fontWeight = FontWeight.Bold, fontSize = 13.sp)
@@ -414,8 +434,8 @@ fun AdminReportDetailDialog(
                             // Resolved banner
                             Surface(
                                 shape = RoundedCornerShape(16.dp),
-                                color = Color(0xFFF0FDF4),
-                                border = BorderStroke(1.dp, Color(0xFFBBF7D0)),
+                                color = if (funkyColors.isDark) funkyColors.ok.copy(alpha = 0.14f) else Color(0xFFF0FDF4),
+                                border = BorderStroke(1.dp, if (funkyColors.isDark) funkyColors.ok.copy(alpha = 0.35f) else Color(0xFFBBF7D0)),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Row(
@@ -424,19 +444,19 @@ fun AdminReportDetailDialog(
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                        SoftCheckIcon(size = 20.dp, color = Color(0xFF16A34A))
+                                        SoftCheckIcon(size = 20.dp, color = funkyColors.ok)
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Column {
                                             Text(
                                                 text = "Report Resolved (${outcome.uppercase()})",
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 13.5.sp,
-                                                color = Color(0xFF166534)
+                                                color = if (funkyColors.isDark) Color(0xFF6EE7B7) else Color(0xFF166534)
                                             )
                                             Text(
                                                 text = "Outcome enforced by staff. Resolved ${resolvedAt?.take(10) ?: ""}",
                                                 fontSize = 11.5.sp,
-                                                color = Color(0xFF15803D)
+                                                color = if (funkyColors.isDark) Color(0xFFA7F3D0) else Color(0xFF15803D)
                                             )
                                         }
                                     }
@@ -454,7 +474,7 @@ fun AdminReportDetailDialog(
                                     if (canReopen) {
                                         Button(
                                             onClick = { showReopenDialog = true },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEA580C)),
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEA580C), contentColor = Color.White),
                                             shape = RoundedCornerShape(10.dp),
                                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                                         ) {
@@ -467,9 +487,9 @@ fun AdminReportDetailDialog(
 
                         // 2. Incident Summary Card
                         Card(
-                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
                             shape = RoundedCornerShape(18.dp),
-                            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                            border = BorderStroke(1.dp, funkyColors.line),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -478,18 +498,18 @@ fun AdminReportDetailDialog(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Incident Details", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = DarkText)
+                                    Text("Incident Details", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = funkyColors.ink)
                                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                         // Context Badge
                                         Surface(
-                                            color = Color(0xFFF1F5F9),
+                                            color = funkyColors.soft,
                                             shape = RoundedCornerShape(8.dp)
                                         ) {
                                             Text(
                                                 text = contextType.uppercase(),
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold,
-                                                color = Color(0xFF475569),
+                                                color = funkyColors.mute,
                                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                                             )
                                         }
@@ -498,25 +518,25 @@ fun AdminReportDetailDialog(
                                     }
                                 }
 
-                                HorizontalDivider(color = Color(0xFFF1F5F9))
+                                HorizontalDivider(color = funkyColors.line)
 
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text("Category", fontSize = 11.sp, color = GraySubtitle)
-                                        Text(reportObj.optString("category", "General"), fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp, color = DarkText)
+                                        Text("Category", fontSize = 11.sp, color = funkyColors.mute)
+                                        Text(reportObj.optString("category", "General"), fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp, color = funkyColors.ink)
                                     }
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text("Reporter", fontSize = 11.sp, color = GraySubtitle)
-                                        Text(reporterName, fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp, color = DarkText)
+                                        Text("Reporter", fontSize = 11.sp, color = funkyColors.mute)
+                                        Text(reporterName, fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp, color = funkyColors.ink)
                                     }
                                 }
 
                                 Column {
-                                    Text("Reason / Statement", fontSize = 11.sp, color = GraySubtitle)
+                                    Text("Reason / Statement", fontSize = 11.sp, color = funkyColors.mute)
                                     Text(
                                         text = reportObj.optString("reason", "No details provided."),
                                         fontSize = 13.sp,
-                                        color = DarkText,
+                                        color = funkyColors.ink,
                                         lineHeight = 18.sp
                                     )
                                 }
@@ -525,7 +545,7 @@ fun AdminReportDetailDialog(
                                 val screenshotUrl = reportObj.optString("screenshot_url").takeIf { it.isNotBlank() && it != "null" }
                                 if (screenshotUrl != null) {
                                     Spacer(modifier = Modifier.height(4.dp))
-                                    Text("Attached Evidence Screenshot", fontSize = 11.sp, color = GraySubtitle)
+                                    Text("Attached Evidence Screenshot", fontSize = 11.sp, color = funkyColors.mute)
                                     AsyncImage(
                                         model = screenshotUrl,
                                         contentDescription = "Evidence screenshot",
@@ -533,7 +553,7 @@ fun AdminReportDetailDialog(
                                             .fillMaxWidth()
                                             .height(180.dp)
                                             .clip(RoundedCornerShape(12.dp))
-                                            .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(12.dp))
+                                            .border(1.dp, funkyColors.line, RoundedCornerShape(12.dp))
                                             .clickable { previewImageUrl = screenshotUrl },
                                         contentScale = ContentScale.Crop
                                     )
@@ -549,9 +569,9 @@ fun AdminReportDetailDialog(
 
                         // 3. Reported User Card (Safety Score & Moderation History)
                         Card(
-                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
                             shape = RoundedCornerShape(18.dp),
-                            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                            border = BorderStroke(1.dp, funkyColors.line),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -560,17 +580,17 @@ fun AdminReportDetailDialog(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Reported User Profile", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = DarkText)
+                                    Text("Reported User Profile", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = funkyColors.ink)
 
                                     val scoreBg = when {
-                                        reportedScore >= 80 -> Color(0xFFDCFCE7)
-                                        reportedScore >= 50 -> Color(0xFFFEF3C7)
-                                        else -> Color(0xFFFEE2E2)
+                                        reportedScore >= 80 -> if (funkyColors.isDark) funkyColors.ok.copy(alpha = 0.16f) else Color(0xFFDCFCE7)
+                                        reportedScore >= 50 -> if (funkyColors.isDark) funkyColors.mango.copy(alpha = 0.16f) else Color(0xFFFEF3C7)
+                                        else -> if (funkyColors.isDark) funkyColors.danger.copy(alpha = 0.16f) else Color(0xFFFEE2E2)
                                     }
                                     val scoreText = when {
-                                        reportedScore >= 80 -> Color(0xFF15803D)
-                                        reportedScore >= 50 -> Color(0xFFB45309)
-                                        else -> Color(0xFFB91C1C)
+                                        reportedScore >= 80 -> if (funkyColors.isDark) Color(0xFF6EE7B7) else Color(0xFF15803D)
+                                        reportedScore >= 50 -> if (funkyColors.isDark) funkyColors.mango else Color(0xFFB45309)
+                                        else -> funkyColors.danger
                                     }
                                     Surface(color = scoreBg, shape = RoundedCornerShape(10.dp)) {
                                         Text(
@@ -583,20 +603,20 @@ fun AdminReportDetailDialog(
                                     }
                                 }
 
-                                HorizontalDivider(color = Color(0xFFF1F5F9))
+                                HorizontalDivider(color = funkyColors.line)
 
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     Column {
-                                        Text("Name", fontSize = 11.sp, color = GraySubtitle)
-                                        Text(reportedName, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = DarkText)
+                                        Text("Name", fontSize = 11.sp, color = funkyColors.mute)
+                                        Text(reportedName, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = funkyColors.ink)
                                     }
                                     Column {
-                                        Text("User ID", fontSize = 11.sp, color = GraySubtitle)
+                                        Text("User ID", fontSize = 11.sp, color = funkyColors.mute)
                                         Text(
                                             text = reportedUserId?.take(10) ?: "N/A",
                                             fontWeight = FontWeight.Medium,
                                             fontSize = 12.sp,
-                                            color = Color(0xFF64748B)
+                                            color = funkyColors.mute
                                         )
                                     }
                                 }
@@ -607,21 +627,21 @@ fun AdminReportDetailDialog(
                                         text = "${otherReports.length()} other report(s) on record for this user",
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.SemiBold,
-                                        color = Color(0xFFDC2626)
+                                        color = funkyColors.danger
                                     )
                                 }
                             }
                         }
 
                         // 4. PROOF AND EVIDENCE SECTIONS (Requirements 2, 3, 4, 5, 6, 8)
-                        Text("Proof & Attached Evidence", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = DarkText)
+                        Text("Proof & Attached Evidence", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = funkyColors.ink)
 
                         if (!hasProof) {
                             // Requirement 6: Empty proof card when no evidence exists
                             Card(
-                                colors = CardDefaults.cardColors(containerColor = Color.White),
+                                colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
                                 shape = RoundedCornerShape(18.dp),
-                                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                                border = BorderStroke(1.dp, funkyColors.line),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Box(
@@ -631,13 +651,13 @@ fun AdminReportDetailDialog(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        SoftShieldIcon(size = 32.dp, color = Color(0xFF94A3B8))
+                                        SoftShieldIcon(size = 32.dp, color = funkyColors.mute)
                                         Spacer(modifier = Modifier.height(8.dp))
                                         Text(
                                             text = "No proof was attached to this report",
                                             fontWeight = FontWeight.SemiBold,
                                             fontSize = 13.5.sp,
-                                            color = Color(0xFF64748B)
+                                            color = funkyColors.mute
                                         )
                                     }
                                 }
@@ -687,7 +707,7 @@ fun AdminReportDetailDialog(
 
                         // 5. Action Buttons (ONLY visible if claim.is_mine == true and report not resolved)
                         if (isMine && !isResolved) {
-                            Text("Enforce Moderation Action", fontWeight = FontWeight.Bold, fontSize = 14.5.sp, color = DarkText)
+                            Text("Enforce Moderation Action", fontWeight = FontWeight.Bold, fontSize = 14.5.sp, color = funkyColors.ink)
 
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -698,7 +718,7 @@ fun AdminReportDetailDialog(
                                         selectedActionType = "warning"
                                         showActionDialog = true
                                     },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF59E0B)),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF59E0B), contentColor = Color.White),
                                     shape = RoundedCornerShape(12.dp),
                                     modifier = Modifier.weight(1f)
                                 ) {
@@ -710,7 +730,7 @@ fun AdminReportDetailDialog(
                                         selectedActionType = "mute"
                                         showActionDialog = true
                                     },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6366F1)),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6366F1), contentColor = Color.White),
                                     shape = RoundedCornerShape(12.dp),
                                     modifier = Modifier.weight(1f)
                                 ) {
@@ -722,7 +742,7 @@ fun AdminReportDetailDialog(
                                         selectedActionType = "suspend"
                                         showActionDialog = true
                                     },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626), contentColor = Color.White),
                                     shape = RoundedCornerShape(12.dp),
                                     modifier = Modifier.weight(1f)
                                 ) {
@@ -736,7 +756,7 @@ fun AdminReportDetailDialog(
                             ) {
                                 Button(
                                     onClick = { showDismissDialog = true },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF64748B)),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF64748B), contentColor = Color.White),
                                     shape = RoundedCornerShape(12.dp),
                                     modifier = Modifier.weight(1f)
                                 ) {
@@ -745,7 +765,7 @@ fun AdminReportDetailDialog(
 
                                 Button(
                                     onClick = { showMessageUserDialog = true },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F172A)),
+                                    colors = ButtonDefaults.buttonColors(containerColor = funkyColors.ink, contentColor = funkyColors.bg),
                                     shape = RoundedCornerShape(12.dp),
                                     modifier = Modifier.weight(1f)
                                 ) {
@@ -756,7 +776,7 @@ fun AdminReportDetailDialog(
 
                         // 6. Reopens & Challenges Section
                         if (reopensArr.length() > 0) {
-                            Text("Reopen & Dispute History", fontWeight = FontWeight.Bold, fontSize = 14.5.sp, color = DarkText)
+                            Text("Reopen & Dispute History", fontWeight = FontWeight.Bold, fontSize = 14.5.sp, color = funkyColors.ink)
 
                             for (i in 0 until reopensArr.length()) {
                                 val ro = reopensArr.optJSONObject(i) ?: continue
@@ -770,8 +790,8 @@ fun AdminReportDetailDialog(
 
                                 Surface(
                                     shape = RoundedCornerShape(14.dp),
-                                    color = Color.White,
-                                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                                    color = funkyColors.surface,
+                                    border = BorderStroke(1.dp, funkyColors.line),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -783,9 +803,9 @@ fun AdminReportDetailDialog(
                                             Text("Reopen Request", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFFEA580C))
                                             Surface(
                                                 color = when (roStatus) {
-                                                    "open" -> Color(0xFFFFFBEB)
-                                                    "challenged" -> Color(0xFFFEF2F2)
-                                                    else -> Color(0xFFECFDF5)
+                                                    "open" -> if (funkyColors.isDark) funkyColors.mango.copy(alpha = 0.16f) else Color(0xFFFFFBEB)
+                                                    "challenged" -> if (funkyColors.isDark) funkyColors.danger.copy(alpha = 0.16f) else Color(0xFFFEF2F2)
+                                                    else -> if (funkyColors.isDark) funkyColors.ok.copy(alpha = 0.16f) else Color(0xFFECFDF5)
                                                 },
                                                 shape = RoundedCornerShape(6.dp)
                                             ) {
@@ -794,32 +814,40 @@ fun AdminReportDetailDialog(
                                                     fontSize = 10.5.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     color = when (roStatus) {
-                                                        "open" -> Color(0xFFB45309)
-                                                        "challenged" -> Color(0xFFB91C1C)
-                                                        else -> Color(0xFF15803D)
+                                                        "open" -> if (funkyColors.isDark) funkyColors.mango else Color(0xFFB45309)
+                                                        "challenged" -> funkyColors.danger
+                                                        else -> if (funkyColors.isDark) Color(0xFF6EE7B7) else Color(0xFF15803D)
                                                     },
                                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                                 )
                                             }
                                         }
 
-                                        Text(text = "Brief: $roBrief", fontSize = 12.5.sp, color = DarkText, lineHeight = 17.sp)
+                                        Text(text = "Brief: $roBrief", fontSize = 12.5.sp, color = funkyColors.ink, lineHeight = 17.sp)
 
                                         if (chBrief != null) {
-                                            Surface(color = Color(0xFFFFF1F2), shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                            Surface(
+                                                color = if (funkyColors.isDark) funkyColors.danger.copy(alpha = 0.14f) else Color(0xFFFFF1F2),
+                                                shape = RoundedCornerShape(8.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
                                                 Column(modifier = Modifier.padding(8.dp)) {
-                                                    Text("Original Admin Challenge Brief:", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color(0xFF9F1239))
-                                                    Text(chBrief, fontSize = 12.sp, color = Color(0xFF881337))
+                                                    Text("Original Admin Challenge Brief:", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = if (funkyColors.isDark) funkyColors.danger else Color(0xFF9F1239))
+                                                    Text(chBrief, fontSize = 12.sp, color = if (funkyColors.isDark) funkyColors.ink else Color(0xFF881337))
                                                 }
                                             }
                                         }
 
                                         if (decision != null) {
-                                            Surface(color = Color(0xFFF0FDF4), shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                            Surface(
+                                                color = if (funkyColors.isDark) funkyColors.ok.copy(alpha = 0.14f) else Color(0xFFF0FDF4),
+                                                shape = RoundedCornerShape(8.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
                                                 Column(modifier = Modifier.padding(8.dp)) {
-                                                    Text("Owner Final Decision: ${decision.replace('_', ' ').uppercase()}", fontWeight = FontWeight.Bold, fontSize = 11.5.sp, color = Color(0xFF166534))
+                                                    Text("Owner Final Decision: ${decision.replace('_', ' ').uppercase()}", fontWeight = FontWeight.Bold, fontSize = 11.5.sp, color = if (funkyColors.isDark) Color(0xFF6EE7B7) else Color(0xFF166534))
                                                     if (!decisionNote.isNullOrBlank()) {
-                                                        Text("Note: $decisionNote", fontSize = 12.sp, color = Color(0xFF14532D))
+                                                        Text("Note: $decisionNote", fontSize = 12.sp, color = if (funkyColors.isDark) Color(0xFFA7F3D0) else Color(0xFF14532D))
                                                     }
                                                 }
                                             }
@@ -832,7 +860,7 @@ fun AdminReportDetailDialog(
                                                     activeChallengeReopenId = roId
                                                     showChallengeDialog = true
                                                 },
-                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48)),
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48), contentColor = Color.White),
                                                 shape = RoundedCornerShape(10.dp),
                                                 modifier = Modifier.fillMaxWidth()
                                             ) {
@@ -847,7 +875,7 @@ fun AdminReportDetailDialog(
                                                         activeDisputeReopenId = roId
                                                         showDisputeDecisionDialog = true
                                                     },
-                                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4338CA)),
+                                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4338CA), contentColor = Color.White),
                                                     shape = RoundedCornerShape(10.dp),
                                                     modifier = Modifier.fillMaxWidth()
                                                 ) {
@@ -862,12 +890,12 @@ fun AdminReportDetailDialog(
 
                         // 7. Audit Event Timeline (Requirement 7: Human readable sentences)
                         if (eventsArr.length() > 0) {
-                            Text("Audit Event Timeline", fontWeight = FontWeight.Bold, fontSize = 14.5.sp, color = DarkText)
+                            Text("Audit Event Timeline", fontWeight = FontWeight.Bold, fontSize = 14.5.sp, color = funkyColors.ink)
 
                             Surface(
                                 shape = RoundedCornerShape(16.dp),
-                                color = Color.White,
-                                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                                color = funkyColors.surface,
+                                border = BorderStroke(1.dp, funkyColors.line),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -884,7 +912,7 @@ fun AdminReportDetailDialog(
                                                 modifier = Modifier
                                                     .size(8.dp)
                                                     .clip(CircleShape)
-                                                    .background(Color(0xFFD97706))
+                                                    .background(funkyColors.mango)
                                             )
                                             Spacer(modifier = Modifier.width(10.dp))
                                             Column {
@@ -893,14 +921,14 @@ fun AdminReportDetailDialog(
                                                         text = readableSentence,
                                                         fontWeight = FontWeight.Bold,
                                                         fontSize = 12.sp,
-                                                        color = DarkText
+                                                        color = funkyColors.ink
                                                     )
-                                                    Text(text = evTime, fontSize = 10.5.sp, color = GraySubtitle)
+                                                    Text(text = evTime, fontSize = 10.5.sp, color = funkyColors.mute)
                                                 }
                                             }
                                         }
                                         if (i < eventsArr.length() - 1) {
-                                            HorizontalDivider(color = Color(0xFFF1F5F9))
+                                            HorizontalDivider(color = funkyColors.line)
                                         }
                                     }
                                 }
@@ -945,10 +973,14 @@ fun AdminReportDetailDialog(
 
         AlertDialog(
             onDismissRequest = { if (!isSubmittingAction) showActionDialog = false },
+            containerColor = funkyColors.surface,
+            titleContentColor = funkyColors.ink,
+            textContentColor = funkyColors.ink,
             title = {
                 Text(
                     text = "Apply ${selectedActionType.replaceFirstChar { it.uppercase() }}",
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    color = funkyColors.ink
                 )
             },
             text = {
@@ -956,14 +988,15 @@ fun AdminReportDetailDialog(
                     Text(
                         text = "Target User ID: ${targetUid.take(12)}...",
                         fontSize = 12.sp,
-                        color = GraySubtitle
+                        color = funkyColors.mute
                     )
 
                     if (selectedActionType == "suspend") {
                         Text(
                             text = "Duration: $suspendHours hour(s) (1 to 90 hours allowed)",
                             fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.SemiBold,
+                            color = funkyColors.ink
                         )
                         Slider(
                             value = suspendHours.toFloat(),
@@ -975,13 +1008,13 @@ fun AdminReportDetailDialog(
                         Text(
                             text = "Warning will remain active for 1 hour.",
                             fontSize = 12.5.sp,
-                            color = Color(0xFF475569)
+                            color = funkyColors.mute
                         )
                     } else if (selectedActionType == "mute") {
                         Text(
                             text = "Mute restricts voice and messaging indefinitely until revoked.",
                             fontSize = 12.5.sp,
-                            color = Color(0xFF475569)
+                            color = funkyColors.mute
                         )
                     }
 
@@ -1021,7 +1054,7 @@ fun AdminReportDetailDialog(
                             }
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+                    colors = ButtonDefaults.buttonColors(containerColor = funkyColors.danger, contentColor = Color.White),
                     enabled = !isSubmittingAction
                 ) {
                     Text(if (isSubmittingAction) "Enforcing..." else "Confirm Action")
@@ -1029,7 +1062,7 @@ fun AdminReportDetailDialog(
             },
             dismissButton = {
                 TextButton(onClick = { showActionDialog = false }, enabled = !isSubmittingAction) {
-                    Text("Cancel")
+                    Text("Cancel", color = funkyColors.mute)
                 }
             }
         )
@@ -1039,10 +1072,13 @@ fun AdminReportDetailDialog(
     if (showDismissDialog) {
         AlertDialog(
             onDismissRequest = { if (!isDismissing) showDismissDialog = false },
-            title = { Text("Dismiss Report", fontWeight = FontWeight.Bold) },
+            containerColor = funkyColors.surface,
+            titleContentColor = funkyColors.ink,
+            textContentColor = funkyColors.ink,
+            title = { Text("Dismiss Report", fontWeight = FontWeight.Bold, color = funkyColors.ink) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Are you sure no moderation action is required for this report? The reporter will be notified that no violation was found.", fontSize = 13.sp, color = Color(0xFF475569))
+                    Text("Are you sure no moderation action is required for this report? The reporter will be notified that no violation was found.", fontSize = 13.sp, color = funkyColors.mute)
                     OutlinedTextField(
                         value = dismissReasonInput,
                         onValueChange = { dismissReasonInput = it },
@@ -1070,7 +1106,7 @@ fun AdminReportDetailDialog(
                             }
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF64748B)),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF64748B), contentColor = Color.White),
                     enabled = !isDismissing
                 ) {
                     Text(if (isDismissing) "Dismissing..." else "Dismiss Report")
@@ -1078,7 +1114,7 @@ fun AdminReportDetailDialog(
             },
             dismissButton = {
                 TextButton(onClick = { showDismissDialog = false }, enabled = !isDismissing) {
-                    Text("Cancel")
+                    Text("Cancel", color = funkyColors.mute)
                 }
             }
         )
@@ -1099,7 +1135,7 @@ fun AdminReportDetailDialog(
                     .fillMaxWidth(0.95f)
                     .fillMaxHeight(0.92f)
                     .clip(RoundedCornerShape(20.dp)),
-                color = Color(0xFFF9FAFB)
+                color = funkyColors.bg
             ) {
                 AdminReportSupportChatView(
                     reportedUserId = targetUid,
@@ -1114,13 +1150,16 @@ fun AdminReportDetailDialog(
     if (showReopenDialog) {
         AlertDialog(
             onDismissRequest = { if (!isSubmittingReopen) showReopenDialog = false },
-            title = { Text("Reopen Report", fontWeight = FontWeight.Bold) },
+            containerColor = funkyColors.surface,
+            titleContentColor = funkyColors.ink,
+            textContentColor = funkyColors.ink,
+            title = { Text("Reopen Report", fontWeight = FontWeight.Bold, color = funkyColors.ink) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         text = "Reopening lifts the active restriction, restores the user's safety score penalty, and returns the report to the Free queue. You must provide a brief explaining why (10 to 2000 chars).",
                         fontSize = 12.5.sp,
-                        color = Color(0xFF475569),
+                        color = funkyColors.mute,
                         lineHeight = 17.sp
                     )
                     OutlinedTextField(
@@ -1153,7 +1192,7 @@ fun AdminReportDetailDialog(
                             }
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEA580C)),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEA580C), contentColor = Color.White),
                     enabled = !isSubmittingReopen
                 ) {
                     Text(if (isSubmittingReopen) "Reopening..." else "Reopen Report")
@@ -1161,7 +1200,7 @@ fun AdminReportDetailDialog(
             },
             dismissButton = {
                 TextButton(onClick = { showReopenDialog = false }, enabled = !isSubmittingReopen) {
-                    Text("Cancel")
+                    Text("Cancel", color = funkyColors.mute)
                 }
             }
         )
@@ -1171,13 +1210,16 @@ fun AdminReportDetailDialog(
     if (showChallengeDialog && activeChallengeReopenId != null) {
         AlertDialog(
             onDismissRequest = { if (!isSubmittingChallenge) showChallengeDialog = false },
-            title = { Text("Challenge Reopen Request", fontWeight = FontWeight.Bold) },
+            containerColor = funkyColors.surface,
+            titleContentColor = funkyColors.ink,
+            textContentColor = funkyColors.ink,
+            title = { Text("Challenge Reopen Request", fontWeight = FontWeight.Bold, color = funkyColors.ink) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         text = "As the original investigating admin, you can challenge this reopen. Your brief goes directly to the owner by email.",
                         fontSize = 12.5.sp,
-                        color = Color(0xFF991B1B),
+                        color = funkyColors.danger,
                         fontWeight = FontWeight.SemiBold
                     )
                     OutlinedTextField(
@@ -1210,7 +1252,7 @@ fun AdminReportDetailDialog(
                             }
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48)),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48), contentColor = Color.White),
                     enabled = !isSubmittingChallenge
                 ) {
                     Text(if (isSubmittingChallenge) "Sending..." else "Submit Challenge")
@@ -1218,7 +1260,7 @@ fun AdminReportDetailDialog(
             },
             dismissButton = {
                 TextButton(onClick = { showChallengeDialog = false }, enabled = !isSubmittingChallenge) {
-                    Text("Cancel")
+                    Text("Cancel", color = funkyColors.mute)
                 }
             }
         )
@@ -1230,17 +1272,20 @@ fun AdminReportDetailDialog(
 
         AlertDialog(
             onDismissRequest = { if (!isSubmittingDecision) showDisputeDecisionDialog = false },
-            title = { Text("Owner Final Dispute Decision", fontWeight = FontWeight.Bold) },
+            containerColor = funkyColors.surface,
+            titleContentColor = funkyColors.ink,
+            textContentColor = funkyColors.ink,
+            title = { Text("Owner Final Dispute Decision", fontWeight = FontWeight.Bold, color = funkyColors.ink) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("As platform owner, make a final binding decision on this reopen dispute:", fontSize = 12.5.sp, color = Color(0xFF475569))
+                    Text("As platform owner, make a final binding decision on this reopen dispute:", fontSize = 12.5.sp, color = funkyColors.mute)
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         RadioButton(
                             selected = selectedDecision == "reopen_upheld",
                             onClick = { selectedDecision = "reopen_upheld" }
                         )
-                        Text("Uphold Reopen (Keep report open for review)", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Text("Uphold Reopen (Keep report open for review)", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = funkyColors.ink)
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1248,7 +1293,7 @@ fun AdminReportDetailDialog(
                             selected = selectedDecision == "original_upheld",
                             onClick = { selectedDecision = "original_upheld" }
                         )
-                        Text("Uphold Original Action (Re-enforce penalty)", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Text("Uphold Original Action (Re-enforce penalty)", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = funkyColors.ink)
                     }
 
                     OutlinedTextField(
@@ -1283,7 +1328,7 @@ fun AdminReportDetailDialog(
                             }
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4338CA)),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4338CA), contentColor = Color.White),
                     enabled = !isSubmittingDecision
                 ) {
                     Text(if (isSubmittingDecision) "Saving..." else "Submit Decision")
@@ -1291,7 +1336,7 @@ fun AdminReportDetailDialog(
             },
             dismissButton = {
                 TextButton(onClick = { showDisputeDecisionDialog = false }, enabled = !isSubmittingDecision) {
-                    Text("Cancel")
+                    Text("Cancel", color = funkyColors.mute)
                 }
             }
         )
@@ -1304,15 +1349,16 @@ fun AdminReportDetailDialog(
 
 @Composable
 private fun EvidenceStatusBadge(status: String) {
+    val funkyColors = LocalFunkyColors.current
     val bg = when (status.lowercase()) {
-        "server_verified" -> Color(0xFFDCFCE7)
-        "unverified" -> Color(0xFFFEF3C7)
-        else -> Color(0xFFF1F5F9)
+        "server_verified" -> if (funkyColors.isDark) funkyColors.ok.copy(alpha = 0.16f) else Color(0xFFDCFCE7)
+        "unverified" -> if (funkyColors.isDark) funkyColors.mango.copy(alpha = 0.16f) else Color(0xFFFEF3C7)
+        else -> funkyColors.soft
     }
     val fg = when (status.lowercase()) {
-        "server_verified" -> Color(0xFF15803D)
-        "unverified" -> Color(0xFFB45309)
-        else -> Color(0xFF64748B)
+        "server_verified" -> if (funkyColors.isDark) Color(0xFF6EE7B7) else Color(0xFF15803D)
+        "unverified" -> if (funkyColors.isDark) funkyColors.mango else Color(0xFFB45309)
+        else -> funkyColors.mute
     }
     val text = when (status.lowercase()) {
         "server_verified" -> "Verified by server"
@@ -1333,31 +1379,32 @@ private fun EvidenceStatusBadge(status: String) {
 
 @Composable
 private fun MomentEvidenceCard(evidenceObj: JSONObject, onImageClick: (String) -> Unit) {
+    val funkyColors = LocalFunkyColors.current
     Card(
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
         shape = RoundedCornerShape(18.dp),
-        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        border = BorderStroke(1.dp, funkyColors.line),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Moment Evidence", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = DarkText)
+            Text("Moment Evidence", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = funkyColors.ink)
 
             val repMoment = evidenceObj.optJSONObject("reported_moment")
             if (repMoment != null) {
                 Surface(
-                    color = Color(0xFFFFFBEB),
+                    color = if (funkyColors.isDark) funkyColors.mango.copy(alpha = 0.14f) else Color(0xFFFFFBEB),
                     shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+                    border = BorderStroke(1.dp, if (funkyColors.isDark) funkyColors.mango.copy(alpha = 0.4f) else Color(0xFFFDE68A)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                            Text("Reported Moment", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFFB45309))
-                            Text(repMoment.optString("created_at").take(10), fontSize = 11.sp, color = Color(0xFFD97706))
+                            Text("Reported Moment", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = if (funkyColors.isDark) funkyColors.mango else Color(0xFFB45309))
+                            Text(repMoment.optString("created_at").take(10), fontSize = 11.sp, color = if (funkyColors.isDark) funkyColors.mango.copy(alpha = 0.85f) else Color(0xFFD97706))
                         }
                         val content = repMoment.optString("content")
                         if (content.isNotBlank()) {
-                            Text(content, fontSize = 13.sp, color = DarkText)
+                            Text(content, fontSize = 13.sp, color = funkyColors.ink)
                         }
                         val imageUrls = repMoment.optJSONArray("image_urls")
                         if (imageUrls != null && imageUrls.length() > 0) {
@@ -1382,18 +1429,18 @@ private fun MomentEvidenceCard(evidenceObj: JSONObject, onImageClick: (String) -
 
             val recentArr = evidenceObj.optJSONArray("recent_moments")
             if (recentArr != null && recentArr.length() > 0) {
-                Text("Their Last Moments", fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp, color = GraySubtitle)
+                Text("Their Last Moments", fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp, color = funkyColors.mute)
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     for (i in 0 until recentArr.length()) {
                         val m = recentArr.optJSONObject(i) ?: continue
                         Surface(
-                            color = Color(0xFFF8FAFC),
+                            color = funkyColors.soft,
                             shape = RoundedCornerShape(10.dp),
-                            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                            border = BorderStroke(1.dp, funkyColors.line),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(modifier = Modifier.padding(10.dp)) {
-                                Text(m.optString("content", "No text"), fontSize = 12.sp, color = DarkText)
+                                Text(m.optString("content", "No text"), fontSize = 12.sp, color = funkyColors.ink)
                                 val imgArr = m.optJSONArray("image_urls")
                                 if (imgArr != null && imgArr.length() > 0) {
                                     Row(modifier = Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -1422,26 +1469,27 @@ private fun MomentEvidenceCard(evidenceObj: JSONObject, onImageClick: (String) -
 
 @Composable
 private fun RoomEvidenceCard(evidenceObj: JSONObject) {
+    val funkyColors = LocalFunkyColors.current
     Card(
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
         shape = RoundedCornerShape(18.dp),
-        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        border = BorderStroke(1.dp, funkyColors.line),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Voice Room Evidence", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = DarkText)
+            Text("Voice Room Evidence", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = funkyColors.ink)
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Room Title:", fontSize = 12.sp, color = GraySubtitle)
-                Text(evidenceObj.optString("title", "Voice Room"), fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp, color = DarkText)
+                Text("Room Title:", fontSize = 12.sp, color = funkyColors.mute)
+                Text(evidenceObj.optString("title", "Voice Room"), fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp, color = funkyColors.ink)
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Room Status:", fontSize = 12.sp, color = GraySubtitle)
-                Text(if (evidenceObj.optBoolean("room_live")) "LIVE" else "ENDED", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = if (evidenceObj.optBoolean("room_live")) Color(0xFF16A34A) else Color(0xFF64748B))
+                Text("Room Status:", fontSize = 12.sp, color = funkyColors.mute)
+                Text(if (evidenceObj.optBoolean("room_live")) "LIVE" else "ENDED", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = if (evidenceObj.optBoolean("room_live")) funkyColors.ok else funkyColors.mute)
             }
             if (evidenceObj.has("captured_at")) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Captured At:", fontSize = 12.sp, color = GraySubtitle)
-                    Text(evidenceObj.optString("captured_at").take(19).replace('T', ' '), fontSize = 11.5.sp, color = DarkText)
+                    Text("Captured At:", fontSize = 12.sp, color = funkyColors.mute)
+                    Text(evidenceObj.optString("captured_at").take(19).replace('T', ' '), fontSize = 11.5.sp, color = funkyColors.ink)
                 }
             }
         }
@@ -1450,18 +1498,19 @@ private fun RoomEvidenceCard(evidenceObj: JSONObject) {
 
 @Composable
 private fun ChatEvidenceCard(evidenceObj: JSONObject, contextType: String) {
+    val funkyColors = LocalFunkyColors.current
     Card(
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
         shape = RoundedCornerShape(18.dp),
-        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        border = BorderStroke(1.dp, funkyColors.line),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(if (contextType == "group") "Group Chat Evidence" else "1:1 Chat Evidence", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = DarkText)
+            Text(if (contextType == "group") "Group Chat Evidence" else "1:1 Chat Evidence", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = funkyColors.ink)
 
             val messagesArr = evidenceObj.optJSONArray("messages")
             if (messagesArr == null || messagesArr.length() == 0) {
-                Text("No chat messages contained in evidence.", fontSize = 12.sp, color = GraySubtitle)
+                Text("No chat messages contained in evidence.", fontSize = 12.sp, color = funkyColors.mute)
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     for (i in 0 until messagesArr.length()) {
@@ -1469,19 +1518,31 @@ private fun ChatEvidenceCard(evidenceObj: JSONObject, contextType: String) {
                         val sender = msg.optString("sender", "unknown")
                         val text = msg.optString("text").takeIf { it.isNotBlank() && it != "null" } ?: "[${msg.optString("type", "message")}]"
                         val sentAt = msg.optString("sent_at").take(19).replace('T', ' ')
+                        val isReportedSide = sender == "them" || sender.contains("reported", ignoreCase = true)
 
                         Surface(
-                            color = if (sender == "them" || sender.contains("reported", ignoreCase = true)) Color(0xFFFFF2F2) else Color(0xFFF8FAFC),
+                            color = when {
+                                isReportedSide && funkyColors.isDark -> funkyColors.danger.copy(alpha = 0.14f)
+                                isReportedSide -> Color(0xFFFFF2F2)
+                                else -> funkyColors.soft
+                            },
                             shape = RoundedCornerShape(10.dp),
-                            border = BorderStroke(1.dp, if (sender == "them" || sender.contains("reported", ignoreCase = true)) Color(0xFFFECACA) else Color(0xFFE2E8F0)),
+                            border = BorderStroke(
+                                1.dp,
+                                when {
+                                    isReportedSide && funkyColors.isDark -> funkyColors.danger.copy(alpha = 0.35f)
+                                    isReportedSide -> Color(0xFFFECACA)
+                                    else -> funkyColors.line
+                                }
+                            ),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(modifier = Modifier.padding(8.dp)) {
                                 Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                                    Text(sender.uppercase(), fontWeight = FontWeight.Bold, fontSize = 10.5.sp, color = Color(0xFF475569))
-                                    Text(sentAt, fontSize = 10.sp, color = GraySubtitle)
+                                    Text(sender.uppercase(), fontWeight = FontWeight.Bold, fontSize = 10.5.sp, color = funkyColors.mute)
+                                    Text(sentAt, fontSize = 10.sp, color = funkyColors.mute)
                                 }
-                                Text(text, fontSize = 12.5.sp, color = DarkText, modifier = Modifier.padding(top = 2.dp))
+                                Text(text, fontSize = 12.5.sp, color = funkyColors.ink, modifier = Modifier.padding(top = 2.dp))
                             }
                         }
                     }
@@ -1493,14 +1554,15 @@ private fun ChatEvidenceCard(evidenceObj: JSONObject, contextType: String) {
 
 @Composable
 private fun MessageSnapshotCard(snapshotArr: JSONArray, reportedUserId: String?) {
+    val funkyColors = LocalFunkyColors.current
     Card(
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
         shape = RoundedCornerShape(18.dp),
-        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        border = BorderStroke(1.dp, funkyColors.line),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Room Message Snapshot", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = DarkText)
+            Text("Room Message Snapshot", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = funkyColors.ink)
 
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 for (i in 0 until snapshotArr.length()) {
@@ -1513,18 +1575,29 @@ private fun MessageSnapshotCard(snapshotArr: JSONArray, reportedUserId: String?)
                     val isReportedUser = reportedUserId != null && userId.equals(reportedUserId, ignoreCase = true)
 
                     Surface(
-                        color = if (isReportedUser) Color(0xFFFEF2F2) else Color(0xFFF8FAFC),
+                        color = when {
+                            isReportedUser && funkyColors.isDark -> funkyColors.danger.copy(alpha = 0.14f)
+                            isReportedUser -> Color(0xFFFEF2F2)
+                            else -> funkyColors.soft
+                        },
                         shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.dp, if (isReportedUser) Color(0xFFFCA5A5) else Color(0xFFE2E8F0)),
+                        border = BorderStroke(
+                            1.dp,
+                            when {
+                                isReportedUser && funkyColors.isDark -> funkyColors.danger.copy(alpha = 0.4f)
+                                isReportedUser -> Color(0xFFFCA5A5)
+                                else -> funkyColors.line
+                            }
+                        ),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(8.dp)) {
                             Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(senderName, fontWeight = FontWeight.Bold, fontSize = 11.5.sp, color = DarkText)
+                                    Text(senderName, fontWeight = FontWeight.Bold, fontSize = 11.5.sp, color = funkyColors.ink)
                                     if (isReportedUser) {
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Surface(color = Color(0xFFDC2626), shape = RoundedCornerShape(4.dp)) {
+                                        Surface(color = funkyColors.danger, shape = RoundedCornerShape(4.dp)) {
                                             Text(
                                                 "REPORTED USER",
                                                 color = Color.White,
@@ -1535,9 +1608,9 @@ private fun MessageSnapshotCard(snapshotArr: JSONArray, reportedUserId: String?)
                                         }
                                     }
                                 }
-                                Text(createdAt, fontSize = 10.sp, color = GraySubtitle)
+                                Text(createdAt, fontSize = 10.sp, color = funkyColors.mute)
                             }
-                            Text(msgText, fontSize = 12.5.sp, color = DarkText, modifier = Modifier.padding(top = 2.dp))
+                            Text(msgText, fontSize = 12.5.sp, color = funkyColors.ink, modifier = Modifier.padding(top = 2.dp))
                         }
                     }
                 }
@@ -1548,14 +1621,15 @@ private fun MessageSnapshotCard(snapshotArr: JSONArray, reportedUserId: String?)
 
 @Composable
 private fun SpeakerLogCard(speakerLogObj: JSONObject) {
+    val funkyColors = LocalFunkyColors.current
     Card(
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
         shape = RoundedCornerShape(18.dp),
-        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        border = BorderStroke(1.dp, funkyColors.line),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Voice Room Speaker Log", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = DarkText)
+            Text("Voice Room Speaker Log", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = funkyColors.ink)
 
             val repUserObj = speakerLogObj.optJSONObject("reported_user")
             if (repUserObj != null) {
@@ -1564,23 +1638,28 @@ private fun SpeakerLogCard(speakerLogObj: JSONObject) {
                 val micSecs = summary?.optInt("mic_on_seconds") ?: 0
                 val formattedTime = String.format(Locale.US, "%02d:%02d", micSecs / 60, micSecs % 60)
 
-                Surface(color = Color(0xFFFFFBEB), shape = RoundedCornerShape(10.dp), border = BorderStroke(1.dp, Color(0xFFFDE68A)), modifier = Modifier.fillMaxWidth()) {
+                Surface(
+                    color = if (funkyColors.isDark) funkyColors.mango.copy(alpha = 0.14f) else Color(0xFFFFFBEB),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, if (funkyColors.isDark) funkyColors.mango.copy(alpha = 0.4f) else Color(0xFFFDE68A)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     Row(modifier = Modifier.padding(10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Mic Turns: $micTurns", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFFB45309))
-                        Text("Mic Time: $formattedTime", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFFB45309))
+                        Text("Mic Turns: $micTurns", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = if (funkyColors.isDark) funkyColors.mango else Color(0xFFB45309))
+                        Text("Mic Time: $formattedTime", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = if (funkyColors.isDark) funkyColors.mango else Color(0xFFB45309))
                     }
                 }
 
                 val eventsArr = repUserObj.optJSONArray("events")
                 if (eventsArr != null && eventsArr.length() > 0) {
-                    Text("Speaker Timeline", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = GraySubtitle)
+                    Text("Speaker Timeline", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = funkyColors.mute)
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         for (i in 0 until eventsArr.length()) {
                             val ev = eventsArr.optJSONObject(i) ?: continue
                             val atTime = ev.optString("at").take(19).replace('T', ' ')
                             val eventName = ev.optString("event")
                             val role = ev.optString("role")
-                            Text("• $atTime - $eventName ($role)", fontSize = 11.5.sp, color = DarkText)
+                            Text("• $atTime - $eventName ($role)", fontSize = 11.5.sp, color = funkyColors.ink)
                         }
                     }
                 }
@@ -1588,13 +1667,13 @@ private fun SpeakerLogCard(speakerLogObj: JSONObject) {
 
             val participantsArr = speakerLogObj.optJSONArray("participants")
             if (participantsArr != null && participantsArr.length() > 0) {
-                Text("Room Participants", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = GraySubtitle)
+                Text("Room Participants", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = funkyColors.mute)
                 val names = mutableListOf<String>()
                 for (i in 0 until participantsArr.length()) {
                     val p = participantsArr.optJSONObject(i) ?: continue
                     names.add(p.optString("name", "User"))
                 }
-                Text(names.joinToString(", "), fontSize = 11.5.sp, color = Color(0xFF475569))
+                Text(names.joinToString(", "), fontSize = 11.5.sp, color = funkyColors.mute)
             }
         }
     }
@@ -1602,10 +1681,11 @@ private fun SpeakerLogCard(speakerLogObj: JSONObject) {
 
 @Composable
 private fun DeletionLogCard(deletionLogArr: JSONArray) {
+    val funkyColors = LocalFunkyColors.current
     Card(
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
         shape = RoundedCornerShape(18.dp),
-        border = BorderStroke(1.dp, Color(0xFFFCA5A5)),
+        border = BorderStroke(1.dp, funkyColors.danger.copy(alpha = 0.45f)),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1613,14 +1693,14 @@ private fun DeletionLogCard(deletionLogArr: JSONArray) {
                 text = "Messages Deleted by Reporter (${deletionLogArr.length()})",
                 fontWeight = FontWeight.Bold,
                 fontSize = 14.sp,
-                color = Color(0xFFDC2626)
+                color = funkyColors.danger
             )
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 for (i in 0 until deletionLogArr.length()) {
                     val item = deletionLogArr.optJSONObject(i) ?: continue
                     val atTime = item.optString("at").take(19).replace('T', ' ')
                     val msgType = item.optString("type", "message")
-                    Text("• $atTime - Deleted $msgType message", fontSize = 12.sp, color = Color(0xFF7F1D1D))
+                    Text("• $atTime - Deleted $msgType message", fontSize = 12.sp, color = funkyColors.ink)
                 }
             }
         }
@@ -1735,10 +1815,11 @@ private fun ReporterProofScreenshotsSection(
     }
 
     if (!isGenerating && signedUrls.isNotEmpty()) {
+        val funkyColors = LocalFunkyColors.current
         Card(
-            colors = CardDefaults.cardColors(containerColor = Color.White),
+            colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
             shape = RoundedCornerShape(18.dp),
-            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+            border = BorderStroke(1.dp, funkyColors.line),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1746,7 +1827,7 @@ private fun ReporterProofScreenshotsSection(
                     text = "Screenshots from the reporter",
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.5.sp,
-                    color = DarkText
+                    color = funkyColors.ink
                 )
 
                 androidx.compose.foundation.lazy.LazyRow(
@@ -1762,7 +1843,7 @@ private fun ReporterProofScreenshotsSection(
                             modifier = Modifier
                                 .size(width = 140.dp, height = 180.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(12.dp))
+                                .border(1.dp, funkyColors.line, RoundedCornerShape(12.dp))
                                 .clickable { onImageClick(url) }
                         )
                     }
@@ -1779,6 +1860,7 @@ private fun AdminReportSupportChatView(
     onClose: () -> Unit
 ) {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
     val messages by AdminSupportManager.messages.collectAsState()
     val conversations by AdminSupportManager.conversations.collectAsState()
     val isSending by AdminSupportManager.isSending.collectAsState()
@@ -1811,11 +1893,11 @@ private fun AdminReportSupportChatView(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFF9FAFB))
+            .background(funkyColors.bg)
     ) {
         // Top Header
         Surface(
-            color = Color.White,
+            color = funkyColors.surface,
             shadowElevation = 2.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -1830,13 +1912,11 @@ private fun AdminReportSupportChatView(
                     modifier = Modifier
                         .size(36.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFFF3F4F6))
+                        .background(funkyColors.soft)
                 ) {
-                    androidx.compose.material3.Icon(
-                        imageVector = androidx.compose.material.icons.Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Close",
-                        tint = Color(0xFF374151),
-                        modifier = Modifier.size(18.dp)
+                    SoftBackIcon(
+                        size = 18.dp,
+                        color = funkyColors.ink
                     )
                 }
 
@@ -1847,7 +1927,7 @@ private fun AdminReportSupportChatView(
                         text = "Message Reported User",
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp,
-                        color = DarkText
+                        color = funkyColors.ink
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1855,14 +1935,14 @@ private fun AdminReportSupportChatView(
                             modifier = Modifier
                                 .size(7.dp)
                                 .clip(CircleShape)
-                                .background(if (isOpen) Color(0xFF16A34A) else Color(0xFF94A3B8))
+                                .background(if (isOpen) funkyColors.ok else funkyColors.mute)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = statusLine,
                             fontSize = 11.5.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = if (isOpen) Color(0xFF15803D) else Color(0xFF64748B)
+                            color = if (isOpen) funkyColors.ok else funkyColors.mute
                         )
                     }
                 }
@@ -1881,8 +1961,8 @@ private fun AdminReportSupportChatView(
                                 }
                             )
                         },
-                        border = BorderStroke(1.dp, Color(0xFFFECACA)),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626)),
+                        border = BorderStroke(1.dp, funkyColors.danger.copy(alpha = 0.45f)),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = funkyColors.danger),
                         shape = RoundedCornerShape(10.dp),
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                         modifier = Modifier.height(34.dp)
@@ -1904,7 +1984,7 @@ private fun AdminReportSupportChatView(
                     Text(
                         text = "Send an inquiry to open a 1:1 support window with the user.",
                         fontSize = 13.sp,
-                        color = Color(0xFF94A3B8),
+                        color = funkyColors.mute,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(24.dp)
                     )
@@ -1936,14 +2016,14 @@ private fun AdminReportSupportChatView(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Surface(
-                                        color = Color(0xFFE2E8F0),
+                                        color = funkyColors.soft,
                                         shape = RoundedCornerShape(12.dp)
                                     ) {
                                         Text(
                                             text = msgDateHeader,
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF475569),
+                                            color = funkyColors.mute,
                                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
                                         )
                                     }
@@ -1959,21 +2039,21 @@ private fun AdminReportSupportChatView(
                             ) {
                                 Surface(
                                     shape = RoundedCornerShape(14.dp),
-                                    color = if (isAdminMsg) GoldPrimary else Color.White,
-                                    border = BorderStroke(1.dp, if (isAdminMsg) Color(0xFFF59E0B) else Color(0xFFE2E8F0)),
+                                    color = if (isAdminMsg) funkyColors.mango else funkyColors.surface,
+                                    border = BorderStroke(1.dp, if (isAdminMsg) funkyColors.mango.copy(alpha = 0.7f) else funkyColors.line),
                                     modifier = Modifier.widthIn(max = 280.dp)
                                 ) {
                                     Column(modifier = Modifier.padding(12.dp)) {
                                         Text(
                                             text = msg.body,
                                             fontSize = 13.sp,
-                                            color = Color(0xFF0F172A)
+                                            color = if (isAdminMsg) funkyColors.onMango else funkyColors.ink
                                         )
                                         Spacer(modifier = Modifier.height(4.dp))
                                         Text(
                                             text = AdminSupportManager.formatRelativeTime(msg.created_at),
                                             fontSize = 10.sp,
-                                            color = if (isAdminMsg) Color(0xFF451A03) else Color(0xFF94A3B8),
+                                            color = if (isAdminMsg) funkyColors.onMango.copy(alpha = 0.75f) else funkyColors.mute,
                                             modifier = Modifier.align(Alignment.End)
                                         )
                                     }
@@ -1987,9 +2067,9 @@ private fun AdminReportSupportChatView(
 
         // Bottom Input Box
         Surface(
-            color = Color.White,
+            color = funkyColors.surface,
             shadowElevation = 6.dp,
-            border = BorderStroke(1.dp, Color(0xFFE5E7EB))
+            border = BorderStroke(1.dp, funkyColors.line)
         ) {
             Column(
                 modifier = Modifier
@@ -2007,7 +2087,7 @@ private fun AdminReportSupportChatView(
                         text = "Keep chat open:",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF475569)
+                        color = funkyColors.mute
                     )
 
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -2016,8 +2096,9 @@ private fun AdminReportSupportChatView(
                             onClick = { selectedOpenHours = 1 },
                             label = { Text("1 hour", fontSize = 11.5.sp) },
                             colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = GoldPrimary,
-                                selectedLabelColor = Color.Black
+                                selectedContainerColor = funkyColors.mango,
+                                selectedLabelColor = funkyColors.onMango,
+                                labelColor = funkyColors.ink
                             ),
                             shape = RoundedCornerShape(16.dp),
                             modifier = Modifier.height(30.dp)
@@ -2028,8 +2109,9 @@ private fun AdminReportSupportChatView(
                             onClick = { selectedOpenHours = 2 },
                             label = { Text("2 hours (Default)", fontSize = 11.5.sp) },
                             colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = GoldPrimary,
-                                selectedLabelColor = Color.Black
+                                selectedContainerColor = funkyColors.mango,
+                                selectedLabelColor = funkyColors.onMango,
+                                labelColor = funkyColors.ink
                             ),
                             shape = RoundedCornerShape(16.dp),
                             modifier = Modifier.height(30.dp)
@@ -2078,19 +2160,17 @@ private fun AdminReportSupportChatView(
                         modifier = Modifier
                             .size(44.dp)
                             .clip(CircleShape)
-                            .background(if (inputText.isNotBlank() && !isSending) GoldPrimary else Color(0xFFE2E8F0))
+                            .background(if (inputText.isNotBlank() && !isSending) funkyColors.mango else funkyColors.soft)
                     ) {
                         if (isSending) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(16.dp),
-                                color = Color.Black,
+                                color = funkyColors.onMango,
                                 strokeWidth = 2.dp
                             )
                         } else {
-                            androidx.compose.material3.Icon(
-                                imageVector = androidx.compose.material.icons.Icons.AutoMirrored.Filled.Send,
-                                contentDescription = "Send Message",
-                                tint = if (inputText.isNotBlank()) Color.Black else Color(0xFF94A3B8),
+                            FunkySendIcon(
+                                color = if (inputText.isNotBlank()) funkyColors.onMango else funkyColors.mute,
                                 modifier = Modifier.size(18.dp)
                             )
                         }

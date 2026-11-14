@@ -109,10 +109,8 @@ fun FunJokeDialog(
                             .clickable { onDismiss() },
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = "✕",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
+                        SoftCloseIcon(
+                            size = 16.dp,
                             color = Color(0xFF64748B)
                         )
                     }

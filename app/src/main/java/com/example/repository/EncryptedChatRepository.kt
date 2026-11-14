@@ -30,7 +30,7 @@ import java.io.File
 import java.util.UUID
 
 class RecipientNotReadyException(val recipientName: String) : Exception(
-    "$recipientName abhi secure chat ke liye ready nahi hai. This user has not opened the app or registered encryption keys yet."
+    "$recipientName isn't ready for secure chat yet. This user has not opened the app or registered encryption keys yet."
 )
 
 object EncryptedChatRepository {

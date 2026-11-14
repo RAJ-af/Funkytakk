@@ -27,7 +27,7 @@ import com.example.ChatPreferencesManager
 import com.example.repository.EncryptedChatRepository
 import com.example.ui.components.*
 import com.example.ui.screens.home.models.DirectChat
-import com.example.ui.theme.GoldAccent
+import com.example.ui.theme.LocalFunkyColors
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -40,6 +40,7 @@ fun ChatLongPressBottomSheet(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val funkyColors = LocalFunkyColors.current
     val isMuted = ChatPreferencesManager.isChatMuted(chat.id)
     val isPinned = ChatPreferencesManager.isChatPinned(chat.id)
     val isBlocked = ChatPreferencesManager.isUserBlocked(chat.id)
@@ -52,8 +53,8 @@ fun ChatLongPressBottomSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Color.White,
-        dragHandle = { BottomSheetDefaults.DragHandle() },
+        containerColor = funkyColors.surface,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = funkyColors.line) },
         shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)
     ) {
         Column(
@@ -88,17 +89,17 @@ fun ChatLongPressBottomSheet(
                             text = chat.name,
                             fontSize = 17.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = Color.Black,
+                            color = funkyColors.ink,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                         if (isPinned) {
                             Spacer(modifier = Modifier.width(6.dp))
-                            SoftPinIcon(size = 15.dp, color = Color(0xFFD97706))
+                            SoftPinIcon(size = 15.dp, color = funkyColors.mango)
                         }
                         if (isMuted) {
                             Spacer(modifier = Modifier.width(4.dp))
-                            SoftMuteIcon(size = 14.dp, color = Color(0xFF9CA3AF))
+                            SoftMuteIcon(size = 14.dp, color = funkyColors.mute)
                         }
                     }
 
@@ -107,21 +108,21 @@ fun ChatLongPressBottomSheet(
                     Text(
                         text = chat.lastMsg,
                         fontSize = 13.sp,
-                        color = Color(0xFF6B7280),
+                        color = funkyColors.mute,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
             }
 
-            HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
+            HorizontalDivider(color = funkyColors.line, thickness = 1.dp)
 
             Spacer(modifier = Modifier.height(10.dp))
 
             // Action: Pin / Unpin
             ChatCustomActionItem(
-                icon = { SoftPinIcon(size = 20.dp, color = if (isPinned) Color(0xFFD97706) else Color(0xFF4B5563)) },
-                iconBg = if (isPinned) Color(0xFFFEF3C7) else Color(0xFFF3F4F6),
+                icon = { SoftPinIcon(size = 20.dp, color = if (isPinned) funkyColors.mango else funkyColors.mute) },
+                iconBg = if (isPinned) funkyColors.soft else funkyColors.bg,
                 title = if (isPinned) "Unpin from top" else "Pin to top",
                 subtitle = if (isPinned) "Remove from top of chats list" else "Keep this conversation pinned at the top",
                 onClick = {
@@ -135,12 +136,12 @@ fun ChatLongPressBottomSheet(
             ChatCustomActionItem(
                 icon = {
                     if (isMuted) {
-                        SoftVolumeIcon(size = 20.dp, color = Color(0xFF10B981))
+                        SoftVolumeIcon(size = 20.dp, color = funkyColors.ok)
                     } else {
-                        SoftMuteIcon(size = 20.dp, color = Color(0xFF4B5563))
+                        SoftMuteIcon(size = 20.dp, color = funkyColors.mute)
                     }
                 },
-                iconBg = if (isMuted) Color(0xFFD1FAE5) else Color(0xFFF3F4F6),
+                iconBg = if (isMuted) funkyColors.ok.copy(alpha = 0.14f) else funkyColors.bg,
                 title = if (isMuted) "Unmute notifications" else "Mute notifications (Silent)",
                 subtitle = if (isMuted) "Turn on alerts for ${chat.name}" else "Silence message alerts from ${chat.name}",
                 onClick = {
@@ -153,7 +154,7 @@ fun ChatLongPressBottomSheet(
             // Action: Mark as Read / Unread
             ChatCustomActionItem(
                 icon = { SoftMailIcon(size = 20.dp, color = Color(0xFF3B82F6)) },
-                iconBg = Color(0xFFDBEAFE),
+                iconBg = Color(0xFF3B82F6).copy(alpha = 0.14f),
                 title = if (chat.unreadCount > 0) "Mark as read" else "Mark as unread",
                 subtitle = "Toggle unread status badge",
                 onClick = {
@@ -174,8 +175,8 @@ fun ChatLongPressBottomSheet(
 
             // Action: Clear Chat History
             ChatCustomActionItem(
-                icon = { SoftBroomIcon(size = 20.dp, color = Color(0xFF6B7280)) },
-                iconBg = Color(0xFFF3F4F6),
+                icon = { SoftBroomIcon(size = 20.dp, color = funkyColors.mute) },
+                iconBg = funkyColors.bg,
                 title = "Clear chat history",
                 subtitle = "Erase all decrypted messages in this thread",
                 onClick = {
@@ -185,8 +186,8 @@ fun ChatLongPressBottomSheet(
 
             // Action: Delete Chat
             ChatCustomActionItem(
-                icon = { SoftTrashIcon(size = 20.dp, color = Color(0xFFDC2626)) },
-                iconBg = Color(0xFFFEE2E2),
+                icon = { SoftTrashIcon(size = 20.dp, color = funkyColors.danger) },
+                iconBg = funkyColors.danger.copy(alpha = 0.14f),
                 title = "Delete conversation",
                 subtitle = "Remove this chat thread from your list",
                 isDestructive = true,
@@ -198,8 +199,8 @@ fun ChatLongPressBottomSheet(
             // Action: Block / Unblock User
             if (isBlocked) {
                 ChatCustomActionItem(
-                    icon = { SoftShieldIcon(size = 20.dp, color = Color(0xFF059669)) },
-                    iconBg = Color(0xFFD1FAE5),
+                    icon = { SoftShieldIcon(size = 20.dp, color = funkyColors.ok) },
+                    iconBg = funkyColors.ok.copy(alpha = 0.14f),
                     title = "Unblock ${chat.name}",
                     subtitle = "Restore chat messages and voice calls",
                     onClick = {
@@ -210,8 +211,8 @@ fun ChatLongPressBottomSheet(
                 )
             } else {
                 ChatCustomActionItem(
-                    icon = { SoftBlockIcon(size = 20.dp, color = Color(0xFFDC2626)) },
-                    iconBg = Color(0xFFFEE2E2),
+                    icon = { SoftBlockIcon(size = 20.dp, color = funkyColors.danger) },
+                    iconBg = funkyColors.danger.copy(alpha = 0.14f),
                     title = "Block ${chat.name}",
                     subtitle = "Prevent this user from messaging or calling you",
                     isDestructive = true,
@@ -245,9 +246,9 @@ fun ChatLongPressBottomSheet(
                         .clip(RoundedCornerShape(32.dp))
                         .clickable(enabled = false) {},
                     shape = RoundedCornerShape(32.dp),
-                    color = Color.White,
+                    color = funkyColors.surface,
                     shadowElevation = 24.dp,
-                    border = BorderStroke(1.dp, Color(0xFFFEE2E2))
+                    border = BorderStroke(1.dp, funkyColors.danger.copy(alpha = 0.25f))
                 ) {
                     Column(
                         modifier = Modifier
@@ -255,7 +256,7 @@ fun ChatLongPressBottomSheet(
                             .padding(24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        // User Avatar with glowing red ban badge
+                        // User Avatar with red ban badge
                         Box(
                             modifier = Modifier.size(76.dp),
                             contentAlignment = Alignment.Center
@@ -267,7 +268,7 @@ fun ChatLongPressBottomSheet(
                                 modifier = Modifier
                                     .size(72.dp)
                                     .clip(CircleShape)
-                                    .border(2.5.dp, Color(0xFFFECDD3), CircleShape)
+                                    .border(2.5.dp, funkyColors.danger.copy(alpha = 0.4f), CircleShape)
                             )
 
                             Box(
@@ -275,8 +276,8 @@ fun ChatLongPressBottomSheet(
                                     .align(Alignment.BottomEnd)
                                     .size(26.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFFE11D48))
-                                    .border(2.dp, Color.White, CircleShape),
+                                    .background(funkyColors.danger)
+                                    .border(2.dp, funkyColors.surface, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
                                 SoftBlockIcon(size = 14.dp, color = Color.White)
@@ -289,7 +290,7 @@ fun ChatLongPressBottomSheet(
                             text = "Block ${chat.name}?",
                             fontSize = 21.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF111827),
+                            color = funkyColors.ink,
                             textAlign = TextAlign.Center
                         )
 
@@ -299,8 +300,8 @@ fun ChatLongPressBottomSheet(
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(18.dp),
-                            color = Color(0xFFFFF1F2),
-                            border = BorderStroke(1.dp, Color(0xFFFFE4E6))
+                            color = funkyColors.danger.copy(alpha = 0.1f),
+                            border = BorderStroke(1.dp, funkyColors.danger.copy(alpha = 0.22f))
                         ) {
                             Column(
                                 modifier = Modifier
@@ -309,32 +310,32 @@ fun ChatLongPressBottomSheet(
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    SoftBlockIcon(size = 15.dp, color = Color(0xFFE11D48))
+                                    SoftBlockIcon(size = 15.dp, color = funkyColors.danger)
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
                                         text = "Cannot send messages or voice notes",
                                         fontSize = 12.5.sp,
-                                        color = Color(0xFF9F1239),
+                                        color = funkyColors.ink,
                                         fontWeight = FontWeight.Medium
                                     )
                                 }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    SoftMuteIcon(size = 15.dp, color = Color(0xFFE11D48))
+                                    SoftMuteIcon(size = 15.dp, color = funkyColors.danger)
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
                                         text = "Cannot call you or see your online status",
                                         fontSize = 12.5.sp,
-                                        color = Color(0xFF9F1239),
+                                        color = funkyColors.ink,
                                         fontWeight = FontWeight.Medium
                                     )
                                 }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    SoftShieldIcon(size = 15.dp, color = Color(0xFFE11D48))
+                                    SoftShieldIcon(size = 15.dp, color = funkyColors.danger)
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
                                         text = "Hidden from your conversations list",
                                         fontSize = 12.5.sp,
-                                        color = Color(0xFF9F1239),
+                                        color = funkyColors.ink,
                                         fontWeight = FontWeight.Medium
                                     )
                                 }
@@ -344,9 +345,9 @@ fun ChatLongPressBottomSheet(
                         Spacer(modifier = Modifier.height(12.dp))
 
                         Text(
-                            text = "💡 You can unblock this user anytime from 3-dots Menu > Blocked Users.",
+                            text = "Tip: You can unblock this user anytime from 3-dots Menu > Blocked Users.",
                             fontSize = 12.sp,
-                            color = Color(0xFF6B7280),
+                            color = funkyColors.mute,
                             textAlign = TextAlign.Center,
                             lineHeight = 16.sp
                         )
@@ -364,11 +365,11 @@ fun ChatLongPressBottomSheet(
                                     .weight(1f)
                                     .height(48.dp),
                                 shape = RoundedCornerShape(16.dp),
-                                border = BorderStroke(1.dp, Color(0xFFE5E7EB))
+                                border = BorderStroke(1.dp, funkyColors.line)
                             ) {
                                 Text(
                                     text = "Cancel",
-                                    color = Color(0xFF374151),
+                                    color = funkyColors.ink,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 14.sp
                                 )
@@ -391,7 +392,7 @@ fun ChatLongPressBottomSheet(
                                     .weight(1f)
                                     .height(48.dp),
                                 shape = RoundedCornerShape(16.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48))
+                                colors = ButtonDefaults.buttonColors(containerColor = funkyColors.danger)
                             ) {
                                 Text(
                                     text = "Block User",
@@ -407,7 +408,7 @@ fun ChatLongPressBottomSheet(
         }
     }
 
-    // Custom Beautiful Luxury Delete Confirmation Dialog
+    // Custom Delete Confirmation Dialog
     if (showDeleteConfirmDialog) {
         Dialog(
             onDismissRequest = { showDeleteConfirmDialog = false },
@@ -427,8 +428,9 @@ fun ChatLongPressBottomSheet(
                         .clip(RoundedCornerShape(28.dp))
                         .clickable(enabled = false) {},
                     shape = RoundedCornerShape(28.dp),
-                    color = Color.White,
-                    shadowElevation = 16.dp
+                    color = funkyColors.surface,
+                    shadowElevation = 16.dp,
+                    border = BorderStroke(1.dp, funkyColors.line)
                 ) {
                     Column(
                         modifier = Modifier
@@ -440,10 +442,10 @@ fun ChatLongPressBottomSheet(
                             modifier = Modifier
                                 .size(64.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFFFEE2E2)),
+                                .background(funkyColors.danger.copy(alpha = 0.14f)),
                             contentAlignment = Alignment.Center
                         ) {
-                            SoftTrashIcon(size = 32.dp, color = Color(0xFFDC2626))
+                            SoftTrashIcon(size = 32.dp, color = funkyColors.danger)
                         }
 
                         Spacer(modifier = Modifier.height(16.dp))
@@ -452,7 +454,7 @@ fun ChatLongPressBottomSheet(
                             text = "Delete Conversation?",
                             fontSize = 20.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF111827),
+                            color = funkyColors.ink,
                             textAlign = TextAlign.Center
                         )
 
@@ -461,7 +463,7 @@ fun ChatLongPressBottomSheet(
                         Text(
                             text = "Are you sure you want to delete this conversation with ${chat.name}? All local encrypted messages will be removed.",
                             fontSize = 13.5.sp,
-                            color = Color(0xFF6B7280),
+                            color = funkyColors.mute,
                             textAlign = TextAlign.Center,
                             lineHeight = 19.sp
                         )
@@ -478,9 +480,9 @@ fun ChatLongPressBottomSheet(
                                     .weight(1f)
                                     .height(48.dp),
                                 shape = RoundedCornerShape(16.dp),
-                                border = BorderStroke(1.dp, Color(0xFFE5E7EB))
+                                border = BorderStroke(1.dp, funkyColors.line)
                             ) {
-                                Text("Cancel", color = Color(0xFF374151), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("Cancel", color = funkyColors.ink, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             }
 
                             Button(
@@ -498,7 +500,7 @@ fun ChatLongPressBottomSheet(
                                     .weight(1f)
                                     .height(48.dp),
                                 shape = RoundedCornerShape(16.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                                colors = ButtonDefaults.buttonColors(containerColor = funkyColors.danger)
                             ) {
                                 Text("Delete", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
                             }
@@ -509,7 +511,7 @@ fun ChatLongPressBottomSheet(
         }
     }
 
-    // Custom Beautiful Luxury Clear Messages Confirmation Dialog
+    // Custom Clear Messages Confirmation Dialog
     if (showClearConfirmDialog) {
         Dialog(
             onDismissRequest = { showClearConfirmDialog = false },
@@ -529,8 +531,9 @@ fun ChatLongPressBottomSheet(
                         .clip(RoundedCornerShape(28.dp))
                         .clickable(enabled = false) {},
                     shape = RoundedCornerShape(28.dp),
-                    color = Color.White,
-                    shadowElevation = 16.dp
+                    color = funkyColors.surface,
+                    shadowElevation = 16.dp,
+                    border = BorderStroke(1.dp, funkyColors.line)
                 ) {
                     Column(
                         modifier = Modifier
@@ -542,10 +545,10 @@ fun ChatLongPressBottomSheet(
                             modifier = Modifier
                                 .size(64.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFFFEF3C7)),
+                                .background(funkyColors.soft),
                             contentAlignment = Alignment.Center
                         ) {
-                            SoftBroomIcon(size = 32.dp, color = Color(0xFFD97706))
+                            SoftBroomIcon(size = 32.dp, color = funkyColors.mango)
                         }
 
                         Spacer(modifier = Modifier.height(16.dp))
@@ -554,7 +557,7 @@ fun ChatLongPressBottomSheet(
                             text = "Clear Messages?",
                             fontSize = 20.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF111827),
+                            color = funkyColors.ink,
                             textAlign = TextAlign.Center
                         )
 
@@ -563,7 +566,7 @@ fun ChatLongPressBottomSheet(
                         Text(
                             text = "Are you sure you want to clear message history with ${chat.name}? The conversation thread will remain in your list.",
                             fontSize = 13.5.sp,
-                            color = Color(0xFF6B7280),
+                            color = funkyColors.mute,
                             textAlign = TextAlign.Center,
                             lineHeight = 19.sp
                         )
@@ -580,9 +583,9 @@ fun ChatLongPressBottomSheet(
                                     .weight(1f)
                                     .height(48.dp),
                                 shape = RoundedCornerShape(16.dp),
-                                border = BorderStroke(1.dp, Color(0xFFE5E7EB))
+                                border = BorderStroke(1.dp, funkyColors.line)
                             ) {
-                                Text("Cancel", color = Color(0xFF374151), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("Cancel", color = funkyColors.ink, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             }
 
                             Button(
@@ -599,9 +602,9 @@ fun ChatLongPressBottomSheet(
                                     .weight(1f)
                                     .height(48.dp),
                                 shape = RoundedCornerShape(16.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = GoldAccent)
+                                colors = ButtonDefaults.buttonColors(containerColor = funkyColors.mango)
                             ) {
-                                Text("Clear History", color = Color.Black, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+                                Text("Clear History", color = funkyColors.onMango, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
                             }
                         }
                     }
@@ -620,6 +623,7 @@ private fun ChatCustomActionItem(
     isDestructive: Boolean = false,
     onClick: () -> Unit
 ) {
+    val funkyColors = LocalFunkyColors.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -645,12 +649,12 @@ private fun ChatCustomActionItem(
                 text = title,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
-                color = if (isDestructive) Color(0xFFDC2626) else Color(0xFF111827)
+                color = if (isDestructive) funkyColors.danger else funkyColors.ink
             )
             Text(
                 text = subtitle,
                 fontSize = 12.sp,
-                color = Color(0xFF6B7280)
+                color = funkyColors.mute
             )
         }
     }

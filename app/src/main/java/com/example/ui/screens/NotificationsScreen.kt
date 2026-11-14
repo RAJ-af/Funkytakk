@@ -72,8 +72,11 @@ fun NotificationsScreen(
 
     val totalUnread = unreadCountState
 
+    val funkyColors = com.example.ui.theme.LocalFunkyColors.current
+    val isDark = funkyColors.isDark
+
     Scaffold(
-        containerColor = Color(0xFFFCFBF7),
+        containerColor = funkyColors.bg,
         topBar = {
             TopAppBar(
                 title = {
@@ -82,19 +85,19 @@ fun NotificationsScreen(
                             text = "Notifications",
                             fontWeight = FontWeight.ExtraBold,
                             fontSize = 20.sp,
-                            color = Color(0xFF0F172A)
+                            color = funkyColors.ink
                         )
                         if (totalUnread > 0) {
                             Spacer(modifier = Modifier.width(8.dp))
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(12.dp))
-                                    .background(GoldAccent)
+                                    .background(funkyColors.mango)
                                     .padding(horizontal = 8.dp, vertical = 2.dp)
                             ) {
                                 Text(
                                     text = "$totalUnread new",
-                                    color = Color(0xFF0F172A),
+                                    color = funkyColors.onMango,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Black
                                 )
@@ -107,15 +110,16 @@ fun NotificationsScreen(
                         onClick = onBack,
                         modifier = Modifier.testTag("notifications_back_button")
                     ) {
-                        SoftBackIcon(size = 20.dp, color = Color(0xFF0F172A))
+                        SoftBackIcon(size = 20.dp, color = funkyColors.ink)
                     }
                 },
                 actions = {
                     if (totalUnread > 0) {
                         Surface(
                             onClick = { NotificationsManager.markAllAsRead(context) },
-                            color = Color(0xFFF1F5F9),
+                            color = funkyColors.surface,
                             shape = RoundedCornerShape(14.dp),
+                            border = BorderStroke(1.dp, funkyColors.line),
                             modifier = Modifier
                                 .padding(end = 12.dp)
                                 .testTag("notifications_mark_all_read_button")
@@ -124,11 +128,11 @@ fun NotificationsScreen(
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                SoftCheckIcon(size = 12.dp, color = Color(0xFF475569))
+                                SoftCheckIcon(size = 12.dp, color = funkyColors.ink)
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = "Mark all read",
-                                    color = Color(0xFF475569),
+                                    color = funkyColors.ink,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -137,7 +141,7 @@ fun NotificationsScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFFFCFBF7)
+                    containerColor = funkyColors.bg
                 )
             )
         }
@@ -153,8 +157,8 @@ fun NotificationsScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 6.dp),
                 shape = RoundedCornerShape(16.dp),
-                color = Color(0xFFF0FDF4),
-                border = BorderStroke(1.dp, Color(0xFFBBF7D0))
+                color = if (isDark) funkyColors.ok.copy(alpha = 0.14f) else Color(0xFFF0FDF4),
+                border = BorderStroke(1.dp, if (isDark) funkyColors.ok.copy(alpha = 0.35f) else Color(0xFFBBF7D0))
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
@@ -172,12 +176,12 @@ fun NotificationsScreen(
                                 text = "System Push Notifications",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF166534)
+                                color = if (isDark) Color(0xFF6EE7B7) else Color(0xFF166534)
                             )
                             Text(
                                 text = "Get notified even when app is closed",
                                 fontSize = 11.sp,
-                                color = Color(0xFF15803D)
+                                color = if (isDark) funkyColors.mute else Color(0xFF15803D)
                             )
                         }
                     }
@@ -187,7 +191,7 @@ fun NotificationsScreen(
                             android.widget.Toast.makeText(context, "Test push notification sent! Check top status bar.", android.widget.Toast.LENGTH_SHORT).show()
                         },
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF166534),
+                            containerColor = funkyColors.ok,
                             contentColor = Color.White
                         ),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
@@ -216,15 +220,15 @@ fun NotificationsScreen(
                     val isSelected = selectedFilter == category
                     Surface(
                         onClick = { selectedFilter = category },
-                        color = if (isSelected) Color(0xFF0F172A) else Color.White,
+                        color = if (isSelected) funkyColors.mango else funkyColors.surface,
                         shape = RoundedCornerShape(20.dp),
-                        border = BorderStroke(1.dp, if (isSelected) Color(0xFF0F172A) else Color(0xFFE2E8F0))
+                        border = BorderStroke(1.dp, if (isSelected) funkyColors.mango else funkyColors.line)
                     ) {
                         Text(
                             text = category,
                             fontSize = 12.5.sp,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isSelected) Color.White else Color(0xFF64748B),
+                            color = if (isSelected) funkyColors.onMango else funkyColors.mute,
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
                         )
                     }
@@ -249,8 +253,8 @@ fun NotificationsScreen(
                             modifier = Modifier
                                 .size(72.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFFFFFBEB))
-                                .border(1.5.dp, Color(0xFFFDE68A), CircleShape),
+                                .background(if (isDark) funkyColors.mango.copy(alpha = 0.16f) else Color(0xFFFFFBEB))
+                                .border(1.5.dp, if (isDark) funkyColors.mango.copy(alpha = 0.4f) else Color(0xFFFDE68A), CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
                             Soft3DBellNotificationIcon(modifier = Modifier.size(36.dp))
@@ -262,7 +266,7 @@ fun NotificationsScreen(
                             text = "All Caught Up!",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A)
+                            color = funkyColors.ink
                         )
 
                         Spacer(modifier = Modifier.height(6.dp))
@@ -270,7 +274,7 @@ fun NotificationsScreen(
                         Text(
                             text = "You don't have any notifications under '$selectedFilter'. System updates, room invites, and support replies will appear here.",
                             fontSize = 13.sp,
-                            color = Color(0xFF64748B),
+                            color = funkyColors.mute,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                             lineHeight = 18.sp
                         )
@@ -311,7 +315,7 @@ fun NotificationsScreen(
                 if (isLoading && notificationsState.isEmpty()) {
                     CircularProgressIndicator(
                         modifier = Modifier.align(Alignment.Center),
-                        color = GoldAccent
+                        color = funkyColors.mango
                     )
                 }
             }
@@ -364,6 +368,8 @@ private fun NotificationItemCard(
     notification: SupabaseNotification,
     onClick: () -> Unit
 ) {
+    val funkyColors = com.example.ui.theme.LocalFunkyColors.current
+    val isDark = funkyColors.isDark
     val isUnread = !notification.is_read
     val relativeTime = NotificationsManager.formatRelativeTime(notification.created_at)
 
@@ -374,12 +380,12 @@ private fun NotificationItemCard(
             .clickable { onClick() }
             .testTag("notification_item_${notification.id}"),
         shape = RoundedCornerShape(18.dp),
-        color = if (isUnread) Color.White else Color(0xFFF8FAFC),
+        color = if (isUnread) funkyColors.surface else funkyColors.soft,
         border = BorderStroke(
             1.dp,
-            if (isUnread) Color(0xFFFDE68A) else Color(0xFFE2E8F0)
+            if (isUnread) funkyColors.mango.copy(alpha = 0.55f) else funkyColors.line
         ),
-        shadowElevation = if (isUnread) 1.dp else 0.dp
+        shadowElevation = if (isUnread && !isDark) 1.dp else 0.dp
     ) {
         Row(
             modifier = Modifier
@@ -394,19 +400,19 @@ private fun NotificationItemCard(
                     .clip(RoundedCornerShape(14.dp))
                     .background(
                         when (notification.type?.lowercase()) {
-                            "staff_report" -> Color(0xFFFEF3C7)
-                            "support", "support_message", "support_reply" -> Color(0xFFECFDF5)
-                            "moderation", "warning", "suspend", "mute" -> Color(0xFFFEF2F2)
-                            "room", "room_invite" -> Color(0xFFEFF6FF)
-                            else -> Color(0xFFFFFBEB)
+                            "staff_report" -> if (isDark) funkyColors.mango.copy(alpha = 0.18f) else Color(0xFFFEF3C7)
+                            "support", "support_message", "support_reply" -> if (isDark) funkyColors.ok.copy(alpha = 0.18f) else Color(0xFFECFDF5)
+                            "moderation", "warning", "suspend", "mute" -> if (isDark) funkyColors.danger.copy(alpha = 0.18f) else Color(0xFFFEF2F2)
+                            "room", "room_invite", "group_invite", "group_join_request" -> if (isDark) Color(0xFF3B82F6).copy(alpha = 0.18f) else Color(0xFFEFF6FF)
+                            else -> if (isDark) funkyColors.mango.copy(alpha = 0.16f) else Color(0xFFFFFBEB)
                         }
                     ),
                 contentAlignment = Alignment.Center
             ) {
                 when (notification.type?.lowercase()) {
-                    "staff_report" -> SoftShieldIcon(size = 20.dp, color = Color(0xFFD97706))
-                    "support", "support_message", "support_reply" -> SoftHeadsetIcon(size = 20.dp, color = Color(0xFF10B981))
-                    "moderation", "warning", "suspend", "mute" -> SoftShieldIcon(size = 20.dp, color = Color(0xFFEF4444))
+                    "staff_report" -> SoftShieldIcon(size = 20.dp, color = funkyColors.mango)
+                    "support", "support_message", "support_reply" -> SoftHeadsetIcon(size = 20.dp, color = funkyColors.ok)
+                    "moderation", "warning", "suspend", "mute" -> SoftShieldIcon(size = 20.dp, color = funkyColors.danger)
                     "room", "room_invite", "group_invite", "group_join_request" -> SoftGroupIcon(size = 20.dp, color = Color(0xFF3B82F6))
                     else -> Soft3DBellNotificationIcon(modifier = Modifier.size(24.dp))
                 }
@@ -425,7 +431,7 @@ private fun NotificationItemCard(
                         text = notification.title ?: "Notification",
                         fontSize = 14.5.sp,
                         fontWeight = if (isUnread) FontWeight.Bold else FontWeight.SemiBold,
-                        color = Color(0xFF0F172A),
+                        color = funkyColors.ink,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
@@ -436,7 +442,7 @@ private fun NotificationItemCard(
                     Text(
                         text = relativeTime,
                         fontSize = 11.sp,
-                        color = Color(0xFF94A3B8),
+                        color = funkyColors.mute,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -446,7 +452,7 @@ private fun NotificationItemCard(
                 Text(
                     text = notification.message ?: "",
                     fontSize = 13.sp,
-                    color = if (isUnread) Color(0xFF334155) else Color(0xFF64748B),
+                    color = if (isUnread) funkyColors.ink.copy(alpha = 0.85f) else funkyColors.mute,
                     lineHeight = 18.sp
                 )
 
@@ -455,7 +461,11 @@ private fun NotificationItemCard(
                     val isStaffReport = notification.type?.lowercase() == "staff_report"
                     Spacer(modifier = Modifier.height(8.dp))
                     Surface(
-                        color = if (isStaffReport) Color(0xFFEFF6FF) else Color(0xFFFEF3C7),
+                        color = if (isStaffReport) {
+                            if (isDark) Color(0xFF3B82F6).copy(alpha = 0.18f) else Color(0xFFEFF6FF)
+                        } else {
+                            if (isDark) funkyColors.mango.copy(alpha = 0.18f) else Color(0xFFFEF3C7)
+                        },
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Row(
@@ -463,22 +473,22 @@ private fun NotificationItemCard(
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             if (isStaffReport) {
-                                SoftShieldIcon(size = 12.dp, color = Color(0xFF2563EB))
+                                SoftShieldIcon(size = 12.dp, color = if (isDark) Color(0xFF60A5FA) else Color(0xFF2563EB))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = "Open Incident Report",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF2563EB)
+                                    color = if (isDark) Color(0xFF93C5FD) else Color(0xFF2563EB)
                                 )
                             } else {
-                                SoftChatBubbleIcon(size = 12.dp, color = Color(0xFF92400E))
+                                SoftChatBubbleIcon(size = 12.dp, color = if (isDark) funkyColors.mango else Color(0xFF92400E))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = "View Support Thread",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF92400E)
+                                    color = if (isDark) funkyColors.mango else Color(0xFF92400E)
                                 )
                             }
                         }
@@ -493,7 +503,7 @@ private fun NotificationItemCard(
                     modifier = Modifier
                         .size(8.dp)
                         .clip(CircleShape)
-                        .background(GoldAccent)
+                        .background(funkyColors.mango)
                 )
             }
         }

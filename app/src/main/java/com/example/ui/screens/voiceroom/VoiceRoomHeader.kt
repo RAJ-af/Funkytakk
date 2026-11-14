@@ -6,11 +6,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -21,7 +16,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.components.FunkyVerticalMoreIcon
 import com.example.ui.components.Soft3DReportShield
+import com.example.ui.components.SoftBackIcon
+import com.example.ui.components.SoftShareIcon
 
 @Composable
 fun VoiceRoomHeader(
@@ -58,11 +56,9 @@ fun VoiceRoomHeader(
                     .clickable { onBack() },
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                    contentDescription = "Back",
-                    tint = contentColor,
-                    modifier = Modifier.size(22.dp)
+                SoftBackIcon(
+                    size = 20.dp,
+                    color = contentColor
                 )
             }
 
@@ -116,11 +112,9 @@ fun VoiceRoomHeader(
                     .clickable { onShare() },
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.Share,
-                    contentDescription = "Share",
-                    tint = contentColor,
-                    modifier = Modifier.size(18.dp)
+                SoftShareIcon(
+                    size = 18.dp,
+                    color = contentColor
                 )
             }
 
@@ -147,10 +141,8 @@ fun VoiceRoomHeader(
                     .clickable { onOpenMenu() },
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.MoreVert,
-                    contentDescription = "Menu",
-                    tint = contentColor,
+                FunkyVerticalMoreIcon(
+                    color = contentColor,
                     modifier = Modifier.size(20.dp)
                 )
             }

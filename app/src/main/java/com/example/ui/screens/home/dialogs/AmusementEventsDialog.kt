@@ -8,13 +8,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
-import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.EventBusy
-import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material3.*
+import androidx.compose.ui.res.painterResource
+import com.example.R
+import com.example.ui.components.SoftHeadsetIcon
+import com.example.ui.theme.LocalFunkyColors
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -105,6 +103,9 @@ fun AmusementEventsDialog(
     onSelectEvent: (SupabaseEvent) -> Unit,
     onJoinEventDirectly: (SupabaseEvent) -> Unit
 ) {
+    val funkyColors = LocalFunkyColors.current
+    val isDark = funkyColors.isDark
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -112,7 +113,7 @@ fun AmusementEventsDialog(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.6f))
+                .background(Color.Black.copy(alpha = if (isDark) 0.72f else 0.6f))
                 .clickable { onDismiss() },
             contentAlignment = Alignment.BottomCenter
         ) {
@@ -121,7 +122,7 @@ fun AmusementEventsDialog(
                     .fillMaxWidth()
                     .clickable(enabled = false) {},
                 shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
                 elevation = CardDefaults.cardElevation(defaultElevation = 16.dp)
             ) {
                 Column(
@@ -136,7 +137,7 @@ fun AmusementEventsDialog(
                             .width(44.dp)
                             .height(4.dp)
                             .clip(RoundedCornerShape(100.dp))
-                            .background(Color(0xFFE5E7EB))
+                            .background(funkyColors.line)
                             .align(Alignment.CenterHorizontally)
                     )
 
@@ -150,16 +151,16 @@ fun AmusementEventsDialog(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Funky Events 🎉",
+                                text = "Funky Events",
                                 fontSize = 24.sp,
                                 fontWeight = FontWeight.Black,
-                                color = Color(0xFF111827)
+                                color = funkyColors.ink
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = "Special language events, mega rooms & live workshops",
                                 fontSize = 13.sp,
-                                color = Color(0xFF6B7280),
+                                color = funkyColors.mute,
                                 fontWeight = FontWeight.Medium
                             )
                         }
@@ -168,13 +169,13 @@ fun AmusementEventsDialog(
                             onClick = onDismiss,
                             modifier = Modifier
                                 .size(36.dp)
-                                .background(Color(0xFFF3F4F6), CircleShape)
+                                .background(funkyColors.soft, CircleShape)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Close,
+                                painter = painterResource(id = R.drawable.ic_close),
                                 contentDescription = "Close",
-                                tint = Color(0xFF4B5563),
-                                modifier = Modifier.size(18.dp)
+                                tint = funkyColors.ink,
+                                modifier = Modifier.size(16.dp)
                             )
                         }
                     }
@@ -195,8 +196,10 @@ fun AmusementEventsDialog(
                                     .fillMaxWidth()
                                     .padding(horizontal = 12.dp),
                                 shape = RoundedCornerShape(24.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFBEB)),
-                                border = BorderStroke(1.dp, Color(0xFFFDE68A))
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isDark) funkyColors.soft else Color(0xFFFFFBEB)
+                                ),
+                                border = BorderStroke(1.dp, if (isDark) funkyColors.line else Color(0xFFFDE68A))
                             ) {
                                 Column(
                                     modifier = Modifier
@@ -207,14 +210,14 @@ fun AmusementEventsDialog(
                                     Box(
                                         modifier = Modifier
                                             .size(72.dp)
-                                            .background(Color(0xFFFEF3C7), CircleShape),
+                                            .background(funkyColors.mango.copy(alpha = 0.2f), CircleShape),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Default.EventBusy,
+                                            painter = painterResource(id = R.drawable.ic_sparkle),
                                             contentDescription = null,
-                                            tint = Color(0xFFD97706),
-                                            modifier = Modifier.size(36.dp)
+                                            tint = funkyColors.mango,
+                                            modifier = Modifier.size(34.dp)
                                         )
                                     }
 
@@ -224,7 +227,7 @@ fun AmusementEventsDialog(
                                         text = "No Upcoming Events",
                                         fontSize = 18.sp,
                                         fontWeight = FontWeight.ExtraBold,
-                                        color = Color(0xFF1F2937)
+                                        color = funkyColors.ink
                                     )
 
                                     Spacer(modifier = Modifier.height(8.dp))
@@ -232,7 +235,7 @@ fun AmusementEventsDialog(
                                     Text(
                                         text = "No upcoming events right now — check back soon!",
                                         fontSize = 13.sp,
-                                        color = Color(0xFF6B7280),
+                                        color = funkyColors.mute,
                                         textAlign = TextAlign.Center,
                                         lineHeight = 18.sp
                                     )
@@ -241,7 +244,7 @@ fun AmusementEventsDialog(
 
                                     Button(
                                         onClick = onDismiss,
-                                        colors = ButtonDefaults.buttonColors(containerColor = GoldAccent),
+                                        colors = ButtonDefaults.buttonColors(containerColor = funkyColors.mango),
                                         shape = RoundedCornerShape(100.dp),
                                         modifier = Modifier.height(42.dp)
                                     ) {
@@ -249,7 +252,7 @@ fun AmusementEventsDialog(
                                             text = "Explore Voice Rooms",
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 13.sp,
-                                            color = Color.Black
+                                            color = funkyColors.onMango
                                         )
                                     }
                                 }
@@ -273,9 +276,11 @@ fun AmusementEventsDialog(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable { onSelectEvent(event) },
-                                    colors = CardDefaults.cardColors(containerColor = palette.lightContainer),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (isDark) funkyColors.soft else palette.lightContainer
+                                    ),
                                     shape = RoundedCornerShape(22.dp),
-                                    border = BorderStroke(1.dp, palette.darkColor.copy(alpha = 0.2f))
+                                    border = BorderStroke(1.dp, palette.darkColor.copy(alpha = if (isDark) 0.35f else 0.2f))
                                 ) {
                                     Column {
                                         // Event Banner Image with Scrim & Tag
@@ -320,7 +325,7 @@ fun AmusementEventsDialog(
                                                     .align(Alignment.TopEnd)
                                                     .padding(12.dp),
                                                 shape = RoundedCornerShape(100.dp),
-                                                color = Color.White.copy(alpha = 0.95f),
+                                                color = funkyColors.surface.copy(alpha = 0.95f),
                                                 shadowElevation = 2.dp
                                             ) {
                                                 Text(
@@ -342,7 +347,7 @@ fun AmusementEventsDialog(
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 Icon(
-                                                    imageVector = Icons.Default.CalendarMonth,
+                                                    painter = painterResource(id = R.drawable.ic_ring),
                                                     contentDescription = null,
                                                     tint = palette.darkColor,
                                                     modifier = Modifier.size(14.dp)
@@ -362,7 +367,7 @@ fun AmusementEventsDialog(
                                             // Title
                                             Text(
                                                 text = event.title,
-                                                color = Color(0xFF111827),
+                                                color = funkyColors.ink,
                                                 fontWeight = FontWeight.Black,
                                                 fontSize = 18.sp,
                                                 lineHeight = 22.sp
@@ -373,7 +378,7 @@ fun AmusementEventsDialog(
                                                 Spacer(modifier = Modifier.height(6.dp))
                                                 Text(
                                                     text = event.description,
-                                                    color = Color(0xFF4B5563),
+                                                    color = funkyColors.mute,
                                                     fontSize = 13.sp,
                                                     lineHeight = 18.sp,
                                                     maxLines = 2,
@@ -392,7 +397,7 @@ fun AmusementEventsDialog(
                                                 Text(
                                                     text = "Tap to view details",
                                                     fontSize = 12.sp,
-                                                    color = Color(0xFF6B7280),
+                                                    color = funkyColors.mute,
                                                     fontWeight = FontWeight.Medium
                                                 )
 
@@ -401,36 +406,34 @@ fun AmusementEventsDialog(
                                                         onClick = { onJoinEventDirectly(event) },
                                                         shape = RoundedCornerShape(100.dp),
                                                         colors = ButtonDefaults.buttonColors(
-                                                            containerColor = GoldAccent
+                                                            containerColor = funkyColors.mango
                                                         ),
                                                         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                                                         modifier = Modifier.height(36.dp)
                                                     ) {
                                                         if (hasRoom) {
-                                                            Icon(
-                                                                imageVector = Icons.Default.Headphones,
-                                                                contentDescription = null,
-                                                                tint = Color.Black,
-                                                                modifier = Modifier.size(14.dp)
+                                                            SoftHeadsetIcon(
+                                                                size = 14.dp,
+                                                                color = funkyColors.onMango
                                                             )
                                                             Spacer(modifier = Modifier.width(6.dp))
                                                             Text(
                                                                 text = "Join Room",
-                                                                color = Color.Black,
+                                                                color = funkyColors.onMango,
                                                                 fontWeight = FontWeight.Bold,
                                                                 fontSize = 12.sp
                                                             )
                                                         } else {
                                                             Icon(
-                                                                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                                                painter = painterResource(id = R.drawable.ic_arrow_right),
                                                                 contentDescription = null,
-                                                                tint = Color.Black,
+                                                                tint = funkyColors.onMango,
                                                                 modifier = Modifier.size(14.dp)
                                                             )
                                                             Spacer(modifier = Modifier.width(6.dp))
                                                             Text(
                                                                 text = "Open Link",
-                                                                color = Color.Black,
+                                                                color = funkyColors.onMango,
                                                                 fontWeight = FontWeight.Bold,
                                                                 fontSize = 12.sp
                                                             )

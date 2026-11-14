@@ -2,23 +2,29 @@ package com.example.ui.screens.profile
 
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.HourglassEmpty
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.AuthViewModel
-import com.example.DeletionStatusResponse
 import com.example.DeletionStatusState
+import com.example.ui.components.SoftWarningIcon
+import com.example.ui.theme.LocalFunkyColors
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -29,6 +35,7 @@ fun AccountDeletionGateScreen(
     onLogout: () -> Unit
 ) {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
     var isCancelling by remember { mutableStateOf(false) }
 
     // Intercept back button to log out instead of bypassing gate
@@ -37,7 +44,7 @@ fun AccountDeletionGateScreen(
     }
 
     Scaffold(
-        containerColor = Color(0xFFFFFDF5)
+        containerColor = funkyColors.bg
     ) { paddingValues ->
         Box(
             modifier = Modifier
@@ -77,10 +84,8 @@ fun AccountDeletionGateScreen(
                         verticalArrangement = Arrangement.Center,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.HourglassEmpty,
-                            contentDescription = "Pending Deletion",
-                            tint = Color(0xFFF59E0B),
+                        PendingHourglassGraphic(
+                            color = funkyColors.mango,
                             modifier = Modifier.size(68.dp)
                         )
 
@@ -90,8 +95,8 @@ fun AccountDeletionGateScreen(
                             text = if (canCancel) "Your account is scheduled for deletion" else "Your account is being deleted",
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            color = funkyColors.ink,
+                            textAlign = TextAlign.Center
                         )
 
                         Spacer(modifier = Modifier.height(8.dp))
@@ -101,7 +106,7 @@ fun AccountDeletionGateScreen(
                                 text = "Receipt: ${info.receipt_id}",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = Color(0xFF64748B)
+                                color = funkyColors.mute
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                         }
@@ -113,8 +118,8 @@ fun AccountDeletionGateScreen(
                                 "Your account deletion is currently being processed by the system. All data and login access are being permanently wiped."
                             },
                             fontSize = 13.sp,
-                            color = Color(0xFF475569),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            color = funkyColors.mute,
+                            textAlign = TextAlign.Center,
                             lineHeight = 18.sp
                         )
 
@@ -133,7 +138,7 @@ fun AccountDeletionGateScreen(
                                 },
                                 enabled = !isCancelling,
                                 shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
+                                colors = ButtonDefaults.buttonColors(containerColor = funkyColors.ok),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(50.dp)
@@ -151,11 +156,13 @@ fun AccountDeletionGateScreen(
                         OutlinedButton(
                             onClick = onLogout,
                             shape = RoundedCornerShape(14.dp),
+                            border = BorderStroke(1.dp, funkyColors.line),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = funkyColors.ink),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(50.dp)
                         ) {
-                            Text("Log out", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF475569))
+                            Text("Log out", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = funkyColors.ink)
                         }
                     }
                 }
@@ -165,11 +172,9 @@ fun AccountDeletionGateScreen(
                         verticalArrangement = Arrangement.Center,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Warning,
-                            contentDescription = "Error",
-                            tint = Color(0xFFDC2626),
-                            modifier = Modifier.size(68.dp)
+                        SoftWarningIcon(
+                            color = funkyColors.danger,
+                            size = 64.dp
                         )
 
                         Spacer(modifier = Modifier.height(18.dp))
@@ -178,8 +183,8 @@ fun AccountDeletionGateScreen(
                             text = "Unable to verify account status",
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            color = funkyColors.ink,
+                            textAlign = TextAlign.Center
                         )
 
                         Spacer(modifier = Modifier.height(8.dp))
@@ -187,8 +192,8 @@ fun AccountDeletionGateScreen(
                         Text(
                             text = state.error.ifBlank { "Could not connect to verify account deletion state. Please check your network and retry." },
                             fontSize = 13.sp,
-                            color = Color(0xFF64748B),
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            color = funkyColors.mute,
+                            textAlign = TextAlign.Center,
                             lineHeight = 18.sp
                         )
 
@@ -199,12 +204,15 @@ fun AccountDeletionGateScreen(
                                 authViewModel.checkDeletionStatus(context)
                             },
                             shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F172A)),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = funkyColors.mango,
+                                contentColor = funkyColors.onMango
+                            ),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(50.dp)
                         ) {
-                            Text("Retry", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            Text("Retry", color = funkyColors.onMango, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                         }
 
                         Spacer(modifier = Modifier.height(12.dp))
@@ -212,18 +220,47 @@ fun AccountDeletionGateScreen(
                         OutlinedButton(
                             onClick = onLogout,
                             shape = RoundedCornerShape(14.dp),
+                            border = BorderStroke(1.dp, funkyColors.line),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = funkyColors.ink),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(50.dp)
                         ) {
-                            Text("Log out", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF475569))
+                            Text("Log out", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = funkyColors.ink)
                         }
                     }
                 }
                 else -> {
-                    CircularProgressIndicator(color = Color(0xFFF59E0B))
+                    CircularProgressIndicator(color = funkyColors.mango)
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun PendingHourglassGraphic(
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val sw = w * 0.08f
+        drawLine(color, Offset(w * 0.24f, h * 0.14f), Offset(w * 0.76f, h * 0.14f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(w * 0.24f, h * 0.86f), Offset(w * 0.76f, h * 0.86f), strokeWidth = sw, cap = StrokeCap.Round)
+        val glass = Path().apply {
+            moveTo(w * 0.30f, h * 0.16f)
+            lineTo(w * 0.30f, h * 0.34f)
+            lineTo(w * 0.50f, h * 0.50f)
+            lineTo(w * 0.70f, h * 0.34f)
+            lineTo(w * 0.70f, h * 0.16f)
+            moveTo(w * 0.30f, h * 0.84f)
+            lineTo(w * 0.30f, h * 0.66f)
+            lineTo(w * 0.50f, h * 0.50f)
+            lineTo(w * 0.70f, h * 0.66f)
+            lineTo(w * 0.70f, h * 0.84f)
+        }
+        drawPath(glass, color = color, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
 }

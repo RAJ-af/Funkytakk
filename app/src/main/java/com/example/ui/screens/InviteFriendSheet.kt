@@ -1,21 +1,12 @@
 package com.example.ui.screens
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Face
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -28,12 +19,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
 import com.example.ui.components.PresenceAvatar
+import com.example.ui.theme.LocalFunkyColors
 import com.example.util.RoomShareHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -50,8 +44,10 @@ fun InviteFriendBottomSheetContent(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val textColor = if (isDarkMode) Color.White else Color.Black
-    val bgColors = if (isDarkMode) Color(0xFF1F2937) else Color(0xFFF3F4F6)
+    val funkyColors = LocalFunkyColors.current
+    val textColor = funkyColors.ink
+    val subColor = funkyColors.mute
+    val chipBg = funkyColors.soft
 
     var isLoading by remember { mutableStateOf(true) }
     var invitableUsers by remember { mutableStateOf<List<com.example.InvitableUserResponse>>(emptyList()) }
@@ -65,22 +61,16 @@ fun InviteFriendBottomSheetContent(
             errorMessage = null
             try {
                 val token = com.example.SupabaseSessionManager.getBearerToken(context)
-                android.util.Log.d("InviteFriend", "Calling list_invitable_following for roomId=$roomId")
                 val res = com.example.SupabaseClient.api.listInvitableFollowing(
                     auth = token,
                     body = mapOf("p_room_id" to roomId)
                 )
                 if (res.isSuccessful && res.body() != null) {
-                    val users = res.body() ?: emptyList()
-                    android.util.Log.d("InviteFriend", "list_invitable_following SUCCESS: received ${users.size} followed users")
-                    invitableUsers = users
+                    invitableUsers = res.body() ?: emptyList()
                 } else {
-                    val err = res.errorBody()?.string() ?: res.message()
-                    android.util.Log.d("InviteFriend", "list_invitable_following ERROR code=${res.code()}: $err")
                     errorMessage = "Could not load followed friends"
                 }
             } catch (e: Exception) {
-                android.util.Log.d("InviteFriend", "list_invitable_following EXCEPTION: ${e.message}")
                 errorMessage = e.message ?: "Failed to connect"
             } finally {
                 isLoading = false
@@ -94,8 +84,9 @@ fun InviteFriendBottomSheetContent(
         modifier = Modifier
             .fillMaxWidth()
             .fillMaxHeight(0.85f)
+            .background(funkyColors.bg)
             .navigationBarsPadding()
-            .padding(horizontal = 20.dp, vertical = 8.dp)
+            .padding(horizontal = 20.dp, vertical = 12.dp)
             .padding(bottom = 16.dp)
     ) {
         // Header Row
@@ -107,17 +98,23 @@ fun InviteFriendBottomSheetContent(
             Text(
                 text = "Invite Friend",
                 fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.ExtraBold,
                 color = textColor
             )
             Box(
                 modifier = Modifier
                     .size(36.dp)
-                    .background(bgColors, CircleShape)
+                    .clip(CircleShape)
+                    .background(chipBg)
                     .clickable { onDismiss() },
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Default.Close, contentDescription = "Close", tint = textColor, modifier = Modifier.size(18.dp))
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_close),
+                    contentDescription = "Close",
+                    tint = textColor,
+                    modifier = Modifier.size(18.dp)
+                )
             }
         }
 
@@ -129,16 +126,16 @@ fun InviteFriendBottomSheetContent(
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
             val platforms = listOf(
-                "Copy Link" to Icons.Default.Share,
-                "WhatsApp" to Icons.Default.Add,
-                "Facebook" to Icons.Default.Face,
-                "More" to Icons.Default.MoreVert
+                Triple("Copy Link", R.drawable.ic_copy, Color(0xFF0EA5E9)),
+                Triple("WhatsApp", R.drawable.ic_share, Color(0xFF22B573)),
+                Triple("Discover", R.drawable.ic_discover, Color(0xFFF59E0B)),
+                Triple("More", R.drawable.ic_more_vert, funkyColors.ink)
             )
-            platforms.forEach { (name, icon) ->
+            platforms.forEach { (name, iconRes, iconTint) ->
                 val testTag = when (name) {
                     "Copy Link" -> "share_copy_link_button"
                     "WhatsApp" -> "share_whatsapp_button"
-                    "Facebook" -> "share_facebook_button"
+                    "Discover" -> "share_facebook_button"
                     else -> "share_more_button"
                 }
                 Column(
@@ -155,9 +152,9 @@ fun InviteFriendBottomSheetContent(
                                     RoomShareHelper.shareToWhatsApp(context, roomName, roomId, inviteLink)
                                     onDismiss()
                                 }
-                                "Facebook" -> {
-                                    RoomShareHelper.shareToFacebook(context, roomName, roomId, inviteLink)
+                                "Discover" -> {
                                     onDismiss()
+                                    onDiscoverPeople?.invoke()
                                 }
                                 "More" -> {
                                     RoomShareHelper.shareMore(context, roomName, roomId, inviteLink)
@@ -170,13 +167,19 @@ fun InviteFriendBottomSheetContent(
                     Box(
                         modifier = Modifier
                             .size(52.dp)
-                            .background(bgColors, CircleShape),
+                            .clip(CircleShape)
+                            .background(chipBg),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(imageVector = icon, contentDescription = name, tint = textColor, modifier = Modifier.size(24.dp))
+                        Icon(
+                            painter = painterResource(id = iconRes),
+                            contentDescription = name,
+                            tint = iconTint,
+                            modifier = Modifier.size(22.dp)
+                        )
                     }
                     Spacer(modifier = Modifier.height(6.dp))
-                    Text(text = name, fontSize = 12.sp, color = if (isDarkMode) Color.White.copy(alpha = 0.7f) else Color.Gray)
+                    Text(text = name, fontSize = 12.sp, color = subColor, fontWeight = FontWeight.Medium)
                 }
             }
         }
@@ -192,7 +195,6 @@ fun InviteFriendBottomSheetContent(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Content Area: Loading / Error / Empty / LazyList
         when {
             isLoading -> {
                 Box(
@@ -202,12 +204,12 @@ fun InviteFriendBottomSheetContent(
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(color = Color(0xFFFFB800), modifier = Modifier.size(36.dp))
+                        CircularProgressIndicator(color = funkyColors.mango, modifier = Modifier.size(36.dp))
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
                             text = "Loading followed friends...",
                             fontSize = 13.sp,
-                            color = if (isDarkMode) Color.White.copy(alpha = 0.6f) else Color.Gray
+                            color = subColor
                         )
                     }
                 }
@@ -235,18 +237,23 @@ fun InviteFriendBottomSheetContent(
                         Text(
                             text = errorMessage ?: "Unknown error occurred",
                             fontSize = 12.sp,
-                            color = Color.Red.copy(alpha = 0.8f),
+                            color = funkyColors.danger,
                             textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Button(
                             onClick = { reloadTrigger++ },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB800)),
+                            colors = ButtonDefaults.buttonColors(containerColor = funkyColors.mango, contentColor = funkyColors.onMango),
                             shape = RoundedCornerShape(20.dp)
                         ) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Retry", tint = Color.Black)
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_refresh),
+                                contentDescription = "Retry",
+                                tint = funkyColors.onMango,
+                                modifier = Modifier.size(16.dp)
+                            )
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Retry", color = Color.Black, fontWeight = FontWeight.Bold)
+                            Text("Retry", color = funkyColors.onMango, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -264,9 +271,9 @@ fun InviteFriendBottomSheetContent(
                         modifier = Modifier.padding(horizontal = 24.dp)
                     ) {
                         Text(
-                            text = "आप अभी किसी को follow नहीं करते। Invite करने के लिए पहले लोगों को follow करें।",
+                            text = "You are not following anyone yet. Follow people first to invite them here.",
                             fontSize = 14.sp,
-                            color = if (isDarkMode) Color.White.copy(alpha = 0.8f) else Color(0xFF374151),
+                            color = subColor,
                             textAlign = TextAlign.Center,
                             lineHeight = 20.sp
                         )
@@ -276,15 +283,20 @@ fun InviteFriendBottomSheetContent(
                                 onDismiss()
                                 onDiscoverPeople?.invoke()
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB800)),
+                            colors = ButtonDefaults.buttonColors(containerColor = funkyColors.mango, contentColor = funkyColors.onMango),
                             shape = RoundedCornerShape(20.dp),
                             contentPadding = PaddingValues(horizontal = 24.dp, vertical = 10.dp)
                         ) {
-                            Icon(Icons.Default.Search, contentDescription = "Discover", tint = Color.Black)
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_search),
+                                contentDescription = "Discover",
+                                tint = funkyColors.onMango,
+                                modifier = Modifier.size(18.dp)
+                            )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Discover",
-                                color = Color.Black,
+                                text = "Discover People",
+                                color = funkyColors.onMango,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -324,7 +336,8 @@ fun InviteFriendBottomSheetContent(
                                     size = 46.dp,
                                     isSpeaking = false,
                                     isOnline = user.is_online,
-                                    countryCode = flagCode
+                                    countryCode = flagCode,
+                                    showFlagBadge = true
                                 )
 
                                 Spacer(modifier = Modifier.width(14.dp))
@@ -342,7 +355,7 @@ fun InviteFriendBottomSheetContent(
                                     Text(
                                         text = if (isInRoom) "In room" else if (user.is_online) "Online" else "Offline",
                                         fontSize = 12.sp,
-                                        color = if (isInRoom) Color(0xFF3B82F6) else if (user.is_online) Color(0xFF10B981) else Color.Gray
+                                        color = if (isInRoom) Color(0xFF3B82F6) else if (user.is_online) funkyColors.ok else subColor
                                     )
                                 }
                             }
@@ -373,7 +386,6 @@ fun InviteFriendBottomSheetContent(
                                                     }
                                                 } else {
                                                     val errBody = res.errorBody()?.string() ?: res.message()
-                                                    android.util.Log.d("InviteFriend", "send_room_invite ERROR for user ${user.user_id}: $errBody")
                                                     val msg = when {
                                                         errBody.contains("already_invited") -> "Already invited, try again in a minute"
                                                         errBody.contains("not_following") -> "You can only invite people you follow"
@@ -398,8 +410,8 @@ fun InviteFriendBottomSheetContent(
                                 },
                                 enabled = !isButtonDisabled,
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isButtonDisabled) bgColors else Color(0xFFFFB800),
-                                    disabledContainerColor = bgColors
+                                    containerColor = if (isButtonDisabled) chipBg else funkyColors.mango,
+                                    disabledContainerColor = chipBg
                                 ),
                                 shape = RoundedCornerShape(100.dp),
                                 contentPadding = PaddingValues(horizontal = 18.dp, vertical = 6.dp)
@@ -408,7 +420,7 @@ fun InviteFriendBottomSheetContent(
                                     text = buttonText,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (isButtonDisabled) (if (isDarkMode) Color.White.copy(alpha = 0.5f) else Color.Gray) else Color.Black
+                                    color = if (isButtonDisabled) subColor else funkyColors.onMango
                                 )
                             }
                         }

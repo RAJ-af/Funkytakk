@@ -33,30 +33,11 @@ fun HomeBottomBar(
     val isMomentsTab = activeTab == "moments"
     val isAppDark = LocalAppDarkTheme.current
     val funkyColors = LocalFunkyColors.current
-    val useDarkBar = isMomentsTab || isAppDark
 
-    val barContainerColor = when {
-        isMomentsTab -> Color(0xCC120E09)
-        isAppDark -> funkyColors.surface
-        else -> Color(0xFFFFFDF8)
-    }
-
-    val activeIconColor = when {
-        useDarkBar -> funkyColors.mango
-        else -> Color(0xFF1F1607)
-    }
-
-    val inactiveIconColor = when {
-        isMomentsTab -> Color.White.copy(alpha = 0.72f)
-        isAppDark -> funkyColors.mute
-        else -> Color(0xFF7B6F5B)
-    }
-
-    val activePillColor = when {
-        isMomentsTab -> funkyColors.mango.copy(alpha = 0.22f)
-        isAppDark -> funkyColors.soft
-        else -> Color(0xFFFFE58F)
-    }
+    val barContainerColor = if (isAppDark) funkyColors.surface else Color(0xFFFFFDF8)
+    val activeIconColor = if (isAppDark) funkyColors.mango else Color(0xFF1F1607)
+    val inactiveIconColor = if (isAppDark) funkyColors.mute else Color(0xFF7B6F5B)
+    val activePillColor = if (isAppDark) funkyColors.soft else Color(0xFFFFE58F)
 
     Surface(
         modifier = Modifier
@@ -64,17 +45,15 @@ fun HomeBottomBar(
             .navigationBarsPadding(),
         color = barContainerColor,
         tonalElevation = 0.dp,
-        shadowElevation = if (isMomentsTab) 0.dp else if (isAppDark) 2.dp else 8.dp
+        shadowElevation = if (isAppDark) 2.dp else 8.dp
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            if (!isMomentsTab) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(1.dp)
-                        .background(funkyColors.line)
-                )
-            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(funkyColors.line)
+            )
             Row(
                 modifier = Modifier
                     .fillMaxWidth()

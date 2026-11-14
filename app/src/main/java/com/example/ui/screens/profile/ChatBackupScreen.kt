@@ -5,6 +5,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -15,23 +16,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Lightbulb
-import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -45,8 +39,15 @@ import com.example.crypto.BackupCrypto
 import com.example.crypto.DriveBackupEngine
 import com.example.crypto.VaultSecurityManager
 import com.example.service.ChatBackupScheduler
+import com.example.ui.components.FunkyLightbulbIcon
 import com.example.ui.components.Soft3DCloudIcon
 import com.example.ui.components.Soft3DShieldIcon
+import com.example.ui.components.SoftArrowRightIcon
+import com.example.ui.components.SoftBackIcon
+import com.example.ui.components.SoftCloseIcon
+import com.example.ui.components.SoftEyeIcon
+import com.example.ui.components.SoftWarningIcon
+import com.example.ui.theme.LocalFunkyColors
 import com.example.util.ChatBackupPreferencesManager
 import com.example.util.StorageQuotaExceededException
 import com.google.android.gms.auth.api.signin.GoogleSignIn
@@ -63,6 +64,8 @@ fun ChatBackupScreen(
     onBackClick: () -> Unit
 ) {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
+    val isDark = funkyColors.isDark
     val coroutineScope = rememberCoroutineScope()
 
     var driveAccountName by remember {
@@ -129,7 +132,7 @@ fun ChatBackupScreen(
                 if (success) {
                     lastBackupTimestamp = ChatBackupPreferencesManager.getLastBackupTimestamp(context)
                     lastBackupSizeBytes = ChatBackupPreferencesManager.getLastBackupSizeBytes(context)
-                    userErrorMessage = null // Dismiss red error banner
+                    userErrorMessage = null
                     Toast.makeText(context, "Chat backup finished successfully!", Toast.LENGTH_SHORT).show()
                 } else {
                     Toast.makeText(context, "Backup cancelled.", Toast.LENGTH_SHORT).show()
@@ -199,7 +202,6 @@ fun ChatBackupScreen(
                     ChatBackupPreferencesManager.setDriveAccountName(context, emailStr)
                     Toast.makeText(context, "Connected: $emailStr", Toast.LENGTH_SHORT).show()
 
-                    // Check if first-time setup is needed
                     coroutineScope.launch {
                         val hasLocalBk = BackupCrypto.loadMasterKeyFromKeystore(context) != null
                         val hasHeader = DriveBackupEngine.hasBackupHeaderOnDrive(context, emailStr)
@@ -249,7 +251,9 @@ fun ChatBackupScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFFFFDF5))
+            .background(funkyColors.bg)
+            .statusBarsPadding()
+            .navigationBarsPadding()
             .verticalScroll(rememberScrollState())
     ) {
         // Header Bar
@@ -263,16 +267,14 @@ fun ChatBackupScreen(
                 modifier = Modifier
                     .size(36.dp)
                     .clip(CircleShape)
-                    .background(Color.White)
-                    .border(1.dp, Color(0xFFE2E8F0), CircleShape)
+                    .background(funkyColors.surface)
+                    .border(1.dp, funkyColors.line, CircleShape)
                     .clickable { onBackClick() },
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    tint = Color(0xFF0F172A),
-                    modifier = Modifier.size(18.dp)
+                SoftBackIcon(
+                    color = funkyColors.ink,
+                    size = 18.dp
                 )
             }
 
@@ -280,17 +282,16 @@ fun ChatBackupScreen(
 
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Chat ", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0F172A))
-                    Text("Backup", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFFFFB800))
+                    Text("Chat ", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = funkyColors.ink)
+                    Text("Backup", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = funkyColors.mango)
                 }
                 Text(
                     text = "Keep your chats safe and accessible across devices.",
                     fontSize = 12.sp,
-                    color = Color(0xFF64748B)
+                    color = funkyColors.mute
                 )
             }
 
-            // Top 3D Cloud Upload Icon
             Soft3DCloudIcon(size = 64.dp)
         }
 
@@ -302,8 +303,8 @@ fun ChatBackupScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
                 .clip(RoundedCornerShape(20.dp))
-                .background(Color(0xFFFEF08A).copy(alpha = 0.4f))
-                .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(20.dp))
+                .background(funkyColors.soft)
+                .border(1.dp, funkyColors.mango.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
                 .padding(16.dp)
         ) {
             Row(verticalAlignment = Alignment.Top) {
@@ -315,14 +316,14 @@ fun ChatBackupScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("End-to-End Encrypted Backups", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
-                        Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(16.dp))
+                        Text("End-to-End Encrypted Backups", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = funkyColors.ink)
+                        BackupInfoGraphic(color = funkyColors.mute, modifier = Modifier.size(16.dp))
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "Your backups are encrypted. If you forget your vault password, backups cannot be recovered.",
                         fontSize = 12.sp,
-                        color = Color(0xFF475569),
+                        color = funkyColors.mute,
                         lineHeight = 16.sp
                     )
                 }
@@ -333,8 +334,8 @@ fun ChatBackupScreen(
             Spacer(modifier = Modifier.height(12.dp))
             Surface(
                 shape = RoundedCornerShape(16.dp),
-                color = Color(0xFFFEF2F2),
-                border = BorderStroke(1.dp, Color(0xFFFCA5A5)),
+                color = funkyColors.danger.copy(alpha = 0.14f),
+                border = BorderStroke(1.dp, funkyColors.danger.copy(alpha = 0.45f)),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
@@ -344,11 +345,11 @@ fun ChatBackupScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFDC2626))
+                    SoftWarningIcon(color = funkyColors.danger, size = 20.dp)
                     Text(
                         text = userErrorMessage!!,
                         fontSize = 13.sp,
-                        color = Color(0xFF991B1B),
+                        color = funkyColors.danger,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier.weight(1f)
                     )
@@ -356,11 +357,9 @@ fun ChatBackupScreen(
                         onClick = { userErrorMessage = null },
                         modifier = Modifier.size(24.dp)
                     ) {
-                        Icon(
-                            Icons.Default.Close,
-                            contentDescription = "Dismiss error",
-                            tint = Color(0xFF991B1B),
-                            modifier = Modifier.size(16.dp)
+                        SoftCloseIcon(
+                            color = funkyColors.danger,
+                            size = 14.dp
                         )
                     }
                 }
@@ -375,8 +374,8 @@ fun ChatBackupScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
                 .clip(RoundedCornerShape(20.dp))
-                .background(Color.White)
-                .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(20.dp))
+                .background(funkyColors.surface)
+                .border(1.dp, funkyColors.line, RoundedCornerShape(20.dp))
                 .padding(16.dp)
         ) {
             Column {
@@ -385,17 +384,17 @@ fun ChatBackupScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text("Google Drive Storage", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Google Drive Storage", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = funkyColors.ink)
                         val statusText = when {
                             isReconnectNeeded -> "Reconnect needed"
                             !driveAccountName.isNullOrBlank() -> "Connected: $driveAccountName"
                             else -> "Not connected"
                         }
                         val statusColor = when {
-                            isReconnectNeeded -> Color(0xFFDC2626)
-                            !driveAccountName.isNullOrBlank() -> Color(0xFF16A34A)
-                            else -> Color(0xFF64748B)
+                            isReconnectNeeded -> funkyColors.danger
+                            !driveAccountName.isNullOrBlank() -> funkyColors.ok
+                            else -> funkyColors.mute
                         }
                         Text(statusText, fontSize = 12.sp, color = statusColor, fontWeight = FontWeight.Medium)
                     }
@@ -410,14 +409,13 @@ fun ChatBackupScreen(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 if (driveAccountName.isNullOrBlank() || isReconnectNeeded) {
-                    // Connect / Reconnect Button
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp)
                             .clip(RoundedCornerShape(24.dp))
                             .background(
-                                Brush.horizontalGradient(listOf(Color(0xFFFFD000), Color(0xFFFFB800)))
+                                Brush.horizontalGradient(listOf(Color(0xFFFFD000), funkyColors.mango))
                             )
                             .clickable { initiateDriveConnection() },
                         contentAlignment = Alignment.Center
@@ -427,14 +425,13 @@ fun ChatBackupScreen(
                                 text = if (isReconnectNeeded) "Reconnect Google Drive" else "Connect Google Drive",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.Black
+                                color = funkyColors.onMango
                             )
                             Spacer(modifier = Modifier.width(6.dp))
-                            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                            SoftArrowRightIcon(color = funkyColors.onMango, size = 16.dp)
                         }
                     }
                 } else {
-                    // Connected actions: Change Password, Disconnect, Delete Backup
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -442,9 +439,11 @@ fun ChatBackupScreen(
                         OutlinedButton(
                             onClick = { showChangePasswordDialog = true },
                             shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, funkyColors.line),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = funkyColors.ink),
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text("Change password", fontSize = 11.sp, maxLines = 1)
+                            Text("Change password", fontSize = 11.sp, maxLines = 1, color = funkyColors.ink)
                         }
 
                         OutlinedButton(
@@ -454,9 +453,10 @@ fun ChatBackupScreen(
                                 Toast.makeText(context, "Google Drive disconnected.", Toast.LENGTH_SHORT).show()
                             },
                             shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, funkyColors.danger.copy(alpha = 0.4f)),
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text("Disconnect", fontSize = 11.sp, color = Color(0xFFDC2626), maxLines = 1)
+                            Text("Disconnect", fontSize = 11.sp, color = funkyColors.danger, maxLines = 1)
                         }
                     }
 
@@ -466,7 +466,7 @@ fun ChatBackupScreen(
                         onClick = { showDeleteConfirmDialog = true },
                         modifier = Modifier.align(Alignment.CenterHorizontally)
                     ) {
-                        Text("Delete backup from Google Drive", fontSize = 12.sp, color = Color(0xFFDC2626))
+                        Text("Delete backup from Google Drive", fontSize = 12.sp, color = funkyColors.danger)
                     }
                 }
             }
@@ -480,37 +480,43 @@ fun ChatBackupScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
                 .clip(RoundedCornerShape(20.dp))
-                .background(Color.White)
-                .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(20.dp))
+                .background(funkyColors.surface)
+                .border(1.dp, funkyColors.line, RoundedCornerShape(20.dp))
                 .padding(16.dp)
         ) {
             Column {
                 Row(modifier = Modifier.fillMaxWidth()) {
                     Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                         Box(
-                            modifier = Modifier.size(40.dp).background(Color(0xFFFEF08A), CircleShape),
+                            modifier = Modifier.size(40.dp).background(funkyColors.soft, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.Schedule, contentDescription = null, tint = Color(0xFF854D0E), modifier = Modifier.size(20.dp))
+                            BackupClockGraphic(
+                                color = if (isDark) funkyColors.mango else Color(0xFF854D0E),
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
-                            Text("Last Backup", fontSize = 11.sp, color = Color(0xFF64748B))
-                            Text(formattedLastBackupTime, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                            Text("Last Backup", fontSize = 11.sp, color = funkyColors.mute)
+                            Text(formattedLastBackupTime, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = funkyColors.ink)
                         }
                     }
 
                     Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                         Box(
-                            modifier = Modifier.size(40.dp).background(Color(0xFFFEF08A), CircleShape),
+                            modifier = Modifier.size(40.dp).background(funkyColors.soft, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFF854D0E), modifier = Modifier.size(20.dp))
+                            BackupInfoGraphic(
+                                color = if (isDark) funkyColors.mango else Color(0xFF854D0E),
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
-                            Text("Backup Size", fontSize = 11.sp, color = Color(0xFF64748B))
-                            Text(formattedBackupSize, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                            Text("Backup Size", fontSize = 11.sp, color = funkyColors.mute)
+                            Text(formattedBackupSize, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = funkyColors.ink)
                         }
                     }
                 }
@@ -530,14 +536,14 @@ fun ChatBackupScreen(
                             Text(
                                 text = backupProgressText,
                                 fontSize = 12.sp,
-                                color = Color(0xFF0F172A),
+                                color = funkyColors.ink,
                                 fontWeight = FontWeight.Medium
                             )
                             Text(
                                 text = "$backupProgressPercent%",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFFB45309)
+                                color = funkyColors.mango
                             )
                         }
 
@@ -547,8 +553,8 @@ fun ChatBackupScreen(
                                 .fillMaxWidth()
                                 .height(6.dp)
                                 .clip(RoundedCornerShape(3.dp)),
-                            color = Color(0xFFFFB800),
-                            trackColor = Color(0xFFF1F5F9)
+                            color = funkyColors.mango,
+                            trackColor = funkyColors.soft
                         )
 
                         Spacer(modifier = Modifier.height(4.dp))
@@ -559,20 +565,20 @@ fun ChatBackupScreen(
                                 backupProgressText = "Cancelling..."
                             },
                             shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, funkyColors.danger.copy(alpha = 0.4f)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Cancel Backup", color = Color(0xFFDC2626), fontSize = 13.sp)
+                            Text("Cancel Backup", color = funkyColors.danger, fontSize = 13.sp)
                         }
                     }
                 } else {
-                    // Back up now button
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(44.dp)
                             .clip(RoundedCornerShape(22.dp))
                             .background(
-                                Brush.horizontalGradient(listOf(Color(0xFFFFD000), Color(0xFFFFB800)))
+                                Brush.horizontalGradient(listOf(Color(0xFFFFD000), funkyColors.mango))
                             )
                             .clickable {
                                 if (driveAccountName.isNullOrBlank()) {
@@ -583,7 +589,7 @@ fun ChatBackupScreen(
                             },
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("Back up now", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                        Text("Back up now", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = funkyColors.onMango)
                     }
                 }
             }
@@ -597,17 +603,17 @@ fun ChatBackupScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
                 .clip(RoundedCornerShape(20.dp))
-                .background(Color.White)
-                .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(20.dp))
+                .background(funkyColors.surface)
+                .border(1.dp, funkyColors.line, RoundedCornerShape(20.dp))
                 .padding(16.dp)
         ) {
             Column {
-                Text("Backup Preferences", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
-                Text("Customize how your chats are backed up.", fontSize = 12.sp, color = Color(0xFF64748B))
+                Text("Backup Preferences", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = funkyColors.ink)
+                Text("Customize how your chats are backed up.", fontSize = 12.sp, color = funkyColors.mute)
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                Text("Auto Backup Frequency", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF334155))
+                Text("Auto Backup Frequency", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = funkyColors.ink)
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -620,8 +626,8 @@ fun ChatBackupScreen(
                                 .weight(1f)
                                 .height(38.dp)
                                 .clip(RoundedCornerShape(19.dp))
-                                .background(if (isSelected) Color(0xFFFFD000) else Color(0xFFF8FAFC))
-                                .border(1.dp, if (isSelected) Color(0xFFFFD000) else Color(0xFFE2E8F0), RoundedCornerShape(19.dp))
+                                .background(if (isSelected) funkyColors.mango else funkyColors.bg)
+                                .border(1.dp, if (isSelected) funkyColors.mango else funkyColors.line, RoundedCornerShape(19.dp))
                                 .clickable {
                                     autoBackupFreq = freq
                                     val prefFreq = freq.uppercase()
@@ -630,22 +636,26 @@ fun ChatBackupScreen(
                                 },
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(freq, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                            Text(
+                                freq,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isSelected) funkyColors.onMango else funkyColors.ink
+                            )
                         }
                     }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Switch 1: Include Photos & Media
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Include Photos & Media", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF0F172A))
-                        Text("Back up images, videos, voice notes and other media files.", fontSize = 11.sp, color = Color(0xFF64748B))
+                        Text("Include Photos & Media", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = funkyColors.ink)
+                        Text("Back up images, videos, voice notes and other media files.", fontSize = 11.sp, color = funkyColors.mute)
                     }
                     Switch(
                         checked = includePhotos,
@@ -653,21 +663,25 @@ fun ChatBackupScreen(
                             includePhotos = it
                             ChatBackupPreferencesManager.setIncludeMedia(context, it)
                         },
-                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFFFFB800))
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = funkyColors.surface,
+                            checkedTrackColor = funkyColors.mango,
+                            uncheckedThumbColor = funkyColors.mute,
+                            uncheckedTrackColor = funkyColors.bg
+                        )
                     )
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Switch 2: Back up over Wi-Fi only
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Back up over Wi-Fi only", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF0F172A))
-                        Text("Avoid using cellular data for backups.", fontSize = 11.sp, color = Color(0xFF64748B))
+                        Text("Back up over Wi-Fi only", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = funkyColors.ink)
+                        Text("Avoid using cellular data for backups.", fontSize = 11.sp, color = funkyColors.mute)
                     }
                     Switch(
                         checked = wifiOnly,
@@ -676,7 +690,12 @@ fun ChatBackupScreen(
                             ChatBackupPreferencesManager.setWifiOnly(context, it)
                             ChatBackupScheduler.updateBackupSchedule(context)
                         },
-                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFFFFB800))
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = funkyColors.surface,
+                            checkedTrackColor = funkyColors.mango,
+                            uncheckedThumbColor = funkyColors.mute,
+                            uncheckedTrackColor = funkyColors.bg
+                        )
                     )
                 }
             }
@@ -690,19 +709,22 @@ fun ChatBackupScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
                 .clip(RoundedCornerShape(20.dp))
-                .background(Color(0xFFEEF2FF))
-                .border(1.dp, Color(0xFFC7D2FE), RoundedCornerShape(20.dp))
+                .background(funkyColors.soft)
+                .border(1.dp, funkyColors.line, RoundedCornerShape(20.dp))
                 .padding(16.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Lightbulb, contentDescription = null, tint = Color(0xFF4F46E5), modifier = Modifier.size(24.dp))
+                FunkyLightbulbIcon(
+                    color = funkyColors.mango,
+                    modifier = Modifier.size(24.dp)
+                )
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Tip", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF3730A3))
+                    Text("Tip", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = funkyColors.ink)
                     Text(
                         "Regular backups keep your conversations safe, even if you change or lose your device.",
                         fontSize = 11.sp,
-                        color = Color(0xFF4338CA),
+                        color = funkyColors.mute,
                         lineHeight = 15.sp
                     )
                 }
@@ -718,7 +740,6 @@ fun ChatBackupScreen(
         val hasVaultConfigured = remember { VaultSecurityManager.isVaultConfigured(context) }
 
         if (hasVaultConfigured) {
-            // Case A: User already has a vault password
             var enteredPassword by remember { mutableStateOf("") }
             var isPasswordVisible by remember { mutableStateOf(false) }
             var isVerifying by remember { mutableStateOf(false) }
@@ -726,23 +747,24 @@ fun ChatBackupScreen(
 
             AlertDialog(
                 onDismissRequest = { if (!isVerifying) showProtectBackupDialog = false },
+                containerColor = funkyColors.surface,
+                titleContentColor = funkyColors.ink,
+                textContentColor = funkyColors.ink,
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
                                 .size(36.dp)
-                                .background(Color(0xFFFEF08A), CircleShape),
+                                .background(funkyColors.soft, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                Icons.Default.Warning,
-                                contentDescription = null,
-                                tint = Color(0xFF854D0E),
-                                modifier = Modifier.size(20.dp)
+                            SoftWarningIcon(
+                                color = funkyColors.mango,
+                                size = 20.dp
                             )
                         }
                         Spacer(modifier = Modifier.width(10.dp))
-                        Text("Protect your backup", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Text("Protect your backup", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = funkyColors.ink)
                     }
                 },
                 text = {
@@ -750,7 +772,7 @@ fun ChatBackupScreen(
                         Text(
                             "Enter your vault password to initialize and encrypt your cloud backup.",
                             fontSize = 13.sp,
-                            color = Color(0xFF64748B),
+                            color = funkyColors.mute,
                             lineHeight = 18.sp
                         )
 
@@ -760,17 +782,23 @@ fun ChatBackupScreen(
                                 enteredPassword = it
                                 dialogError = null
                             },
-                            label = { Text("Enter your vault password") },
+                            label = { Text("Enter your vault password", color = funkyColors.mute) },
                             visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                             trailingIcon = {
                                 IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
-                                    Icon(
-                                        imageVector = if (isPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                        contentDescription = if (isPasswordVisible) "Hide password" else "Show password",
-                                        tint = Color(0xFF64748B)
+                                    SoftEyeIcon(
+                                        visible = isPasswordVisible,
+                                        tint = funkyColors.mute,
+                                        size = 20.dp
                                     )
                                 }
                             },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = funkyColors.mango,
+                                unfocusedBorderColor = funkyColors.line,
+                                focusedTextColor = funkyColors.ink,
+                                unfocusedTextColor = funkyColors.ink
+                            ),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                             singleLine = true,
                             isError = dialogError != null,
@@ -780,7 +808,7 @@ fun ChatBackupScreen(
                         if (dialogError != null) {
                             Text(
                                 text = dialogError!!,
-                                color = Color(0xFFDC2626),
+                                color = funkyColors.danger,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium
                             )
@@ -825,13 +853,13 @@ fun ChatBackupScreen(
                             }
                         },
                         enabled = !isVerifying,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB800))
+                        colors = ButtonDefaults.buttonColors(containerColor = funkyColors.mango)
                     ) {
                         if (isVerifying) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.Black)
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = funkyColors.onMango)
                             Spacer(modifier = Modifier.width(8.dp))
                         }
-                        Text("Continue", color = Color.Black, fontWeight = FontWeight.Bold)
+                        Text("Continue", color = funkyColors.onMango, fontWeight = FontWeight.Bold)
                     }
                 },
                 dismissButton = {
@@ -839,12 +867,11 @@ fun ChatBackupScreen(
                         onClick = { showProtectBackupDialog = false },
                         enabled = !isVerifying
                     ) {
-                        Text("Cancel", color = Color(0xFF64748B))
+                        Text("Cancel", color = funkyColors.mute)
                     }
                 }
             )
         } else {
-            // Case B: No vault password exists yet -> Create a backup password
             var newPassword by remember { mutableStateOf("") }
             var confirmPassword by remember { mutableStateOf("") }
             var isNewPasswordVisible by remember { mutableStateOf(false) }
@@ -859,23 +886,24 @@ fun ChatBackupScreen(
 
             AlertDialog(
                 onDismissRequest = { if (!isSubmitting) showProtectBackupDialog = false },
+                containerColor = funkyColors.surface,
+                titleContentColor = funkyColors.ink,
+                textContentColor = funkyColors.ink,
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
                                 .size(36.dp)
-                                .background(Color(0xFFFEF08A), CircleShape),
+                                .background(funkyColors.soft, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                Icons.Default.Warning,
-                                contentDescription = null,
-                                tint = Color(0xFF854D0E),
-                                modifier = Modifier.size(20.dp)
+                            SoftWarningIcon(
+                                color = funkyColors.mango,
+                                size = 20.dp
                             )
                         }
                         Spacer(modifier = Modifier.width(10.dp))
-                        Text("Protect your backup", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Text("Protect your backup", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = funkyColors.ink)
                     }
                 },
                 text = {
@@ -883,7 +911,7 @@ fun ChatBackupScreen(
                         Text(
                             "Create a password to protect your end-to-end encrypted backup.",
                             fontSize = 13.sp,
-                            color = Color(0xFF64748B),
+                            color = funkyColors.mute,
                             lineHeight = 18.sp
                         )
 
@@ -893,30 +921,35 @@ fun ChatBackupScreen(
                                 newPassword = it
                                 dialogError = null
                             },
-                            label = { Text("Create a backup password") },
+                            label = { Text("Create a backup password", color = funkyColors.mute) },
                             visualTransformation = if (isNewPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                             trailingIcon = {
                                 IconButton(onClick = { isNewPasswordVisible = !isNewPasswordVisible }) {
-                                    Icon(
-                                        imageVector = if (isNewPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                        contentDescription = if (isNewPasswordVisible) "Hide password" else "Show password",
-                                        tint = Color(0xFF64748B)
+                                    SoftEyeIcon(
+                                        visible = isNewPasswordVisible,
+                                        tint = funkyColors.mute,
+                                        size = 20.dp
                                     )
                                 }
                             },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = funkyColors.mango,
+                                unfocusedBorderColor = funkyColors.line,
+                                focusedTextColor = funkyColors.ink,
+                                unfocusedTextColor = funkyColors.ink
+                            ),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                             singleLine = true,
                             isError = dialogError != null,
                             modifier = Modifier.fillMaxWidth()
                         )
 
-                        // Strength hint
                         if (newPassword.isNotEmpty()) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Text("Password strength:", fontSize = 12.sp, color = Color(0xFF64748B))
+                                Text("Password strength:", fontSize = 12.sp, color = funkyColors.mute)
                                 Text(
                                     text = strengthLabel,
                                     fontSize = 12.sp,
@@ -932,24 +965,29 @@ fun ChatBackupScreen(
                                 confirmPassword = it
                                 dialogError = null
                             },
-                            label = { Text("Confirm password") },
+                            label = { Text("Confirm password", color = funkyColors.mute) },
                             visualTransformation = if (isConfirmPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                             trailingIcon = {
                                 IconButton(onClick = { isConfirmPasswordVisible = !isConfirmPasswordVisible }) {
-                                    Icon(
-                                        imageVector = if (isConfirmPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                        contentDescription = if (isConfirmPasswordVisible) "Hide password" else "Show password",
-                                        tint = Color(0xFF64748B)
+                                    SoftEyeIcon(
+                                        visible = isConfirmPasswordVisible,
+                                        tint = funkyColors.mute,
+                                        size = 20.dp
                                     )
                                 }
                             },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = funkyColors.mango,
+                                unfocusedBorderColor = funkyColors.line,
+                                focusedTextColor = funkyColors.ink,
+                                unfocusedTextColor = funkyColors.ink
+                            ),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                             singleLine = true,
                             isError = dialogError != null,
                             modifier = Modifier.fillMaxWidth()
                         )
 
-                        // Checkbox: "I understand that if I forget this password my backup cannot be recovered"
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
@@ -961,15 +999,15 @@ fun ChatBackupScreen(
                                 checked = understandChecked,
                                 onCheckedChange = { understandChecked = it },
                                 colors = CheckboxDefaults.colors(
-                                    checkedColor = Color(0xFFFFB800),
-                                    checkmarkColor = Color.Black
+                                    checkedColor = funkyColors.mango,
+                                    checkmarkColor = funkyColors.onMango
                                 )
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = "I understand that if I forget this password my backup cannot be recovered",
                                 fontSize = 12.sp,
-                                color = Color(0xFF334155),
+                                color = funkyColors.ink,
                                 lineHeight = 16.sp
                             )
                         }
@@ -977,7 +1015,7 @@ fun ChatBackupScreen(
                         if (dialogError != null) {
                             Text(
                                 text = dialogError!!,
-                                color = Color(0xFFDC2626),
+                                color = funkyColors.danger,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium
                             )
@@ -1030,13 +1068,13 @@ fun ChatBackupScreen(
                             }
                         },
                         enabled = canSubmit,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB800))
+                        colors = ButtonDefaults.buttonColors(containerColor = funkyColors.mango)
                     ) {
                         if (isSubmitting) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.Black)
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = funkyColors.onMango)
                             Spacer(modifier = Modifier.width(8.dp))
                         }
-                        Text("Create backup", color = Color.Black, fontWeight = FontWeight.Bold)
+                        Text("Create backup", color = funkyColors.onMango, fontWeight = FontWeight.Bold)
                     }
                 },
                 dismissButton = {
@@ -1044,7 +1082,7 @@ fun ChatBackupScreen(
                         onClick = { showProtectBackupDialog = false },
                         enabled = !isSubmitting
                     ) {
-                        Text("Cancel", color = Color(0xFF64748B))
+                        Text("Cancel", color = funkyColors.mute)
                     }
                 }
             )
@@ -1060,21 +1098,30 @@ fun ChatBackupScreen(
 
         AlertDialog(
             onDismissRequest = { if (!isSubmitting) showChangePasswordDialog = false },
-            title = { Text("Change Backup Password", fontWeight = FontWeight.Bold) },
+            containerColor = funkyColors.surface,
+            titleContentColor = funkyColors.ink,
+            textContentColor = funkyColors.ink,
+            title = { Text("Change Backup Password", fontWeight = FontWeight.Bold, color = funkyColors.ink) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
                         "This will re-encrypt your backup master key with a new vault password without re-uploading your chat data.",
                         fontSize = 12.sp,
-                        color = Color(0xFF64748B)
+                        color = funkyColors.mute
                     )
 
                     OutlinedTextField(
                         value = currentPasswordInput,
                         onValueChange = { currentPasswordInput = it },
-                        label = { Text("Current Vault Password") },
+                        label = { Text("Current Vault Password", color = funkyColors.mute) },
                         visualTransformation = PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = funkyColors.mango,
+                            unfocusedBorderColor = funkyColors.line,
+                            focusedTextColor = funkyColors.ink,
+                            unfocusedTextColor = funkyColors.ink
+                        ),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -1082,15 +1129,21 @@ fun ChatBackupScreen(
                     OutlinedTextField(
                         value = newPasswordInput,
                         onValueChange = { newPasswordInput = it },
-                        label = { Text("New Vault Password") },
+                        label = { Text("New Vault Password", color = funkyColors.mute) },
                         visualTransformation = PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = funkyColors.mango,
+                            unfocusedBorderColor = funkyColors.line,
+                            focusedTextColor = funkyColors.ink,
+                            unfocusedTextColor = funkyColors.ink
+                        ),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
 
                     if (dialogError != null) {
-                        Text(dialogError!!, color = Color(0xFFDC2626), fontSize = 12.sp)
+                        Text(dialogError!!, color = funkyColors.danger, fontSize = 12.sp)
                     }
                 }
             },
@@ -1125,9 +1178,9 @@ fun ChatBackupScreen(
                         }
                     },
                     enabled = !isSubmitting,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB800))
+                    colors = ButtonDefaults.buttonColors(containerColor = funkyColors.mango)
                 ) {
-                    Text("Update Password", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text("Update Password", color = funkyColors.onMango, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -1135,7 +1188,7 @@ fun ChatBackupScreen(
                     onClick = { showChangePasswordDialog = false },
                     enabled = !isSubmitting
                 ) {
-                    Text("Cancel")
+                    Text("Cancel", color = funkyColors.mute)
                 }
             }
         )
@@ -1147,12 +1200,15 @@ fun ChatBackupScreen(
 
         AlertDialog(
             onDismissRequest = { if (!isDeleting) showDeleteConfirmDialog = false },
-            title = { Text("Delete Backup from Drive?", fontWeight = FontWeight.Bold) },
+            containerColor = funkyColors.surface,
+            titleContentColor = funkyColors.ink,
+            textContentColor = funkyColors.ink,
+            title = { Text("Delete Backup from Drive?", fontWeight = FontWeight.Bold, color = funkyColors.ink) },
             text = {
                 Text(
                     "Are you sure you want to delete your backup from Google Drive? This will permanently delete all encrypted chat backups and media from Google Drive. This action cannot be undone.",
                     fontSize = 13.sp,
-                    color = Color(0xFF475569),
+                    color = funkyColors.mute,
                     lineHeight = 18.sp
                 )
             },
@@ -1175,7 +1231,7 @@ fun ChatBackupScreen(
                         }
                     },
                     enabled = !isDeleting,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                    colors = ButtonDefaults.buttonColors(containerColor = funkyColors.danger)
                 ) {
                     Text("Delete Backup", color = Color.White, fontWeight = FontWeight.Bold)
                 }
@@ -1185,10 +1241,42 @@ fun ChatBackupScreen(
                     onClick = { showDeleteConfirmDialog = false },
                     enabled = !isDeleting
                 ) {
-                    Text("Cancel")
+                    Text("Cancel", color = funkyColors.mute)
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun BackupClockGraphic(
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val sw = size.minDimension * 0.10f
+        val r = size.minDimension * 0.38f
+        val cx = size.width / 2f
+        val cy = size.height / 2f
+        drawCircle(color = color, radius = r, center = Offset(cx, cy), style = Stroke(width = sw))
+        drawLine(color, Offset(cx, cy), Offset(cx, cy - r * 0.52f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(cx, cy), Offset(cx + r * 0.45f, cy + r * 0.15f), strokeWidth = sw, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+private fun BackupInfoGraphic(
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val sw = size.minDimension * 0.10f
+        val r = size.minDimension * 0.38f
+        val cx = size.width / 2f
+        val cy = size.height / 2f
+        drawCircle(color = color, radius = r, center = Offset(cx, cy), style = Stroke(width = sw))
+        drawCircle(color = color, radius = sw * 0.65f, center = Offset(cx, cy - r * 0.38f))
+        drawLine(color, Offset(cx, cy - r * 0.05f), Offset(cx, cy + r * 0.45f), strokeWidth = sw, cap = StrokeCap.Round)
     }
 }
 

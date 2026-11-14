@@ -13,10 +13,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -26,6 +22,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -33,12 +30,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.AdminSupportManager
+import com.example.R
 import com.example.SupabaseSupportConversation
 import com.example.SupabaseSupportMessage
 import com.example.UserProfile
 import com.example.realtime.VoiceRoomRealtimeManager
 import com.example.ui.components.CircleFlag
-import com.example.ui.theme.GoldPrimary
+import com.example.ui.components.FunkyChevronRightIcon
+import com.example.ui.components.FunkySearchIcon
+import com.example.ui.components.FunkySendIcon
+import com.example.ui.components.SoftBackIcon
+import com.example.ui.components.SoftChatBubbleIcon
+import com.example.ui.components.SoftCloseIcon
+import com.example.ui.theme.LocalFunkyColors
 
 @Composable
 fun AdminSupportInboxView(
@@ -46,6 +50,8 @@ fun AdminSupportInboxView(
     onOpenReport: (reportId: String) -> Unit = {}
 ) {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
+    val isDark = funkyColors.isDark
     val conversations by AdminSupportManager.conversations.collectAsState()
     val messages by AdminSupportManager.messages.collectAsState()
     val lastMessagesMap by AdminSupportManager.lastMessagesMap.collectAsState()
@@ -72,7 +78,6 @@ fun AdminSupportInboxView(
     }
 
     if (activeConversation != null) {
-        // FULL CHAT SCREEN (admin view)
         val conv = activeConversation!!
         val targetUid = conv.user_id ?: ""
         val targetProfile = supabaseProfiles.find { it.uid == targetUid }
@@ -97,13 +102,13 @@ fun AdminSupportInboxView(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFFF9FAFB))
+                .background(funkyColors.bg)
         ) {
             // Header Bar
             Surface(
-                color = Color.White,
-                shadowElevation = 1.dp,
-                border = BorderStroke(1.dp, Color(0xFFE5E7EB))
+                color = funkyColors.surface,
+                shadowElevation = if (isDark) 0.dp else 1.dp,
+                border = BorderStroke(1.dp, funkyColors.line)
             ) {
                 Row(
                     modifier = Modifier
@@ -116,13 +121,11 @@ fun AdminSupportInboxView(
                         modifier = Modifier
                             .size(36.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFFF3F4F6))
+                            .background(funkyColors.soft)
                     ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back to list",
-                            tint = Color(0xFF374151),
-                            modifier = Modifier.size(18.dp)
+                        SoftBackIcon(
+                            color = funkyColors.ink,
+                            size = 18.dp
                         )
                     }
 
@@ -140,11 +143,12 @@ fun AdminSupportInboxView(
                         )
                         CircleFlag(
                             countryCode = targetFlag,
+                            allowProgramming = false,
                             modifier = Modifier
                                 .size(14.dp)
                                 .align(Alignment.BottomEnd)
                                 .clip(CircleShape)
-                                .border(1.dp, Color.White, CircleShape)
+                                .border(1.dp, funkyColors.surface, CircleShape)
                         )
                     }
 
@@ -155,7 +159,7 @@ fun AdminSupportInboxView(
                             text = targetName,
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.sp,
-                            color = Color(0xFF1E293B)
+                            color = funkyColors.ink
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -163,14 +167,14 @@ fun AdminSupportInboxView(
                                 modifier = Modifier
                                     .size(7.dp)
                                     .clip(CircleShape)
-                                    .background(if (isOpen) Color(0xFF16A34A) else Color(0xFF94A3B8))
+                                    .background(if (isOpen) funkyColors.ok else funkyColors.mute)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
                                 text = statusLine,
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = if (isOpen) Color(0xFF15803D) else Color(0xFF64748B)
+                                color = if (isOpen) funkyColors.ok else funkyColors.mute
                             )
                         }
                     }
@@ -192,31 +196,30 @@ fun AdminSupportInboxView(
                                     }
                                 )
                             },
-                            border = BorderStroke(1.dp, Color(0xFFFECACA)),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626)),
+                            border = BorderStroke(1.dp, funkyColors.danger.copy(alpha = 0.4f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = funkyColors.danger),
                             shape = RoundedCornerShape(10.dp),
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                             modifier = Modifier.height(34.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp)
+                            SoftCloseIcon(
+                                color = funkyColors.danger,
+                                size = 12.dp
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text("Close chat", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     } else {
                         Surface(
-                            color = Color(0xFFF1F5F9),
+                            color = funkyColors.soft,
                             shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, Color(0xFFE2E8F0))
+                            border = BorderStroke(1.dp, funkyColors.line)
                         ) {
                             Text(
                                 text = "Closed",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF64748B),
+                                color = funkyColors.mute,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             )
                         }
@@ -232,14 +235,14 @@ fun AdminSupportInboxView(
             ) {
                 if (messages.isEmpty() && isLoading) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = GoldPrimary)
+                        CircularProgressIndicator(color = funkyColors.mango)
                     }
                 } else if (messages.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
                             text = "No messages in this support conversation yet.",
                             fontSize = 13.sp,
-                            color = Color(0xFF94A3B8)
+                            color = funkyColors.mute
                         )
                     }
                 } else {
@@ -270,14 +273,15 @@ fun AdminSupportInboxView(
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Surface(
-                                            color = Color(0xFFE2E8F0),
-                                            shape = RoundedCornerShape(12.dp)
+                                            color = funkyColors.soft,
+                                            shape = RoundedCornerShape(12.dp),
+                                            border = BorderStroke(1.dp, funkyColors.line)
                                         ) {
                                             Text(
                                                 text = msgDateHeader,
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold,
-                                                color = Color(0xFF475569),
+                                                color = funkyColors.mute,
                                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
                                             )
                                         }
@@ -302,9 +306,9 @@ fun AdminSupportInboxView(
 
             // Staff Reply Panel
             Surface(
-                color = Color.White,
-                shadowElevation = 6.dp,
-                border = BorderStroke(1.dp, Color(0xFFE5E7EB))
+                color = funkyColors.surface,
+                shadowElevation = if (isDark) 0.dp else 6.dp,
+                border = BorderStroke(1.dp, funkyColors.line)
             ) {
                 Column(
                     modifier = Modifier
@@ -323,7 +327,7 @@ fun AdminSupportInboxView(
                             text = "Keep chat open:",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF475569)
+                            color = funkyColors.mute
                         )
 
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -332,8 +336,10 @@ fun AdminSupportInboxView(
                                 onClick = { selectedOpenHours = 1 },
                                 label = { Text("1 hour", fontSize = 11.5.sp) },
                                 colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = GoldPrimary,
-                                    selectedLabelColor = Color.Black
+                                    selectedContainerColor = funkyColors.mango,
+                                    selectedLabelColor = funkyColors.onMango,
+                                    containerColor = funkyColors.bg,
+                                    labelColor = funkyColors.ink
                                 ),
                                 shape = RoundedCornerShape(16.dp),
                                 modifier = Modifier.height(30.dp)
@@ -344,8 +350,10 @@ fun AdminSupportInboxView(
                                 onClick = { selectedOpenHours = 2 },
                                 label = { Text("2 hours (Default)", fontSize = 11.5.sp) },
                                 colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = GoldPrimary,
-                                    selectedLabelColor = Color.Black
+                                    selectedContainerColor = funkyColors.mango,
+                                    selectedLabelColor = funkyColors.onMango,
+                                    containerColor = funkyColors.bg,
+                                    labelColor = funkyColors.ink
                                 ),
                                 shape = RoundedCornerShape(16.dp),
                                 modifier = Modifier.height(30.dp)
@@ -364,7 +372,7 @@ fun AdminSupportInboxView(
                             placeholder = {
                                 Text(
                                     text = "Reply as FunkyTalk Support...",
-                                    color = Color(0xFF94A3B8),
+                                    color = funkyColors.mute,
                                     fontSize = 13.sp
                                 )
                             },
@@ -374,10 +382,13 @@ fun AdminSupportInboxView(
                             shape = RoundedCornerShape(20.dp),
                             maxLines = 4,
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = Color(0xFFF8FAFC),
-                                unfocusedContainerColor = Color(0xFFF8FAFC),
-                                focusedBorderColor = GoldPrimary,
-                                unfocusedBorderColor = Color(0xFFE2E8F0)
+                                focusedContainerColor = funkyColors.bg,
+                                unfocusedContainerColor = funkyColors.bg,
+                                focusedBorderColor = funkyColors.mango,
+                                unfocusedBorderColor = funkyColors.line,
+                                focusedTextColor = funkyColors.ink,
+                                unfocusedTextColor = funkyColors.ink,
+                                cursorColor = funkyColors.mango
                             ),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                             keyboardActions = KeyboardActions(onSend = {
@@ -425,19 +436,17 @@ fun AdminSupportInboxView(
                             modifier = Modifier
                                 .size(44.dp)
                                 .clip(CircleShape)
-                                .background(if (inputText.isNotBlank() && !isSending) GoldPrimary else Color(0xFFE2E8F0))
+                                .background(if (inputText.isNotBlank() && !isSending) funkyColors.mango else funkyColors.soft)
                         ) {
                             if (isSending) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(16.dp),
-                                    color = Color.Black,
+                                    color = funkyColors.onMango,
                                     strokeWidth = 2.dp
                                 )
                             } else {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.Send,
-                                    contentDescription = "Send Reply",
-                                    tint = if (inputText.isNotBlank()) Color.Black else Color(0xFF94A3B8),
+                                FunkySendIcon(
+                                    color = if (inputText.isNotBlank()) funkyColors.onMango else funkyColors.mute,
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
@@ -464,7 +473,7 @@ fun AdminSupportInboxView(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFFF9FAFB)),
+                .background(funkyColors.bg),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
@@ -473,24 +482,27 @@ fun AdminSupportInboxView(
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    placeholder = { Text("Search support threads by user or UID...", fontSize = 13.sp, color = Color(0xFF94A3B8)) },
+                    placeholder = { Text("Search support threads by user or UID...", fontSize = 13.sp, color = funkyColors.mute) },
                     leadingIcon = {
-                        Icon(Icons.Default.Search, contentDescription = "Search", tint = Color(0xFF94A3B8), modifier = Modifier.size(20.dp))
+                        FunkySearchIcon(color = funkyColors.mute, modifier = Modifier.size(20.dp))
                     },
                     trailingIcon = {
                         if (searchQuery.isNotEmpty()) {
                             IconButton(onClick = { searchQuery = "" }) {
-                                Icon(Icons.Default.Clear, contentDescription = "Clear", tint = Color(0xFF94A3B8), modifier = Modifier.size(16.dp))
+                                SoftCloseIcon(color = funkyColors.mute, size = 14.dp)
                             }
                         }
                     },
                     singleLine = true,
                     shape = RoundedCornerShape(14.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = Color.White,
-                        unfocusedContainerColor = Color.White,
-                        focusedBorderColor = GoldPrimary,
-                        unfocusedBorderColor = Color(0xFFE2E8F0)
+                        focusedContainerColor = funkyColors.surface,
+                        unfocusedContainerColor = funkyColors.surface,
+                        focusedBorderColor = funkyColors.mango,
+                        unfocusedBorderColor = funkyColors.line,
+                        focusedTextColor = funkyColors.ink,
+                        unfocusedTextColor = funkyColors.ink,
+                        cursorColor = funkyColors.mango
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -506,7 +518,7 @@ fun AdminSupportInboxView(
                             .height(180.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        CircularProgressIndicator(color = GoldPrimary)
+                        CircularProgressIndicator(color = funkyColors.mango)
                     }
                 }
             } else if (filteredList.isEmpty()) {
@@ -518,24 +530,22 @@ fun AdminSupportInboxView(
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                imageVector = Icons.Default.Forum,
-                                contentDescription = null,
-                                tint = Color(0xFFCBD5E1),
-                                modifier = Modifier.size(48.dp)
+                            SoftChatBubbleIcon(
+                                color = funkyColors.mute,
+                                size = 48.dp
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
                                 text = "No Support Conversations",
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF64748B)
+                                color = funkyColors.ink
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = "When users message FunkyTalk Support, their threads will appear here.",
                                 fontSize = 12.sp,
-                                color = Color(0xFF94A3B8)
+                                color = funkyColors.mute
                             )
                         }
                     }
@@ -574,12 +584,12 @@ fun AdminSupportInboxView(
                             }
                             .testTag("admin_support_item_${conv.id}"),
                         shape = RoundedCornerShape(16.dp),
-                        color = if (hasUnread) Color(0xFFFFFBEB) else Color.White,
+                        color = if (hasUnread) funkyColors.soft else funkyColors.surface,
                         border = BorderStroke(
                             1.dp,
-                            if (hasUnread) Color(0xFFFCD34D) else Color(0xFFE2E8F0)
+                            if (hasUnread) funkyColors.mango else funkyColors.line
                         ),
-                        shadowElevation = 0.5.dp
+                        shadowElevation = if (isDark) 0.dp else 0.5.dp
                     ) {
                         Row(
                             modifier = Modifier
@@ -587,7 +597,6 @@ fun AdminSupportInboxView(
                                 .padding(14.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Avatar + Unread Dot Indicator
                             Box(modifier = Modifier.size(48.dp)) {
                                 AsyncImage(
                                     model = avatar,
@@ -599,11 +608,12 @@ fun AdminSupportInboxView(
                                 )
                                 CircleFlag(
                                     countryCode = flagCode,
+                                    allowProgramming = false,
                                     modifier = Modifier
                                         .size(15.dp)
                                         .align(Alignment.BottomEnd)
                                         .clip(CircleShape)
-                                        .border(1.5.dp, Color.White, CircleShape)
+                                        .border(1.5.dp, funkyColors.surface, CircleShape)
                                 )
                             }
 
@@ -623,35 +633,33 @@ fun AdminSupportInboxView(
                                             text = name,
                                             fontWeight = if (hasUnread) FontWeight.Black else FontWeight.Bold,
                                             fontSize = 15.sp,
-                                            color = Color(0xFF0F172A),
+                                            color = funkyColors.ink,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
 
-                                        // Red Unread Dot
                                         if (hasUnread) {
                                             Spacer(modifier = Modifier.width(6.dp))
                                             Box(
                                                 modifier = Modifier
                                                     .size(8.dp)
                                                     .clip(CircleShape)
-                                                    .background(Color(0xFFEF4444))
+                                                    .background(funkyColors.danger)
                                             )
                                         }
 
-                                        // Appeal Badge
                                         if (isAppealUser) {
                                             Spacer(modifier = Modifier.width(6.dp))
                                             Surface(
-                                                color = Color(0xFFFEF2F2),
+                                                color = funkyColors.danger.copy(alpha = 0.14f),
                                                 shape = RoundedCornerShape(6.dp),
-                                                border = BorderStroke(0.5.dp, Color(0xFFFCA5A5))
+                                                border = BorderStroke(0.5.dp, funkyColors.danger.copy(alpha = 0.4f))
                                             ) {
                                                 Text(
                                                     text = "Appeal",
                                                     fontSize = 10.sp,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = Color(0xFFDC2626),
+                                                    color = funkyColors.danger,
                                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                                 )
                                             }
@@ -663,19 +671,18 @@ fun AdminSupportInboxView(
                                     Text(
                                         text = relativeTime,
                                         fontSize = 11.sp,
-                                        color = if (hasUnread) Color(0xFFD97706) else Color(0xFF94A3B8),
+                                        color = if (hasUnread) funkyColors.mango else funkyColors.mute,
                                         fontWeight = if (hasUnread) FontWeight.Bold else FontWeight.Normal
                                     )
                                 }
 
                                 Spacer(modifier = Modifier.height(3.dp))
 
-                                // Last Message Snippet
                                 Text(
                                     text = lastMsg?.body?.ifBlank { null } ?: "Tap to view conversation...",
                                     fontSize = 12.5.sp,
                                     fontWeight = if (hasUnread) FontWeight.SemiBold else FontWeight.Normal,
-                                    color = if (hasUnread) Color(0xFF1E293B) else Color(0xFF64748B),
+                                    color = if (hasUnread) funkyColors.ink else funkyColors.mute,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -683,10 +690,8 @@ fun AdminSupportInboxView(
 
                             Spacer(modifier = Modifier.width(8.dp))
 
-                            Icon(
-                                imageVector = Icons.Default.ChevronRight,
-                                contentDescription = "Open",
-                                tint = Color(0xFFCBD5E1),
+                            FunkyChevronRightIcon(
+                                color = funkyColors.mute,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -705,6 +710,7 @@ private fun AdminThreadMessageBubble(
     supabaseProfiles: List<UserProfile>,
     onOpenReport: (reportId: String) -> Unit
 ) {
+    val funkyColors = LocalFunkyColors.current
     val isAdmin = message.sender_type == "admin"
     val formattedTime = AdminSupportManager.formatRelativeTime(message.created_at)
 
@@ -724,7 +730,6 @@ private fun AdminThreadMessageBubble(
         verticalAlignment = Alignment.Bottom
     ) {
         if (!isAdmin) {
-            // User Avatar on left
             AsyncImage(
                 model = targetAvatar,
                 contentDescription = targetName,
@@ -740,7 +745,6 @@ private fun AdminThreadMessageBubble(
             horizontalAlignment = if (isAdmin) Alignment.End else Alignment.Start,
             modifier = Modifier.widthIn(max = 280.dp)
         ) {
-            // Header
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(bottom = 2.dp, start = 4.dp, end = 4.dp)
@@ -749,7 +753,7 @@ private fun AdminThreadMessageBubble(
                     text = if (isAdmin) "FunkyTalk Support" else targetName,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF475569)
+                    color = funkyColors.mute
                 )
 
                 if (isAdmin) {
@@ -757,7 +761,7 @@ private fun AdminThreadMessageBubble(
                     Text(
                         text = "· sent by $staffName",
                         fontSize = 10.sp,
-                        color = Color(0xFF94A3B8),
+                        color = funkyColors.mute.copy(alpha = 0.8f),
                         fontWeight = FontWeight.Normal
                     )
                 }
@@ -770,20 +774,20 @@ private fun AdminThreadMessageBubble(
                     bottomStart = if (isAdmin) 16.dp else 4.dp,
                     bottomEnd = if (isAdmin) 4.dp else 16.dp
                 ),
-                color = if (isAdmin) GoldPrimary else Color.White,
+                color = if (isAdmin) funkyColors.mango else funkyColors.surface,
                 border = BorderStroke(
                     1.dp,
-                    if (isAdmin) Color(0xFFF59E0B) else Color(0xFFE2E8F0)
+                    if (isAdmin) funkyColors.mango else funkyColors.line
                 ),
-                shadowElevation = 0.5.dp
+                shadowElevation = if (funkyColors.isDark) 0.dp else 0.5.dp
             ) {
                 Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
                     if (!message.report_id.isNullOrBlank()) {
                         Surface(
                             onClick = { onOpenReport(message.report_id!!) },
                             shape = RoundedCornerShape(6.dp),
-                            color = if (isAdmin) Color(0x22000000) else Color(0xFFEFF6FF),
-                            border = BorderStroke(0.5.dp, if (isAdmin) Color(0x44000000) else Color(0xFFBFDBFE)),
+                            color = if (isAdmin) Color(0x22000000) else funkyColors.soft,
+                            border = BorderStroke(0.5.dp, if (isAdmin) Color(0x44000000) else funkyColors.line),
                             modifier = Modifier.padding(bottom = 6.dp)
                         ) {
                             Row(
@@ -791,9 +795,9 @@ private fun AdminThreadMessageBubble(
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.Assessment,
+                                    painter = painterResource(id = R.drawable.ic_bars),
                                     contentDescription = null,
-                                    tint = if (isAdmin) Color.Black else Color(0xFF1D4ED8),
+                                    tint = if (isAdmin) funkyColors.onMango else funkyColors.ink,
                                     modifier = Modifier.size(12.dp)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
@@ -801,7 +805,7 @@ private fun AdminThreadMessageBubble(
                                     text = "View Report #${message.report_id!!.take(8)}",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (isAdmin) Color.Black else Color(0xFF1D4ED8)
+                                    color = if (isAdmin) funkyColors.onMango else funkyColors.ink
                                 )
                             }
                         }
@@ -810,7 +814,7 @@ private fun AdminThreadMessageBubble(
                     Text(
                         text = message.body,
                         fontSize = 13.sp,
-                        color = Color(0xFF0F172A),
+                        color = if (isAdmin) funkyColors.onMango else funkyColors.ink,
                         lineHeight = 18.sp
                     )
 
@@ -819,7 +823,7 @@ private fun AdminThreadMessageBubble(
                     Text(
                         text = formattedTime,
                         fontSize = 10.sp,
-                        color = if (isAdmin) Color(0xFF451A03) else Color(0xFF94A3B8),
+                        color = if (isAdmin) funkyColors.onMango.copy(alpha = 0.75f) else funkyColors.mute,
                         modifier = Modifier.align(Alignment.End)
                     )
                 }
@@ -832,14 +836,14 @@ private fun AdminThreadMessageBubble(
                 modifier = Modifier
                     .size(32.dp)
                     .clip(CircleShape)
-                    .background(GoldPrimary),
+                    .background(funkyColors.mango),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = "FT",
                     fontWeight = FontWeight.Black,
                     fontSize = 11.sp,
-                    color = Color.Black
+                    color = funkyColors.onMango
                 )
             }
         }

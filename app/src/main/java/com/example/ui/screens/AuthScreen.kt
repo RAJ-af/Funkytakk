@@ -13,16 +13,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import com.example.ui.components.FunkyLockIcon
+import com.example.ui.components.SoftEyeIcon
+import com.example.ui.components.SoftForwardArrowIcon
+import com.example.ui.components.SoftMailIcon
+import com.example.ui.components.SoftWarningIcon
+import com.example.ui.theme.LocalFunkyColors
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -229,10 +227,26 @@ fun AuthScreen(
         }
     }
 
+    val funkyColors = LocalFunkyColors.current
+    val isDark = funkyColors.isDark
+    val bgColor = if (isDark) funkyColors.bg else Color(0xFFFAFAEE)
+    val blobColorTop = if (isDark) funkyColors.soft.copy(alpha = 0.55f) else Color(0xFFF7ECBC).copy(alpha = 0.55f)
+    val blobColorBottom = if (isDark) funkyColors.soft.copy(alpha = 0.45f) else Color(0xFFF7ECBC).copy(alpha = 0.50f)
+    val inkColor = if (isDark) funkyColors.ink else Color(0xFF141414)
+    val muteColor = if (isDark) funkyColors.mute else Color(0xFF6B6B70)
+    val subtleLabelColor = if (isDark) funkyColors.mute else Color(0xFF8E8E93)
+    val fieldBg = if (isDark) funkyColors.surface else Color.White
+    val fieldDisabledBg = if (isDark) funkyColors.surface.copy(alpha = 0.6f) else Color(0xFFF3F4F6)
+    val fieldBorder = if (isDark) funkyColors.line else Color(0xFFE5E5EA)
+    val leadingIconBoxBg = if (isDark) funkyColors.soft else Color(0xFFF0F0F2)
+    val leadingIconTint = if (isDark) funkyColors.mango else Color(0xFF757575)
+    val dividerColor = if (isDark) funkyColors.line else Color(0xFFDCDCE0)
+    val accentGold = funkyColors.mango
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFFAFAEE)) // Warm ivory background
+            .background(bgColor) // Dual cream-light / warm-dark background
     ) {
         // Infinite rotation animations for background shapes
         val infiniteTransition = rememberInfiniteTransition(label = "bg_shapes_rotation")
@@ -287,7 +301,7 @@ fun AuthScreen(
             }
             drawPath(
                 path = path,
-                color = Color(0xFFF7ECBC).copy(alpha = 0.55f)
+                color = blobColorTop
             )
         }
 
@@ -319,7 +333,7 @@ fun AuthScreen(
             }
             drawPath(
                 path = path,
-                color = Color(0xFFF7ECBC).copy(alpha = 0.50f)
+                color = blobColorBottom
             )
         }
 
@@ -342,10 +356,10 @@ fun AuthScreen(
             ) {
                 Text(
                     text = buildAnnotatedString {
-                        withStyle(style = SpanStyle(color = Color(0xFF141414), fontWeight = FontWeight.Black)) {
+                        withStyle(style = SpanStyle(color = inkColor, fontWeight = FontWeight.Black)) {
                             append("Funky")
                         }
-                        withStyle(style = SpanStyle(color = Color(0xFFF6C343), fontWeight = FontWeight.Black)) {
+                        withStyle(style = SpanStyle(color = accentGold, fontWeight = FontWeight.Black)) {
                             append("Talk.")
                         }
                     },
@@ -365,7 +379,7 @@ fun AuthScreen(
                     text = "WELCOME TO FUNKYTALK",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFF8E8E93),
+                    color = subtleLabelColor,
                     letterSpacing = 2.sp
                 )
 
@@ -375,7 +389,7 @@ fun AuthScreen(
                     text = if (isSignUpMode) "Create your\naccount" else "Welcome\nback",
                     fontSize = 40.sp,
                     fontWeight = FontWeight.Black,
-                    color = Color(0xFF141414),
+                    color = inkColor,
                     lineHeight = 44.sp,
                     letterSpacing = (-1.5).sp,
                     modifier = Modifier.testTag("auth_welcome_title")
@@ -390,7 +404,7 @@ fun AuthScreen(
                         "Log in to continue chatting with\nyour friends around the world.",
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Normal,
-                    color = Color(0xFF6B6B70),
+                    color = muteColor,
                     lineHeight = 24.sp
                 )
 
@@ -402,7 +416,7 @@ fun AuthScreen(
                         .width(48.dp)
                         .height(4.dp)
                         .clip(RoundedCornerShape(2.dp))
-                        .background(Color(0xFFF6C343))
+                        .background(accentGold)
                 )
             }
 
@@ -423,20 +437,18 @@ fun AuthScreen(
                         },
                         enabled = !isLoading,
                         isError = emailError != null,
-                        textStyle = LocalTextStyle.current.copy(color = Color(0xFF141414), fontSize = 15.sp, fontWeight = FontWeight.Medium),
-                        placeholder = { Text("Enter your email", color = Color(0xFF9E9E9E), fontSize = 15.sp) },
+                        textStyle = LocalTextStyle.current.copy(color = inkColor, fontSize = 15.sp, fontWeight = FontWeight.Medium),
+                        placeholder = { Text("Enter your email", color = subtleLabelColor, fontSize = 15.sp) },
                         leadingIcon = {
                             Box(
                                 modifier = Modifier
                                     .size(34.dp)
-                                    .background(Color(0xFFF0F0F2), RoundedCornerShape(10.dp)),
+                                    .background(leadingIconBoxBg, RoundedCornerShape(10.dp)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Email,
-                                    contentDescription = "Email Icon",
-                                    tint = Color(0xFF757575),
-                                    modifier = Modifier.size(18.dp)
+                                SoftMailIcon(
+                                    size = 18.dp,
+                                    color = leadingIconTint
                                 )
                             }
                         },
@@ -445,15 +457,15 @@ fun AuthScreen(
                             .height(60.dp)
                             .testTag("email_input"),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color(0xFF141414),
-                            unfocusedTextColor = Color(0xFF141414),
-                            focusedContainerColor = Color.White,
-                            unfocusedContainerColor = Color.White,
-                            disabledContainerColor = Color(0xFFF3F4F6),
-                            focusedBorderColor = Color(0xFFE2E2E6),
-                            unfocusedBorderColor = Color(0xFFE5E5EA),
+                            focusedTextColor = inkColor,
+                            unfocusedTextColor = inkColor,
+                            focusedContainerColor = fieldBg,
+                            unfocusedContainerColor = fieldBg,
+                            disabledContainerColor = fieldDisabledBg,
+                            focusedBorderColor = accentGold,
+                            unfocusedBorderColor = fieldBorder,
                             errorBorderColor = Color(0xFFEF4444),
-                            cursorColor = Color(0xFFF6C343)
+                            cursorColor = accentGold
                         ),
                         shape = RoundedCornerShape(22.dp),
                         singleLine = true,
@@ -487,30 +499,27 @@ fun AuthScreen(
                         },
                         enabled = !isLoading,
                         isError = passwordError != null,
-                        textStyle = LocalTextStyle.current.copy(color = Color(0xFF141414), fontSize = 15.sp, fontWeight = FontWeight.Medium),
-                        placeholder = { Text(if (isSignUpMode) "Create a password" else "Enter your password", color = Color(0xFF9E9E9E), fontSize = 15.sp) },
+                        textStyle = LocalTextStyle.current.copy(color = inkColor, fontSize = 15.sp, fontWeight = FontWeight.Medium),
+                        placeholder = { Text(if (isSignUpMode) "Create a password" else "Enter your password", color = subtleLabelColor, fontSize = 15.sp) },
                         leadingIcon = {
                             Box(
                                 modifier = Modifier
                                     .size(34.dp)
-                                    .background(Color(0xFFF0F0F2), RoundedCornerShape(10.dp)),
+                                    .background(leadingIconBoxBg, RoundedCornerShape(10.dp)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Lock,
-                                    contentDescription = "Lock Icon",
-                                    tint = Color(0xFF757575),
+                                FunkyLockIcon(
+                                    color = leadingIconTint,
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
                         },
                         trailingIcon = {
                             IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
-                                Icon(
-                                    imageVector = if (isPasswordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                    contentDescription = if (isPasswordVisible) "Hide Password" else "Show Password",
-                                    tint = Color(0xFF757575),
-                                    modifier = Modifier.size(20.dp)
+                                SoftEyeIcon(
+                                    visible = isPasswordVisible,
+                                    size = 20.dp,
+                                    tint = subtleLabelColor
                                 )
                             }
                         },
@@ -519,15 +528,15 @@ fun AuthScreen(
                             .height(60.dp)
                             .testTag("password_input"),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color(0xFF141414),
-                            unfocusedTextColor = Color(0xFF141414),
-                            focusedContainerColor = Color.White,
-                            unfocusedContainerColor = Color.White,
-                            disabledContainerColor = Color(0xFFF3F4F6),
-                            focusedBorderColor = Color(0xFFE2E2E6),
-                            unfocusedBorderColor = Color(0xFFE5E5EA),
+                            focusedTextColor = inkColor,
+                            unfocusedTextColor = inkColor,
+                            focusedContainerColor = fieldBg,
+                            unfocusedContainerColor = fieldBg,
+                            disabledContainerColor = fieldDisabledBg,
+                            focusedBorderColor = accentGold,
+                            unfocusedBorderColor = fieldBorder,
                             errorBorderColor = Color(0xFFEF4444),
-                            cursorColor = Color(0xFFF6C343)
+                            cursorColor = accentGold
                         ),
                         shape = RoundedCornerShape(22.dp),
                         singleLine = true,
@@ -708,7 +717,7 @@ fun AuthScreen(
                 ) {
                     if (authState is AuthState.Loading) {
                         CircularProgressIndicator(
-                            color = Color(0xFF141414),
+                            color = funkyColors.onMango,
                             modifier = Modifier.size(24.dp),
                             strokeWidth = 2.5.dp
                         )
@@ -721,14 +730,12 @@ fun AuthScreen(
                                 text = "Continue",
                                 fontSize = 18.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF141414)
+                                color = funkyColors.onMango
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = "Arrow",
-                                tint = Color(0xFF141414),
-                                modifier = Modifier.size(20.dp)
+                            SoftForwardArrowIcon(
+                                size = 20.dp,
+                                color = funkyColors.onMango
                             )
                         }
                     }
@@ -744,18 +751,18 @@ fun AuthScreen(
             ) {
                 HorizontalDivider(
                     modifier = Modifier.weight(1f),
-                    color = Color(0xFFDCDCE0)
+                    color = dividerColor
                 )
                 Text(
                     text = "OR",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFF8E8E93),
+                    color = subtleLabelColor,
                     modifier = Modifier.padding(horizontal = 16.dp)
                 )
                 HorizontalDivider(
                     modifier = Modifier.weight(1f),
-                    color = Color(0xFFDCDCE0)
+                    color = dividerColor
                 )
             }
 
@@ -784,11 +791,11 @@ fun AuthScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(58.dp)
-                    .border(1.dp, Color(0xFFE2E2E8), RoundedCornerShape(29.dp))
+                    .border(1.dp, fieldBorder, RoundedCornerShape(29.dp))
                     .testTag("google_login_button"),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.White,
-                    contentColor = Color(0xFF141414)
+                    containerColor = fieldBg,
+                    contentColor = inkColor
                 ),
                 shape = RoundedCornerShape(29.dp),
                 elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
@@ -808,7 +815,7 @@ fun AuthScreen(
                         text = "Continue with Google",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF141414)
+                        color = inkColor
                     )
                 }
             }
@@ -824,13 +831,13 @@ fun AuthScreen(
                 Text(
                     text = if (isSignUpMode) "Already have an account? " else "Don't have an account? ",
                     fontSize = 15.sp,
-                    color = Color(0xFF6B6B70)
+                    color = muteColor
                 )
                 Text(
                     text = if (isSignUpMode) "Log In" else "Sign Up",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFFF7C343),
+                    color = accentGold,
                     modifier = Modifier
                         .clickable { isSignUpMode = !isSignUpMode }
                         .testTag("toggle_auth_mode")
@@ -843,11 +850,12 @@ fun AuthScreen(
         if (showGoogleDiagnosticDialog) {
             AlertDialog(
                 onDismissRequest = { showGoogleDiagnosticDialog = false },
+                containerColor = fieldBg,
                 title = {
                     Text(
                         text = "Google Sign-In SHA-1 Setup",
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF141414)
+                        color = inkColor
                     )
                 },
                 text = {
@@ -855,12 +863,12 @@ fun AuthScreen(
                         Text(
                             text = "Firebase needs the exact SHA-1 fingerprint of this installed APK. Here is the SHA-1 detected on your device right now:",
                             fontSize = 14.sp,
-                            color = Color(0xFF49454F)
+                            color = muteColor
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Surface(
                             shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFFF4F4F6),
+                            color = leadingIconBoxBg,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
@@ -868,7 +876,7 @@ fun AuthScreen(
                                 fontSize = 12.sp,
                                 fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF141414),
+                                color = inkColor,
                                 modifier = Modifier.padding(10.dp)
                             )
                         }
@@ -876,13 +884,13 @@ fun AuthScreen(
                         Text(
                             text = "Package: $detectedPackage",
                             fontSize = 12.sp,
-                            color = Color(0xFF6B6B70)
+                            color = muteColor
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = "Web Client ID: $webClientId",
                             fontSize = 11.sp,
-                            color = Color(0xFF6B6B70)
+                            color = muteColor
                         )
                     }
                 },
@@ -901,7 +909,7 @@ fun AuthScreen(
                 },
                 dismissButton = {
                     TextButton(onClick = { showGoogleDiagnosticDialog = false }) {
-                        Text("Close")
+                        Text("Close", color = muteColor)
                     }
                 }
             )
@@ -914,20 +922,18 @@ fun AuthScreen(
                 onDismissRequest = {
                     viewModel.resetAuthState()
                 },
-                containerColor = Color.White,
+                containerColor = fieldBg,
                 shape = RoundedCornerShape(24.dp),
                 icon = {
                     Box(
                         modifier = Modifier
                             .size(56.dp)
-                            .background(Color(0xFFFFF7DB), CircleShape),
+                            .background(if (isDark) funkyColors.soft else Color(0xFFFFF7DB), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Warning,
-                            contentDescription = "Account Exists",
-                            tint = Color(0xFFF7C343),
-                            modifier = Modifier.size(32.dp)
+                        SoftWarningIcon(
+                            size = 32.dp,
+                            color = accentGold
                         )
                     }
                 },
@@ -936,7 +942,7 @@ fun AuthScreen(
                         text = "Account Already Exists",
                         fontWeight = FontWeight.Bold,
                         fontSize = 20.sp,
-                        color = Color(0xFF141414),
+                        color = inkColor,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -950,13 +956,13 @@ fun AuthScreen(
                             text = "Only 1 account is permitted per email address.",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF141414),
+                            color = inkColor,
                             textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(14.dp))
                         Card(
                             colors = CardDefaults.cardColors(
-                                containerColor = Color(0xFFF4F4F6)
+                                containerColor = leadingIconBoxBg
                             ),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth()
@@ -968,18 +974,16 @@ fun AuthScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.Center
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Email,
-                                    contentDescription = "Email",
-                                    tint = Color(0xFF141414),
-                                    modifier = Modifier.size(18.dp)
+                                SoftMailIcon(
+                                    size = 18.dp,
+                                    color = inkColor
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = collision.email.ifBlank { "Registered Email" },
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF141414),
+                                    color = inkColor,
                                     textAlign = TextAlign.Center
                                 )
                             }
@@ -988,7 +992,7 @@ fun AuthScreen(
                         Text(
                             text = "An account with this email already exists. Please select Log In to enter your password or sign in with Google.",
                             fontSize = 13.sp,
-                            color = Color(0xFF6B6B70),
+                            color = muteColor,
                             textAlign = TextAlign.Center,
                             lineHeight = 18.sp
                         )
@@ -1004,8 +1008,8 @@ fun AuthScreen(
                             viewModel.resetAuthState()
                         },
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFFF7C343),
-                            contentColor = Color(0xFF141414)
+                            containerColor = accentGold,
+                            contentColor = funkyColors.onMango
                         ),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
@@ -1020,7 +1024,7 @@ fun AuthScreen(
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Got It", color = Color(0xFF6B6B70), fontWeight = FontWeight.SemiBold)
+                        Text("Got It", color = muteColor, fontWeight = FontWeight.SemiBold)
                     }
                 }
             )

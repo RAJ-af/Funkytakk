@@ -179,12 +179,13 @@ fun AppLoadingHUDOverlay() {
     val cancelAction by AppLoadingManager.cancelAction.collectAsState()
     val isSuccess by AppLoadingManager.isSuccess.collectAsState()
 
-    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
-    val scrimColor = if (isDark) Color(10, 8, 5).copy(alpha = 0.56f) else Color(20, 14, 6).copy(alpha = 0.38f)
-    val cardBg = if (isDark) Color(0xFF231D15) else Color.White
-    val inkColor = if (isDark) Color(0xFFFFF3DC) else Color(0xFF2B2118)
-    val muteColor = if (isDark) Color(0xFFA89A82) else Color(0xFF8A7B66)
-    val borderColor = if (isDark) Color(0xFF34291A) else Color(0xFFF0E3C4)
+    val funkyColors = com.example.ui.theme.LocalFunkyColors.current
+    val isDark = funkyColors.isDark
+    val scrimColor = if (isDark) Color(10, 8, 5).copy(alpha = 0.62f) else Color(20, 14, 6).copy(alpha = 0.38f)
+    val cardBg = funkyColors.surface
+    val inkColor = funkyColors.ink
+    val muteColor = funkyColors.mute
+    val borderColor = funkyColors.line
 
     if (isLoading) {
         Dialog(
@@ -417,6 +418,9 @@ fun AppNoInternetDialog(
     var statusHintText by remember { mutableStateOf("Please check your Wi-Fi or mobile data and try again.") }
     val coroutineScope = rememberCoroutineScope()
 
+    val funkyColors = com.example.ui.theme.LocalFunkyColors.current
+    val isDark = funkyColors.isDark
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -427,10 +431,10 @@ fun AppNoInternetDialog(
                 .wrapContentHeight()
                 .testTag("no_internet_dialog"),
             shape = RoundedCornerShape(28.dp),
-            color = Color(0xFFFFFBF0), // Warm soft cream card
+            color = funkyColors.surface,
             tonalElevation = 10.dp,
             shadowElevation = 20.dp,
-            border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFFEADFC4))
+            border = androidx.compose.foundation.BorderStroke(1.5.dp, funkyColors.line)
         ) {
             Column(
                 modifier = Modifier
@@ -443,10 +447,10 @@ fun AppNoInternetDialog(
                     modifier = Modifier
                         .size(68.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFFFFE8E5)),
+                        .background(if (isDark) funkyColors.danger.copy(alpha = 0.18f) else Color(0xFFFFE8E5)),
                     contentAlignment = Alignment.Center
                 ) {
-                    CuteCanvasOfflineCloudIcon(modifier = Modifier.size(36.dp), tint = Color(0xFFFF5A4D))
+                    CuteCanvasOfflineCloudIcon(modifier = Modifier.size(36.dp), tint = funkyColors.danger)
                 }
 
                 Spacer(modifier = Modifier.height(18.dp))
@@ -456,7 +460,7 @@ fun AppNoInternetDialog(
                     text = "No Internet Connection",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF2B2118),
+                    color = funkyColors.ink,
                     textAlign = TextAlign.Center,
                     letterSpacing = (-0.3).sp,
                     modifier = Modifier.testTag("no_internet_title")
@@ -469,7 +473,7 @@ fun AppNoInternetDialog(
                     text = statusHintText,
                     fontSize = 13.5.sp,
                     fontWeight = FontWeight.Medium,
-                    color = Color(0xFF7A7260),
+                    color = funkyColors.mute,
                     textAlign = TextAlign.Center,
                     lineHeight = 20.sp,
                     modifier = Modifier.padding(horizontal = 8.dp)
@@ -506,8 +510,8 @@ fun AppNoInternetDialog(
                             .testTag("no_internet_retry_button"),
                         shape = RoundedCornerShape(25.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFFFFC21A),
-                            contentColor = Color(0xFF2A1E00)
+                            containerColor = funkyColors.mango,
+                            contentColor = funkyColors.onMango
                         ),
                         elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
                     ) {
@@ -543,7 +547,7 @@ fun AppNoInternetDialog(
                                 text = "Dismiss",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF7A7260)
+                                color = funkyColors.mute
                             )
                         }
                     }

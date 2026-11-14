@@ -16,7 +16,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -208,8 +207,14 @@ fun MomentV2Slide(
     var showTranslation by remember(moment.id) { mutableStateOf(false) }
     var showDoubleTapHeart by remember(moment.id) { mutableStateOf(false) }
 
+    val isAppDark = com.example.ui.theme.LocalAppDarkTheme.current
+    val funkyColors = com.example.ui.theme.LocalFunkyColors.current
     val preset = remember(moment.bg_key) { MomentsRepository.resolveBgPreset(moment.bg_key) }
     val isLightCanvas = mediaList.isEmpty() && preset.isDarkText
+    val useLightUiContrast = isLightCanvas && !isAppDark
+    val overlayInk = if (useLightUiContrast) funkyColors.ink else Color.White
+    val overlaySubInk = if (useLightUiContrast) funkyColors.mute else Color.White.copy(alpha = 0.80f)
+    val actionChipBg = if (useLightUiContrast) funkyColors.surface.copy(alpha = 0.88f) else Color.Black.copy(alpha = 0.38f)
 
     val heartScale by animateFloatAsState(
         targetValue = if (showDoubleTapHeart) 1.25f else 0.7f,
@@ -358,33 +363,35 @@ fun MomentV2Slide(
             }
         }
 
-        // Top and Bottom gradient scrims for contrast
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(180.dp)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color.Black.copy(alpha = 0.72f), Color.Transparent)
-                    )
-                )
-        )
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(380.dp)
-                .align(Alignment.BottomCenter)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            Color.Transparent,
-                            Color.Black.copy(alpha = 0.45f),
-                            Color.Black.copy(alpha = 0.9f)
+        // Top and Bottom gradient scrims for contrast (skipped when rendering a light-canvas text card in Light Mode)
+        if (!useLightUiContrast) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(180.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Black.copy(alpha = 0.72f), Color.Transparent)
                         )
                     )
-                )
-        )
+            )
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(380.dp)
+                    .align(Alignment.BottomCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                Color.Transparent,
+                                Color.Black.copy(alpha = 0.45f),
+                                Color.Black.copy(alpha = 0.9f)
+                            )
+                        )
+                    )
+            )
+        }
 
         // Photo pagination pill & dots indicator (if multiple photos)
         if (mediaList.size > 1) {
@@ -468,17 +475,19 @@ fun MomentV2Slide(
         ) {
             MomentActionIconButton(
                 iconRes = if (moment.liked_by_me) R.drawable.ic_heart_filled else R.drawable.ic_heart,
-                tint = if (moment.liked_by_me) Color(0xFFFF3366) else Color.White,
+                tint = if (moment.liked_by_me) Color(0xFFFF3366) else overlayInk,
                 countText = formatMomentCount(moment.likes_count),
                 contentDescription = if (moment.liked_by_me) "Unlike moment" else "Like moment",
+                containerColor = actionChipBg,
                 onClick = onToggleLike
             )
 
             MomentActionIconButton(
                 iconRes = R.drawable.ic_comment,
-                tint = Color.White,
+                tint = overlayInk,
                 countText = formatMomentCount(moment.comments_count),
                 contentDescription = "Comments",
+                containerColor = actionChipBg,
                 onClick = onOpenComments
             )
 
@@ -488,22 +497,24 @@ fun MomentV2Slide(
                 countText = if (moment.corrections_count > 0) formatMomentCount(moment.corrections_count) else "Fix",
                 contentDescription = "Native corrections",
                 onClick = onOpenCorrections,
-                containerColor = Color(0xFF2B2118).copy(alpha = 0.65f)
+                containerColor = if (useLightUiContrast) Color(0xFF2B2118) else Color(0xFF2B2118).copy(alpha = 0.72f)
             )
 
             MomentActionIconButton(
                 iconRes = if (isBookmarked) R.drawable.ic_bookmark_filled else R.drawable.ic_bookmark,
-                tint = if (isBookmarked) Color(0xFFFFB627) else Color.White,
+                tint = if (isBookmarked) Color(0xFFFFB627) else overlayInk,
                 countText = "",
                 contentDescription = if (isBookmarked) "Remove bookmark" else "Bookmark moment",
+                containerColor = actionChipBg,
                 onClick = onToggleBookmark
             )
 
             MomentActionIconButton(
                 iconRes = R.drawable.ic_share,
-                tint = Color.White,
+                tint = overlayInk,
                 countText = "",
                 contentDescription = "Share moment",
+                containerColor = actionChipBg,
                 onClick = onShare
             )
         }
@@ -521,7 +532,7 @@ fun MomentV2Slide(
                     text = moment.title,
                     fontSize = 21.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White,
+                    color = overlayInk,
                     lineHeight = 25.sp
                 )
             }
@@ -530,7 +541,7 @@ fun MomentV2Slide(
                 Text(
                     text = moment.content,
                     fontSize = 13.5.sp,
-                    color = Color(0xFFF1F5F9),
+                    color = if (useLightUiContrast) funkyColors.ink.copy(alpha = 0.85f) else Color(0xFFF1F5F9),
                     lineHeight = 19.sp,
                     maxLines = 4,
                     overflow = TextOverflow.Ellipsis
@@ -541,7 +552,7 @@ fun MomentV2Slide(
                 Surface(
                     onClick = { showTranslation = !showTranslation },
                     shape = RoundedCornerShape(14.dp),
-                    color = Color.White.copy(alpha = 0.16f)
+                    color = if (useLightUiContrast) funkyColors.soft else Color.White.copy(alpha = 0.16f)
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
@@ -551,13 +562,13 @@ fun MomentV2Slide(
                         Icon(
                             painter = painterResource(id = R.drawable.ic_globe),
                             contentDescription = null,
-                            tint = Color(0xFFFFE082),
+                            tint = funkyColors.mango,
                             modifier = Modifier.size(13.dp)
                         )
                         Text(
                             text = if (showTranslation) "Translation: ${moment.translation}" else "View author translation",
                             fontSize = 12.sp,
-                            color = Color(0xFFE2E8F0),
+                            color = if (useLightUiContrast) funkyColors.ink else Color(0xFFE2E8F0),
                             fontWeight = FontWeight.Medium
                         )
                     }
@@ -575,41 +586,65 @@ fun MomentV2Slide(
                 displayLocation.takeIf { it.isNotBlank() },
                 timeAgo.takeIf { it.isNotBlank() }
             ).joinToString(" · ")
+            val flagCode = moment.author.country_code?.takeIf { it.isNotBlank() }
+                ?: LanguageData.getFlagCodeForLanguage(moment.language)
 
-            // User Profile Row: Avatar, Name, Verified badge, Flag & Location/Time, Follow button
+            // User Profile Row: Avatar with overlapping bottom-right Flag, Name, Verified badge, Location/Time, Follow button
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                val avatarModel = resolveAvatarModel(moment.author.avatar_url)
-                if (avatarModel != null) {
-                    AsyncImage(
-                        model = ImageRequest.Builder(context)
-                            .data(avatarModel)
-                            .crossfade(true)
-                            .build(),
-                        contentDescription = authorName,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .border(1.5.dp, Color.White, CircleShape)
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFFFB627))
-                            .border(1.5.dp, Color.White, CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = authorName.firstOrNull()?.uppercase() ?: "U",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF2B2118)
+                Box(modifier = Modifier.size(40.dp)) {
+                    val avatarModel = resolveAvatarModel(moment.author.avatar_url)
+                    if (avatarModel != null) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(context)
+                                .data(avatarModel)
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = authorName,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .border(1.5.dp, overlayInk, CircleShape)
                         )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(funkyColors.mango)
+                                .border(1.5.dp, overlayInk, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = authorName.firstOrNull()?.uppercase() ?: "U",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = funkyColors.onMango
+                            )
+                        }
+                    }
+
+                    if (flagCode.isNotBlank()) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .size(16.dp)
+                                .clip(CircleShape)
+                                .background(funkyColors.surface)
+                                .border(1.5.dp, overlayInk, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircleFlag(
+                                countryCode = flagCode,
+                                allowProgramming = false,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(CircleShape)
+                            )
+                        }
                     }
                 }
 
@@ -619,7 +654,7 @@ fun MomentV2Slide(
                             text = authorName,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White,
+                            color = overlayInk,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -634,17 +669,11 @@ fun MomentV2Slide(
                         }
                     }
 
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        val flagCode = moment.author.country_code?.takeIf { it.isNotBlank() }
-                            ?: LanguageData.getFlagCodeForLanguage(moment.language)
-                        CircleFlag(countryCode = flagCode, modifier = Modifier.size(12.dp))
+                    if (subLocationLine.isNotBlank()) {
                         Text(
                             text = subLocationLine,
                             fontSize = 11.sp,
-                            color = Color.White.copy(alpha = 0.78f),
+                            color = overlaySubInk,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -744,15 +773,16 @@ fun MomentCommentsBottomSheet(
     val coroutineScope = rememberCoroutineScope()
     val limits = remember { MomentsRepository.getCachedOptions().limits }
 
-    // Warm Cream Palette (with Dark mode fallback) matching screenshots
-    val isDark = isSystemInDarkTheme()
-    val sheetBg = if (isDark) Color(0xFF231D15) else Color(0xFFFFF8E7)
-    val softSurface = if (isDark) Color(0xFF3A2D12) else Color(0xFFFFEFC2)
-    val activeTabBg = if (isDark) Color(0xFF2B2118) else Color.White
-    val inkColor = if (isDark) Color(0xFFFFF3DC) else Color(0xFF2B2118)
-    val muteColor = if (isDark) Color(0xFFA89A82) else Color(0xFF8A7B66)
-    val lineColor = if (isDark) Color(0xFF34291A) else Color(0xFFF0E3C4)
-    val mangoColor = Color(0xFFFFB627)
+    // Warm Cream Palette (with Dark mode support) honoring app theme preference
+    val funkyColors = com.example.ui.theme.LocalFunkyColors.current
+    val isDark = funkyColors.isDark || com.example.ui.theme.LocalAppDarkTheme.current
+    val sheetBg = if (isDark) funkyColors.surface else Color(0xFFFFF8E7)
+    val softSurface = if (isDark) funkyColors.soft else Color(0xFFFFEFC2)
+    val activeTabBg = if (isDark) funkyColors.bg else Color.White
+    val inkColor = if (isDark) funkyColors.ink else Color(0xFF2B2118)
+    val muteColor = if (isDark) funkyColors.mute else Color(0xFF8A7B66)
+    val lineColor = if (isDark) funkyColors.line else Color(0xFFF0E3C4)
+    val mangoColor = funkyColors.mango
 
     // Sub-tab inside sheet: 0 = "Comments" (all), 1 = "Corrections" (corrections)
     var selectedSheetTab by remember(moment.id, initialTab) { mutableIntStateOf(initialTab) }
@@ -1727,11 +1757,12 @@ fun CommentItemRow(
     isNestedReply: Boolean = false
 ) {
     val context = LocalContext.current
-    val isDark = com.example.ui.theme.LocalAppDarkTheme.current
-    val inkColor = if (isDark) Color(0xFFFFF3DC) else Color(0xFF2B2118)
-    val muteColor = if (isDark) Color(0xFFA89A82) else Color(0xFF8A7B66)
-    val cardBg = if (isDark) Color(0xFF3A2D12) else Color(0xFFFFEFC2)
-    val mangoColor = Color(0xFFFFB627)
+    val funkyColors = com.example.ui.theme.LocalFunkyColors.current
+    val isDark = funkyColors.isDark || com.example.ui.theme.LocalAppDarkTheme.current
+    val inkColor = if (isDark) funkyColors.ink else Color(0xFF2B2118)
+    val muteColor = if (isDark) funkyColors.mute else Color(0xFF8A7B66)
+    val cardBg = if (isDark) funkyColors.soft else Color(0xFFFFEFC2)
+    val mangoColor = funkyColors.mango
 
     val authorName = comment.author.name?.takeIf { it.isNotBlank() }
         ?: comment.author.username?.takeIf { it.isNotBlank() }
@@ -1824,13 +1855,19 @@ fun CommentItemRow(
                         shape = RoundedCornerShape(10.dp),
                         color = Color(0xFF16A34A).copy(alpha = 0.16f)
                     ) {
-                        Text(
-                            text = "✓ Accepted",
-                            fontSize = 10.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF15803D),
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            SoftCheckIcon(size = 10.dp, color = Color(0xFF15803D))
+                            Text(
+                                text = "Accepted",
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF15803D)
+                            )
+                        }
                     }
                 }
             }
@@ -1962,13 +1999,21 @@ fun CommentItemRow(
                 }
 
                 if (isCorrection && isPostAuthor) {
-                    Text(
-                        text = if (comment.is_accepted) "Accepted ✓" else "Accept fix",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (comment.is_accepted) Color(0xFF16A34A) else Color(0xFFD97706),
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
                         modifier = Modifier.clickable { onAcceptCorrection(comment) }
-                    )
+                    ) {
+                        Text(
+                            text = if (comment.is_accepted) "Accepted" else "Accept fix",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (comment.is_accepted) Color(0xFF16A34A) else Color(0xFFD97706)
+                        )
+                        if (comment.is_accepted) {
+                            SoftCheckIcon(size = 11.dp, color = Color(0xFF16A34A))
+                        }
+                    }
                 }
 
                 if (comment.author.is_me || isPostAuthor) {
@@ -2189,6 +2234,8 @@ fun MomentsV2FeedViewerDialog(
         }
     }
 
+    val funkyColors = com.example.ui.theme.LocalFunkyColors.current
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(
@@ -2199,7 +2246,7 @@ fun MomentsV2FeedViewerDialog(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black)
+                .background(funkyColors.bg)
                 .testTag("profile_moments_v2_viewer")
         ) {
             VerticalPager(
@@ -2380,19 +2427,38 @@ fun MomentsV2FeedViewerDialog(
 
                     DropdownMenu(
                         expanded = showTopMenu,
-                        onDismissRequest = { showTopMenu = false }
+                        onDismissRequest = { showTopMenu = false },
+                        containerColor = funkyColors.surface,
+                        shape = RoundedCornerShape(20.dp),
+                        border = BorderStroke(1.dp, funkyColors.line)
                     ) {
                         if (currentMoment != null) {
                             val canDelete = currentMoment.author.is_me || isSelfProfile
                             if (!canDelete) {
                                 DropdownMenuItem(
-                                    text = { Text("Not interested") },
-                                    leadingIcon = {
-                                        Icon(
-                                            painter = painterResource(id = R.drawable.ic_visibility_off),
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp)
+                                    text = {
+                                        Text(
+                                            "Not interested",
+                                            color = funkyColors.ink,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 14.sp
                                         )
+                                    },
+                                    leadingIcon = {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(32.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(funkyColors.soft),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                painter = painterResource(id = R.drawable.ic_visibility_off),
+                                                contentDescription = null,
+                                                tint = funkyColors.ink,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
                                     },
                                     onClick = {
                                         showTopMenu = false
@@ -2403,15 +2469,34 @@ fun MomentsV2FeedViewerDialog(
                                         }
                                     }
                                 )
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = 12.dp),
+                                    color = funkyColors.line.copy(alpha = 0.6f)
+                                )
                                 DropdownMenuItem(
-                                    text = { Text("Report post", color = Color(0xFFEF4444)) },
-                                    leadingIcon = {
-                                        Icon(
-                                            painter = painterResource(id = R.drawable.ic_flag),
-                                            contentDescription = null,
-                                            tint = Color(0xFFEF4444),
-                                            modifier = Modifier.size(18.dp)
+                                    text = {
+                                        Text(
+                                            "Report post",
+                                            color = funkyColors.danger,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 14.sp
                                         )
+                                    },
+                                    leadingIcon = {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(32.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(funkyColors.danger.copy(alpha = 0.12f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                painter = painterResource(id = R.drawable.ic_flag),
+                                                contentDescription = null,
+                                                tint = funkyColors.danger,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
                                     },
                                     onClick = {
                                         showTopMenu = false
@@ -2420,14 +2505,29 @@ fun MomentsV2FeedViewerDialog(
                                 )
                             } else {
                                 DropdownMenuItem(
-                                    text = { Text("Delete post", color = Color(0xFFEF4444)) },
-                                    leadingIcon = {
-                                        Icon(
-                                            painter = painterResource(id = R.drawable.ic_trash),
-                                            contentDescription = null,
-                                            tint = Color(0xFFEF4444),
-                                            modifier = Modifier.size(18.dp)
+                                    text = {
+                                        Text(
+                                            "Delete post",
+                                            color = funkyColors.danger,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 14.sp
                                         )
+                                    },
+                                    leadingIcon = {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(32.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(funkyColors.danger.copy(alpha = 0.12f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                painter = painterResource(id = R.drawable.ic_trash),
+                                                contentDescription = null,
+                                                tint = funkyColors.danger,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
                                     },
                                     onClick = {
                                         showTopMenu = false

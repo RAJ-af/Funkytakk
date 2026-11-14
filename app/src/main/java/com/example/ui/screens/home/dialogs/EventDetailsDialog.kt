@@ -5,12 +5,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
-import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material3.*
+import androidx.compose.ui.res.painterResource
+import com.example.R
+import com.example.ui.components.SoftHeadsetIcon
+import com.example.ui.theme.LocalFunkyColors
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,6 +32,7 @@ fun EventDetailsDialog(
     onDismiss: () -> Unit,
     onJoinEvent: (SupabaseEvent) -> Unit
 ) {
+    val funkyColors = LocalFunkyColors.current
     val palette = getCategoryPalette(event.category_tag)
     val formattedDate = formatEventDateTime(event.event_time, event.timezone_label)
     val hasRoom = !event.join_room_id.isNullOrBlank()
@@ -46,7 +46,7 @@ fun EventDetailsDialog(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.6f))
+                .background(Color.Black.copy(alpha = 0.65f))
                 .clickable { onDismiss() },
             contentAlignment = Alignment.Center
         ) {
@@ -56,7 +56,7 @@ fun EventDetailsDialog(
                     .padding(vertical = 24.dp)
                     .clickable(enabled = false) {},
                 shape = RoundedCornerShape(26.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
                 elevation = CardDefaults.cardElevation(defaultElevation = 12.dp)
             ) {
                 Column {
@@ -102,13 +102,13 @@ fun EventDetailsDialog(
                                 .align(Alignment.TopEnd)
                                 .padding(12.dp)
                                 .size(34.dp)
-                                .background(Color.Black.copy(alpha = 0.45f), shape = CircleShape)
+                                .background(Color.Black.copy(alpha = 0.5f), shape = CircleShape)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Close,
+                                painter = painterResource(id = R.drawable.ic_close),
                                 contentDescription = "Close",
                                 tint = Color.White,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(16.dp)
                             )
                         }
 
@@ -119,7 +119,7 @@ fun EventDetailsDialog(
                                 .align(Alignment.BottomStart)
                                 .padding(14.dp),
                             shape = RoundedCornerShape(100.dp),
-                            color = Color.White.copy(alpha = 0.95f)
+                            color = funkyColors.surface.copy(alpha = 0.95f)
                         ) {
                             Text(
                                 text = tagText,
@@ -140,7 +140,7 @@ fun EventDetailsDialog(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                imageVector = Icons.Default.CalendarMonth,
+                                painter = painterResource(id = R.drawable.ic_ring),
                                 contentDescription = null,
                                 tint = palette.darkColor,
                                 modifier = Modifier.size(16.dp)
@@ -162,7 +162,7 @@ fun EventDetailsDialog(
                             text = event.title,
                             fontSize = 22.sp,
                             fontWeight = FontWeight.Black,
-                            color = Color(0xFF111827),
+                            color = funkyColors.ink,
                             lineHeight = 26.sp
                         )
 
@@ -172,7 +172,7 @@ fun EventDetailsDialog(
                             Text(
                                 text = event.description,
                                 fontSize = 14.sp,
-                                color = Color(0xFF4B5563),
+                                color = funkyColors.mute,
                                 lineHeight = 20.sp
                             )
                         }
@@ -187,33 +187,31 @@ fun EventDetailsDialog(
                                     .fillMaxWidth()
                                     .height(50.dp),
                                 shape = RoundedCornerShape(16.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = GoldAccent)
+                                colors = ButtonDefaults.buttonColors(containerColor = funkyColors.mango)
                             ) {
                                 if (hasRoom) {
-                                    Icon(
-                                        imageVector = Icons.Default.Headphones,
-                                        contentDescription = null,
-                                        tint = Color.Black,
-                                        modifier = Modifier.size(18.dp)
+                                    SoftHeadsetIcon(
+                                        size = 18.dp,
+                                        color = funkyColors.onMango
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
                                         text = "Join Voice Room",
-                                        color = Color.Black,
+                                        color = funkyColors.onMango,
                                         fontSize = 16.sp,
                                         fontWeight = FontWeight.Bold
                                     )
                                 } else {
                                     Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                        painter = painterResource(id = R.drawable.ic_arrow_right),
                                         contentDescription = null,
-                                        tint = Color.Black,
+                                        tint = funkyColors.onMango,
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
                                         text = "Open Event Link",
-                                        color = Color.Black,
+                                        color = funkyColors.onMango,
                                         fontSize = 16.sp,
                                         fontWeight = FontWeight.Bold
                                     )
@@ -229,12 +227,12 @@ fun EventDetailsDialog(
                                     .height(50.dp),
                                 shape = RoundedCornerShape(16.dp),
                                 colors = ButtonDefaults.buttonColors(
-                                    disabledContainerColor = Color(0xFFF3F4F6)
+                                    disabledContainerColor = funkyColors.soft
                                 )
                             ) {
                                 Text(
                                     text = "Event Details (No Link)",
-                                    color = Color(0xFF9CA3AF),
+                                    color = funkyColors.mute,
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold
                                 )

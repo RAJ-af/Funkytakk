@@ -56,6 +56,7 @@ import com.example.ui.components.*
 import com.example.ui.screens.home.models.DarkText
 import com.example.ui.screens.home.models.GraySubtitle
 import com.example.ui.theme.GoldPrimary
+import com.example.ui.theme.LocalFunkyColors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -262,6 +263,7 @@ fun ModerationReviewDialog(
     initialReportId: String? = null
 ) {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
     val clipboardManager = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
 
@@ -406,13 +408,13 @@ fun ModerationReviewDialog(
                     .fillMaxWidth()
                     .fillMaxHeight(0.94f)
                     .clip(RoundedCornerShape(28.dp)),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFF9FAFB)),
+                colors = CardDefaults.cardColors(containerColor = funkyColors.bg),
                 elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
             ) {
                 Column(modifier = Modifier.fillMaxSize()) {
                     // Header Bar
                     Surface(
-                        color = Color.White,
+                        color = funkyColors.surface,
                         shadowElevation = 2.dp,
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -428,10 +430,10 @@ fun ModerationReviewDialog(
                                     modifier = Modifier
                                         .size(42.dp)
                                         .clip(CircleShape)
-                                        .background(Color(0xFFFEF3C7)),
+                                        .background(if (funkyColors.isDark) funkyColors.mango.copy(alpha = 0.16f) else Color(0xFFFEF3C7)),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    SoftShieldIcon(size = 22.dp, color = Color(0xFFD97706))
+                                    SoftShieldIcon(size = 22.dp, color = funkyColors.mango)
                                 }
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
@@ -440,18 +442,18 @@ fun ModerationReviewDialog(
                                             text = "Moderation Center",
                                             fontWeight = FontWeight.Black,
                                             fontSize = 18.sp,
-                                            color = DarkText
+                                            color = funkyColors.ink
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Box(
                                             modifier = Modifier
                                                 .clip(RoundedCornerShape(6.dp))
-                                                .background(Color(0xFFD1FAE5))
+                                                .background(if (funkyColors.isDark) funkyColors.ok.copy(alpha = 0.18f) else Color(0xFFD1FAE5))
                                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                                         ) {
                                             Text(
                                                 text = "ADMIN",
-                                                color = Color(0xFF065F46),
+                                                color = if (funkyColors.isDark) Color(0xFF6EE7B7) else Color(0xFF065F46),
                                                 fontSize = 10.sp,
                                                 fontWeight = FontWeight.Bold
                                             )
@@ -460,7 +462,7 @@ fun ModerationReviewDialog(
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
                                         text = "Review incident reports & enforce safety",
-                                        color = Color(0xFF6B7280),
+                                        color = funkyColors.mute,
                                         fontSize = 12.sp
                                     )
                                 }
@@ -472,9 +474,9 @@ fun ModerationReviewDialog(
                                     modifier = Modifier
                                         .size(38.dp)
                                         .clip(CircleShape)
-                                        .background(Color(0xFFF3F4F6))
+                                        .background(funkyColors.soft)
                                 ) {
-                                    SoftRefreshIcon(size = 18.dp, color = Color(0xFF374151))
+                                    SoftRefreshIcon(size = 18.dp, color = funkyColors.ink)
                                 }
                                 Spacer(modifier = Modifier.width(8.dp))
                                 IconButton(
@@ -482,10 +484,10 @@ fun ModerationReviewDialog(
                                     modifier = Modifier
                                         .size(38.dp)
                                         .clip(CircleShape)
-                                        .background(Color(0xFFF3F4F6))
+                                        .background(funkyColors.soft)
                                         .testTag("close_moderation_dialog")
                                 ) {
-                                    SoftCloseIcon(size = 16.dp, color = Color(0xFF374151))
+                                    SoftCloseIcon(size = 16.dp, color = funkyColors.ink)
                                 }
                             }
                         }
@@ -494,8 +496,8 @@ fun ModerationReviewDialog(
                     // Admin Navigation Tabs
                     PrimaryTabRow(
                         selectedTabIndex = selectedAdminTab,
-                        containerColor = Color.White,
-                        contentColor = Color(0xFFD97706),
+                        containerColor = funkyColors.surface,
+                        contentColor = funkyColors.mango,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Tab(
@@ -514,7 +516,7 @@ fun ModerationReviewDialog(
                             onClick = { selectedAdminTab = 1 },
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    SoftBlockIcon(size = 16.dp, color = Color(0xFFDC2626))
+                                    SoftBlockIcon(size = 16.dp, color = funkyColors.danger)
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text("Active Penalties (${activePenaltiesList.size})", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                 }
@@ -522,10 +524,10 @@ fun ModerationReviewDialog(
                         )
                         Tab(
                             selected = selectedAdminTab == 2,
-                            onClick = { selectedAdminTab == 2 },
+                            onClick = { selectedAdminTab = 2 },
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    SoftHeadsetIcon(size = 16.dp, color = Color(0xFF4F46E5))
+                                    SoftHeadsetIcon(size = 16.dp, color = Color(0xFF6366F1))
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text("Support Inbox", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                     if (adminUnreadSupportCount > 0) {
@@ -533,7 +535,7 @@ fun ModerationReviewDialog(
                                         Box(
                                             modifier = Modifier
                                                 .clip(CircleShape)
-                                                .background(Color(0xFFDC2626))
+                                                .background(funkyColors.danger)
                                                 .padding(horizontal = 5.dp, vertical = 1.dp)
                                         ) {
                                             Text(
@@ -552,7 +554,7 @@ fun ModerationReviewDialog(
                             onClick = { selectedAdminTab = 3 },
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    SoftStarIcon(size = 16.dp, color = Color(0xFFD97706))
+                                    SoftStarIcon(size = 16.dp, color = funkyColors.mango)
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text("Badges", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                 }
@@ -560,7 +562,7 @@ fun ModerationReviewDialog(
                         )
                     }
 
-                    HorizontalDivider(color = Color(0xFFE5E7EB), thickness = 1.dp)
+                    HorizontalDivider(color = funkyColors.line, thickness = 1.dp)
 
                     if (selectedAdminTab == 0) {
                         Box(
@@ -589,12 +591,12 @@ fun ModerationReviewDialog(
                                     text = "Active Moderation Restrictions (${activePenaltiesList.size})",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = DarkText
+                                    color = funkyColors.ink
                                 )
                                 Text(
                                     text = "Manage and revoke active warnings, suspensions, or mutes across FunkyTalk.",
                                     fontSize = 12.sp,
-                                    color = Color(0xFF6B7280)
+                                    color = funkyColors.mute
                                 )
                             }
 
@@ -606,7 +608,7 @@ fun ModerationReviewDialog(
                                             .height(180.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        CircularProgressIndicator(color = GoldPrimary, modifier = Modifier.size(32.dp))
+                                        CircularProgressIndicator(color = funkyColors.mango, modifier = Modifier.size(32.dp))
                                     }
                                 }
                             } else if (activePenaltiesList.isEmpty()) {
@@ -615,9 +617,9 @@ fun ModerationReviewDialog(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .padding(vertical = 20.dp),
-                                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                                        colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
                                         shape = RoundedCornerShape(20.dp),
-                                        border = BorderStroke(1.dp, Color(0xFFE5E7EB))
+                                        border = BorderStroke(1.dp, funkyColors.line)
                                     ) {
                                         Column(
                                             modifier = Modifier
@@ -629,23 +631,23 @@ fun ModerationReviewDialog(
                                                 modifier = Modifier
                                                     .size(56.dp)
                                                     .clip(CircleShape)
-                                                    .background(Color(0xFFF3F4F6)),
+                                                    .background(funkyColors.soft),
                                                 contentAlignment = Alignment.Center
                                             ) {
-                                                SoftShieldIcon(size = 28.dp, color = Color(0xFF10B981))
+                                                SoftShieldIcon(size = 28.dp, color = funkyColors.ok)
                                             }
                                             Spacer(modifier = Modifier.height(12.dp))
                                             Text(
                                                 text = "No Active Restrictions",
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 15.sp,
-                                                color = DarkText
+                                                color = funkyColors.ink
                                             )
                                             Spacer(modifier = Modifier.height(4.dp))
                                             Text(
                                                 text = "There are currently no users with active warning, suspend, or mute actions.",
                                                 fontSize = 12.sp,
-                                                color = GraySubtitle
+                                                color = funkyColors.mute
                                             )
                                         }
                                     }
@@ -654,23 +656,23 @@ fun ModerationReviewDialog(
                                 items(activePenaltiesList, key = { it.user_id ?: UUID.randomUUID().toString() }) { penalty ->
                                     val actionType = penalty.action_type?.lowercase() ?: "action"
                                     val badgeColor = when (actionType) {
-                                        "suspend" -> Color(0xFFDC2626)
-                                        "warning" -> Color(0xFFD97706)
-                                        "mute" -> Color(0xFF7C3AED)
-                                        else -> Color(0xFF4B5563)
+                                        "suspend" -> funkyColors.danger
+                                        "warning" -> funkyColors.mango
+                                        "mute" -> if (funkyColors.isDark) Color(0xFFC4B5FD) else Color(0xFF7C3AED)
+                                        else -> funkyColors.mute
                                     }
                                     val badgeBg = when (actionType) {
-                                        "suspend" -> Color(0xFFFEE2E2)
-                                        "warning" -> Color(0xFFFEF3C7)
-                                        "mute" -> Color(0xFFEDE9FE)
-                                        else -> Color(0xFFF3F4F6)
+                                        "suspend" -> if (funkyColors.isDark) funkyColors.danger.copy(alpha = 0.16f) else Color(0xFFFEE2E2)
+                                        "warning" -> if (funkyColors.isDark) funkyColors.mango.copy(alpha = 0.16f) else Color(0xFFFEF3C7)
+                                        "mute" -> if (funkyColors.isDark) Color(0xFF7C3AED).copy(alpha = 0.2f) else Color(0xFFEDE9FE)
+                                        else -> funkyColors.soft
                                     }
 
                                     Card(
                                         modifier = Modifier.fillMaxWidth(),
-                                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                                        colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
                                         shape = RoundedCornerShape(16.dp),
-                                        border = BorderStroke(1.dp, Color(0xFFE5E7EB))
+                                        border = BorderStroke(1.dp, funkyColors.line)
                                     ) {
                                         Column(modifier = Modifier.padding(14.dp)) {
                                             Row(
@@ -697,7 +699,7 @@ fun ModerationReviewDialog(
                                                         revokeTargetUserId = penalty.user_id
                                                         showRevokeConfirmDialog = true
                                                     },
-                                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                                                    colors = ButtonDefaults.buttonColors(containerColor = funkyColors.ok, contentColor = Color.White),
                                                     shape = RoundedCornerShape(10.dp),
                                                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                                                 ) {
@@ -709,6 +711,7 @@ fun ModerationReviewDialog(
 
                                             Spacer(modifier = Modifier.height(8.dp))
 
+                                            val linkBlue = if (funkyColors.isDark) Color(0xFF60A5FA) else Color(0xFF2563EB)
                                             Row(
                                                 verticalAlignment = Alignment.CenterVertically,
                                                 modifier = Modifier.clickable {
@@ -722,11 +725,11 @@ fun ModerationReviewDialog(
                                                     text = "User UUID: ${penalty.user_id ?: "Unknown"}",
                                                     fontSize = 12.sp,
                                                     fontWeight = FontWeight.SemiBold,
-                                                    color = Color(0xFF2563EB),
+                                                    color = linkBlue,
                                                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
                                                 )
                                                 Spacer(modifier = Modifier.width(6.dp))
-                                                SoftCopyIcon(size = 12.dp, color = Color(0xFF2563EB))
+                                                SoftCopyIcon(size = 12.dp, color = linkBlue)
                                             }
 
                                             if (!penalty.reason.isNullOrBlank()) {
@@ -734,7 +737,7 @@ fun ModerationReviewDialog(
                                                 Text(
                                                     text = "Reason: ${penalty.reason}",
                                                     fontSize = 12.sp,
-                                                    color = DarkText
+                                                    color = funkyColors.ink
                                                 )
                                             }
 
@@ -742,7 +745,7 @@ fun ModerationReviewDialog(
                                             Text(
                                                 text = if (penalty.expires_at != null) "Expires: ${penalty.expires_at}" else "Expires: Indefinite / Manual Revoke",
                                                 fontSize = 11.sp,
-                                                color = Color(0xFF6B7280)
+                                                color = funkyColors.mute
                                             )
                                         }
                                     }
@@ -840,6 +843,7 @@ fun RevokeModerationConfirmDialog(
     onRevoked: () -> Unit
 ) {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
     val scope = rememberCoroutineScope()
     var reasonInput by remember { mutableStateOf("") }
     var isRevoking by remember { mutableStateOf(false) }
@@ -849,7 +853,7 @@ fun RevokeModerationConfirmDialog(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(24.dp)),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
+            colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
             elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
         ) {
             Column(
@@ -862,33 +866,33 @@ fun RevokeModerationConfirmDialog(
                         modifier = Modifier
                             .size(38.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFFECFDF5)),
+                            .background(if (funkyColors.isDark) funkyColors.ok.copy(alpha = 0.16f) else Color(0xFFECFDF5)),
                         contentAlignment = Alignment.Center
                     ) {
-                        SoftSwapIcon(size = 20.dp, color = Color(0xFF10B981))
+                        SoftSwapIcon(size = 20.dp, color = funkyColors.ok)
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
-                        Text("Revoke Moderation Action", fontWeight = FontWeight.Black, fontSize = 16.sp, color = DarkText)
-                        Text("Lift warning, suspension, or mute", fontSize = 12.sp, color = Color(0xFF6B7280))
+                        Text("Revoke Moderation Action", fontWeight = FontWeight.Black, fontSize = 16.sp, color = funkyColors.ink)
+                        Text("Lift warning, suspension, or mute", fontSize = 12.sp, color = funkyColors.mute)
                     }
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
 
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF9FAFB)),
+                    colors = CardDefaults.cardColors(containerColor = funkyColors.soft),
                     shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                    border = BorderStroke(1.dp, funkyColors.line),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Text("Target User UUID:", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = Color(0xFF6B7280))
+                        Text("Target User UUID:", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = funkyColors.mute)
                         Text(
                             text = targetUserId,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF2563EB),
+                            color = if (funkyColors.isDark) Color(0xFF60A5FA) else Color(0xFF2563EB),
                             fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
                         )
                     }
@@ -896,17 +900,19 @@ fun RevokeModerationConfirmDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                Text("Revocation Reason:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = DarkText)
+                Text("Revocation Reason:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = funkyColors.ink)
                 Spacer(modifier = Modifier.height(6.dp))
                 OutlinedTextField(
                     value = reasonInput,
                     onValueChange = { reasonInput = it },
-                    placeholder = { Text("Reason for revoking (e.g., appeal granted, resolved)...", fontSize = 12.sp, color = Color(0xFF9CA3AF)) },
+                    placeholder = { Text("Reason for revoking (e.g., appeal granted, resolved)...", fontSize = 12.sp, color = funkyColors.mute) },
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = GoldPrimary,
-                        unfocusedBorderColor = Color(0xFFE5E7EB)
+                        focusedBorderColor = funkyColors.mango,
+                        unfocusedBorderColor = funkyColors.line,
+                        focusedTextColor = funkyColors.ink,
+                        unfocusedTextColor = funkyColors.ink
                     ),
                     modifier = Modifier.fillMaxWidth().height(50.dp)
                 )
@@ -920,9 +926,10 @@ fun RevokeModerationConfirmDialog(
                     OutlinedButton(
                         onClick = onDismiss,
                         shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, funkyColors.line),
                         modifier = Modifier.weight(1f).height(44.dp)
                     ) {
-                        Text("Cancel", color = Color(0xFF6B7280), fontWeight = FontWeight.Bold)
+                        Text("Cancel", color = funkyColors.mute, fontWeight = FontWeight.Bold)
                     }
 
                     Button(
@@ -936,7 +943,7 @@ fun RevokeModerationConfirmDialog(
                                 )
                                 isRevoking = false
                                 result.onSuccess { msg ->
-                                    Toast.makeText(context, "✓ $msg", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                                     ModerationManager.fetchMyModerationStatus(context)
                                     onRevoked()
                                 }.onFailure { e ->
@@ -945,7 +952,7 @@ fun RevokeModerationConfirmDialog(
                             }
                         },
                         enabled = !isRevoking,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
+                        colors = ButtonDefaults.buttonColors(containerColor = funkyColors.ok, contentColor = Color.White),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.weight(1.3f).height(44.dp)
                     ) {
@@ -968,6 +975,7 @@ private fun AdminModerationActionDialog(
     onActionApplied: () -> Unit
 ) {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
     val scope = rememberCoroutineScope()
 
     // Parse offenders from speaker_log or reported_user_id
@@ -1002,7 +1010,7 @@ private fun AdminModerationActionDialog(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(24.dp)),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
+            colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
             elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
         ) {
             Column(
@@ -1016,34 +1024,35 @@ private fun AdminModerationActionDialog(
                         modifier = Modifier
                             .size(38.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFFFEF2F2)),
+                            .background(if (funkyColors.isDark) funkyColors.danger.copy(alpha = 0.16f) else Color(0xFFFEF2F2)),
                         contentAlignment = Alignment.Center
                     ) {
-                        SoftGavelIcon(size = 20.dp, color = Color(0xFFEF4444))
+                        SoftGavelIcon(size = 20.dp, color = funkyColors.danger)
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
-                        Text("Apply Moderation Action", fontWeight = FontWeight.Black, fontSize = 17.sp, color = DarkText)
+                        Text("Apply Moderation Action", fontWeight = FontWeight.Black, fontSize = 17.sp, color = funkyColors.ink)
                         val contextLabel = when (report.context_type?.lowercase()) {
                             "profile" -> "Profile Incident"
                             "dm" -> "Direct Message Incident"
                             "moment" -> "Moment Post Incident"
                             else -> "Room #${report.room_id?.take(8) ?: "N/A"}"
                         }
-                        Text(contextLabel, fontSize = 12.sp, color = Color(0xFF6B7280))
+                        Text(contextLabel, fontSize = 12.sp, color = funkyColors.mute)
                     }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Target Offender Selection
-                Text("Target Offender:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = DarkText)
+                Text("Target Offender:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = funkyColors.ink)
                 Spacer(modifier = Modifier.height(6.dp))
 
+                val linkBlue = if (funkyColors.isDark) Color(0xFF60A5FA) else Color(0xFF2563EB)
                 if (!prefilledTarget.isNullOrBlank()) {
                     Surface(
                         shape = RoundedCornerShape(12.dp),
-                        color = Color(0xFFEFF6FF),
+                        color = if (funkyColors.isDark) Color(0xFF3B82F6).copy(alpha = 0.15f) else Color(0xFFEFF6FF),
                         border = BorderStroke(1.5.dp, Color(0xFF3B82F6)),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1057,15 +1066,15 @@ private fun AdminModerationActionDialog(
                                 modifier = Modifier
                                     .size(32.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFFDBEAFE)),
+                                    .background(if (funkyColors.isDark) Color(0xFF3B82F6).copy(alpha = 0.25f) else Color(0xFFDBEAFE)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                SoftPersonIcon(size = 18.dp, color = Color(0xFF2563EB))
+                                SoftPersonIcon(size = 18.dp, color = linkBlue)
                             }
                             Spacer(modifier = Modifier.width(10.dp))
                             Column {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("Reported Offender", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1D4ED8))
+                                    Text("Reported Offender", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = linkBlue)
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Box(
                                         modifier = Modifier
@@ -1076,28 +1085,28 @@ private fun AdminModerationActionDialog(
                                         Text("AUTO-SELECTED", color = Color.White, fontSize = 8.5.sp, fontWeight = FontWeight.Black)
                                     }
                                 }
-                                Text(prefilledTarget, fontSize = 12.sp, color = Color(0xFF1E293B), fontWeight = FontWeight.SemiBold)
+                                Text(prefilledTarget, fontSize = 12.sp, color = funkyColors.ink, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                 } else if (validTargets.isEmpty()) {
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFBEB)),
+                        colors = CardDefaults.cardColors(containerColor = if (funkyColors.isDark) funkyColors.mango.copy(alpha = 0.14f) else Color(0xFFFFFBEB)),
                         shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+                        border = BorderStroke(1.dp, if (funkyColors.isDark) funkyColors.mango.copy(alpha = 0.4f) else Color(0xFFFDE68A)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
                             modifier = Modifier.padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            SoftWarningIcon(size = 18.dp, color = Color(0xFFD97706))
+                            SoftWarningIcon(size = 18.dp, color = funkyColors.mango)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "No reported user UUID attached. Please enter the target UUID below.",
                                 fontSize = 12.sp,
-                                color = Color(0xFF92400E)
+                                color = if (funkyColors.isDark) funkyColors.mango else Color(0xFF92400E)
                             )
                         }
                     }
@@ -1113,8 +1122,12 @@ private fun AdminModerationActionDialog(
                             Surface(
                                 onClick = { selectedTargetUserId = item.user_id },
                                 shape = RoundedCornerShape(10.dp),
-                                color = if (isSelected) Color(0xFFEFF6FF) else Color(0xFFF9FAFB),
-                                border = BorderStroke(1.dp, if (isSelected) Color(0xFF3B82F6) else Color(0xFFE5E7EB)),
+                                color = when {
+                                    isSelected && funkyColors.isDark -> Color(0xFF3B82F6).copy(alpha = 0.16f)
+                                    isSelected -> Color(0xFFEFF6FF)
+                                    else -> funkyColors.soft
+                                },
+                                border = BorderStroke(1.dp, if (isSelected) Color(0xFF3B82F6) else funkyColors.line),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Row(
@@ -1135,13 +1148,13 @@ private fun AdminModerationActionDialog(
                                                     text = item.name.ifBlank { "User" },
                                                     fontWeight = FontWeight.Bold,
                                                     fontSize = 13.sp,
-                                                    color = DarkText
+                                                    color = funkyColors.ink
                                                 )
                                                 if (item.user_id == report.reporter_id) {
                                                     Spacer(modifier = Modifier.width(4.dp))
                                                     Text(
                                                         text = "(Reporter)",
-                                                        color = Color(0xFFDC2626),
+                                                        color = funkyColors.danger,
                                                         fontSize = 10.sp,
                                                         fontWeight = FontWeight.Bold
                                                     )
@@ -1150,7 +1163,7 @@ private fun AdminModerationActionDialog(
                                             Text(
                                                 text = "Role: ${item.role} • UUID: ${item.user_id.take(8)}...",
                                                 fontSize = 11.sp,
-                                                color = Color(0xFF6B7280)
+                                                color = funkyColors.mute
                                             )
                                         }
                                     }
@@ -1169,7 +1182,7 @@ private fun AdminModerationActionDialog(
                     label = { Text("Or Enter Target UUID Directly", fontSize = 11.sp) },
                     placeholder = { Text("e.g. 550e8400-e29b-41d4-a716-446655440000", fontSize = 11.sp) },
                     singleLine = true,
-                    textStyle = TextStyle(fontSize = 12.sp),
+                    textStyle = TextStyle(fontSize = 12.sp, color = funkyColors.ink),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1179,7 +1192,7 @@ private fun AdminModerationActionDialog(
                     Text(
                         text = "Target ID: $effectiveTargetUserId",
                         fontSize = 11.sp,
-                        color = Color(0xFF2563EB),
+                        color = linkBlue,
                         fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
                     )
                 }
@@ -1187,7 +1200,7 @@ private fun AdminModerationActionDialog(
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // Action Type Selector
-                Text("Enforcement Type:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = DarkText)
+                Text("Enforcement Type:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = funkyColors.ink)
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Row(
@@ -1203,7 +1216,7 @@ private fun AdminModerationActionDialog(
                         Surface(
                             onClick = { actionType = key },
                             shape = RoundedCornerShape(10.dp),
-                            color = if (isSelected) Color(0xFF1E293B) else Color(0xFFF3F4F6),
+                            color = if (isSelected) funkyColors.ink else funkyColors.soft,
                             modifier = Modifier
                                 .weight(1f)
                                 .height(38.dp)
@@ -1211,7 +1224,7 @@ private fun AdminModerationActionDialog(
                             Box(contentAlignment = Alignment.Center) {
                                 Text(
                                     text = label,
-                                    color = if (isSelected) Color.White else Color(0xFF374151),
+                                    color = if (isSelected) funkyColors.bg else funkyColors.ink,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -1231,8 +1244,8 @@ private fun AdminModerationActionDialog(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Suspension Duration:", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = DarkText)
-                                Text("$durationHours hours", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFFDC2626))
+                                Text("Suspension Duration:", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = funkyColors.ink)
+                                Text("$durationHours hours", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = funkyColors.danger)
                             }
                             Spacer(modifier = Modifier.height(4.dp))
                             // Presets
@@ -1245,13 +1258,13 @@ private fun AdminModerationActionDialog(
                                     Surface(
                                         onClick = { durationHours = hours },
                                         shape = RoundedCornerShape(8.dp),
-                                        color = if (isSelected) Color(0xFFDC2626) else Color(0xFFF3F4F6),
+                                        color = if (isSelected) funkyColors.danger else funkyColors.soft,
                                         modifier = Modifier.weight(1f).height(30.dp)
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
                                             Text(
                                                 text = "${hours}h",
-                                                color = if (isSelected) Color.White else Color(0xFF374151),
+                                                color = if (isSelected) Color.White else funkyColors.ink,
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold
                                             )
@@ -1260,14 +1273,22 @@ private fun AdminModerationActionDialog(
                                 }
                             }
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text("Blocks voice room access and messaging (1 to 90 hours).", fontSize = 11.sp, color = Color(0xFF6B7280))
+                            Text("Blocks voice room access and messaging (1 to 90 hours).", fontSize = 11.sp, color = funkyColors.mute)
                         }
                     }
                     "warning" -> {
-                        Text("⚠️ Fixed 1 hour penalty: Messaging disabled, user cannot send chat messages or replies.", fontSize = 11.sp, color = Color(0xFFB45309))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            SoftWarningIcon(size = 14.dp, color = funkyColors.mango)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Fixed 1 hour penalty: Messaging disabled, user cannot send chat messages or replies.", fontSize = 11.sp, color = funkyColors.mango)
+                        }
                     }
                     "mute" -> {
-                        Text("🔇 Indefinite Mute: User outgoing messaging is blocked until revoked.", fontSize = 11.sp, color = Color(0xFF4B5563))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            SoftMuteIcon(size = 14.dp, color = funkyColors.mute)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Indefinite Mute: User outgoing messaging is blocked until revoked.", fontSize = 11.sp, color = funkyColors.mute)
+                        }
                     }
                 }
 
@@ -1277,12 +1298,14 @@ private fun AdminModerationActionDialog(
                 OutlinedTextField(
                     value = reasonInput,
                     onValueChange = { reasonInput = it },
-                    placeholder = { Text("Reason for moderation...", fontSize = 12.sp, color = Color(0xFF9CA3AF)) },
+                    placeholder = { Text("Reason for moderation...", fontSize = 12.sp, color = funkyColors.mute) },
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = GoldPrimary,
-                        unfocusedBorderColor = Color(0xFFE5E7EB)
+                        focusedBorderColor = funkyColors.mango,
+                        unfocusedBorderColor = funkyColors.line,
+                        focusedTextColor = funkyColors.ink,
+                        unfocusedTextColor = funkyColors.ink
                     ),
                     modifier = Modifier.fillMaxWidth().height(50.dp)
                 )
@@ -1297,9 +1320,10 @@ private fun AdminModerationActionDialog(
                     OutlinedButton(
                         onClick = onDismiss,
                         shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, funkyColors.line),
                         modifier = Modifier.weight(1f).height(44.dp)
                     ) {
-                        Text("Cancel", color = Color(0xFF6B7280), fontWeight = FontWeight.Bold)
+                        Text("Cancel", color = funkyColors.mute, fontWeight = FontWeight.Bold)
                     }
 
                     Button(
@@ -1326,7 +1350,7 @@ private fun AdminModerationActionDialog(
 
                                 isSubmitting = false
                                 result.onSuccess { msg ->
-                                    Toast.makeText(context, "✓ $msg", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                                     onActionApplied()
                                 }.onFailure { e ->
                                     Toast.makeText(context, "Enforcement Failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
@@ -1334,7 +1358,7 @@ private fun AdminModerationActionDialog(
                             }
                         },
                         enabled = !isSubmitting && effectiveTargetUserId.isNotBlank(),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+                        colors = ButtonDefaults.buttonColors(containerColor = funkyColors.danger, contentColor = Color.White),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.weight(1.3f).height(44.dp)
                     ) {
@@ -1358,11 +1382,12 @@ private fun ModernStatBadge(
     accentColor: Color,
     modifier: Modifier = Modifier
 ) {
+    val funkyColors = LocalFunkyColors.current
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(containerColor = containerColor),
         shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.2f))
+        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.25f))
     ) {
         Column(
             modifier = Modifier
@@ -1374,13 +1399,13 @@ private fun ModernStatBadge(
                 text = count,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Black,
-                color = DarkText
+                color = funkyColors.ink
             )
             Text(
                 text = title,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = Color(0xFF6B7280),
+                color = funkyColors.mute,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -1397,6 +1422,7 @@ private fun ModernReportCard(
     onTakeAction: () -> Unit
 ) {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
     val isSolved = (report.status ?: "").lowercase() in listOf("solved", "resolved", "closed")
     val isUrgent = (report.category ?: "").contains("Abuse", ignoreCase = true) || (report.category ?: "").contains("Harassment", ignoreCase = true)
     val contextType = (report.context_type ?: "room").lowercase().trim()
@@ -1407,9 +1433,9 @@ private fun ModernReportCard(
         modifier = Modifier
             .fillMaxWidth()
             .shadow(2.dp, RoundedCornerShape(20.dp), spotColor = Color(0x12000000)),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
         shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(1.dp, if (isUrgent && !isSolved) Color(0xFFFECACA) else Color(0xFFE5E7EB))
+        border = BorderStroke(1.dp, if (isUrgent && !isSolved) funkyColors.danger.copy(alpha = 0.45f) else funkyColors.line)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             // Header Row: Category Badge + Context Type Badge + Status Badge
@@ -1420,9 +1446,9 @@ private fun ModernReportCard(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val (badgeBg, badgeText) = when {
-                        isUrgent -> Color(0xFFFEF2F2) to Color(0xFFDC2626)
-                        (report.category ?: "").contains("Spam", ignoreCase = true) -> Color(0xFFF3E8FF) to Color(0xFF7E22CE)
-                        else -> Color(0xFFFFFBEB) to Color(0xFFD97706)
+                        isUrgent -> (if (funkyColors.isDark) funkyColors.danger.copy(alpha = 0.16f) else Color(0xFFFEF2F2)) to funkyColors.danger
+                        (report.category ?: "").contains("Spam", ignoreCase = true) -> (if (funkyColors.isDark) Color(0xFFA855F7).copy(alpha = 0.18f) else Color(0xFFF3E8FF)) to (if (funkyColors.isDark) Color(0xFFD8B4FE) else Color(0xFF7E22CE))
+                        else -> (if (funkyColors.isDark) funkyColors.mango.copy(alpha = 0.16f) else Color(0xFFFFFBEB)) to funkyColors.mango
                     }
 
                     Box(
@@ -1443,17 +1469,25 @@ private fun ModernReportCard(
 
                     // Context Type Pill
                     val (ctxBg, ctxText, ctxLabel) = when (contextType) {
-                        "profile" -> Triple(Color(0xFFEFF6FF), Color(0xFF1D4ED8), "👤 Profile")
-                        "dm" -> Triple(Color(0xFFFAF5FF), Color(0xFF7E22CE), "💬 E2EE DM")
-                        "moment" -> Triple(Color(0xFFECFDF5), Color(0xFF047857), "📸 Moment")
-                        else -> Triple(Color(0xFFFFF7ED), Color(0xFFC2410C), "🎙️ Voice Room")
+                        "profile" -> Triple(if (funkyColors.isDark) Color(0xFF3B82F6).copy(alpha = 0.18f) else Color(0xFFEFF6FF), if (funkyColors.isDark) Color(0xFF93C5FD) else Color(0xFF1D4ED8), "Profile")
+                        "dm" -> Triple(if (funkyColors.isDark) Color(0xFFA855F7).copy(alpha = 0.18f) else Color(0xFFFAF5FF), if (funkyColors.isDark) Color(0xFFD8B4FE) else Color(0xFF7E22CE), "E2EE DM")
+                        "moment" -> Triple(if (funkyColors.isDark) funkyColors.ok.copy(alpha = 0.18f) else Color(0xFFECFDF5), if (funkyColors.isDark) Color(0xFF6EE7B7) else Color(0xFF047857), "Moment")
+                        else -> Triple(if (funkyColors.isDark) Color(0xFFEA580C).copy(alpha = 0.18f) else Color(0xFFFFF7ED), if (funkyColors.isDark) Color(0xFFFDBA74) else Color(0xFFC2410C), "Voice Room")
                     }
-                    Box(
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
                             .background(ctxBg)
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
+                        when (contextType) {
+                            "profile" -> SoftPersonIcon(size = 11.dp, color = ctxText)
+                            "dm" -> SoftChatBubbleIcon(size = 11.dp, color = ctxText)
+                            "moment" -> SoftImageIcon(size = 11.dp, color = ctxText)
+                            else -> SoftHeadsetIcon(size = 11.dp, color = ctxText)
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(ctxLabel, color = ctxText, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
 
@@ -1462,7 +1496,7 @@ private fun ModernReportCard(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFFDC2626))
+                                .background(funkyColors.danger)
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
                             Text("URGENT", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Black)
@@ -1474,17 +1508,24 @@ private fun ModernReportCard(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(100.dp))
-                        .background(if (isSolved) Color(0xFFECFDF5) else Color(0xFFFFFBEB))
+                        .background(
+                            when {
+                                isSolved && funkyColors.isDark -> funkyColors.ok.copy(alpha = 0.16f)
+                                isSolved -> Color(0xFFECFDF5)
+                                funkyColors.isDark -> funkyColors.mango.copy(alpha = 0.16f)
+                                else -> Color(0xFFFFFBEB)
+                            }
+                        )
                         .border(
                             1.dp,
-                            if (isSolved) Color(0xFFA7F3D0) else Color(0xFFFDE68A),
+                            if (isSolved) funkyColors.ok.copy(alpha = 0.4f) else funkyColors.mango.copy(alpha = 0.4f),
                             RoundedCornerShape(100.dp)
                         )
                         .padding(horizontal = 10.dp, vertical = 4.dp)
                 ) {
                     Text(
-                        text = if (isSolved) "✓ Resolved" else "● Pending",
-                        color = if (isSolved) Color(0xFF047857) else Color(0xFFB45309),
+                        text = if (isSolved) "Resolved" else "Pending",
+                        color = if (isSolved) (if (funkyColors.isDark) Color(0xFF6EE7B7) else Color(0xFF047857)) else funkyColors.mango,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -1498,7 +1539,7 @@ private fun ModernReportCard(
                 text = report.reason ?: "Unspecified incident",
                 fontWeight = FontWeight.Bold,
                 fontSize = 15.sp,
-                color = DarkText
+                color = funkyColors.ink
             )
 
             if (!report.additional_details.isNullOrBlank()) {
@@ -1506,7 +1547,7 @@ private fun ModernReportCard(
                 Text(
                     text = report.additional_details,
                     fontSize = 13.sp,
-                    color = Color(0xFF4B5563),
+                    color = funkyColors.mute,
                     lineHeight = 18.sp
                 )
             }
@@ -1588,8 +1629,8 @@ private fun ModernReportCard(
                                 .weight(1f)
                                 .height(88.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0xFFF3F4F6))
-                                .border(1.dp, Color(0xFFE5E7EB), RoundedCornerShape(12.dp))
+                                .background(funkyColors.soft)
+                                .border(1.dp, funkyColors.line, RoundedCornerShape(12.dp))
                                 .clickable {
                                     if (effectiveScreenshotUrl != null) {
                                         onViewScreenshot(effectiveScreenshotUrl)
@@ -1611,7 +1652,7 @@ private fun ModernReportCard(
                                         CircularProgressIndicator(
                                             modifier = Modifier.size(20.dp),
                                             strokeWidth = 2.dp,
-                                            color = GoldPrimary
+                                            color = funkyColors.mango
                                         )
                                     }
                                 },
@@ -1619,12 +1660,12 @@ private fun ModernReportCard(
                                     Box(
                                         modifier = Modifier
                                             .fillMaxSize()
-                                            .background(Color(0xFFFEF2F2)),
+                                            .background(if (funkyColors.isDark) funkyColors.danger.copy(alpha = 0.14f) else Color(0xFFFEF2F2)),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            SoftImageIcon(size = 18.dp, color = Color(0xFFEF4444))
-                                            Text("Evidence", fontSize = 10.sp, color = Color(0xFFDC2626), fontWeight = FontWeight.Bold)
+                                            SoftImageIcon(size = 18.dp, color = funkyColors.danger)
+                                            Text("Evidence", fontSize = 10.sp, color = funkyColors.danger, fontWeight = FontWeight.Bold)
                                         }
                                     }
                                 }
@@ -1664,10 +1705,16 @@ private fun ModernReportCard(
                                 .weight(1f)
                                 .height(88.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(if (isThisPlaying) Color(0xFFFFFBEB) else Color(0xFFF9FAFB))
+                                .background(
+                                    when {
+                                        isThisPlaying && funkyColors.isDark -> funkyColors.mango.copy(alpha = 0.16f)
+                                        isThisPlaying -> Color(0xFFFFFBEB)
+                                        else -> funkyColors.soft
+                                    }
+                                )
                                 .border(
                                     1.dp,
-                                    if (isThisPlaying) Color(0xFFFCD34D) else Color(0xFFE5E7EB),
+                                    if (isThisPlaying) funkyColors.mango.copy(alpha = 0.55f) else funkyColors.line,
                                     RoundedCornerShape(12.dp)
                                 )
                                 .clickable { audioPlayer.togglePlay(audioUrl) }
@@ -1686,17 +1733,17 @@ private fun ModernReportCard(
                                         modifier = Modifier
                                             .size(36.dp)
                                             .clip(CircleShape)
-                                            .background(if (isThisPlaying) Color(0xFFD97706) else Color(0xFF1E293B)),
+                                            .background(if (isThisPlaying) funkyColors.mango else funkyColors.ink),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         if (isThisBuffering) {
                                             CircularProgressIndicator(
                                                 modifier = Modifier.size(18.dp),
-                                                color = Color.White,
+                                                color = if (isThisPlaying) funkyColors.onMango else funkyColors.bg,
                                                 strokeWidth = 2.dp
                                             )
                                         } else if (isThisPlaying) {
-                                            SoftPauseIcon(size = 16.dp, color = Color.White)
+                                            SoftPauseIcon(size = 16.dp, color = funkyColors.onMango)
                                         } else {
                                             SoftPlayIcon(size = 16.dp)
                                         }
@@ -1709,7 +1756,7 @@ private fun ModernReportCard(
                                             text = if (isThisBuffering) "Buffering..." else if (isThisPlaying) "Playing Evidence" else "Audio Evidence",
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = DarkText,
+                                            color = funkyColors.ink,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
@@ -1736,8 +1783,8 @@ private fun ModernReportCard(
                                             .fillMaxWidth()
                                             .height(3.dp)
                                             .clip(RoundedCornerShape(2.dp)),
-                                        color = Color(0xFFD97706),
-                                        trackColor = Color(0xFFE5E7EB)
+                                        color = funkyColors.mango,
+                                        trackColor = funkyColors.line
                                     )
                                 }
                             }
@@ -1756,8 +1803,8 @@ private fun ModernReportCard(
                     Surface(
                         onClick = { isSnapshotsExpanded = !isSnapshotsExpanded },
                         shape = RoundedCornerShape(10.dp),
-                        color = Color(0xFFF8FAFC),
-                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        color = funkyColors.soft,
+                        border = BorderStroke(1.dp, funkyColors.line),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(10.dp)) {
@@ -1773,12 +1820,12 @@ private fun ModernReportCard(
                                         text = "Room Logs (${report.speaker_log?.size ?: 0} speakers, ${report.message_snapshot?.size ?: 0} msgs)",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF475569)
+                                        color = funkyColors.mute
                                     )
                                 }
                                 SoftChevronDownIcon(
                                     size = 14.dp,
-                                    color = Color(0xFF64748B),
+                                    color = funkyColors.mute,
                                     modifier = Modifier.rotate(if (isSnapshotsExpanded) 180f else 0f)
                                 )
                             }
@@ -1788,7 +1835,7 @@ private fun ModernReportCard(
 
                                 // Speaker log list
                                 if (hasSpeakers) {
-                                    Text("Speakers Captured:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = DarkText)
+                                    Text("Speakers Captured:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = funkyColors.ink)
                                     Spacer(modifier = Modifier.height(4.dp))
                                     report.speaker_log!!.forEach { spk ->
                                         Row(
@@ -1801,12 +1848,12 @@ private fun ModernReportCard(
                                             Text(
                                                 text = "• ${spk.name} (${spk.role})",
                                                 fontSize = 11.sp,
-                                                color = Color(0xFF334155)
+                                                color = funkyColors.ink
                                             )
                                             Text(
                                                 text = "ID: ${spk.user_id.take(8)}...",
                                                 fontSize = 10.sp,
-                                                color = Color(0xFF94A3B8)
+                                                color = funkyColors.mute
                                             )
                                         }
                                     }
@@ -1815,13 +1862,13 @@ private fun ModernReportCard(
                                 // Message snapshot
                                 if (hasMessages) {
                                     Spacer(modifier = Modifier.height(6.dp))
-                                    Text("Chat Messages Snapshot:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = DarkText)
+                                    Text("Chat Messages Snapshot:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = funkyColors.ink)
                                     Spacer(modifier = Modifier.height(4.dp))
                                     report.message_snapshot!!.takeLast(5).forEach { msg ->
                                         Text(
                                             text = "${msg.sender}: ${msg.text}",
                                             fontSize = 11.sp,
-                                            color = Color(0xFF475569),
+                                            color = funkyColors.mute,
                                             maxLines = 2,
                                             overflow = TextOverflow.Ellipsis
                                         )
@@ -1838,7 +1885,7 @@ private fun ModernReportCard(
             // Action Button
             Button(
                 onClick = onTakeAction,
-                colors = ButtonDefaults.buttonColors(containerColor = if (isSolved) Color(0xFF475569) else Color(0xFFDC2626)),
+                colors = ButtonDefaults.buttonColors(containerColor = if (isSolved) Color(0xFF475569) else funkyColors.danger, contentColor = Color.White),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1867,6 +1914,7 @@ private fun ReportedProfileContentSection(
     onCopyText: (String, String) -> Unit
 ) {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
     var profileData by remember { mutableStateOf<DiscoverableProfile?>(null) }
     var isFetchingProfile by remember { mutableStateOf(true) }
 
@@ -1897,6 +1945,7 @@ private fun ReportedProfileContentSection(
         }
     }
 
+    val linkBlue = if (funkyColors.isDark) Color(0xFF60A5FA) else Color(0xFF2563EB)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // User IDs info bar
         Row(
@@ -1907,7 +1956,7 @@ private fun ReportedProfileContentSection(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xFFEFF6FF))
+                    .background(if (funkyColors.isDark) Color(0xFF3B82F6).copy(alpha = 0.16f) else Color(0xFFEFF6FF))
                     .clickable { onCopyText(reportedUserId, "Target User ID") }
                     .padding(horizontal = 10.dp, vertical = 6.dp)
             ) {
@@ -1917,11 +1966,11 @@ private fun ReportedProfileContentSection(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        SoftPersonIcon(size = 13.dp, color = Color(0xFF2563EB))
+                        SoftPersonIcon(size = 13.dp, color = linkBlue)
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Target: ${reportedUserId.take(8)}...", fontSize = 11.sp, color = Color(0xFF1E40AF), fontWeight = FontWeight.SemiBold)
+                        Text("Target: ${reportedUserId.take(8)}...", fontSize = 11.sp, color = linkBlue, fontWeight = FontWeight.SemiBold)
                     }
-                    SoftCopyIcon(size = 11.dp, color = Color(0xFF3B82F6))
+                    SoftCopyIcon(size = 11.dp, color = linkBlue)
                 }
             }
 
@@ -1929,7 +1978,7 @@ private fun ReportedProfileContentSection(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xFFF3F4F6))
+                    .background(funkyColors.soft)
                     .clickable { onCopyText(reporterId, "Reporter ID") }
                     .padding(horizontal = 10.dp, vertical = 6.dp)
             ) {
@@ -1939,11 +1988,11 @@ private fun ReportedProfileContentSection(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        SoftPersonIcon(size = 13.dp, color = Color(0xFF6B7280))
+                        SoftPersonIcon(size = 13.dp, color = funkyColors.mute)
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Reporter: ${reporterId.take(8)}...", fontSize = 11.sp, color = Color(0xFF374151), fontWeight = FontWeight.Medium)
+                        Text("Reporter: ${reporterId.take(8)}...", fontSize = 11.sp, color = funkyColors.ink, fontWeight = FontWeight.Medium)
                     }
-                    SoftCopyIcon(size = 11.dp, color = Color(0xFF9CA3AF))
+                    SoftCopyIcon(size = 11.dp, color = funkyColors.mute)
                 }
             }
         }
@@ -1951,8 +2000,8 @@ private fun ReportedProfileContentSection(
         // Mini Profile Card
         Surface(
             shape = RoundedCornerShape(14.dp),
-            color = Color(0xFFF8FAFC),
-            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+            color = funkyColors.soft,
+            border = BorderStroke(1.dp, funkyColors.line),
             modifier = Modifier.fillMaxWidth()
         ) {
             if (isFetchingProfile) {
@@ -1962,7 +2011,7 @@ private fun ReportedProfileContentSection(
                         .padding(14.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = GoldPrimary)
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = funkyColors.mango)
                 }
             } else if (profileData != null) {
                 val p = profileData!!
@@ -1982,19 +2031,19 @@ private fun ReportedProfileContentSection(
                             text = p.profile_name ?: p.username ?: "Anonymous",
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
-                            color = DarkText
+                            color = funkyColors.ink
                         )
                         Text(
                             text = "@${p.username ?: "user"}",
                             fontSize = 11.5.sp,
-                            color = Color(0xFF64748B)
+                            color = funkyColors.mute
                         )
                         if (!p.bio.isNullOrBlank()) {
                             Spacer(modifier = Modifier.height(3.dp))
                             Text(
                                 text = p.bio,
                                 fontSize = 12.sp,
-                                color = Color(0xFF334155),
+                                color = funkyColors.ink.copy(alpha = 0.85f),
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -2005,7 +2054,7 @@ private fun ReportedProfileContentSection(
                 Text(
                     text = "Profile data: $reportedUserId",
                     fontSize = 12.sp,
-                    color = Color(0xFF64748B),
+                    color = funkyColors.mute,
                     modifier = Modifier.padding(12.dp)
                 )
             }
@@ -2022,6 +2071,9 @@ private fun ReportedDmContentSection(
     reporterId: String,
     onCopyText: (String, String) -> Unit
 ) {
+    val funkyColors = LocalFunkyColors.current
+    val purpleTint = if (funkyColors.isDark) Color(0xFFC084FC) else Color(0xFF7E22CE)
+    val purpleBg = if (funkyColors.isDark) Color(0xFFA855F7).copy(alpha = 0.16f) else Color(0xFFFAF5FF)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -2031,7 +2083,7 @@ private fun ReportedDmContentSection(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xFFFAF5FF))
+                    .background(purpleBg)
                     .clickable { onCopyText(reportedUserId, "Reported Sender ID") }
                     .padding(horizontal = 10.dp, vertical = 6.dp)
             ) {
@@ -2041,11 +2093,11 @@ private fun ReportedDmContentSection(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        SoftPersonIcon(size = 13.dp, color = Color(0xFF7E22CE))
+                        SoftPersonIcon(size = 13.dp, color = purpleTint)
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Sender: ${reportedUserId.take(8)}...", fontSize = 11.sp, color = Color(0xFF6B21A8), fontWeight = FontWeight.SemiBold)
+                        Text("Sender: ${reportedUserId.take(8)}...", fontSize = 11.sp, color = purpleTint, fontWeight = FontWeight.SemiBold)
                     }
-                    SoftCopyIcon(size = 11.dp, color = Color(0xFFA855F7))
+                    SoftCopyIcon(size = 11.dp, color = purpleTint)
                 }
             }
 
@@ -2053,7 +2105,7 @@ private fun ReportedDmContentSection(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xFFF3F4F6))
+                    .background(funkyColors.soft)
                     .clickable { onCopyText(reporterId, "Reporter ID") }
                     .padding(horizontal = 10.dp, vertical = 6.dp)
             ) {
@@ -2063,20 +2115,20 @@ private fun ReportedDmContentSection(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        SoftPersonIcon(size = 13.dp, color = Color(0xFF6B7280))
+                        SoftPersonIcon(size = 13.dp, color = funkyColors.mute)
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Reporter: ${reporterId.take(8)}...", fontSize = 11.sp, color = Color(0xFF374151), fontWeight = FontWeight.Medium)
+                        Text("Reporter: ${reporterId.take(8)}...", fontSize = 11.sp, color = funkyColors.ink, fontWeight = FontWeight.Medium)
                     }
-                    SoftCopyIcon(size = 11.dp, color = Color(0xFF9CA3AF))
+                    SoftCopyIcon(size = 11.dp, color = funkyColors.mute)
                 }
             }
         }
 
         // E2EE Notice Card
         Card(
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFFAF5FF)),
+            colors = CardDefaults.cardColors(containerColor = purpleBg),
             shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, Color(0xFFF3E8FF)),
+            border = BorderStroke(1.dp, purpleTint.copy(alpha = 0.35f)),
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
@@ -2088,7 +2140,7 @@ private fun ReportedDmContentSection(
                 Text(
                     text = "End-to-End Encrypted Message: Plaintext is never stored on servers. The decrypted snapshot was captured locally by the reporter and attached below.",
                     fontSize = 11.sp,
-                    color = Color(0xFF6B21A8),
+                    color = purpleTint,
                     lineHeight = 15.sp
                 )
             }
@@ -2108,6 +2160,7 @@ private fun ReportedMomentContentSection(
     onCopyText: (String, String) -> Unit
 ) {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
     var momentData by remember { mutableStateOf<MomentDto?>(null) }
     var isFetchingMoment by remember { mutableStateOf(true) }
 
@@ -2123,6 +2176,9 @@ private fun ReportedMomentContentSection(
         }
     }
 
+    val greenTint = if (funkyColors.isDark) Color(0xFF6EE7B7) else Color(0xFF047857)
+    val greenBg = if (funkyColors.isDark) funkyColors.ok.copy(alpha = 0.16f) else Color(0xFFECFDF5)
+
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -2132,7 +2188,7 @@ private fun ReportedMomentContentSection(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xFFECFDF5))
+                    .background(greenBg)
                     .clickable { onCopyText(momentId, "Moment Post ID") }
                     .padding(horizontal = 10.dp, vertical = 6.dp)
             ) {
@@ -2142,11 +2198,11 @@ private fun ReportedMomentContentSection(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        SoftImageIcon(size = 13.dp, color = Color(0xFF047857))
+                        SoftImageIcon(size = 13.dp, color = greenTint)
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Post: ${momentId.take(8)}...", fontSize = 11.sp, color = Color(0xFF065F46), fontWeight = FontWeight.SemiBold)
+                        Text("Post: ${momentId.take(8)}...", fontSize = 11.sp, color = greenTint, fontWeight = FontWeight.SemiBold)
                     }
-                    SoftCopyIcon(size = 11.dp, color = Color(0xFF10B981))
+                    SoftCopyIcon(size = 11.dp, color = greenTint)
                 }
             }
 
@@ -2154,7 +2210,7 @@ private fun ReportedMomentContentSection(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xFFF3F4F6))
+                    .background(funkyColors.soft)
                     .clickable { onCopyText(reporterId, "Reporter ID") }
                     .padding(horizontal = 10.dp, vertical = 6.dp)
             ) {
@@ -2164,11 +2220,11 @@ private fun ReportedMomentContentSection(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        SoftPersonIcon(size = 13.dp, color = Color(0xFF6B7280))
+                        SoftPersonIcon(size = 13.dp, color = funkyColors.mute)
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Reporter: ${reporterId.take(8)}...", fontSize = 11.sp, color = Color(0xFF374151), fontWeight = FontWeight.Medium)
+                        Text("Reporter: ${reporterId.take(8)}...", fontSize = 11.sp, color = funkyColors.ink, fontWeight = FontWeight.Medium)
                     }
-                    SoftCopyIcon(size = 11.dp, color = Color(0xFF9CA3AF))
+                    SoftCopyIcon(size = 11.dp, color = funkyColors.mute)
                 }
             }
         }
@@ -2176,8 +2232,8 @@ private fun ReportedMomentContentSection(
         // Moment Post Preview Card
         Surface(
             shape = RoundedCornerShape(14.dp),
-            color = Color(0xFFF8FAFC),
-            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+            color = funkyColors.soft,
+            border = BorderStroke(1.dp, funkyColors.line),
             modifier = Modifier.fillMaxWidth()
         ) {
             if (isFetchingMoment) {
@@ -2187,7 +2243,7 @@ private fun ReportedMomentContentSection(
                         .padding(14.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = GoldPrimary)
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = funkyColors.mango)
                 }
             } else if (momentData != null) {
                 val m = momentData!!
@@ -2200,7 +2256,7 @@ private fun ReportedMomentContentSection(
                         text = displayText,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
-                        color = DarkText
+                        color = funkyColors.ink
                     )
                     Spacer(modifier = Modifier.height(8.dp))
 
@@ -2212,7 +2268,7 @@ private fun ReportedMomentContentSection(
                                 .fillMaxWidth()
                                 .height(120.dp)
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFFE2E8F0))
+                                .background(funkyColors.line)
                                 .clickable { onViewImage(firstImg) }
                         ) {
                             SubcomposeAsyncImage(
@@ -2233,16 +2289,16 @@ private fun ReportedMomentContentSection(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             SoftHeartIcon(size = 14.dp, isLiked = true)
                             Spacer(modifier = Modifier.width(3.dp))
-                            Text("${m.likes_count} likes", fontSize = 11.sp, color = Color(0xFF64748B))
+                            Text("${m.likes_count} likes", fontSize = 11.sp, color = funkyColors.mute)
                             Spacer(modifier = Modifier.width(10.dp))
-                            SoftChatBubbleIcon(size = 14.dp, color = Color(0xFF64748B))
+                            SoftChatBubbleIcon(size = 14.dp, color = funkyColors.mute)
                             Spacer(modifier = Modifier.width(3.dp))
-                            Text("${m.comments_count} comments", fontSize = 11.sp, color = Color(0xFF64748B))
+                            Text("${m.comments_count} comments", fontSize = 11.sp, color = funkyColors.mute)
                         }
                         Text(
                             text = "Author: ${(m.author.id.ifBlank { reportedUserId }).take(8)}...",
                             fontSize = 10.5.sp,
-                            color = Color(0xFF94A3B8)
+                            color = funkyColors.mute
                         )
                     }
                 }
@@ -2250,7 +2306,7 @@ private fun ReportedMomentContentSection(
                 Text(
                     text = "Reported Moment Post ID: $momentId",
                     fontSize = 12.sp,
-                    color = Color(0xFF64748B),
+                    color = funkyColors.mute,
                     modifier = Modifier.padding(12.dp)
                 )
             }
@@ -2267,6 +2323,7 @@ private fun ReportedRoomContentSection(
     reporterId: String,
     onCopyText: (String, String) -> Unit
 ) {
+    val funkyColors = LocalFunkyColors.current
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -2275,7 +2332,7 @@ private fun ReportedRoomContentSection(
             modifier = Modifier
                 .weight(1f)
                 .clip(RoundedCornerShape(10.dp))
-                .background(Color(0xFFF3F4F6))
+                .background(funkyColors.soft)
                 .clickable { onCopyText(roomId, "Room ID") }
                 .padding(horizontal = 10.dp, vertical = 6.dp)
         ) {
@@ -2285,11 +2342,11 @@ private fun ReportedRoomContentSection(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    SoftGlobeIcon(size = 13.dp, color = Color(0xFF6B7280))
+                    SoftGlobeIcon(size = 13.dp, color = funkyColors.mute)
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Room: ${roomId.take(8)}...", fontSize = 11.sp, color = Color(0xFF374151), fontWeight = FontWeight.Medium)
+                    Text("Room: ${roomId.take(8)}...", fontSize = 11.sp, color = funkyColors.ink, fontWeight = FontWeight.Medium)
                 }
-                SoftCopyIcon(size = 11.dp, color = Color(0xFF9CA3AF))
+                SoftCopyIcon(size = 11.dp, color = funkyColors.mute)
             }
         }
 
@@ -2297,7 +2354,7 @@ private fun ReportedRoomContentSection(
             modifier = Modifier
                 .weight(1f)
                 .clip(RoundedCornerShape(10.dp))
-                .background(Color(0xFFF3F4F6))
+                .background(funkyColors.soft)
                 .clickable { onCopyText(reporterId, "Reporter ID") }
                 .padding(horizontal = 10.dp, vertical = 6.dp)
         ) {
@@ -2307,11 +2364,11 @@ private fun ReportedRoomContentSection(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    SoftPersonIcon(size = 13.dp, color = Color(0xFF6B7280))
+                    SoftPersonIcon(size = 13.dp, color = funkyColors.mute)
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Reporter: ${reporterId.take(8)}...", fontSize = 11.sp, color = Color(0xFF374151), fontWeight = FontWeight.Medium)
+                    Text("Reporter: ${reporterId.take(8)}...", fontSize = 11.sp, color = funkyColors.ink, fontWeight = FontWeight.Medium)
                 }
-                SoftCopyIcon(size = 11.dp, color = Color(0xFF9CA3AF))
+                SoftCopyIcon(size = 11.dp, color = funkyColors.mute)
             }
         }
     }
@@ -2480,6 +2537,7 @@ private fun AudioWaveformBar(
     isPlaying: Boolean,
     timeText: String = "0:14"
 ) {
+    val funkyColors = LocalFunkyColors.current
     val infiniteTransition = rememberInfiniteTransition(label = "audio_bars")
     val h1 by infiniteTransition.animateFloat(
         initialValue = 4f,
@@ -2500,20 +2558,21 @@ private fun AudioWaveformBar(
         label = "h3"
     )
 
+    val barColor = if (isPlaying) funkyColors.mango else funkyColors.mute
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(2.dp),
         modifier = Modifier.padding(top = 2.dp)
     ) {
-        Box(modifier = Modifier.width(3.dp).height(h1.dp).clip(RoundedCornerShape(2.dp)).background(if (isPlaying) Color(0xFFD97706) else Color(0xFF9CA3AF)))
-        Box(modifier = Modifier.width(3.dp).height(h2.dp).clip(RoundedCornerShape(2.dp)).background(if (isPlaying) Color(0xFFD97706) else Color(0xFF9CA3AF)))
-        Box(modifier = Modifier.width(3.dp).height(h3.dp).clip(RoundedCornerShape(2.dp)).background(if (isPlaying) Color(0xFFD97706) else Color(0xFF9CA3AF)))
-        Box(modifier = Modifier.width(3.dp).height(h1.dp).clip(RoundedCornerShape(2.dp)).background(if (isPlaying) Color(0xFFD97706) else Color(0xFF9CA3AF)))
+        Box(modifier = Modifier.width(3.dp).height(h1.dp).clip(RoundedCornerShape(2.dp)).background(barColor))
+        Box(modifier = Modifier.width(3.dp).height(h2.dp).clip(RoundedCornerShape(2.dp)).background(barColor))
+        Box(modifier = Modifier.width(3.dp).height(h3.dp).clip(RoundedCornerShape(2.dp)).background(barColor))
+        Box(modifier = Modifier.width(3.dp).height(h1.dp).clip(RoundedCornerShape(2.dp)).background(barColor))
         Spacer(modifier = Modifier.width(4.dp))
         Text(
             text = timeText,
             fontSize = 10.sp,
-            color = if (isPlaying) Color(0xFFD97706) else Color(0xFF6B7280),
+            color = if (isPlaying) funkyColors.mango else funkyColors.mute,
             fontWeight = if (isPlaying) FontWeight.Bold else FontWeight.Normal
         )
     }
@@ -2534,6 +2593,7 @@ fun AdminBadgesManagementView(
     onBadgeModified: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
     val coroutineScope = rememberCoroutineScope()
 
     var targetUserId by remember { mutableStateOf(initialUserId ?: "") }
@@ -2584,9 +2644,9 @@ fun AdminBadgesManagementView(
         // 1. Header & Description
         item {
             Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFBEB)),
+                colors = CardDefaults.cardColors(containerColor = if (funkyColors.isDark) funkyColors.mango.copy(alpha = 0.14f) else Color(0xFFFFFBEB)),
                 shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+                border = BorderStroke(1.dp, if (funkyColors.isDark) funkyColors.mango.copy(alpha = 0.4f) else Color(0xFFFDE68A)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
@@ -2598,22 +2658,22 @@ fun AdminBadgesManagementView(
                         modifier = Modifier
                             .size(44.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFFF59E0B)),
+                            .background(funkyColors.mango),
                         contentAlignment = Alignment.Center
                     ) {
-                        SoftStarIcon(size = 22.dp, color = Color.White)
+                        SoftStarIcon(size = 22.dp, color = funkyColors.onMango)
                     }
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "Badges & Honors Management",
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.sp,
-                            color = Color(0xFF92400E)
+                            color = if (funkyColors.isDark) funkyColors.mango else Color(0xFF92400E)
                         )
                         Text(
                             text = "Manually award or revoke prestigious badges (e.g. Founder, VIP) to community members.",
                             fontSize = 12.sp,
-                            color = Color(0xFFB45309),
+                            color = if (funkyColors.isDark) funkyColors.ink.copy(alpha = 0.85f) else Color(0xFFB45309),
                             lineHeight = 16.sp
                         )
                     }
@@ -2624,9 +2684,9 @@ fun AdminBadgesManagementView(
         // 2. Target User Input / Picker
         item {
             Card(
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
                 shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                border = BorderStroke(1.dp, funkyColors.line),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -2634,7 +2694,7 @@ fun AdminBadgesManagementView(
                         text = "Target User UUID / ID",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF374151)
+                        color = funkyColors.ink
                     )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -2651,10 +2711,10 @@ fun AdminBadgesManagementView(
                         )
                         Button(
                             onClick = { refreshUserBadges(targetUserId) },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD43B), contentColor = Color(0xFF0F172A)),
+                            colors = ButtonDefaults.buttonColors(containerColor = funkyColors.mango, contentColor = funkyColors.onMango),
                             shape = RoundedCornerShape(12.dp)
                         ) {
-                            SoftSearchIcon(size = 14.dp, color = Color(0xFF0F172A))
+                            SoftSearchIcon(size = 14.dp, color = funkyColors.onMango)
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Inspect", fontWeight = FontWeight.Bold)
                         }
@@ -2666,10 +2726,11 @@ fun AdminBadgesManagementView(
                             text = "Quick Select:",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF9CA3AF)
+                            color = funkyColors.mute
                         )
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             items(supabaseProfiles.take(8)) { profile ->
+                                val isSelected = targetUserId == profile.uid
                                 Surface(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(100.dp))
@@ -2677,9 +2738,9 @@ fun AdminBadgesManagementView(
                                             targetUserId = profile.uid
                                             refreshUserBadges(profile.uid)
                                         },
-                                    color = if (targetUserId == profile.uid) Color(0xFFFEF3C7) else Color(0xFFF3F4F6),
+                                    color = if (isSelected) (if (funkyColors.isDark) funkyColors.mango.copy(alpha = 0.22f) else Color(0xFFFEF3C7)) else funkyColors.soft,
                                     shape = RoundedCornerShape(100.dp),
-                                    border = BorderStroke(1.dp, if (targetUserId == profile.uid) Color(0xFFF59E0B) else Color(0xFFE5E7EB))
+                                    border = BorderStroke(1.dp, if (isSelected) funkyColors.mango else funkyColors.line)
                                 ) {
                                     Row(
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
@@ -2690,7 +2751,7 @@ fun AdminBadgesManagementView(
                                             text = profile.displayName ?: profile.username ?: profile.uid.take(6),
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = if (targetUserId == profile.uid) Color(0xFF92400E) else Color(0xFF374151)
+                                            color = if (isSelected) funkyColors.mango else funkyColors.ink
                                         )
                                     }
                                 }
@@ -2704,9 +2765,9 @@ fun AdminBadgesManagementView(
         // 3. User's Current Awarded Badges (with Revoke action)
         item {
             Card(
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
                 shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                border = BorderStroke(1.dp, funkyColors.line),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -2719,10 +2780,10 @@ fun AdminBadgesManagementView(
                             text = "Currently Awarded Badges (${userBadges.size})",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF1F2937)
+                            color = funkyColors.ink
                         )
                         if (isLoadingUserBadges) {
-                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color(0xFFD97706))
+                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = funkyColors.mango)
                         }
                     }
 
@@ -2730,21 +2791,21 @@ fun AdminBadgesManagementView(
                         Text(
                             text = "Enter a user ID above to view and manage their badges.",
                             fontSize = 12.sp,
-                            color = Color(0xFF9CA3AF)
+                            color = funkyColors.mute
                         )
                     } else if (userBadges.isEmpty()) {
                         Text(
                             text = "This user currently has no assigned badges.",
                             fontSize = 12.sp,
-                            color = Color(0xFF6B7280)
+                            color = funkyColors.mute
                         )
                     } else {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             userBadges.forEach { badge ->
                                 Surface(
                                     shape = RoundedCornerShape(12.dp),
-                                    color = Color(0xFFF9FAFB),
-                                    border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                                    color = funkyColors.soft,
+                                    border = BorderStroke(1.dp, funkyColors.line),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Row(
@@ -2763,12 +2824,12 @@ fun AdminBadgesManagementView(
                                                     text = badge.name,
                                                     fontWeight = FontWeight.Bold,
                                                     fontSize = 13.sp,
-                                                    color = Color(0xFF111827)
+                                                    color = funkyColors.ink
                                                 )
                                                 Text(
                                                     text = "code: ${badge.code}",
                                                     fontSize = 10.sp,
-                                                    color = Color(0xFF9CA3AF)
+                                                    color = funkyColors.mute
                                                 )
                                             }
                                         }
@@ -2788,7 +2849,10 @@ fun AdminBadgesManagementView(
                                                     actionInProgress = null
                                                 }
                                             },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFEE2E2), contentColor = Color(0xFFDC2626)),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = if (funkyColors.isDark) funkyColors.danger.copy(alpha = 0.2f) else Color(0xFFFEE2E2),
+                                                contentColor = funkyColors.danger
+                                            ),
                                             shape = RoundedCornerShape(8.dp),
                                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                                             enabled = actionInProgress == null
@@ -2807,9 +2871,9 @@ fun AdminBadgesManagementView(
         // 4. Available Catalog Badges (with Award action)
         item {
             Card(
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
                 shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                border = BorderStroke(1.dp, funkyColors.line),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -2817,21 +2881,21 @@ fun AdminBadgesManagementView(
                         text = "Available Badges in Catalog",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1F2937)
+                        color = funkyColors.ink
                     )
 
                     if (isLoadingCatalog) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Color(0xFFD97706))
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = funkyColors.mango)
                     } else if (catalogBadges.isEmpty()) {
-                        Text("No badges found in catalog.", fontSize = 12.sp, color = Color(0xFF9CA3AF))
+                        Text("No badges found in catalog.", fontSize = 12.sp, color = funkyColors.mute)
                     } else {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             catalogBadges.forEach { catBadge ->
                                 val isAlreadyAwarded = userBadges.any { it.code.equals(catBadge.code, ignoreCase = true) }
                                 Surface(
                                     shape = RoundedCornerShape(12.dp),
-                                    color = if (isAlreadyAwarded) Color(0xFFF3F4F6) else Color(0xFFFFFBEB).copy(alpha = 0.5f),
-                                    border = BorderStroke(1.dp, if (isAlreadyAwarded) Color(0xFFE5E7EB) else Color(0xFFFDE68A)),
+                                    color = if (isAlreadyAwarded) funkyColors.soft else if (funkyColors.isDark) funkyColors.mango.copy(alpha = 0.12f) else Color(0xFFFFFBEB).copy(alpha = 0.5f),
+                                    border = BorderStroke(1.dp, if (isAlreadyAwarded) funkyColors.line else funkyColors.mango.copy(alpha = 0.45f)),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Row(
@@ -2850,12 +2914,12 @@ fun AdminBadgesManagementView(
                                                     text = catBadge.name,
                                                     fontWeight = FontWeight.Bold,
                                                     fontSize = 13.sp,
-                                                    color = Color(0xFF1F2937)
+                                                    color = funkyColors.ink
                                                 )
                                                 Text(
                                                     text = catBadge.description ?: "Special community badge",
                                                     fontSize = 11.sp,
-                                                    color = Color(0xFF6B7280),
+                                                    color = funkyColors.mute,
                                                     maxLines = 2,
                                                     overflow = TextOverflow.Ellipsis
                                                 )
@@ -2882,8 +2946,8 @@ fun AdminBadgesManagementView(
                                                 }
                                             },
                                             colors = ButtonDefaults.buttonColors(
-                                                containerColor = if (isAlreadyAwarded) Color(0xFFE5E7EB) else Color(0xFFFFD43B),
-                                                contentColor = Color(0xFF0F172A)
+                                                containerColor = if (isAlreadyAwarded) funkyColors.soft else funkyColors.mango,
+                                                contentColor = if (isAlreadyAwarded) funkyColors.mute else funkyColors.onMango
                                             ),
                                             shape = RoundedCornerShape(8.dp),
                                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),

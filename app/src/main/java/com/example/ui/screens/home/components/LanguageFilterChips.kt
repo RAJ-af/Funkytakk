@@ -6,24 +6,38 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.theme.GoldAccent
+import com.example.R
+import com.example.ui.components.CircleFlag
+import com.example.ui.theme.LocalFunkyColors
 
 @Composable
 fun LanguageFilterChips(
     selectedLanguageFilter: String,
+    selectedLanguages: Set<String> = emptySet(),
     onLanguageSelected: (String) -> Unit
 ) {
-    val categories = listOf("All", "🇺🇸 English", "🇮🇳 Hindi", "🇰🇷 Korean", "🇯🇵 Japanese", "🇨🇳 Chinese", "🇷🇺 Russian")
+    val funkyColors = LocalFunkyColors.current
+    val categories = listOf(
+        "All" to "",
+        "English" to "us",
+        "Hindi" to "in",
+        "Korean" to "kr",
+        "Japanese" to "jp",
+        "Chinese" to "cn",
+        "Russian" to "ru"
+    )
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -31,39 +45,57 @@ fun LanguageFilterChips(
             .padding(horizontal = 20.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        categories.forEach { cat ->
-            val catNormal = when {
-                cat.contains("English") -> "English"
-                cat.contains("Hindi") -> "Hindi"
-                cat.contains("Korean") -> "Korean"
-                cat.contains("Japanese") -> "Japanese"
-                cat.contains("Chinese") -> "Chinese"
-                cat.contains("Russian") -> "Russian"
-                else -> cat
+        categories.forEach { (label, flagCode) ->
+            val isAll = label == "All"
+            val isActive = if (isAll) {
+                selectedLanguages.isEmpty() && (selectedLanguageFilter == "All" || selectedLanguageFilter.isBlank())
+            } else {
+                selectedLanguages.any { it.equals(label, ignoreCase = true) } ||
+                    selectedLanguageFilter.equals(label, ignoreCase = true)
             }
-            val isActive = selectedLanguageFilter == catNormal
 
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(100.dp))
-                    .background(if (isActive) GoldAccent else Color.White)
+                    .background(if (isActive) funkyColors.mango else funkyColors.surface)
                     .border(
                         width = 1.dp,
-                        color = if (isActive) GoldAccent else Color.LightGray.copy(alpha = 0.4f),
+                        color = if (isActive) funkyColors.mango else funkyColors.line,
                         shape = RoundedCornerShape(100.dp)
                     )
                     .clickable {
-                        onLanguageSelected(catNormal)
+                        onLanguageSelected(label)
                     }
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = cat,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isActive) Color.Black else Color.DarkGray
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (isAll) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_globe),
+                            contentDescription = null,
+                            tint = if (isActive) funkyColors.onMango else funkyColors.mango,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    } else {
+                        CircleFlag(
+                            countryCode = flagCode,
+                            allowProgramming = false,
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clip(CircleShape)
+                        )
+                    }
+                    Text(
+                        text = label,
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isActive) funkyColors.onMango else funkyColors.ink
+                    )
+                }
             }
         }
     }

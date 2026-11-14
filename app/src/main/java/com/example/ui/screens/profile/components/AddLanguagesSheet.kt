@@ -10,9 +10,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,19 +17,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
+import com.example.ui.components.CircleFlag
 import com.example.ui.components.getLanguageBadgeStyle
 import com.example.ui.screens.Language
 import com.example.ui.screens.LanguageData
-
-private val TextPrimary = Color(0xFF111827)
-private val TextSecondary = Color(0xFF4B5563)
-private val TextPlaceholder = Color(0xFF9CA3AF)
-private val PrimaryYellow = Color(0xFFF8C63D)
-private val BorderInactive = Color(0xFFD1D5DB)
+import com.example.ui.theme.LocalFunkyColors
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,6 +36,7 @@ fun AddLanguagesSheet(
     onLanguagesAdded: (List<String>) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val funkyColors = LocalFunkyColors.current
     var searchQuery by remember { mutableStateOf("") }
 
     val pendingSelections = remember {
@@ -80,14 +76,14 @@ fun AddLanguagesSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Color.White,
+        containerColor = funkyColors.surface,
         dragHandle = {
             Box(
                 modifier = Modifier
                     .padding(vertical = 10.dp)
                     .width(44.dp)
                     .height(4.dp)
-                    .background(Color(0xFFE5E7EB), RoundedCornerShape(2.dp))
+                    .background(funkyColors.line, RoundedCornerShape(2.dp))
             )
         },
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
@@ -103,12 +99,12 @@ fun AddLanguagesSheet(
                 text = "Add languages",
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
-                color = TextPrimary
+                color = funkyColors.ink
             )
             Text(
                 text = "Choose languages you know",
                 fontSize = 13.sp,
-                color = TextSecondary,
+                color = funkyColors.mute,
                 modifier = Modifier.padding(top = 2.dp, bottom = 16.dp)
             )
 
@@ -117,8 +113,8 @@ fun AddLanguagesSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp)
-                    .background(Color(0xFFF9FAFB), RoundedCornerShape(14.dp))
-                    .border(1.dp, Color(0xFFE5E7EB), RoundedCornerShape(14.dp))
+                    .background(funkyColors.bg, RoundedCornerShape(14.dp))
+                    .border(1.dp, funkyColors.line, RoundedCornerShape(14.dp))
                     .padding(horizontal = 14.dp),
                 contentAlignment = Alignment.CenterStart
             ) {
@@ -127,10 +123,10 @@ fun AddLanguagesSheet(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Search,
+                        painter = painterResource(id = R.drawable.ic_search),
                         contentDescription = "Search",
-                        tint = TextPlaceholder,
-                        modifier = Modifier.size(20.dp)
+                        tint = funkyColors.mute,
+                        modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     BasicTextField(
@@ -139,10 +135,10 @@ fun AddLanguagesSheet(
                         singleLine = true,
                         textStyle = TextStyle(
                             fontSize = 15.sp,
-                            color = TextPrimary,
+                            color = funkyColors.ink,
                             fontWeight = FontWeight.Normal
                         ),
-                        cursorBrush = SolidColor(TextPrimary),
+                        cursorBrush = SolidColor(funkyColors.mango),
                         modifier = Modifier.weight(1f),
                         decorationBox = { innerTextField ->
                             if (searchQuery.isEmpty()) {
@@ -150,7 +146,7 @@ fun AddLanguagesSheet(
                                     text = "Search languages...",
                                     style = TextStyle(
                                         fontSize = 14.sp,
-                                        color = TextPlaceholder
+                                        color = funkyColors.mute
                                     )
                                 )
                             }
@@ -177,10 +173,10 @@ fun AddLanguagesSheet(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(14.dp))
-                            .background(if (isSelected) Color(0xFFFFFDF5) else Color.Transparent)
+                            .background(if (isSelected) funkyColors.soft else Color.Transparent)
                             .border(
                                 width = 1.dp,
-                                color = if (isSelected) Color(0xFFFEF3C7) else Color.Transparent,
+                                color = if (isSelected) funkyColors.mango.copy(alpha = 0.6f) else Color.Transparent,
                                 shape = RoundedCornerShape(14.dp)
                             )
                             .clickable {
@@ -206,12 +202,23 @@ fun AddLanguagesSheet(
                                         .background(badgeStyle.bgColor),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text(
-                                        text = lang.initials,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = badgeStyle.textColor
-                                    )
+                                    if (lang.flagCode.isNotBlank() && lang.flagCode.lowercase() != "un") {
+                                        CircleFlag(
+                                            countryCode = lang.flagCode,
+                                            allowProgramming = lang.flagCode.startsWith("prog_"),
+                                            contentDescription = lang.name,
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .clip(CircleShape)
+                                        )
+                                    } else {
+                                        Text(
+                                            text = lang.initials,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = badgeStyle.textColor
+                                        )
+                                    }
                                 }
 
                                 Spacer(modifier = Modifier.width(14.dp))
@@ -221,13 +228,13 @@ fun AddLanguagesSheet(
                                         text = lang.name,
                                         fontSize = 16.sp,
                                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                                        color = TextPrimary
+                                        color = funkyColors.ink
                                     )
                                     if (lang.nativeName != lang.name) {
                                         Text(
                                             text = lang.nativeName,
                                             fontSize = 12.sp,
-                                            color = TextSecondary
+                                            color = funkyColors.mute
                                         )
                                     }
                                 }
@@ -237,21 +244,21 @@ fun AddLanguagesSheet(
                                 Box(
                                     modifier = Modifier
                                         .size(24.dp)
-                                        .background(PrimaryYellow, CircleShape),
+                                        .background(funkyColors.mango, CircleShape),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.Check,
+                                        painter = painterResource(id = R.drawable.ic_check),
                                         contentDescription = "Selected",
-                                        tint = TextPrimary,
-                                        modifier = Modifier.size(16.dp)
+                                        tint = funkyColors.onMango,
+                                        modifier = Modifier.size(14.dp)
                                     )
                                 }
                             } else {
                                 Box(
                                     modifier = Modifier
                                         .size(24.dp)
-                                        .border(1.5.dp, BorderInactive, CircleShape)
+                                        .border(1.5.dp, funkyColors.line, CircleShape)
                                 )
                             }
                         }
@@ -267,7 +274,12 @@ fun AddLanguagesSheet(
                                     Box(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(10.dp))
-                                            .background(if (isLevelSelected) PrimaryYellow else Color(0xFFF3F4F6))
+                                            .background(if (isLevelSelected) funkyColors.mango else funkyColors.surface)
+                                            .border(
+                                                width = 1.dp,
+                                                color = if (isLevelSelected) funkyColors.mango else funkyColors.line,
+                                                shape = RoundedCornerShape(10.dp)
+                                            )
                                             .clickable {
                                                 pendingSelections[lang.name] = level
                                             }
@@ -277,7 +289,7 @@ fun AddLanguagesSheet(
                                             text = level,
                                             fontSize = 11.sp,
                                             fontWeight = if (isLevelSelected) FontWeight.Bold else FontWeight.Normal,
-                                            color = TextPrimary
+                                            color = if (isLevelSelected) funkyColors.onMango else funkyColors.ink
                                         )
                                     }
                                 }
@@ -298,8 +310,8 @@ fun AddLanguagesSheet(
                     onDismiss()
                 },
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = PrimaryYellow,
-                    contentColor = TextPrimary
+                    containerColor = funkyColors.mango,
+                    contentColor = funkyColors.onMango
                 ),
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
@@ -310,7 +322,7 @@ fun AddLanguagesSheet(
                     text = "Add selected (${pendingSelections.size})",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
-                    color = TextPrimary
+                    color = funkyColors.onMango
                 )
             }
 
@@ -324,7 +336,7 @@ fun AddLanguagesSheet(
                     text = "Cancel",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Medium,
-                    color = TextSecondary
+                    color = funkyColors.mute
                 )
             }
         }

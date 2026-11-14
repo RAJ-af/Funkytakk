@@ -24,6 +24,7 @@ import com.example.ChatPreferencesManager
 import com.example.SupabaseClient
 import com.example.SupabaseSessionManager
 import com.example.ui.components.*
+import com.example.ui.theme.LocalFunkyColors
 import kotlinx.coroutines.launch
 
 data class BlockedUserItem(
@@ -39,6 +40,7 @@ fun BlockedUsersBottomSheet(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val funkyColors = LocalFunkyColors.current
     val blockedIds by ChatPreferencesManager.blockedUsers.collectAsState()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -96,8 +98,8 @@ fun BlockedUsersBottomSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Color.White,
-        dragHandle = { BottomSheetDefaults.DragHandle() },
+        containerColor = funkyColors.surface,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = funkyColors.line) },
         shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)
     ) {
         Column(
@@ -119,10 +121,10 @@ fun BlockedUsersBottomSheet(
                         modifier = Modifier
                             .size(40.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFFFEE2E2)),
+                            .background(funkyColors.danger.copy(alpha = 0.14f)),
                         contentAlignment = Alignment.Center
                     ) {
-                        SoftBlockIcon(size = 20.dp, color = Color(0xFFDC2626))
+                        SoftBlockIcon(size = 20.dp, color = funkyColors.danger)
                     }
 
                     Spacer(modifier = Modifier.width(12.dp))
@@ -132,12 +134,12 @@ fun BlockedUsersBottomSheet(
                             text = "Blocked Users",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = Color.Black
+                            color = funkyColors.ink
                         )
                         Text(
                             text = "${blockedIds.size} user(s) blocked",
                             fontSize = 12.sp,
-                            color = Color(0xFF6B7280)
+                            color = funkyColors.mute
                         )
                     }
                 }
@@ -147,13 +149,13 @@ fun BlockedUsersBottomSheet(
                     modifier = Modifier
                         .size(34.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFFF3F4F6))
+                        .background(funkyColors.soft)
                 ) {
-                    SoftCloseIcon(size = 14.dp, color = Color(0xFF374151))
+                    SoftCloseIcon(size = 14.dp, color = funkyColors.ink)
                 }
             }
 
-            HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
+            HorizontalDivider(color = funkyColors.line, thickness = 1.dp)
 
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -169,7 +171,7 @@ fun BlockedUsersBottomSheet(
                         modifier = Modifier
                             .size(72.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFFF0FDF4)),
+                            .background(funkyColors.ok.copy(alpha = 0.12f)),
                         contentAlignment = Alignment.Center
                     ) {
                         SoftShieldIcon(size = 36.dp)
@@ -181,7 +183,7 @@ fun BlockedUsersBottomSheet(
                         text = "No Blocked Users",
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF111827)
+                        color = funkyColors.ink
                     )
 
                     Spacer(modifier = Modifier.height(4.dp))
@@ -189,7 +191,7 @@ fun BlockedUsersBottomSheet(
                     Text(
                         text = "You haven't blocked anyone. Blocked users will appear here and can be unblocked anytime.",
                         fontSize = 13.sp,
-                        color = Color(0xFF6B7280),
+                        color = funkyColors.mute,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                         lineHeight = 18.sp,
                         modifier = Modifier.padding(horizontal = 24.dp)
@@ -206,8 +208,8 @@ fun BlockedUsersBottomSheet(
                     items(blockedUsersList, key = { it.id }) { user ->
                         Surface(
                             shape = RoundedCornerShape(18.dp),
-                            color = Color(0xFFFAFAFA),
-                            border = BorderStroke(1.dp, Color(0xFFF3F4F6)),
+                            color = funkyColors.bg,
+                            border = BorderStroke(1.dp, funkyColors.line),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
@@ -232,14 +234,14 @@ fun BlockedUsersBottomSheet(
                                         text = user.name,
                                         fontSize = 15.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color.Black,
+                                        color = funkyColors.ink,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         text = "Blocked from chatting & calls",
                                         fontSize = 11.5.sp,
-                                        color = Color(0xFF9CA3AF)
+                                        color = funkyColors.mute
                                     )
                                 }
 
@@ -252,10 +254,10 @@ fun BlockedUsersBottomSheet(
                                     },
                                     shape = RoundedCornerShape(50.dp),
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color(0xFFFEF2F2),
-                                        contentColor = Color(0xFFDC2626)
+                                        containerColor = funkyColors.danger.copy(alpha = 0.14f),
+                                        contentColor = funkyColors.danger
                                     ),
-                                    border = BorderStroke(1.dp, Color(0xFFFECACA)),
+                                    border = BorderStroke(1.dp, funkyColors.danger.copy(alpha = 0.3f)),
                                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
                                     elevation = ButtonDefaults.buttonElevation(0.dp, 0.dp)
                                 ) {

@@ -6,15 +6,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ExitToApp
-import androidx.compose.material.icons.filled.CardGiftcard
-import androidx.compose.material.icons.filled.Face
-import androidx.compose.material.icons.filled.Group
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MicOff
-import androidx.compose.material.icons.filled.Send
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -26,6 +17,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.components.FunkyChatIcon
+import com.example.ui.components.SoftExitIcon
+import com.example.ui.components.SoftFaceIcon
+import com.example.ui.components.SoftGiftBoxIcon
+import com.example.ui.components.SoftGroupIcon
+import com.example.ui.components.SoftMicIcon
+import com.example.ui.components.SoftMicOffIcon
 
 @Composable
 fun VoiceRoomControls(
@@ -69,10 +67,8 @@ fun VoiceRoomControls(
                     .clickable { onOpenChat() },
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.Send,
-                    contentDescription = "Chat",
-                    tint = iconColor,
+                FunkyChatIcon(
+                    color = iconColor,
                     modifier = Modifier.size(20.dp)
                 )
                 if (unreadCount > 0) {
@@ -102,11 +98,9 @@ fun VoiceRoomControls(
                     .clickable { onOpenPeople() },
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.Group,
-                    contentDescription = "People",
-                    tint = iconColor,
-                    modifier = Modifier.size(20.dp)
+                SoftGroupIcon(
+                    size = 20.dp,
+                    color = iconColor
                 )
             }
 
@@ -126,12 +120,17 @@ fun VoiceRoomControls(
                     .clickable { onToggleMic() },
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = if (isMicOn && isSpeakerOrHost) Icons.Default.Mic else Icons.Default.MicOff,
-                    contentDescription = "Mic",
-                    tint = if (isMicOn && isSpeakerOrHost) Color.Black else Color.White,
-                    modifier = Modifier.size(26.dp)
-                )
+                if (isMicOn && isSpeakerOrHost) {
+                    SoftMicIcon(
+                        size = 24.dp,
+                        color = Color.Black
+                    )
+                } else {
+                    SoftMicOffIcon(
+                        size = 24.dp,
+                        color = Color.White
+                    )
+                }
             }
 
             // Reactions Overlay Button
@@ -143,11 +142,9 @@ fun VoiceRoomControls(
                     .clickable { onOpenReactions() },
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.Face,
-                    contentDescription = "Reactions",
-                    tint = iconColor,
-                    modifier = Modifier.size(20.dp)
+                SoftFaceIcon(
+                    size = 20.dp,
+                    color = iconColor
                 )
             }
 
@@ -167,11 +164,9 @@ fun VoiceRoomControls(
                     .clickable { onOpenGift() },
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.CardGiftcard,
-                    contentDescription = "Send Gift",
-                    tint = Color(0xFFEC4899),
-                    modifier = Modifier.size(22.dp)
+                SoftGiftBoxIcon(
+                    size = 22.dp,
+                    color = Color(0xFFEC4899)
                 )
             }
 
@@ -180,16 +175,18 @@ fun VoiceRoomControls(
                 modifier = Modifier
                     .size(46.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFFFEF2F2))
-                    .border(1.dp, Color(0xFFFEE2E2), CircleShape)
+                    .background(if (isDarkMode) Color(0xFFEF4444).copy(alpha = 0.2f) else Color(0xFFFEF2F2))
+                    .border(
+                        1.dp,
+                        if (isDarkMode) Color(0xFFEF4444).copy(alpha = 0.45f) else Color(0xFFFEE2E2),
+                        CircleShape
+                    )
                     .clickable { onLeaveRoom() },
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ExitToApp,
-                    contentDescription = "Leave",
-                    tint = Color(0xFFDC2626),
-                    modifier = Modifier.size(20.dp)
+                SoftExitIcon(
+                    size = 20.dp,
+                    color = Color(0xFFEF4444)
                 )
             }
         }

@@ -15,11 +15,6 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,7 +31,18 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.GiftCatalogItem
 import com.example.gifting.GiftManager
+import com.example.ui.components.FunkyChevronRightIcon
+import com.example.ui.components.FunkySendIcon
 import com.example.ui.components.PresenceAvatar
+import com.example.ui.components.SoftCakeIcon
+import com.example.ui.components.SoftCheckIcon
+import com.example.ui.components.SoftCrownIcon
+import com.example.ui.components.SoftGiftBoxIcon
+import com.example.ui.components.SoftHeartIcon
+import com.example.ui.components.SoftInfoIcon
+import com.example.ui.components.SoftSparkleIcon
+import com.example.ui.components.SoftWarningIcon
+import com.example.ui.theme.LocalFunkyColors
 import kotlinx.coroutines.launch
 
 /**
@@ -64,17 +70,23 @@ val defaultGiftCatalog = listOf(
     GiftCatalogItem(id = "g_diamond", name = "Diamond", price_coins = 1000, sort_order = 8)
 )
 
-private fun getGiftEmoji(name: String): String {
-    return when (name.lowercase()) {
-        "heart" -> "❤️"
-        "rose" -> "🌹"
-        "teddy" -> "🧸"
-        "crown" -> "👑"
-        "star" -> "⭐"
-        "firework" -> "🎆"
-        "cake" -> "🎂"
-        "diamond" -> "💎"
-        else -> "🎁"
+@Composable
+private fun GiftItemArt(name: String, modifier: Modifier = Modifier) {
+    when (name.lowercase()) {
+        "heart" -> SoftHeartIcon(modifier = modifier, size = 36.dp, isLiked = true, color = Color(0xFFEF4444))
+        "crown" -> SoftCrownIcon(modifier = modifier, size = 36.dp, color = Color(0xFFFFB627))
+        "star" -> SoftSparkleIcon(modifier = modifier, size = 36.dp, color = Color(0xFFF59E0B))
+        "cake" -> SoftCakeIcon(modifier = modifier, size = 36.dp, color = Color(0xFFF59E0B))
+        else -> SoftGiftBoxIcon(
+            modifier = modifier,
+            size = 36.dp,
+            color = when (name.lowercase()) {
+                "rose" -> Color(0xFFEC4899)
+                "firework" -> Color(0xFF8B5CF6)
+                "diamond" -> Color(0xFF06B6D4)
+                else -> Color(0xFFF59E0B)
+            }
+        )
     }
 }
 
@@ -144,14 +156,19 @@ fun RoomGiftBottomSheet(
     var isSending by remember { mutableStateOf(false) }
     var inlineError by remember { mutableStateOf<String?>(null) }
 
-    // Warm, elegant color palette matching screenshot
-    val sheetBgColor = Color(0xFFFFFDF5)
-    val cardBgColor = Color(0xFFFFFFFF)
-    val cardBorderColor = Color(0xFFF3F4F6)
-    val textMainColor = Color(0xFF1E1B18)
-    val textMutedColor = Color(0xFF78716C)
+    val funkyColors = LocalFunkyColors.current
+    val effectiveDark = isDarkMode || funkyColors.isDark
+
+    // Warm cream-light / warm-brown dark color palette
+    val sheetBgColor = if (effectiveDark) funkyColors.surface else Color(0xFFFFFDF5)
+    val cardBgColor = if (effectiveDark) Color(0xFF2E251A) else Color(0xFFFFFFFF)
+    val cardBorderColor = if (effectiveDark) funkyColors.line else Color(0xFFF3F4F6)
+    val textMainColor = if (effectiveDark) Color(0xFFFFF3DC) else Color(0xFF1E1B18)
+    val textMutedColor = if (effectiveDark) Color(0xFFA89A82) else Color(0xFF78716C)
     val yellowGoldAccent = Color(0xFFFFC527)
-    val yellowPillBg = Color(0xFFFEF3C7)
+    val yellowPillBg = if (effectiveDark) Color(0xFF3A2D12) else Color(0xFFFEF3C7)
+    val selectedCardBg = if (effectiveDark) Color(0xFF3A2D12) else Color(0xFFFFFBEB)
+    val softBarBg = if (effectiveDark) Color(0xFF1A150F) else Color(0xFFF5F5F0)
     val selectedBorderColor = Color(0xFFFFC527)
 
     val totalCoinsCost = (selectedGift?.price_coins ?: 0) * selectedQuantity
@@ -162,7 +179,7 @@ fun RoomGiftBottomSheet(
         containerColor = sheetBgColor,
         dragHandle = {
             BottomSheetDefaults.DragHandle(
-                color = Color(0xFFD6D3D1)
+                color = if (effectiveDark) funkyColors.line else Color(0xFFD6D3D1)
             )
         },
         shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
@@ -192,7 +209,7 @@ fun RoomGiftBottomSheet(
                             .background(yellowPillBg),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(text = "🎁", fontSize = 24.sp)
+                        SoftGiftBoxIcon(size = 24.dp, color = yellowGoldAccent)
                     }
 
                     Spacer(modifier = Modifier.width(12.dp))
@@ -218,7 +235,7 @@ fun RoomGiftBottomSheet(
                     modifier = Modifier
                         .clip(RoundedCornerShape(100.dp))
                         .background(yellowPillBg)
-                        .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(100.dp))
+                        .border(1.dp, if (effectiveDark) yellowGoldAccent.copy(alpha = 0.4f) else Color(0xFFFDE68A), RoundedCornerShape(100.dp))
                         .padding(horizontal = 12.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -241,7 +258,7 @@ fun RoomGiftBottomSheet(
                         text = String.format("%,d", walletBalance),
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 15.sp,
-                        color = Color(0xFF1E1B18)
+                        color = textMainColor
                     )
                 }
             }
@@ -272,10 +289,8 @@ fun RoomGiftBottomSheet(
                         color = textMutedColor,
                         fontWeight = FontWeight.Medium
                     )
-                    Icon(
-                        imageVector = Icons.Default.ChevronRight,
-                        contentDescription = null,
-                        tint = textMutedColor,
+                    FunkyChevronRightIcon(
+                        color = textMutedColor,
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -350,11 +365,9 @@ fun RoomGiftBottomSheet(
                                             .border(1.5.dp, Color.White, CircleShape),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = "Selected",
-                                            tint = Color(0xFF1E1B18),
-                                            modifier = Modifier.size(14.dp)
+                                        SoftCheckIcon(
+                                            size = 12.dp,
+                                            color = Color(0xFF1E1B18)
                                         )
                                     }
                                 }
@@ -377,19 +390,19 @@ fun RoomGiftBottomSheet(
                             Row(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(100.dp))
-                                    .background(if (user.role.equals("host", ignoreCase = true)) yellowPillBg else Color(0xFFF3F4F6))
+                                    .background(if (user.role.equals("host", ignoreCase = true)) yellowPillBg else softBarBg)
                                     .padding(horizontal = 8.dp, vertical = 2.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 if (user.role.equals("host", ignoreCase = true)) {
-                                    Text(text = "👑", fontSize = 10.sp)
+                                    SoftCrownIcon(size = 11.dp, color = yellowGoldAccent)
                                 }
                                 Text(
                                     text = roleLabel,
                                     fontSize = 10.5.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (user.role.equals("host", ignoreCase = true)) Color(0xFF92400E) else Color(0xFF6B7280)
+                                    color = if (user.role.equals("host", ignoreCase = true)) (if (effectiveDark) yellowGoldAccent else Color(0xFF92400E)) else textMutedColor
                                 )
                             }
                         }
@@ -423,10 +436,8 @@ fun RoomGiftBottomSheet(
                         color = textMutedColor,
                         fontWeight = FontWeight.Medium
                     )
-                    Icon(
-                        imageVector = Icons.Default.ChevronRight,
-                        contentDescription = null,
-                        tint = textMutedColor,
+                    FunkyChevronRightIcon(
+                        color = textMutedColor,
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -447,7 +458,7 @@ fun RoomGiftBottomSheet(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(20.dp))
-                            .background(if (isSelected) Color(0xFFFFFBEB) else cardBgColor)
+                            .background(if (isSelected) selectedCardBg else cardBgColor)
                             .border(
                                 width = if (isSelected) 2.dp else 1.dp,
                                 color = if (isSelected) selectedBorderColor else cardBorderColor,
@@ -471,10 +482,12 @@ fun RoomGiftBottomSheet(
                                     modifier = Modifier.size(44.dp)
                                 )
                             } else {
-                                Text(
-                                    text = getGiftEmoji(item.name),
-                                    fontSize = 36.sp
-                                )
+                                Box(
+                                    modifier = Modifier.size(44.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    GiftItemArt(name = item.name)
+                                }
                             }
 
                             Spacer(modifier = Modifier.height(6.dp))
@@ -528,11 +541,9 @@ fun RoomGiftBottomSheet(
                                     .border(1.dp, Color.White, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = "Selected",
-                                    tint = Color(0xFF1E1B18),
-                                    modifier = Modifier.size(12.dp)
+                                SoftCheckIcon(
+                                    size = 11.dp,
+                                    color = Color(0xFF1E1B18)
                                 )
                             }
                         }
@@ -558,7 +569,7 @@ fun RoomGiftBottomSheet(
                     .fillMaxWidth()
                     .height(48.dp)
                     .clip(RoundedCornerShape(24.dp))
-                    .background(Color(0xFFF5F5F0))
+                    .background(softBarBg)
                     .padding(4.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
@@ -583,7 +594,7 @@ fun RoomGiftBottomSheet(
                             text = "$qty",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = if (isSelected) Color(0xFF1E1B18) else Color(0xFF57534E)
+                            color = if (isSelected) Color(0xFF1E1B18) else textMutedColor
                         )
                     }
                 }
@@ -622,20 +633,20 @@ fun RoomGiftBottomSheet(
                             val spent = resp.coins_spent ?: (gift.price_coins * qty)
                             Toast.makeText(
                                 context,
-                                "Sent $qty ${gift.name} to ${receiver?.name ?: "user"}! 🎁",
+                                "Sent $qty ${gift.name} to ${receiver?.name ?: "user"}!",
                                 Toast.LENGTH_SHORT
                             ).show()
                             onGiftSentSuccess(gift.name, receiver?.name ?: "user", qty, spent)
                             onDismiss()
                         }.onFailure { err ->
-                            inlineError = err.message ?: "Gift नहीं भेजा जा सका, फिर कोशिश करो"
+                            inlineError = err.message ?: "Could not send gift, please try again"
                         }
                     }
                 },
                 enabled = canSend,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = yellowGoldAccent,
-                    disabledContainerColor = Color(0xFFE7E5E4)
+                    disabledContainerColor = if (effectiveDark) Color(0xFF3A2D12) else Color(0xFFE7E5E4)
                 ),
                 shape = RoundedCornerShape(24.dp),
                 modifier = Modifier
@@ -661,10 +672,8 @@ fun RoomGiftBottomSheet(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Send,
-                            contentDescription = "Send",
-                            tint = Color(0xFF1E1B18),
+                        FunkySendIcon(
+                            color = Color(0xFF1E1B18),
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
@@ -690,14 +699,16 @@ fun RoomGiftBottomSheet(
                             .fillMaxWidth()
                             .padding(top = 10.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFFFEF2F2))
-                            .border(1.dp, Color(0xFFFCA5A5), RoundedCornerShape(12.dp))
+                            .background(if (effectiveDark) Color(0xFF7F1D1D).copy(alpha = 0.35f) else Color(0xFFFEF2F2))
+                            .border(1.dp, if (effectiveDark) Color(0xFFEF4444).copy(alpha = 0.5f) else Color(0xFFFCA5A5), RoundedCornerShape(12.dp))
                             .padding(horizontal = 14.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        SoftWarningIcon(size = 16.dp, color = if (effectiveDark) Color(0xFFFCA5A5) else Color(0xFFDC2626))
                         Text(
-                            text = "⚠️ $err",
-                            color = Color(0xFFDC2626),
+                            text = err,
+                            color = if (effectiveDark) Color(0xFFFCA5A5) else Color(0xFFDC2626),
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -714,16 +725,14 @@ fun RoomGiftBottomSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(100.dp))
-                    .background(Color(0xFFF5F5F0))
+                    .background(softBarBg)
                     .padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = null,
-                    tint = textMutedColor,
-                    modifier = Modifier.size(15.dp)
+                SoftInfoIcon(
+                    size = 15.dp,
+                    color = textMutedColor
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(

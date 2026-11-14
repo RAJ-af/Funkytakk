@@ -146,7 +146,9 @@ data class CustomRoom(
     val badgeText: String,
     val badgeColor: Color,
     val avatars: List<String>,
-    val hostId: String = ""
+    val hostId: String = "",
+    val hostNativeLanguages: List<String> = emptyList(),
+    val hostLearningLanguages: List<String> = emptyList()
 )
 
 data class MomentPost(

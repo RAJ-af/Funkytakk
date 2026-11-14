@@ -7,10 +7,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -18,11 +14,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.theme.GoldAccent
+import com.example.ui.components.FunkySearchIcon
+import com.example.ui.components.SoftFilterIcon
+import com.example.ui.theme.LocalFunkyColors
 
 @Composable
 fun HomeSearchBar(
@@ -30,55 +28,65 @@ fun HomeSearchBar(
     onSearchQueryChange: (String) -> Unit,
     onOpenFilter: () -> Unit
 ) {
+    val funkyColors = LocalFunkyColors.current
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         // Search bar capsule
         OutlinedTextField(
             value = searchQuery,
             onValueChange = onSearchQueryChange,
-            placeholder = { Text("Search language or room...", color = Color.Gray, fontSize = 14.sp) },
+            placeholder = {
+                Text(
+                    text = "Search language or room...",
+                    color = funkyColors.mute,
+                    fontSize = 14.sp
+                )
+            },
             leadingIcon = {
-                Icon(
-                    imageVector = Icons.Default.Search,
-                    contentDescription = "Search",
-                    tint = Color.Gray
+                FunkySearchIcon(
+                    color = funkyColors.mute,
+                    modifier = Modifier.size(18.dp)
                 )
             },
             singleLine = true,
             shape = RoundedCornerShape(100.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = Color.White,
-                unfocusedContainerColor = Color.White,
-                focusedBorderColor = GoldAccent,
-                unfocusedBorderColor = Color.LightGray.copy(alpha = 0.5f),
-                focusedTextColor = Color.Black,
-                unfocusedTextColor = Color.Black
+                focusedContainerColor = funkyColors.surface,
+                unfocusedContainerColor = funkyColors.surface,
+                focusedBorderColor = funkyColors.mango,
+                unfocusedBorderColor = funkyColors.line,
+                focusedTextColor = funkyColors.ink,
+                unfocusedTextColor = funkyColors.ink,
+                cursorColor = funkyColors.mango
             ),
             modifier = Modifier
                 .weight(1f)
-                .height(48.dp),
+                .heightIn(min = 48.dp)
+                .testTag("home_search_input"),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { /* Do filtering */ })
+            keyboardActions = KeyboardActions(onSearch = { /* Filter live */ })
         )
 
-        // Custom Filter icon button next to it
+        // Filter icon button
         Box(
             modifier = Modifier
                 .size(48.dp)
-                .border(1.dp, Color.LightGray.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+                .border(1.dp, funkyColors.line, RoundedCornerShape(16.dp))
                 .clip(RoundedCornerShape(16.dp))
-                .background(Color.White)
-                .clickable { onOpenFilter() },
+                .background(funkyColors.surface)
+                .clickable { onOpenFilter() }
+                .testTag("home_filter_button"),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = Icons.Default.Tune,
-                contentDescription = "Filter Parameters",
-                tint = Color.Black
+            SoftFilterIcon(
+                color = funkyColors.ink,
+                size = 18.dp
             )
         }
     }

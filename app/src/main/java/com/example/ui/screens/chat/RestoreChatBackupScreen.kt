@@ -13,10 +13,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -38,6 +34,7 @@ import com.example.service.RestoreProgressTracker
 import com.example.ui.components.GroupLockIcon
 import com.example.ui.components.Soft3DCloudIcon
 import com.example.ui.components.Soft3DShieldIcon
+import com.example.ui.theme.LocalFunkyColors
 import com.example.util.ChatBackupPreferencesManager
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
@@ -52,6 +49,7 @@ fun RestoreChatBackupScreen(
     onSkipRestore: () -> Unit
 ) {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
     val coroutineScope = rememberCoroutineScope()
     val firebaseUser = FirebaseAuth.getInstance().currentUser
 
@@ -218,7 +216,7 @@ fun RestoreChatBackupScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFFFFDF5))
+            .background(funkyColors.bg)
             .systemBarsPadding()
     ) {
         Column(
@@ -236,7 +234,7 @@ fun RestoreChatBackupScreen(
                 modifier = Modifier
                     .size(80.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFFFEF08A).copy(alpha = 0.5f)),
+                    .background(funkyColors.soft),
                 contentAlignment = Alignment.Center
             ) {
                 Soft3DCloudIcon(size = 64.dp)
@@ -246,13 +244,13 @@ fun RestoreChatBackupScreen(
                 text = "Restore your chats",
                 fontSize = 24.sp,
                 fontWeight = FontWeight.ExtraBold,
-                color = Color(0xFF0F172A)
+                color = funkyColors.ink
             )
 
             Text(
                 text = "Restore your encrypted messages, media attachments and group history safely from your Google Drive.",
                 fontSize = 13.sp,
-                color = Color(0xFF64748B),
+                color = funkyColors.mute,
                 lineHeight = 18.sp,
                 modifier = Modifier.padding(horizontal = 12.dp)
             )
@@ -260,8 +258,8 @@ fun RestoreChatBackupScreen(
             // Warning Banner
             Surface(
                 shape = RoundedCornerShape(16.dp),
-                color = Color(0xFFFFFBEB),
-                border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+                color = funkyColors.soft,
+                border = BorderStroke(1.dp, funkyColors.mango.copy(alpha = 0.45f)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
@@ -274,7 +272,7 @@ fun RestoreChatBackupScreen(
                         text = "If you forget your vault password, your backup cannot be recovered.",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium,
-                        color = Color(0xFFB45309),
+                        color = if (funkyColors.isDark) funkyColors.mango else Color(0xFFB45309),
                         lineHeight = 16.sp
                     )
                 }
@@ -284,8 +282,8 @@ fun RestoreChatBackupScreen(
             if (restoreState.isRestoring) {
                 Surface(
                     shape = RoundedCornerShape(20.dp),
-                    color = Color.White,
-                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    color = funkyColors.surface,
+                    border = BorderStroke(1.dp, funkyColors.line),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -297,7 +295,7 @@ fun RestoreChatBackupScreen(
                             text = "Restoring Chats (${restoreState.percent}%)",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A)
+                            color = funkyColors.ink
                         )
 
                         LinearProgressIndicator(
@@ -306,14 +304,14 @@ fun RestoreChatBackupScreen(
                                 .fillMaxWidth()
                                 .height(8.dp)
                                 .clip(RoundedCornerShape(4.dp)),
-                            color = Color(0xFFFFB800),
-                            trackColor = Color(0xFFF1F5F9)
+                            color = funkyColors.mango,
+                            trackColor = funkyColors.soft
                         )
 
                         Text(
                             text = restoreState.statusText,
                             fontSize = 12.sp,
-                            color = Color(0xFF64748B)
+                            color = funkyColors.mute
                         )
 
                         Spacer(modifier = Modifier.height(8.dp))
@@ -321,7 +319,7 @@ fun RestoreChatBackupScreen(
                         Text(
                             text = "You can leave this screen and start using FunkyTalk while restoration finishes in the background.",
                             fontSize = 12.sp,
-                            color = Color(0xFF334155),
+                            color = funkyColors.mute,
                             lineHeight = 16.sp
                         )
 
@@ -329,8 +327,8 @@ fun RestoreChatBackupScreen(
                             onClick = onRestoreSuccess,
                             shape = RoundedCornerShape(14.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFFFFD000),
-                                contentColor = Color.Black
+                                containerColor = funkyColors.mango,
+                                contentColor = funkyColors.onMango
                             ),
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -342,8 +340,8 @@ fun RestoreChatBackupScreen(
                 // Restore Completed Successfully
                 Surface(
                     shape = RoundedCornerShape(20.dp),
-                    color = Color.White,
-                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    color = funkyColors.surface,
+                    border = BorderStroke(1.dp, funkyColors.line),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -355,15 +353,15 @@ fun RestoreChatBackupScreen(
                             text = "Chats restored successfully!",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF16A34A)
+                            color = funkyColors.ok
                         )
 
                         Button(
                             onClick = onRestoreSuccess,
                             shape = RoundedCornerShape(14.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFFFFD000),
-                                contentColor = Color.Black
+                                containerColor = funkyColors.mango,
+                                contentColor = funkyColors.onMango
                             ),
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -375,8 +373,8 @@ fun RestoreChatBackupScreen(
                 // Step 1: Connect Google Drive
                 Surface(
                     shape = RoundedCornerShape(20.dp),
-                    color = Color.White,
-                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    color = funkyColors.surface,
+                    border = BorderStroke(1.dp, funkyColors.line),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -387,15 +385,15 @@ fun RestoreChatBackupScreen(
                             text = "Connect Google Drive",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A)
+                            color = funkyColors.ink
                         )
 
                         Button(
                             onClick = { initiateDriveConnection() },
                             shape = RoundedCornerShape(14.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFFFFD000),
-                                contentColor = Color.Black
+                                containerColor = funkyColors.mango,
+                                contentColor = funkyColors.onMango
                             ),
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -413,16 +411,17 @@ fun RestoreChatBackupScreen(
                         onSkipRestore()
                     },
                     shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, funkyColors.line),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Skip for now", color = Color(0xFF64748B))
+                    Text("Skip for now", color = funkyColors.mute)
                 }
             } else if (isCheckingDrive) {
                 // Checking Drive
                 Surface(
                     shape = RoundedCornerShape(20.dp),
-                    color = Color.White,
-                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    color = funkyColors.surface,
+                    border = BorderStroke(1.dp, funkyColors.line),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -430,16 +429,16 @@ fun RestoreChatBackupScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        CircularProgressIndicator(color = Color(0xFFFFB800))
-                        Text("Searching for backups on Google Drive...", fontSize = 13.sp, color = Color(0xFF64748B))
+                        CircularProgressIndicator(color = funkyColors.mango)
+                        Text("Searching for backups on Google Drive...", fontSize = 13.sp, color = funkyColors.mute)
                     }
                 }
             } else if (noBackupFound) {
                 // No backup found
                 Surface(
                     shape = RoundedCornerShape(20.dp),
-                    color = Color.White,
-                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    color = funkyColors.surface,
+                    border = BorderStroke(1.dp, funkyColors.line),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -451,13 +450,13 @@ fun RestoreChatBackupScreen(
                             text = "No backup found",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A)
+                            color = funkyColors.ink
                         )
 
                         Text(
                             text = "No encrypted chat backup was found in your Google Drive account ($googleAccountName).",
                             fontSize = 12.sp,
-                            color = Color(0xFF64748B),
+                            color = funkyColors.mute,
                             lineHeight = 16.sp
                         )
 
@@ -470,8 +469,8 @@ fun RestoreChatBackupScreen(
                             },
                             shape = RoundedCornerShape(14.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFFFFD000),
-                                contentColor = Color.Black
+                                containerColor = funkyColors.mango,
+                                contentColor = funkyColors.onMango
                             ),
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -479,7 +478,7 @@ fun RestoreChatBackupScreen(
                         }
 
                         TextButton(onClick = { initiateDriveConnection() }) {
-                            Text("Connect a different Google account", fontSize = 12.sp, color = Color(0xFF64748B))
+                            Text("Connect a different Google account", fontSize = 12.sp, color = funkyColors.mute)
                         }
                     }
                 }
@@ -487,8 +486,8 @@ fun RestoreChatBackupScreen(
                 // Backup found!
                 Surface(
                     shape = RoundedCornerShape(20.dp),
-                    color = Color.White,
-                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    color = funkyColors.surface,
+                    border = BorderStroke(1.dp, funkyColors.line),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -505,17 +504,17 @@ fun RestoreChatBackupScreen(
                                     text = "Backup found: ${driveBackupInfo!!.dateString}, ${driveBackupInfo!!.sizeString}",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF0F172A)
+                                    color = funkyColors.ink
                                 )
                                 Text(
                                     text = "Account: $googleAccountName",
                                     fontSize = 12.sp,
-                                    color = Color(0xFF64748B)
+                                    color = funkyColors.mute
                                 )
                             }
                         }
 
-                        HorizontalDivider(color = Color(0xFFF1F5F9))
+                        HorizontalDivider(color = funkyColors.line)
 
                         OutlinedTextField(
                             value = vaultPasswordInput,
@@ -524,12 +523,19 @@ fun RestoreChatBackupScreen(
                                 errorMessage = null
                             },
                             enabled = !isVerifyingPassword && lockoutSecondsRemaining == 0,
-                            label = { Text("Enter your vault password") },
+                            label = { Text("Enter your vault password", color = funkyColors.mute) },
                             visualTransformation = PasswordVisualTransformation(),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                             singleLine = true,
-                            leadingIcon = { GroupLockIcon(size = 20.dp, color = Color(0xFF64748B)) },
+                            leadingIcon = { GroupLockIcon(size = 20.dp, color = funkyColors.mute) },
                             modifier = Modifier.fillMaxWidth(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = funkyColors.ink,
+                                unfocusedTextColor = funkyColors.ink,
+                                focusedBorderColor = funkyColors.mango,
+                                unfocusedBorderColor = funkyColors.line,
+                                cursorColor = funkyColors.mango
+                            ),
                             isError = errorMessage != null
                         )
 
@@ -537,7 +543,7 @@ fun RestoreChatBackupScreen(
                             Text(
                                 text = errorMessage.orEmpty(),
                                 fontSize = 12.sp,
-                                color = Color(0xFFDC2626),
+                                color = funkyColors.danger,
                                 fontWeight = FontWeight.Medium
                             )
                         }
@@ -546,7 +552,7 @@ fun RestoreChatBackupScreen(
                             Text(
                                 text = "Too many failed attempts. Try again in ${lockoutSecondsRemaining}s",
                                 fontSize = 12.sp,
-                                color = Color(0xFFDC2626),
+                                color = funkyColors.danger,
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
@@ -556,8 +562,8 @@ fun RestoreChatBackupScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                                Text("Verifying password...", fontSize = 12.sp, color = Color(0xFF64748B))
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = funkyColors.mango)
+                                Text("Verifying password...", fontSize = 12.sp, color = funkyColors.mute)
                             }
                         }
 
@@ -566,8 +572,8 @@ fun RestoreChatBackupScreen(
                             enabled = !isVerifyingPassword && lockoutSecondsRemaining == 0 && vaultPasswordInput.isNotBlank(),
                             shape = RoundedCornerShape(14.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFFFFD000),
-                                contentColor = Color.Black
+                                containerColor = funkyColors.mango,
+                                contentColor = funkyColors.onMango
                             ),
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -582,9 +588,10 @@ fun RestoreChatBackupScreen(
                                 onSkipRestore()
                             },
                             shape = RoundedCornerShape(14.dp),
+                            border = BorderStroke(1.dp, funkyColors.line),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Skip for now", color = Color(0xFF64748B))
+                            Text("Skip for now", color = funkyColors.mute)
                         }
                     }
                 }

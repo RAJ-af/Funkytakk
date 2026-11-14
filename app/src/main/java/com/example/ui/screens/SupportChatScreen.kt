@@ -3,8 +3,8 @@ package com.example.ui.screens
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -13,14 +13,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.ChatBubble
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
@@ -33,7 +25,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -44,8 +39,14 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.SupabaseSupportMessage
 import com.example.SupportChatManager
+import com.example.ui.components.FunkyPlusIcon
+import com.example.ui.components.FunkySendIcon
+import com.example.ui.components.FunkySingleCheckIcon
+import com.example.ui.components.FunkyVerticalMoreIcon
 import com.example.ui.components.SoftBackIcon
-import com.example.ui.theme.GoldAccent
+import com.example.ui.components.SoftChatBubbleIcon
+import com.example.ui.components.SoftCloseIcon
+import com.example.ui.theme.LocalFunkyColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import java.text.SimpleDateFormat
@@ -60,6 +61,8 @@ fun SupportChatScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
+    val isDark = funkyColors.isDark
     val listState = rememberLazyListState()
 
     val session by SupportChatManager.session.collectAsState()
@@ -129,21 +132,21 @@ fun SupportChatScreen(
 
     val headerSubtitle = remember(isOpen, isAppeal, remainingTimeText) {
         if (!isOpen) {
-            "⚪ Chat closed"
+            "Chat closed"
         } else if (isAppeal) {
             "Support Chat"
         } else {
-            "🟢 $remainingTimeText"
+            remainingTimeText
         }
     }
 
     Scaffold(
-        containerColor = Color(0xFFFCFBF7),
+        containerColor = funkyColors.bg,
         topBar = {
             Surface(
-                color = Color.White,
-                shadowElevation = 1.dp,
-                border = BorderStroke(1.dp, Color(0xFFF3F4F6))
+                color = funkyColors.surface,
+                shadowElevation = if (isDark) 0.dp else 1.dp,
+                border = BorderStroke(1.dp, funkyColors.line)
             ) {
                 Row(
                     modifier = Modifier
@@ -157,26 +160,23 @@ fun SupportChatScreen(
                         modifier = Modifier.testTag("support_chat_back_button")
                     ) {
                         SoftBackIcon(
-                            color = Color.Black,
+                            color = funkyColors.ink,
                             size = 20.dp
                         )
                     }
 
                     Spacer(modifier = Modifier.width(4.dp))
 
-                    // Speech bubble icon header avatar (matching design mockup)
                     Box(
                         modifier = Modifier
                             .size(40.dp)
                             .clip(CircleShape)
-                            .background(GoldAccent),
+                            .background(funkyColors.mango),
                         contentAlignment = Alignment.Center
                     ) {
-                        androidx.compose.material3.Icon(
-                            imageVector = Icons.Default.ChatBubble,
-                            contentDescription = null,
-                            tint = Color.Black,
-                            modifier = Modifier.size(20.dp)
+                        SoftChatBubbleIcon(
+                            color = funkyColors.onMango,
+                            size = 20.dp
                         )
                     }
 
@@ -187,21 +187,31 @@ fun SupportChatScreen(
                             text = headerTitle,
                             fontSize = 17.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = Color.Black
+                            color = funkyColors.ink
                         )
-                        Text(
-                            text = headerSubtitle,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color(0xFF64748B)
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (!isOpen || !isAppeal) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(7.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isOpen) funkyColors.ok else funkyColors.mute)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                            }
+                            Text(
+                                text = headerSubtitle,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = funkyColors.mute
+                            )
+                        }
                     }
 
                     IconButton(onClick = { /* Menu options */ }) {
-                        androidx.compose.material3.Icon(
-                            imageVector = Icons.Default.MoreVert,
-                            contentDescription = "Options",
-                            tint = Color(0xFF475569)
+                        FunkyVerticalMoreIcon(
+                            color = funkyColors.mute,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }
@@ -210,9 +220,9 @@ fun SupportChatScreen(
         bottomBar = {
             if (isOpen) {
                 Surface(
-                    color = Color.White,
-                    shadowElevation = 4.dp,
-                    border = BorderStroke(1.dp, Color(0xFFE5E7EB))
+                    color = funkyColors.surface,
+                    shadowElevation = if (isDark) 0.dp else 4.dp,
+                    border = BorderStroke(1.dp, funkyColors.line)
                 ) {
                     Row(
                         modifier = Modifier
@@ -222,13 +232,10 @@ fun SupportChatScreen(
                             .padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Paperclip attachment icon
                         IconButton(onClick = { /* Optional attachment */ }) {
-                            androidx.compose.material3.Icon(
-                                imageVector = Icons.Default.AttachFile,
-                                contentDescription = "Attach proof",
-                                tint = Color(0xFF64748B),
-                                modifier = Modifier.size(22.dp)
+                            FunkyPlusIcon(
+                                color = funkyColors.mute,
+                                modifier = Modifier.size(20.dp)
                             )
                         }
 
@@ -238,7 +245,7 @@ fun SupportChatScreen(
                             placeholder = {
                                 Text(
                                     text = "Type a message...",
-                                    color = Color(0xFF9CA3AF),
+                                    color = funkyColors.mute,
                                     fontSize = 14.sp
                                 )
                             },
@@ -249,12 +256,13 @@ fun SupportChatScreen(
                             maxLines = 4,
                             enabled = !isSending,
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = Color(0xFFF9FAFB),
-                                unfocusedContainerColor = Color(0xFFF9FAFB),
-                                focusedBorderColor = GoldAccent,
-                                unfocusedBorderColor = Color(0xFFE5E7EB),
-                                focusedTextColor = Color.Black,
-                                unfocusedTextColor = Color.Black
+                                focusedContainerColor = funkyColors.bg,
+                                unfocusedContainerColor = funkyColors.bg,
+                                focusedBorderColor = funkyColors.mango,
+                                unfocusedBorderColor = funkyColors.line,
+                                focusedTextColor = funkyColors.ink,
+                                unfocusedTextColor = funkyColors.ink,
+                                cursorColor = funkyColors.mango
                             ),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                             keyboardActions = KeyboardActions(onSend = {
@@ -292,20 +300,18 @@ fun SupportChatScreen(
                             modifier = Modifier
                                 .size(44.dp)
                                 .clip(CircleShape)
-                                .background(if (inputText.isNotBlank() && !isSending) GoldAccent else Color(0xFFE5E7EB))
+                                .background(if (inputText.isNotBlank() && !isSending) funkyColors.mango else funkyColors.soft)
                                 .testTag("support_chat_send_button")
                         ) {
                             if (isSending) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(18.dp),
-                                    color = Color.Black,
+                                    color = funkyColors.onMango,
                                     strokeWidth = 2.dp
                                 )
                             } else {
-                                androidx.compose.material3.Icon(
-                                    imageVector = Icons.Default.Send,
-                                    contentDescription = "Send",
-                                    tint = if (inputText.isNotBlank()) Color.Black else Color(0xFF9CA3AF),
+                                FunkySendIcon(
+                                    color = if (inputText.isNotBlank()) funkyColors.onMango else funkyColors.mute,
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
@@ -321,17 +327,14 @@ fun SupportChatScreen(
                 .padding(paddingValues)
         ) {
             if (!isOpen) {
-                // CHAT ENDED FULL SCREEN STATE
                 SupportChatEndedState(modifier = Modifier.fillMaxSize())
             } else if (messages.isEmpty() && !isLoading) {
-                // EMPTY CHAT STATE (Appeal / First time)
                 AppealEmptyChatState(
                     title = if (isAppeal) "Appeal" else "Support",
                     subtitle = if (isAppeal) "Tell us why this decision should be reviewed. Our team will reply here." else "Welcome! Send a message to get in touch with our team.",
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
-                // ACTIVE CHAT MESSAGES THREAD
                 LazyColumn(
                     state = listState,
                     modifier = Modifier
@@ -340,7 +343,6 @@ fun SupportChatScreen(
                     contentPadding = PaddingValues(top = 16.dp, bottom = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Top banner for support_opened reason
                     if (session?.reason == "support_opened" && !session?.until.isNullOrBlank()) {
                         item {
                             SupportOpenedNoticeCard(untilIso = session?.until)
@@ -356,7 +358,7 @@ fun SupportChatScreen(
             if (isLoading && messages.isEmpty()) {
                 CircularProgressIndicator(
                     modifier = Modifier.align(Alignment.Center),
-                    color = GoldAccent
+                    color = funkyColors.mango
                 )
             }
         }
@@ -368,6 +370,8 @@ fun SupportChatScreen(
  */
 @Composable
 private fun SupportOpenedNoticeCard(untilIso: String?) {
+    val funkyColors = LocalFunkyColors.current
+    val isDark = funkyColors.isDark
     val formattedUntil = remember(untilIso) { formatUntilTimeString(untilIso) }
 
     Surface(
@@ -375,8 +379,8 @@ private fun SupportOpenedNoticeCard(untilIso: String?) {
             .fillMaxWidth()
             .padding(vertical = 4.dp),
         shape = RoundedCornerShape(16.dp),
-        color = Color(0xFFFFFBEB),
-        border = BorderStroke(1.dp, Color(0xFFFDE68A))
+        color = funkyColors.soft,
+        border = BorderStroke(1.dp, funkyColors.mango.copy(alpha = 0.45f))
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
@@ -386,13 +390,11 @@ private fun SupportOpenedNoticeCard(untilIso: String?) {
                 modifier = Modifier
                     .size(32.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFFFEF3C7)),
+                    .background(funkyColors.mango.copy(alpha = 0.22f)),
                 contentAlignment = Alignment.Center
             ) {
-                androidx.compose.material3.Icon(
-                    imageVector = Icons.Default.Schedule,
-                    contentDescription = null,
-                    tint = Color(0xFFD97706),
+                SupportClockGraphic(
+                    color = if (isDark) funkyColors.mango else Color(0xFFD97706),
                     modifier = Modifier.size(18.dp)
                 )
             }
@@ -403,7 +405,7 @@ private fun SupportOpenedNoticeCard(untilIso: String?) {
                 text = "Our team has opened this chat for you. You can reply until $formattedUntil.",
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
-                color = Color(0xFF92400E),
+                color = funkyColors.ink,
                 lineHeight = 18.sp
             )
         }
@@ -419,31 +421,29 @@ private fun AppealEmptyChatState(
     subtitle: String,
     modifier: Modifier = Modifier
 ) {
+    val funkyColors = LocalFunkyColors.current
     Column(
         modifier = modifier.padding(horizontal = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        // Graphic illustration: Overlapping yellow speech bubbles
         Box(
             modifier = Modifier.size(160.dp),
             contentAlignment = Alignment.Center
         ) {
-            // Background soft bubble
             Box(
                 modifier = Modifier
                     .size(90.dp)
                     .offset(x = 24.dp, y = 14.dp)
                     .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp, bottomStart = 28.dp, bottomEnd = 6.dp))
-                    .background(Color(0xFFFEF08A).copy(alpha = 0.6f))
+                    .background(funkyColors.soft)
             )
-            // Foreground primary yellow bubble with 3 dots
             Surface(
                 modifier = Modifier
                     .size(105.dp)
                     .offset(x = (-12).dp, y = (-10).dp),
                 shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp, bottomStart = 8.dp, bottomEnd = 32.dp),
-                color = GoldAccent,
+                color = funkyColors.mango,
                 shadowElevation = 6.dp
             ) {
                 Row(
@@ -456,7 +456,7 @@ private fun AppealEmptyChatState(
                             modifier = Modifier
                                 .size(10.dp)
                                 .clip(CircleShape)
-                                .background(Color.White)
+                                .background(funkyColors.surface)
                         )
                         if (it < 2) Spacer(modifier = Modifier.width(6.dp))
                     }
@@ -470,7 +470,7 @@ private fun AppealEmptyChatState(
             text = title,
             fontSize = 24.sp,
             fontWeight = FontWeight.Black,
-            color = Color(0xFF0F172A),
+            color = funkyColors.ink,
             textAlign = TextAlign.Center
         )
 
@@ -479,7 +479,7 @@ private fun AppealEmptyChatState(
         Text(
             text = subtitle,
             fontSize = 14.sp,
-            color = Color(0xFF64748B),
+            color = funkyColors.mute,
             textAlign = TextAlign.Center,
             lineHeight = 20.sp
         )
@@ -487,16 +487,16 @@ private fun AppealEmptyChatState(
 }
 
 /**
- * Full Screen Chat Ended State (Grey bubble with X)
+ * Full Screen Chat Ended State
  */
 @Composable
 private fun SupportChatEndedState(modifier: Modifier = Modifier) {
+    val funkyColors = LocalFunkyColors.current
     Column(
         modifier = modifier.padding(horizontal = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        // Grey speech bubble with white X illustration
         Box(
             modifier = Modifier.size(150.dp),
             contentAlignment = Alignment.Center
@@ -504,18 +504,17 @@ private fun SupportChatEndedState(modifier: Modifier = Modifier) {
             Surface(
                 modifier = Modifier.size(110.dp),
                 shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp, bottomStart = 8.dp, bottomEnd = 32.dp),
-                color = Color(0xFF94A3B8),
+                color = funkyColors.soft,
+                border = BorderStroke(1.dp, funkyColors.line),
                 shadowElevation = 4.dp
             ) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    androidx.compose.material3.Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(48.dp)
+                    SoftCloseIcon(
+                        color = funkyColors.mute,
+                        size = 42.dp
                     )
                 }
             }
@@ -527,7 +526,7 @@ private fun SupportChatEndedState(modifier: Modifier = Modifier) {
             text = "This support chat has ended.",
             fontSize = 22.sp,
             fontWeight = FontWeight.Black,
-            color = Color(0xFF0F172A),
+            color = funkyColors.ink,
             textAlign = TextAlign.Center
         )
 
@@ -536,7 +535,7 @@ private fun SupportChatEndedState(modifier: Modifier = Modifier) {
         Text(
             text = "You can no longer send messages in this conversation.",
             fontSize = 14.sp,
-            color = Color(0xFF64748B),
+            color = funkyColors.mute,
             textAlign = TextAlign.Center,
             lineHeight = 20.sp
         )
@@ -545,6 +544,7 @@ private fun SupportChatEndedState(modifier: Modifier = Modifier) {
 
 @Composable
 private fun SupportMessageBubble(message: SupabaseSupportMessage) {
+    val funkyColors = LocalFunkyColors.current
     val isUser = message.sender_type == "user"
     val formattedTime = SupportChatManager.formatMessageTime(message.created_at)
 
@@ -553,20 +553,17 @@ private fun SupportMessageBubble(message: SupabaseSupportMessage) {
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
         verticalAlignment = Alignment.Bottom
     ) {
-        // FunkyTalk Support Avatar for admin
         if (!isUser) {
             Box(
                 modifier = Modifier
                     .size(32.dp)
                     .clip(CircleShape)
-                    .background(GoldAccent),
+                    .background(funkyColors.mango),
                 contentAlignment = Alignment.Center
             ) {
-                androidx.compose.material3.Icon(
-                    imageVector = Icons.Default.ChatBubble,
-                    contentDescription = null,
-                    tint = Color.Black,
-                    modifier = Modifier.size(16.dp)
+                SoftChatBubbleIcon(
+                    color = funkyColors.onMango,
+                    size = 16.dp
                 )
             }
             Spacer(modifier = Modifier.width(8.dp))
@@ -585,7 +582,7 @@ private fun SupportMessageBubble(message: SupabaseSupportMessage) {
                         text = "FunkyTalk Support",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF4B5563)
+                        color = funkyColors.mute
                     )
                 }
             }
@@ -597,18 +594,18 @@ private fun SupportMessageBubble(message: SupabaseSupportMessage) {
                     bottomStart = if (isUser) 18.dp else 4.dp,
                     bottomEnd = if (isUser) 4.dp else 18.dp
                 ),
-                color = if (isUser) GoldAccent else Color.White,
+                color = if (isUser) funkyColors.mango else funkyColors.surface,
                 border = BorderStroke(
                     1.dp,
-                    if (isUser) Color(0xFFF59E0B) else Color(0xFFE5E7EB)
+                    if (isUser) funkyColors.mango else funkyColors.line
                 ),
-                shadowElevation = 0.5.dp
+                shadowElevation = if (funkyColors.isDark) 0.dp else 0.5.dp
             ) {
                 Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                     Text(
                         text = message.body,
                         fontSize = 14.sp,
-                        color = Color.Black,
+                        color = if (isUser) funkyColors.onMango else funkyColors.ink,
                         lineHeight = 19.sp
                     )
 
@@ -621,14 +618,12 @@ private fun SupportMessageBubble(message: SupabaseSupportMessage) {
                         Text(
                             text = formattedTime,
                             fontSize = 10.sp,
-                            color = if (isUser) Color(0xFF451A03) else Color(0xFF9CA3AF)
+                            color = if (isUser) funkyColors.onMango.copy(alpha = 0.75f) else funkyColors.mute
                         )
                         if (isUser) {
                             Spacer(modifier = Modifier.width(4.dp))
-                            androidx.compose.material3.Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = "Sent",
-                                tint = Color(0xFF451A03),
+                            FunkySingleCheckIcon(
+                                color = funkyColors.onMango.copy(alpha = 0.8f),
                                 modifier = Modifier.size(12.dp)
                             )
                         }
@@ -636,6 +631,22 @@ private fun SupportMessageBubble(message: SupabaseSupportMessage) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SupportClockGraphic(
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val sw = size.minDimension * 0.11f
+        val r = size.minDimension * 0.38f
+        val cx = size.width / 2f
+        val cy = size.height / 2f
+        drawCircle(color = color, radius = r, center = Offset(cx, cy), style = Stroke(width = sw))
+        drawLine(color, Offset(cx, cy), Offset(cx, cy - r * 0.52f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(cx, cy), Offset(cx + r * 0.45f, cy + r * 0.15f), strokeWidth = sw, cap = StrokeCap.Round)
     }
 }
 

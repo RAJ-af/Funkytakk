@@ -261,11 +261,19 @@ fun EditProfileScreen(
             Regex("\\s*\\((?:Beginner|Elementary|Intermediate|Upper Intermediate|Advanced|Native / Fluent|Native|Fluent)\\)\\s*$", RegexOption.IGNORE_CASE),
             ""
         ).trim()
-        val rawName = if (withoutLevel != langStr) withoutLevel else langStr.substringBefore("(").trim()
-        val match = LanguageData.popularLanguages.find { it.name.equals(rawName, ignoreCase = true) }
-            ?: LanguageData.programmingLanguages.find { it.name.equals(rawName, ignoreCase = true) }
-            ?: LanguageData.allLanguages.find { it.name.equals(rawName, ignoreCase = true) }
-        return match?.flagCode ?: "un"
+        val rawName = (if (withoutLevel != langStr) withoutLevel else langStr.substringBefore("(")).trim()
+        val normalized = when (rawName.lowercase()) {
+            "chinese", "mandarin", "chinese (mandarin)", "cantonese", "zh" -> "Chinese"
+            "c", "c language" -> "C"
+            else -> rawName
+        }
+        val match = LanguageData.popularLanguages.find { it.name.equals(normalized, ignoreCase = true) || it.code.equals(normalized, ignoreCase = true) }
+            ?: LanguageData.allLanguages.find { it.name.equals(normalized, ignoreCase = true) || it.code.equals(normalized, ignoreCase = true) }
+            ?: LanguageData.programmingLanguages.find { it.name.equals(normalized, ignoreCase = true) }
+        return match?.flagCode ?: when (normalized.lowercase()) {
+            "chinese" -> "cn"
+            else -> "un"
+        }
     }
 
     // Helper for colorful interest emoji badge (zero Material Icons)
@@ -389,7 +397,7 @@ fun EditProfileScreen(
                                     listOf(Color(0xFFFEF3C7), Color(0xFFFDE68A), Color(0xFFF8C63D))
                                 )
                             )
-                            .border(1.dp, Color(0xFFE5E7DE), RoundedCornerShape(16.dp))
+                            .border(1.dp, funkyColors.line, RoundedCornerShape(16.dp))
                             .clickable {
                                 coverPickerLauncher.launch(
                                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
@@ -913,7 +921,7 @@ fun EditProfileScreen(
                         text = "Edit",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFFD97706),
+                        color = funkyColors.mango,
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
                             .clickable { showLanguagesSheet = true }

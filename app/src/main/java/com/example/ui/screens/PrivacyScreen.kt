@@ -5,19 +5,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.OpenInNew
-import androidx.compose.material.icons.filled.People
-import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.SpanStyle
@@ -26,18 +18,26 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.components.FunkyLockIcon
+import com.example.ui.components.SoftDocumentIcon
+import com.example.ui.components.SoftGroupIcon
+import com.example.ui.components.SoftOpenInNewIcon
+import com.example.ui.components.SoftShieldIcon
+import com.example.ui.components.SoftTrashIcon
+import com.example.ui.theme.LocalFunkyColors
 
 @Composable
 fun PrivacyScreen(
     onContinueClick: () -> Unit
 ) {
     val uriHandler = LocalUriHandler.current
+    val funkyColors = LocalFunkyColors.current
     var isAgreed by remember { mutableStateOf(false) }
     val targetUrl = "https://lost39.github.io/funkytalk/#privacy"
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
-        containerColor = Color.White
+        containerColor = funkyColors.bg
     ) { innerPadding ->
         Box(
             modifier = Modifier
@@ -51,7 +51,7 @@ fun PrivacyScreen(
                     .align(Alignment.TopEnd)
                     .offset(x = 60.dp, y = (-60).dp)
                     .clip(CircleShape)
-                    .background(Color(0xFFFFFBEA))
+                    .background(funkyColors.soft.copy(alpha = 0.65f))
             )
 
             // Soft decorative blob bottom left
@@ -61,7 +61,7 @@ fun PrivacyScreen(
                     .align(Alignment.BottomStart)
                     .offset(x = (-90).dp, y = 90.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFFFFFBEA))
+                    .background(funkyColors.soft.copy(alpha = 0.65f))
             )
 
             Column(
@@ -78,19 +78,17 @@ fun PrivacyScreen(
                 ) {
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Shield icon badge in top left (matching Screenshot 2 logo)
+                    // Shield icon badge in top left
                     Box(
                         modifier = Modifier
                             .size(68.dp)
                             .clip(RoundedCornerShape(18.dp))
-                            .background(Color(0xFFFFF7E2)),
+                            .background(funkyColors.soft),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Shield,
-                            contentDescription = "Privacy Shield Logo",
-                            tint = Color(0xFFFFB300),
-                            modifier = Modifier.size(32.dp)
+                        SoftShieldIcon(
+                            size = 32.dp,
+                            color = funkyColors.mango
                         )
                     }
 
@@ -101,7 +99,7 @@ fun PrivacyScreen(
                         text = "Your privacy\nmatters",
                         fontSize = 34.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = Color.Black,
+                        color = funkyColors.ink,
                         lineHeight = 40.sp,
                         letterSpacing = (-1).sp,
                         modifier = Modifier.testTag("privacy_header")
@@ -113,13 +111,13 @@ fun PrivacyScreen(
                     Text(
                         text = "We keep things simple and transparent.\nHere's what you should know:",
                         fontSize = 15.sp,
-                        color = Color(0xFF5A5C64),
+                        color = funkyColors.mute,
                         lineHeight = 22.sp
                     )
 
                     Spacer(modifier = Modifier.height(28.dp))
 
-                    // Column of list items with custom beautiful light backgrounds
+                    // Column of list items
                     Column(
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
@@ -132,14 +130,12 @@ fun PrivacyScreen(
                                 modifier = Modifier
                                     .size(44.dp)
                                     .clip(RoundedCornerShape(12.dp))
-                                    .background(Color(0xFFFFF7E2)),
+                                    .background(funkyColors.soft),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.People,
-                                    contentDescription = null,
-                                    tint = Color(0xFFFFB300),
-                                    modifier = Modifier.size(20.dp)
+                                SoftGroupIcon(
+                                    size = 20.dp,
+                                    color = funkyColors.mango
                                 )
                             }
                             Spacer(modifier = Modifier.width(16.dp))
@@ -147,7 +143,7 @@ fun PrivacyScreen(
                                 text = "Match you with the best language partners",
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.Black
+                                color = funkyColors.ink
                             )
                         }
 
@@ -160,13 +156,11 @@ fun PrivacyScreen(
                                 modifier = Modifier
                                     .size(44.dp)
                                     .clip(RoundedCornerShape(12.dp))
-                                    .background(Color(0xFFFFF7E2)),
+                                    .background(funkyColors.soft),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Lock,
-                                    contentDescription = null,
-                                    tint = Color(0xFFFFB300),
+                                FunkyLockIcon(
+                                    color = funkyColors.mango,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -175,7 +169,7 @@ fun PrivacyScreen(
                                 text = "Your messages stay private",
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.Black
+                                color = funkyColors.ink
                             )
                         }
 
@@ -188,14 +182,12 @@ fun PrivacyScreen(
                                 modifier = Modifier
                                     .size(44.dp)
                                     .clip(RoundedCornerShape(12.dp))
-                                    .background(Color(0xFFFFF7E2)),
+                                    .background(funkyColors.soft),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Delete,
-                                    contentDescription = null,
-                                    tint = Color(0xFFFFB300),
-                                    modifier = Modifier.size(20.dp)
+                                SoftTrashIcon(
+                                    size = 20.dp,
+                                    color = funkyColors.mango
                                 )
                             }
                             Spacer(modifier = Modifier.width(16.dp))
@@ -203,7 +195,7 @@ fun PrivacyScreen(
                                 text = "Delete your account and data anytime",
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.Black
+                                color = funkyColors.ink
                             )
                         }
                     }
@@ -216,7 +208,12 @@ fun PrivacyScreen(
                     ) {
                         PolicyRow(
                             title = "Privacy Policy",
-                            icon = Icons.Default.Shield,
+                            iconContent = {
+                                SoftShieldIcon(
+                                    size = 20.dp,
+                                    color = funkyColors.mango
+                                )
+                            },
                             onClick = {
                                 uriHandler.openUri(targetUrl)
                             }
@@ -224,7 +221,12 @@ fun PrivacyScreen(
 
                         PolicyRow(
                             title = "Terms & Conditions",
-                            icon = Icons.Default.Description,
+                            iconContent = {
+                                SoftDocumentIcon(
+                                    size = 20.dp,
+                                    color = funkyColors.mango
+                                )
+                            },
                             onClick = {
                                 uriHandler.openUri(targetUrl)
                             }
@@ -250,9 +252,9 @@ fun PrivacyScreen(
                             checked = isAgreed,
                             onCheckedChange = { isAgreed = it },
                             colors = CheckboxDefaults.colors(
-                                checkedColor = Color(0xFFFFC529),
-                                uncheckedColor = Color(0xFF757575),
-                                checkmarkColor = Color.Black
+                                checkedColor = funkyColors.mango,
+                                uncheckedColor = funkyColors.mute,
+                                checkmarkColor = funkyColors.onMango
                             ),
                             modifier = Modifier.testTag("privacy_checkbox")
                         )
@@ -262,13 +264,13 @@ fun PrivacyScreen(
                         val annotatedText = buildAnnotatedString {
                             append("I agree to the ")
                             pushStringAnnotation(tag = "URL", annotation = targetUrl)
-                            withStyle(style = SpanStyle(color = Color(0xFFFFB300), fontWeight = FontWeight.Bold)) {
+                            withStyle(style = SpanStyle(color = funkyColors.mango, fontWeight = FontWeight.Bold)) {
                                 append("Privacy Policy")
                             }
                             pop()
                             append(" and ")
                             pushStringAnnotation(tag = "URL", annotation = targetUrl)
-                            withStyle(style = SpanStyle(color = Color(0xFFFFB300), fontWeight = FontWeight.Bold)) {
+                            withStyle(style = SpanStyle(color = funkyColors.mango, fontWeight = FontWeight.Bold)) {
                                 append("Terms")
                             }
                             pop()
@@ -276,7 +278,7 @@ fun PrivacyScreen(
 
                         androidx.compose.foundation.text.ClickableText(
                             text = annotatedText,
-                            style = LocalTextStyle.current.copy(fontSize = 14.sp, color = Color.Black),
+                            style = LocalTextStyle.current.copy(fontSize = 14.sp, color = funkyColors.ink),
                             onClick = { offset ->
                                 annotatedText.getStringAnnotations(tag = "URL", start = offset, end = offset)
                                     .firstOrNull()?.let { annotation ->
@@ -303,10 +305,10 @@ fun PrivacyScreen(
                             .height(58.dp)
                             .testTag("privacy_continue_button"),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFFFFC529),
-                            contentColor = Color.Black,
-                            disabledContainerColor = Color(0xFFE5E5EA),
-                            disabledContentColor = Color(0xFF8E8E93)
+                            containerColor = funkyColors.mango,
+                            contentColor = funkyColors.onMango,
+                            disabledContainerColor = funkyColors.soft,
+                            disabledContentColor = funkyColors.mute
                         ),
                         shape = RoundedCornerShape(29.dp),
                         elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
@@ -326,16 +328,17 @@ fun PrivacyScreen(
 @Composable
 fun PolicyRow(
     title: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    iconContent: @Composable () -> Unit,
     onClick: () -> Unit
 ) {
+    val funkyColors = LocalFunkyColors.current
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
             .testTag("policy_row_${title.replace(" ", "_").lowercase()}"),
         colors = CardDefaults.cardColors(
-            containerColor = Color(0xFFF7F7F9)
+            containerColor = funkyColors.surface
         ),
         shape = RoundedCornerShape(16.dp)
     ) {
@@ -349,26 +352,19 @@ fun PolicyRow(
             Row(
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = Color(0xFFFFB300),
-                    modifier = Modifier.size(20.dp)
-                )
+                iconContent()
                 Spacer(modifier = Modifier.width(14.dp))
                 Text(
                     text = title,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.Black
+                    color = funkyColors.ink
                 )
             }
 
-            Icon(
-                imageVector = Icons.Default.OpenInNew,
-                contentDescription = "Open Link Icon",
-                tint = Color(0xFF8E8E93),
-                modifier = Modifier.size(18.dp)
+            SoftOpenInNewIcon(
+                size = 18.dp,
+                color = funkyColors.mute
             )
         }
     }

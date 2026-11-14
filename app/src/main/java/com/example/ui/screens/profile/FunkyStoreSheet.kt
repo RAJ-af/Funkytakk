@@ -11,11 +11,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -30,6 +25,11 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.StoreItemRow
 import com.example.store.*
+import com.example.ui.components.SoftCoinIcon
+import com.example.ui.components.SoftGiftBoxIcon
+import com.example.ui.components.SoftShopBagIcon
+import com.example.ui.components.SoftSparkleIcon
+import com.example.ui.theme.LocalFunkyColors
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -38,6 +38,7 @@ fun FunkyStoreSheet(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
     val scope = rememberCoroutineScope()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -71,7 +72,8 @@ fun FunkyStoreSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Color(0xFFFAFAF9),
+        containerColor = funkyColors.bg,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = funkyColors.line) },
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
     ) {
         Column(
@@ -87,37 +89,43 @@ fun FunkyStoreSheet(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text(
-                        text = "🛍️ Funky Store",
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFF0F172A)
-                    )
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        SoftShopBagIcon(size = 22.dp, color = funkyColors.mango)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Funky Store",
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = funkyColors.ink
+                        )
+                    }
                     Text(
                         text = "Customize chat bubbles, frames, effects & stickers",
                         fontSize = 12.5.sp,
-                        color = Color(0xFF64748B)
+                        color = funkyColors.mute
                     )
                 }
+
+                Spacer(modifier = Modifier.width(8.dp))
 
                 // Wallet Balance Chip
                 Surface(
                     shape = RoundedCornerShape(100.dp),
-                    color = Color(0xFFFEF3C7),
-                    border = BorderStroke(1.dp, Color(0xFFFDE047))
+                    color = funkyColors.soft,
+                    border = BorderStroke(1.dp, funkyColors.mango.copy(alpha = 0.5f))
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text("🪙", fontSize = 16.sp)
+                        SoftCoinIcon(size = 16.dp, color = funkyColors.mango)
                         Text(
                             text = "$coinBalance Coins",
                             fontSize = 13.5.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFFB45309)
+                            color = if (funkyColors.isDark) funkyColors.mango else Color(0xFFB45309)
                         )
                     }
                 }
@@ -129,7 +137,7 @@ fun FunkyStoreSheet(
             TabRow(
                 selectedTabIndex = selectedTabIndex,
                 containerColor = Color.Transparent,
-                contentColor = Color(0xFF0F172A),
+                contentColor = funkyColors.ink,
                 divider = {}
             ) {
                 tabs.forEachIndexed { index, title ->
@@ -140,6 +148,7 @@ fun FunkyStoreSheet(
                             Text(
                                 text = title,
                                 fontSize = 13.sp,
+                                color = if (selectedTabIndex == index) funkyColors.ink else funkyColors.mute,
                                 fontWeight = if (selectedTabIndex == index) FontWeight.Bold else FontWeight.Medium
                             )
                         }
@@ -157,7 +166,7 @@ fun FunkyStoreSheet(
                         .height(280.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator(color = Color(0xFFFFC629))
+                    CircularProgressIndicator(color = funkyColors.mango)
                 }
             } else if (storeItems.isEmpty()) {
                 Box(
@@ -167,12 +176,12 @@ fun FunkyStoreSheet(
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("✨", fontSize = 32.sp)
+                        SoftSparkleIcon(size = 32.dp, color = funkyColors.mango)
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = "No items found in this section",
                             fontSize = 14.sp,
-                            color = Color(0xFF64748B)
+                            color = funkyColors.mute
                         )
                     }
                 }
@@ -238,8 +247,8 @@ fun FunkyStoreSheet(
                     .fillMaxWidth()
                     .height(48.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFFFFC629),
-                    contentColor = Color(0xFF0F172A)
+                    containerColor = funkyColors.mango,
+                    contentColor = funkyColors.onMango
                 ),
                 shape = RoundedCornerShape(100.dp)
             ) {
@@ -252,17 +261,18 @@ fun FunkyStoreSheet(
     confirmingPurchaseItem?.let { item ->
         AlertDialog(
             onDismissRequest = { confirmingPurchaseItem = null },
+            containerColor = funkyColors.surface,
             title = {
-                Text("Confirm Purchase", fontWeight = FontWeight.Bold)
+                Text("Confirm Purchase", fontWeight = FontWeight.Bold, color = funkyColors.ink)
             },
             text = {
                 Column {
-                    Text("Do you want to buy ${item.name} for ${item.price_coins} coins?")
+                    Text("Do you want to buy ${item.name} for ${item.price_coins} coins?", color = funkyColors.ink)
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "Current Balance: $coinBalance Coins",
                         fontSize = 12.sp,
-                        color = Color(0xFF64748B)
+                        color = funkyColors.mute
                     )
                 }
             },
@@ -288,14 +298,14 @@ fun FunkyStoreSheet(
                             actionInProgressId = null
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFC629), contentColor = Color.Black)
+                    colors = ButtonDefaults.buttonColors(containerColor = funkyColors.mango, contentColor = funkyColors.onMango)
                 ) {
-                    Text("Buy Now (${item.price_coins} 🪙)", fontWeight = FontWeight.Bold)
+                    Text("Buy Now (${item.price_coins} Coins)", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { confirmingPurchaseItem = null }) {
-                    Text("Cancel", color = Color.Gray)
+                    Text("Cancel", color = funkyColors.mute)
                 }
             }
         )
@@ -310,14 +320,15 @@ private fun StoreItemCard(
     onEquip: () -> Unit,
     onUnequip: () -> Unit
 ) {
+    val funkyColors = LocalFunkyColors.current
     Surface(
         shape = RoundedCornerShape(18.dp),
-        color = Color.White,
+        color = funkyColors.surface,
         border = BorderStroke(
             width = if (item.equipped) 2.dp else 1.dp,
-            color = if (item.equipped) Color(0xFFFFC629) else Color(0xFFE2E8F0)
+            color = if (item.equipped) funkyColors.mango else funkyColors.line
         ),
-        shadowElevation = 2.dp,
+        shadowElevation = if (funkyColors.isDark) 0.dp else 2.dp,
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
@@ -330,7 +341,7 @@ private fun StoreItemCard(
                     .fillMaxWidth()
                     .height(96.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFFF8FAFC)),
+                    .background(funkyColors.bg),
                 contentAlignment = Alignment.Center
             ) {
                 when (item.item_type) {
@@ -340,7 +351,7 @@ private fun StoreItemCard(
                         }
                         ThemedBubble(config = config, isOutgoing = true) {
                             Text(
-                                text = "Preview message ✨",
+                                text = "Preview message",
                                 fontSize = 11.5.sp,
                                 color = Color(0xFF0F172A)
                             )
@@ -351,15 +362,15 @@ private fun StoreItemCard(
                             CosmeticsConfigParser.parseChatBg(item.config)
                         }
                         Box(modifier = Modifier.fillMaxSize()) {
-                            ChatBackground(config = config, isDark = false, modifier = Modifier.fillMaxSize())
+                            ChatBackground(config = config, isDark = funkyColors.isDark, modifier = Modifier.fillMaxSize())
                             Text(
                                 text = "Chat BG",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.Black,
+                                color = funkyColors.ink,
                                 modifier = Modifier
                                     .align(Alignment.Center)
-                                    .background(Color.White.copy(alpha = 0.8f), RoundedCornerShape(6.dp))
+                                    .background(funkyColors.surface.copy(alpha = 0.85f), RoundedCornerShape(6.dp))
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             )
                         }
@@ -387,13 +398,21 @@ private fun StoreItemCard(
                         )
                     }
                     "sticker_pack" -> {
-                        Text(
-                            text = "🎁 Pack",
-                            fontSize = 24.sp
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            SoftGiftBoxIcon(size = 24.dp, color = funkyColors.mango)
+                            Text(
+                                text = "Pack",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = funkyColors.ink
+                            )
+                        }
                     }
                     else -> {
-                        Text(item.name, fontSize = 13.sp)
+                        Text(item.name, fontSize = 13.sp, color = funkyColors.ink)
                     }
                 }
             }
@@ -404,14 +423,14 @@ private fun StoreItemCard(
                 text = item.name,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFF0F172A),
+                color = funkyColors.ink,
                 maxLines = 1
             )
 
             Text(
                 text = item.description ?: "",
                 fontSize = 11.sp,
-                color = Color(0xFF64748B),
+                color = funkyColors.mute,
                 maxLines = 1,
                 textAlign = TextAlign.Center
             )
@@ -420,12 +439,12 @@ private fun StoreItemCard(
 
             // Price / Ownership Action Button
             if (isProcessing) {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp, color = funkyColors.mango)
             } else if (item.equipped) {
                 Button(
                     onClick = onUnequip,
                     modifier = Modifier.fillMaxWidth().height(34.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE2E8F0), contentColor = Color(0xFF0F172A)),
+                    colors = ButtonDefaults.buttonColors(containerColor = funkyColors.soft, contentColor = funkyColors.ink),
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                 ) {
                     Text("Equipped", fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -434,18 +453,23 @@ private fun StoreItemCard(
                 if (item.item_type == "sticker_pack") {
                     Surface(
                         shape = RoundedCornerShape(100.dp),
-                        color = Color(0xFFDCFCE7),
+                        color = if (funkyColors.isDark) funkyColors.ok.copy(alpha = 0.18f) else Color(0xFFDCFCE7),
                         modifier = Modifier.fillMaxWidth().height(34.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Text("Owned Pack", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF166534))
+                            Text(
+                                "Owned Pack",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (funkyColors.isDark) funkyColors.ok else Color(0xFF166534)
+                            )
                         }
                     }
                 } else {
                     Button(
                         onClick = onEquip,
                         modifier = Modifier.fillMaxWidth().height(34.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F172A), contentColor = Color.White),
+                        colors = ButtonDefaults.buttonColors(containerColor = funkyColors.ink, contentColor = funkyColors.bg),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                     ) {
                         Text("Equip", fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -455,10 +479,10 @@ private fun StoreItemCard(
                 Button(
                     onClick = onPurchase,
                     modifier = Modifier.fillMaxWidth().height(34.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFC629), contentColor = Color(0xFF0F172A)),
+                    colors = ButtonDefaults.buttonColors(containerColor = funkyColors.mango, contentColor = funkyColors.onMango),
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                 ) {
-                    val priceTxt = if (item.price_coins == 0) "Free" else "${item.price_coins} 🪙"
+                    val priceTxt = if (item.price_coins == 0) "Free" else "${item.price_coins} Coins"
                     Text("Buy $priceTxt", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }

@@ -4,6 +4,7 @@ import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.VerticalPager
@@ -20,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -33,6 +35,8 @@ import com.example.ui.components.MomentCommentsBottomSheet
 import com.example.ui.components.MomentV2Slide
 import com.example.ui.components.MomentVideoPlayerDialog
 import com.example.ui.screens.post.CreatePostScreen
+import com.example.ui.theme.LocalAppDarkTheme
+import com.example.ui.theme.LocalFunkyColors
 import kotlinx.coroutines.launch
 
 private class MomentTabFeedState(val tabKey: String) {
@@ -54,6 +58,8 @@ fun MomentsTabContent(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val funkyColors = LocalFunkyColors.current
+    val isAppDark = LocalAppDarkTheme.current
     val prefs = remember(context) {
         context.getSharedPreferences("funky_talk_prefs", android.content.Context.MODE_PRIVATE)
     }
@@ -210,10 +216,18 @@ fun MomentsTabContent(
     val currentDisplayedMoment = activeFeed.items.getOrNull(verticalPagerState.currentPage)
     val pullToRefreshState = rememberPullToRefreshState()
 
+    val isCurrentSlideLightCanvas = currentDisplayedMoment != null &&
+        currentDisplayedMoment.media.isEmpty() &&
+        MomentsRepository.resolveBgPreset(currentDisplayedMoment.bg_key).isDarkText
+    val useLightHeaderContrast = !isAppDark && (activeFeed.items.isEmpty() || isCurrentSlideLightCanvas)
+    val headerInk = if (useLightHeaderContrast) funkyColors.ink else Color.White
+    val headerMutedInk = if (useLightHeaderContrast) funkyColors.mute else Color.White.copy(alpha = 0.72f)
+    val headerBtnBg = if (useLightHeaderContrast) funkyColors.surface else Color.White.copy(alpha = 0.2f)
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(funkyColors.bg)
     ) {
         PullToRefreshBox(
             isRefreshing = activeFeed.isRefreshing,
@@ -228,8 +242,8 @@ fun MomentsTabContent(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .padding(top = 100.dp),
-                    containerColor = Color(0xFF231D15),
-                    color = Color(0xFFFFB627)
+                    containerColor = funkyColors.surface,
+                    color = funkyColors.mango
                 )
             },
             modifier = Modifier.fillMaxSize()
@@ -240,7 +254,7 @@ fun MomentsTabContent(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
-                        CircularProgressIndicator(color = Color(0xFFFFB627))
+                        CircularProgressIndicator(color = funkyColors.mango)
                     }
                 }
 
@@ -256,13 +270,28 @@ fun MomentsTabContent(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(64.dp)
+                                    .clip(CircleShape)
+                                    .background(funkyColors.soft)
+                                    .border(1.dp, funkyColors.line, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_sparkle),
+                                    contentDescription = null,
+                                    tint = funkyColors.mango,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
                             Text(
                                 text = when {
                                     isErrorState -> activeFeed.errorMessage!!
                                     selectedTab == 1 -> "No posts in your languages yet"
                                     else -> "No moments yet. Be the first to post!"
                                 },
-                                color = Color.White,
+                                color = funkyColors.ink,
                                 fontSize = 17.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -272,7 +301,7 @@ fun MomentsTabContent(
                                 } else {
                                     "Pull down to refresh or share your own language moment."
                                 },
-                                color = Color.White.copy(alpha = 0.7f),
+                                color = funkyColors.mute,
                                 fontSize = 13.sp
                             )
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -280,15 +309,15 @@ fun MomentsTabContent(
                                     onClick = {
                                         coroutineScope.launch { loadFeedPage(activeFeed, reset = true) }
                                     },
-                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.4f))
+                                    border = BorderStroke(1.dp, funkyColors.line)
                                 ) {
-                                    Text(if (isErrorState) "Retry" else "Refresh", color = Color.White)
+                                    Text(if (isErrorState) "Retry" else "Refresh", color = funkyColors.ink)
                                 }
                                 Button(
                                     onClick = { showCreatePostSheet = true },
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color(0xFFFFB627),
-                                        contentColor = Color(0xFF2B2118)
+                                        containerColor = funkyColors.mango,
+                                        contentColor = funkyColors.onMango
                                     )
                                 ) {
                                     Text("Create Moment", fontWeight = FontWeight.Bold)
@@ -381,7 +410,7 @@ fun MomentsTabContent(
             }
         }
 
-        // Top Overlay: Title, Tabs, and Create/Menu actions (custom icons only)
+        // Top Overlay: Title, Tabs, and Create/Menu actions
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -399,7 +428,7 @@ fun MomentsTabContent(
                     text = "Moments",
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Black,
-                    color = Color.White
+                    color = headerInk
                 )
 
                 Row(
@@ -409,14 +438,19 @@ fun MomentsTabContent(
                     IconButton(
                         onClick = { showCreatePostSheet = true },
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(40.dp)
                             .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.2f))
+                            .background(headerBtnBg)
+                            .then(
+                                if (useLightHeaderContrast) Modifier.border(1.dp, funkyColors.line, CircleShape)
+                                else Modifier
+                            )
+                            .testTag("moments_create_button")
                     ) {
                         Icon(
                             painter = painterResource(id = R.drawable.ic_plus),
                             contentDescription = "Create Moment",
-                            tint = Color.White,
+                            tint = headerInk,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -426,30 +460,54 @@ fun MomentsTabContent(
                         IconButton(
                             onClick = { showTopMenu = true },
                             modifier = Modifier
-                                .size(38.dp)
+                                .size(40.dp)
                                 .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.2f))
+                                .background(headerBtnBg)
+                                .then(
+                                    if (useLightHeaderContrast) Modifier.border(1.dp, funkyColors.line, CircleShape)
+                                    else Modifier
+                                )
+                                .testTag("moments_more_menu_button")
                         ) {
                             Icon(
                                 painter = painterResource(id = R.drawable.ic_more_vert),
                                 contentDescription = "Menu",
-                                tint = Color.White,
+                                tint = headerInk,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
 
                         DropdownMenu(
                             expanded = showTopMenu,
-                            onDismissRequest = { showTopMenu = false }
+                            onDismissRequest = { showTopMenu = false },
+                            containerColor = funkyColors.surface,
+                            shape = RoundedCornerShape(20.dp),
+                            border = BorderStroke(1.dp, funkyColors.line)
                         ) {
                             DropdownMenuItem(
-                                text = { Text("Create Moment") },
-                                leadingIcon = {
-                                    Icon(
-                                        painter = painterResource(id = R.drawable.ic_plus),
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp)
+                                text = {
+                                    Text(
+                                        "Create Moment",
+                                        color = funkyColors.ink,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 14.sp
                                     )
+                                },
+                                leadingIcon = {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(funkyColors.mango.copy(alpha = 0.16f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            painter = painterResource(id = R.drawable.ic_plus),
+                                            contentDescription = null,
+                                            tint = funkyColors.mango,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
                                 },
                                 onClick = {
                                     showTopMenu = false
@@ -457,13 +515,29 @@ fun MomentsTabContent(
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text("Refresh") },
-                                leadingIcon = {
-                                    Icon(
-                                        painter = painterResource(id = R.drawable.ic_refresh),
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp)
+                                text = {
+                                    Text(
+                                        "Refresh feed",
+                                        color = funkyColors.ink,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 14.sp
                                     )
+                                },
+                                leadingIcon = {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(funkyColors.soft),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            painter = painterResource(id = R.drawable.ic_refresh),
+                                            contentDescription = null,
+                                            tint = funkyColors.ink,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
                                 },
                                 onClick = {
                                     showTopMenu = false
@@ -471,15 +545,35 @@ fun MomentsTabContent(
                                 }
                             )
                             if (currentDisplayedMoment != null) {
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = 12.dp),
+                                    color = funkyColors.line.copy(alpha = 0.6f)
+                                )
                                 if (!currentDisplayedMoment.author.is_me) {
                                     DropdownMenuItem(
-                                        text = { Text("Not interested") },
-                                        leadingIcon = {
-                                            Icon(
-                                                painter = painterResource(id = R.drawable.ic_visibility_off),
-                                                contentDescription = null,
-                                                modifier = Modifier.size(18.dp)
+                                        text = {
+                                            Text(
+                                                "Not interested",
+                                                color = funkyColors.ink,
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 14.sp
                                             )
+                                        },
+                                        leadingIcon = {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(32.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(funkyColors.soft),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    painter = painterResource(id = R.drawable.ic_visibility_off),
+                                                    contentDescription = null,
+                                                    tint = funkyColors.ink,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
                                         },
                                         onClick = {
                                             showTopMenu = false
@@ -500,14 +594,29 @@ fun MomentsTabContent(
                                         }
                                     )
                                     DropdownMenuItem(
-                                        text = { Text("Report post", color = Color(0xFFEF4444)) },
-                                        leadingIcon = {
-                                            Icon(
-                                                painter = painterResource(id = R.drawable.ic_flag),
-                                                contentDescription = null,
-                                                tint = Color(0xFFEF4444),
-                                                modifier = Modifier.size(18.dp)
+                                        text = {
+                                            Text(
+                                                "Report post",
+                                                color = funkyColors.danger,
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 14.sp
                                             )
+                                        },
+                                        leadingIcon = {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(32.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(funkyColors.danger.copy(alpha = 0.12f)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    painter = painterResource(id = R.drawable.ic_flag),
+                                                    contentDescription = null,
+                                                    tint = funkyColors.danger,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
                                         },
                                         onClick = {
                                             showTopMenu = false
@@ -516,14 +625,29 @@ fun MomentsTabContent(
                                     )
                                 } else {
                                     DropdownMenuItem(
-                                        text = { Text("Delete post", color = Color(0xFFEF4444)) },
-                                        leadingIcon = {
-                                            Icon(
-                                                painter = painterResource(id = R.drawable.ic_trash),
-                                                contentDescription = null,
-                                                tint = Color(0xFFEF4444),
-                                                modifier = Modifier.size(18.dp)
+                                        text = {
+                                            Text(
+                                                "Delete post",
+                                                color = funkyColors.danger,
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 14.sp
                                             )
+                                        },
+                                        leadingIcon = {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(32.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(funkyColors.danger.copy(alpha = 0.12f)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    painter = painterResource(id = R.drawable.ic_trash),
+                                                    contentDescription = null,
+                                                    tint = funkyColors.danger,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
                                         },
                                         onClick = {
                                             showTopMenu = false
@@ -574,14 +698,14 @@ fun MomentsTabContent(
                         Icon(
                             painter = painterResource(id = R.drawable.ic_flame),
                             contentDescription = null,
-                            tint = if (selectedTab == 0) Color(0xFFFFB627) else Color.White.copy(alpha = 0.65f),
+                            tint = if (selectedTab == 0) funkyColors.mango else headerMutedInk,
                             modifier = Modifier.size(15.dp)
                         )
                         Text(
                             text = "Trending",
                             fontSize = 15.sp,
                             fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Medium,
-                            color = if (selectedTab == 0) Color.White else Color.White.copy(alpha = 0.65f)
+                            color = if (selectedTab == 0) headerInk else headerMutedInk
                         )
                     }
                     Spacer(modifier = Modifier.height(4.dp))
@@ -591,7 +715,7 @@ fun MomentsTabContent(
                                 .width(76.dp)
                                 .height(3.dp)
                                 .clip(RoundedCornerShape(2.dp))
-                                .background(Color(0xFFFFB627))
+                                .background(funkyColors.mango)
                         )
                     } else {
                         Spacer(modifier = Modifier.height(3.dp))
@@ -605,7 +729,7 @@ fun MomentsTabContent(
                         text = "My language",
                         fontSize = 15.sp,
                         fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Medium,
-                        color = if (selectedTab == 1) Color.White else Color.White.copy(alpha = 0.65f)
+                        color = if (selectedTab == 1) headerInk else headerMutedInk
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     if (selectedTab == 1) {
@@ -614,7 +738,7 @@ fun MomentsTabContent(
                                 .width(86.dp)
                                 .height(3.dp)
                                 .clip(RoundedCornerShape(2.dp))
-                                .background(Color(0xFFFFB627))
+                                .background(funkyColors.mango)
                         )
                     } else {
                         Spacer(modifier = Modifier.height(3.dp))
@@ -624,7 +748,7 @@ fun MomentsTabContent(
         }
     }
 
-    // Comments & Corrections Modal Bottom Sheet (shared warm cream sheet)
+    // Comments & Corrections Modal Bottom Sheet
     val currentMomentForSheet = remember(activeMomentIdForComments, activeFeed.items.toList()) {
         activeMomentIdForComments?.let { id ->
             activeFeed.items.firstOrNull { it.id == id }

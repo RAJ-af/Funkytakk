@@ -22,8 +22,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,7 +29,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -49,9 +46,17 @@ import com.example.SupabaseClient
 import com.example.SupabaseSessionManager
 import com.example.repository.EncryptedChatRepository
 import com.example.repository.GroupChatRepository
+import com.example.ui.components.FunkyLockIcon
+import com.example.ui.components.SoftAddPhotoIcon
+import com.example.ui.components.SoftCheckIcon
 import com.example.ui.components.SoftCloseIcon
+import com.example.ui.components.SoftEyeIcon
+import com.example.ui.components.SoftHelpIcon
+import com.example.ui.components.SoftMegaphoneIcon
+import com.example.ui.components.SoftPersonOffIcon
 import com.example.ui.components.SoftShieldIcon
-import com.example.ui.theme.GoldAccent
+import com.example.ui.components.SoftWarningIcon
+import com.example.ui.theme.LocalFunkyColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -65,9 +70,17 @@ import java.util.Locale
 
 private const val TAG = "ReportSheet"
 
+enum class ReportReasonIconType {
+    WARNING,
+    HATE,
+    HARASSMENT,
+    NSFW,
+    OTHER
+}
+
 data class ReasonOption(
     val title: String,
-    val icon: ImageVector
+    val iconType: ReportReasonIconType
 )
 
 enum class ReportSubmitState {
@@ -93,6 +106,7 @@ fun ReportUserDialog(
     onReportSubmitted: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
     val scope = rememberCoroutineScope()
 
     val formattedContextTitle = remember(contextType) {
@@ -107,11 +121,11 @@ fun ReportUserDialog(
 
     val reasonOptions = remember {
         listOf(
-            ReasonOption("Spam & Scam", Icons.Default.Warning),
-            ReasonOption("Hate Speech", Icons.Default.Campaign),
-            ReasonOption("Harassment", Icons.Default.PersonOff),
-            ReasonOption("Inappropriate Content / NSFW", Icons.Default.VisibilityOff),
-            ReasonOption("Other", Icons.Default.HelpOutline)
+            ReasonOption("Spam & Scam", ReportReasonIconType.WARNING),
+            ReasonOption("Hate Speech", ReportReasonIconType.HATE),
+            ReasonOption("Harassment", ReportReasonIconType.HARASSMENT),
+            ReasonOption("Inappropriate Content / NSFW", ReportReasonIconType.NSFW),
+            ReasonOption("Other", ReportReasonIconType.OTHER)
         )
     }
 
@@ -152,8 +166,8 @@ fun ReportUserDialog(
                 onDismiss()
             }
         },
-        containerColor = Color.White,
-        dragHandle = { BottomSheetDefaults.DragHandle() },
+        containerColor = funkyColors.surface,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = funkyColors.line) },
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     ) {
         Column(
@@ -174,10 +188,10 @@ fun ReportUserDialog(
                         modifier = Modifier
                             .size(38.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFFFEE2E2)),
+                            .background(if (funkyColors.isDark) funkyColors.danger.copy(alpha = 0.18f) else Color(0xFFFEE2E2)),
                         contentAlignment = Alignment.Center
                     ) {
-                        SoftShieldIcon(size = 20.dp, color = Color(0xFFEF4444))
+                        SoftShieldIcon(size = 20.dp, color = funkyColors.danger)
                     }
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
@@ -185,12 +199,12 @@ fun ReportUserDialog(
                             text = "Report $formattedContextTitle",
                             fontSize = 17.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF0F172A)
+                            color = funkyColors.ink
                         )
                         Text(
                             text = "Reporting $reportedUserName",
                             fontSize = 12.sp,
-                            color = Color(0xFF64748B)
+                            color = funkyColors.mute
                         )
                     }
                 }
@@ -201,9 +215,9 @@ fun ReportUserDialog(
                     modifier = Modifier
                         .size(32.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFFF1F5F9))
+                        .background(funkyColors.soft)
                 ) {
-                    SoftCloseIcon(size = 14.dp, color = Color(0xFF475569))
+                    SoftCloseIcon(size = 14.dp, color = funkyColors.ink)
                 }
             }
 
@@ -212,9 +226,9 @@ fun ReportUserDialog(
             if (submitState == ReportSubmitState.SUCCESS) {
                 // Success Confirmation Card
                 Surface(
-                    color = Color(0xFFF0FDF4),
+                    color = if (funkyColors.isDark) funkyColors.ok.copy(alpha = 0.15f) else Color(0xFFF0FDF4),
                     shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.dp, Color(0xFFBBF7D0)),
+                    border = BorderStroke(1.dp, if (funkyColors.isDark) funkyColors.ok.copy(alpha = 0.45f) else Color(0xFFBBF7D0)),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 24.dp)
@@ -227,14 +241,12 @@ fun ReportUserDialog(
                             modifier = Modifier
                                 .size(48.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFF22C55E)),
+                                .background(funkyColors.ok),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(28.dp)
+                            SoftCheckIcon(
+                                size = 26.dp,
+                                color = Color.White
                             )
                         }
                         Spacer(modifier = Modifier.height(14.dp))
@@ -242,7 +254,7 @@ fun ReportUserDialog(
                             text = "Thanks, our team will review your report.",
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.sp,
-                            color = Color(0xFF15803D),
+                            color = if (funkyColors.isDark) funkyColors.ok else Color(0xFF15803D),
                             textAlign = TextAlign.Center
                         )
                         if (attachmentWarning != null) {
@@ -250,7 +262,7 @@ fun ReportUserDialog(
                             Text(
                                 text = attachmentWarning!!,
                                 fontSize = 12.sp,
-                                color = Color(0xFFB45309),
+                                color = funkyColors.mango,
                                 textAlign = TextAlign.Center
                             )
                         }
@@ -262,7 +274,7 @@ fun ReportUserDialog(
                     text = "What is the problem?",
                     fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF334155)
+                    color = funkyColors.ink
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -277,10 +289,10 @@ fun ReportUserDialog(
                                 .clickable { selectedReason = opt.title }
                                 .testTag("reason_card_${opt.title}"),
                             shape = RoundedCornerShape(14.dp),
-                            color = if (isSel) Color(0xFFFFFBEB) else Color(0xFFF8FAFC),
+                            color = if (isSel) funkyColors.soft else funkyColors.bg,
                             border = BorderStroke(
                                 width = if (isSel) 1.5.dp else 1.dp,
-                                color = if (isSel) GoldAccent else Color(0xFFE2E8F0)
+                                color = if (isSel) funkyColors.mango else funkyColors.line
                             )
                         ) {
                             Row(
@@ -293,15 +305,17 @@ fun ReportUserDialog(
                                     modifier = Modifier
                                         .size(32.dp)
                                         .clip(CircleShape)
-                                        .background(if (isSel) Color(0xFFFEF3C7) else Color(0xFFF1F5F9)),
+                                        .background(if (isSel) funkyColors.mango.copy(alpha = 0.22f) else funkyColors.surface),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(
-                                        imageVector = opt.icon,
-                                        contentDescription = null,
-                                        tint = if (isSel) Color(0xFFD97706) else Color(0xFF64748B),
-                                        modifier = Modifier.size(16.dp)
-                                    )
+                                    val iconTint = if (isSel) funkyColors.mango else funkyColors.mute
+                                    when (opt.iconType) {
+                                        ReportReasonIconType.WARNING -> SoftWarningIcon(size = 16.dp, color = iconTint)
+                                        ReportReasonIconType.HATE -> SoftMegaphoneIcon(size = 16.dp, color = iconTint)
+                                        ReportReasonIconType.HARASSMENT -> SoftPersonOffIcon(size = 16.dp, color = iconTint)
+                                        ReportReasonIconType.NSFW -> SoftEyeIcon(visible = false, size = 16.dp, tint = iconTint)
+                                        ReportReasonIconType.OTHER -> SoftHelpIcon(size = 16.dp, color = iconTint)
+                                    }
                                 }
 
                                 Spacer(modifier = Modifier.width(12.dp))
@@ -310,14 +324,17 @@ fun ReportUserDialog(
                                     text = opt.title,
                                     fontSize = 14.sp,
                                     fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
-                                    color = Color(0xFF0F172A),
+                                    color = funkyColors.ink,
                                     modifier = Modifier.weight(1f)
                                 )
 
                                 RadioButton(
                                     selected = isSel,
                                     onClick = { selectedReason = opt.title },
-                                    colors = RadioButtonDefaults.colors(selectedColor = GoldAccent)
+                                    colors = RadioButtonDefaults.colors(
+                                        selectedColor = funkyColors.mango,
+                                        unselectedColor = funkyColors.mute
+                                    )
                                 )
                             }
                         }
@@ -336,12 +353,12 @@ fun ReportUserDialog(
                         text = "Brief (Optional)",
                         fontSize = 13.5.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF334155)
+                        color = funkyColors.ink
                     )
                     Text(
                         text = "${reasonText.length}/1000",
                         fontSize = 11.5.sp,
-                        color = if (reasonText.length > 1000) Color(0xFFEF4444) else Color(0xFF94A3B8)
+                        color = if (reasonText.length > 1000) funkyColors.danger else funkyColors.mute
                     )
                 }
 
@@ -352,11 +369,11 @@ fun ReportUserDialog(
                         .fillMaxWidth()
                         .height(72.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFFF8FAFC))
+                        .background(funkyColors.bg)
                         .border(
                             BorderStroke(
                                 1.dp,
-                                if (reasonText.length > 1000) Color(0xFFEF4444) else Color(0xFFE2E8F0)
+                                if (reasonText.length > 1000) funkyColors.danger else funkyColors.line
                             ),
                             RoundedCornerShape(12.dp)
                         )
@@ -366,15 +383,15 @@ fun ReportUserDialog(
                     if (reasonText.isEmpty()) {
                         Text(
                             text = "Provide any helpful context for moderators...",
-                            color = Color(0xFF94A3B8),
+                            color = funkyColors.mute,
                             fontSize = 13.sp
                         )
                     }
                     BasicTextField(
                         value = reasonText,
                         onValueChange = { if (it.length <= 1000) reasonText = it },
-                        textStyle = TextStyle(color = Color.Black, fontSize = 13.sp),
-                        cursorBrush = SolidColor(Color.Black),
+                        textStyle = TextStyle(color = funkyColors.ink, fontSize = 13.sp),
+                        cursorBrush = SolidColor(funkyColors.mango),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -392,12 +409,12 @@ fun ReportUserDialog(
                             text = "Add proof (optional)",
                             fontSize = 13.5.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF334155)
+                            color = funkyColors.ink
                         )
                         Text(
                             text = "${selectedImageUris.size}/4",
                             fontSize = 11.5.sp,
-                            color = Color(0xFF94A3B8)
+                            color = funkyColors.mute
                         )
                     }
 
@@ -420,25 +437,23 @@ fun ReportUserDialog(
                                             )
                                         },
                                     shape = RoundedCornerShape(12.dp),
-                                    color = Color(0xFFF8FAFC),
-                                    border = BorderStroke(1.5.dp, GoldAccent)
+                                    color = funkyColors.bg,
+                                    border = BorderStroke(1.5.dp, funkyColors.mango)
                                 ) {
                                     Column(
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                         verticalArrangement = Arrangement.Center
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Default.AddPhotoAlternate,
-                                            contentDescription = "Add screenshot",
-                                            tint = GoldAccent,
-                                            modifier = Modifier.size(24.dp)
+                                        SoftAddPhotoIcon(
+                                            size = 24.dp,
+                                            color = funkyColors.mango
                                         )
                                         Spacer(modifier = Modifier.height(2.dp))
                                         Text(
                                             text = "Add",
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF475569)
+                                            color = funkyColors.ink
                                         )
                                     }
                                 }
@@ -455,7 +470,7 @@ fun ReportUserDialog(
                                     modifier = Modifier
                                         .fillMaxSize()
                                         .clip(RoundedCornerShape(12.dp))
-                                        .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(12.dp))
+                                        .border(1.dp, funkyColors.line, RoundedCornerShape(12.dp))
                                 )
                                 IconButton(
                                     onClick = { selectedImageUris = selectedImageUris - uri },
@@ -464,13 +479,11 @@ fun ReportUserDialog(
                                         .align(Alignment.TopEnd)
                                         .offset(x = 4.dp, y = (-4).dp)
                                         .clip(CircleShape)
-                                        .background(Color(0xFFDC2626))
+                                        .background(funkyColors.danger)
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Remove screenshot",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(12.dp)
+                                    SoftCloseIcon(
+                                        size = 11.dp,
+                                        color = Color.White
                                     )
                                 }
                             }
@@ -485,7 +498,7 @@ fun ReportUserDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFFF8FAFC))
+                            .background(funkyColors.bg)
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
@@ -495,12 +508,12 @@ fun ReportUserDialog(
                                 text = "Include the last 20 messages as proof",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = Color(0xFF0F172A)
+                                color = funkyColors.ink
                             )
                             Text(
                                 text = "Only messages you can see are sent, to moderators only.",
                                 fontSize = 11.5.sp,
-                                color = Color(0xFF64748B),
+                                color = funkyColors.mute,
                                 lineHeight = 15.sp
                             )
                         }
@@ -509,8 +522,8 @@ fun ReportUserDialog(
                             checked = includeProof,
                             onCheckedChange = { includeProof = it },
                             colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = GoldAccent
+                                checkedThumbColor = funkyColors.onMango,
+                                checkedTrackColor = funkyColors.mango
                             )
                         )
                     }
@@ -523,17 +536,15 @@ fun ReportUserDialog(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Lock,
-                        contentDescription = null,
-                        tint = Color(0xFF64748B),
+                    FunkyLockIcon(
+                        color = funkyColors.mute,
                         modifier = Modifier.size(14.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = "Your report is private. The other person is never told who reported.",
                         fontSize = 11.5.sp,
-                        color = Color(0xFF64748B),
+                        color = funkyColors.mute,
                         textAlign = TextAlign.Center
                     )
                 }
@@ -542,9 +553,9 @@ fun ReportUserDialog(
                 if (submitState == ReportSubmitState.UPLOAD_FAILED) {
                     Spacer(modifier = Modifier.height(12.dp))
                     Surface(
-                        color = Color(0xFFFEF2F2),
+                        color = if (funkyColors.isDark) funkyColors.danger.copy(alpha = 0.14f) else Color(0xFFFEF2F2),
                         shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, Color(0xFFFCA5A5)),
+                        border = BorderStroke(1.dp, if (funkyColors.isDark) funkyColors.danger.copy(alpha = 0.45f) else Color(0xFFFCA5A5)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
@@ -552,7 +563,7 @@ fun ReportUserDialog(
                                 text = "Could not upload the screenshots",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp,
-                                color = Color(0xFFDC2626)
+                                color = funkyColors.danger
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

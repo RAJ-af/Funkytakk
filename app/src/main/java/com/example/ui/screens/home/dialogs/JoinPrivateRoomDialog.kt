@@ -16,15 +16,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.automirrored.filled.Backspace
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentPaste
-import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.*
+import androidx.compose.ui.res.painterResource
+import com.example.R
+import com.example.ui.components.SoftBackIcon
+import com.example.ui.components.SoftShieldIcon
+import com.example.ui.theme.LocalFunkyColors
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,6 +50,8 @@ fun JoinPrivateRoomDialog(
     isLoading: Boolean = false
 ) {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
+    val isDark = funkyColors.isDark
     var code by remember { mutableStateOf("") }
 
     // Auto submit when 6 digits are reached
@@ -71,7 +70,7 @@ fun JoinPrivateRoomDialog(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.65f))
+                .background(Color.Black.copy(alpha = if (isDark) 0.72f else 0.65f))
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
@@ -89,9 +88,9 @@ fun JoinPrivateRoomDialog(
                     ) {} // Prevent click-through
                     .wrapContentHeight(),
                 shape = RoundedCornerShape(32.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
                 elevation = CardDefaults.cardElevation(defaultElevation = 16.dp),
-                border = BorderStroke(1.5.dp, Color(0xFFFDE68A))
+                border = BorderStroke(1.5.dp, if (isDark) funkyColors.mango.copy(alpha = 0.45f) else Color(0xFFFDE68A))
             ) {
                 Box(modifier = Modifier.fillMaxWidth()) {
                     // Decorative ambient glow backdrop in top corners
@@ -102,9 +101,9 @@ fun JoinPrivateRoomDialog(
                             .background(
                                 Brush.verticalGradient(
                                     colors = listOf(
-                                        Color(0xFFFFFBEB),
-                                        Color(0xFFFEF3C7).copy(alpha = 0.4f),
-                                        Color.White
+                                        funkyColors.mango.copy(alpha = if (isDark) 0.14f else 0.22f),
+                                        funkyColors.mango.copy(alpha = if (isDark) 0.04f else 0.08f),
+                                        funkyColors.surface
                                     )
                                 )
                             )
@@ -118,13 +117,14 @@ fun JoinPrivateRoomDialog(
                             .padding(16.dp)
                             .size(36.dp)
                             .shadow(2.dp, CircleShape)
-                            .background(Color.White, CircleShape)
+                            .background(funkyColors.soft, CircleShape)
+                            .border(1.dp, funkyColors.line, CircleShape)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Close,
+                            painter = painterResource(id = R.drawable.ic_close),
                             contentDescription = "Close",
-                            tint = Color(0xFF4B5563),
-                            modifier = Modifier.size(18.dp)
+                            tint = funkyColors.ink,
+                            modifier = Modifier.size(16.dp)
                         )
                     }
 
@@ -155,10 +155,10 @@ fun JoinPrivateRoomDialog(
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Lock,
+                                painter = painterResource(id = R.drawable.ic_lock),
                                 contentDescription = null,
                                 tint = Color(0xFF92400E),
-                                modifier = Modifier.size(38.dp)
+                                modifier = Modifier.size(34.dp)
                             )
                         }
 
@@ -167,25 +167,23 @@ fun JoinPrivateRoomDialog(
                         // Category Pill Tag
                         Surface(
                             shape = RoundedCornerShape(100.dp),
-                            color = Color(0xFFFFFBEB),
-                            border = BorderStroke(1.dp, Color(0xFFFCD34D))
+                            color = if (isDark) funkyColors.mango.copy(alpha = 0.16f) else Color(0xFFFFFBEB),
+                            border = BorderStroke(1.dp, if (isDark) funkyColors.mango.copy(alpha = 0.45f) else Color(0xFFFCD34D))
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Security,
-                                    contentDescription = null,
-                                    tint = Color(0xFFB45309),
-                                    modifier = Modifier.size(12.dp)
+                                SoftShieldIcon(
+                                    size = 13.dp,
+                                    color = if (isDark) funkyColors.mango else Color(0xFFB45309)
                                 )
                                 Spacer(modifier = Modifier.width(5.dp))
                                 Text(
                                     text = "PRIVATE VOICE ROOM",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.ExtraBold,
-                                    color = Color(0xFFB45309),
+                                    color = if (isDark) funkyColors.mango else Color(0xFFB45309),
                                     letterSpacing = 0.8.sp
                                 )
                             }
@@ -198,7 +196,7 @@ fun JoinPrivateRoomDialog(
                             text = "Enter Room Code",
                             fontSize = 22.sp,
                             fontWeight = FontWeight.Black,
-                            color = Color(0xFF111827),
+                            color = funkyColors.ink,
                             letterSpacing = (-0.5).sp
                         )
 
@@ -208,7 +206,7 @@ fun JoinPrivateRoomDialog(
                         Text(
                             text = "Enter the 6-digit passcode shared by the host to connect immediately.",
                             fontSize = 13.sp,
-                            color = Color(0xFF6B7280),
+                            color = funkyColors.mute,
                             textAlign = TextAlign.Center,
                             lineHeight = 18.sp,
                             modifier = Modifier.padding(horizontal = 10.dp)
@@ -233,15 +231,15 @@ fun JoinPrivateRoomDialog(
                                     val isFilled = char.isNotEmpty()
 
                                     val backgroundColor = when {
-                                        isFilled -> Color(0xFFFFFDF5)
-                                        isCurrent -> Color(0xFFFFFBEB)
-                                        else -> Color(0xFFF9FAFB)
+                                        isFilled -> if (isDark) funkyColors.mango.copy(alpha = 0.16f) else Color(0xFFFFFDF5)
+                                        isCurrent -> if (isDark) funkyColors.mango.copy(alpha = 0.24f) else Color(0xFFFFFBEB)
+                                        else -> funkyColors.soft
                                     }
 
                                     val borderColor = when {
-                                        isCurrent -> Color(0xFFFFB800)
-                                        isFilled -> Color(0xFFF59E0B)
-                                        else -> Color(0xFFE5E7EB)
+                                        isCurrent -> funkyColors.mango
+                                        isFilled -> funkyColors.mango.copy(alpha = 0.7f)
+                                        else -> funkyColors.line
                                     }
 
                                     val borderWidth = if (isCurrent || isFilled) 2.dp else 1.2.dp
@@ -259,7 +257,7 @@ fun JoinPrivateRoomDialog(
                                                 text = char,
                                                 fontSize = 22.sp,
                                                 fontWeight = FontWeight.Black,
-                                                color = Color(0xFF1F2937),
+                                                color = funkyColors.ink,
                                                 textAlign = TextAlign.Center
                                             )
                                         } else if (isCurrent) {
@@ -277,13 +275,13 @@ fun JoinPrivateRoomDialog(
                                             Box(
                                                 modifier = Modifier
                                                     .size(width = 2.dp, height = 22.dp)
-                                                    .background(Color(0xFFD97706).copy(alpha = alpha), RoundedCornerShape(1.dp))
+                                                    .background(funkyColors.mango.copy(alpha = alpha), RoundedCornerShape(1.dp))
                                             )
                                         } else {
                                             Box(
                                                 modifier = Modifier
                                                     .size(7.dp)
-                                                    .background(Color(0xFFD1D5DB), CircleShape)
+                                                    .background(funkyColors.mute.copy(alpha = 0.45f), CircleShape)
                                             )
                                         }
                                     }
@@ -321,8 +319,8 @@ fun JoinPrivateRoomDialog(
                                     }
                                 },
                                 shape = RoundedCornerShape(100.dp),
-                                color = Color(0xFFF3F4F6),
-                                border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                                color = funkyColors.soft,
+                                border = BorderStroke(1.dp, funkyColors.line),
                                 modifier = Modifier.height(34.dp)
                             ) {
                                 Row(
@@ -330,9 +328,9 @@ fun JoinPrivateRoomDialog(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.ContentPaste,
+                                        painter = painterResource(id = R.drawable.ic_copy),
                                         contentDescription = null,
-                                        tint = Color(0xFF4B5563),
+                                        tint = funkyColors.ink,
                                         modifier = Modifier.size(13.dp)
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
@@ -340,7 +338,7 @@ fun JoinPrivateRoomDialog(
                                         text = "Paste Code",
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF374151)
+                                        color = funkyColors.ink
                                     )
                                 }
                             }
@@ -350,15 +348,15 @@ fun JoinPrivateRoomDialog(
                                 Surface(
                                     onClick = { code = "" },
                                     shape = RoundedCornerShape(100.dp),
-                                    color = Color(0xFFFEE2E2),
-                                    border = BorderStroke(1.dp, Color(0xFFFECACA)),
+                                    color = if (isDark) funkyColors.danger.copy(alpha = 0.16f) else Color(0xFFFEE2E2),
+                                    border = BorderStroke(1.dp, if (isDark) funkyColors.danger.copy(alpha = 0.45f) else Color(0xFFFECACA)),
                                     modifier = Modifier.height(34.dp)
                                 ) {
                                     Text(
                                         text = "Clear",
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color(0xFFDC2626),
+                                        color = funkyColors.danger,
                                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
                                     )
                                 }
@@ -396,17 +394,16 @@ fun JoinPrivateRoomDialog(
                                                         }
                                                     },
                                                     shape = RoundedCornerShape(16.dp),
-                                                    color = Color(0xFFF3F4F6),
+                                                    color = funkyColors.soft,
+                                                    border = BorderStroke(1.dp, funkyColors.line),
                                                     modifier = Modifier
                                                         .weight(1f)
                                                         .height(44.dp)
                                                 ) {
                                                     Box(contentAlignment = Alignment.Center) {
-                                                        Icon(
-                                                            imageVector = Icons.AutoMirrored.Filled.Backspace,
-                                                            contentDescription = "Backspace",
-                                                            tint = Color(0xFF4B5563),
-                                                            modifier = Modifier.size(18.dp)
+                                                        SoftBackIcon(
+                                                            size = 18.dp,
+                                                            color = funkyColors.ink
                                                         )
                                                     }
                                                 }
@@ -427,17 +424,18 @@ fun JoinPrivateRoomDialog(
                                                         } catch (_: Exception) {}
                                                     },
                                                     shape = RoundedCornerShape(16.dp),
-                                                    color = Color(0xFFF3F4F6),
+                                                    color = funkyColors.soft,
+                                                    border = BorderStroke(1.dp, funkyColors.line),
                                                     modifier = Modifier
                                                         .weight(1f)
                                                         .height(44.dp)
                                                 ) {
                                                     Box(contentAlignment = Alignment.Center) {
                                                         Icon(
-                                                            imageVector = Icons.Default.Key,
+                                                            painter = painterResource(id = R.drawable.ic_copy),
                                                             contentDescription = "Paste",
-                                                            tint = Color(0xFF4B5563),
-                                                            modifier = Modifier.size(18.dp)
+                                                            tint = funkyColors.ink,
+                                                            modifier = Modifier.size(16.dp)
                                                         )
                                                     }
                                                 }
@@ -450,8 +448,8 @@ fun JoinPrivateRoomDialog(
                                                         }
                                                     },
                                                     shape = RoundedCornerShape(16.dp),
-                                                    color = Color(0xFFF8FAFC),
-                                                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                                                    color = funkyColors.soft,
+                                                    border = BorderStroke(1.dp, funkyColors.line),
                                                     modifier = Modifier
                                                         .weight(1f)
                                                         .height(44.dp)
@@ -461,7 +459,7 @@ fun JoinPrivateRoomDialog(
                                                             text = key,
                                                             fontSize = 18.sp,
                                                             fontWeight = FontWeight.ExtraBold,
-                                                            color = Color(0xFF1E293B)
+                                                            color = funkyColors.ink
                                                         )
                                                     }
                                                 }
@@ -486,40 +484,40 @@ fun JoinPrivateRoomDialog(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(52.dp)
-                                .shadow(if (code.length == 6) 6.dp else 0.dp, RoundedCornerShape(18.dp), spotColor = GoldAccent),
+                                .shadow(if (code.length == 6) 6.dp else 0.dp, RoundedCornerShape(18.dp), spotColor = funkyColors.mango),
                             shape = RoundedCornerShape(18.dp),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = GoldAccent,
-                                disabledContainerColor = Color(0xFFF3F4F6)
+                                containerColor = funkyColors.mango,
+                                disabledContainerColor = funkyColors.soft
                             ),
                             enabled = !isLoading && code.length == 6
                         ) {
                             if (isLoading) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(20.dp),
-                                    color = Color.Black,
+                                    color = funkyColors.onMango,
                                     strokeWidth = 2.5.dp
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Text(
                                     text = "Connecting to Room...",
-                                    color = Color.Black,
+                                    color = funkyColors.onMango,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 15.sp
                                 )
                             } else {
                                 Text(
                                     text = "Join Private Room",
-                                    color = if (code.length == 6) Color.Black else Color(0xFF9CA3AF),
+                                    color = if (code.length == 6) funkyColors.onMango else funkyColors.mute,
                                     fontWeight = FontWeight.ExtraBold,
                                     fontSize = 15.sp
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                    painter = painterResource(id = R.drawable.ic_arrow_right),
                                     contentDescription = null,
-                                    tint = if (code.length == 6) Color.Black else Color(0xFF9CA3AF),
-                                    modifier = Modifier.size(18.dp)
+                                    tint = if (code.length == 6) funkyColors.onMango else funkyColors.mute,
+                                    modifier = Modifier.size(16.dp)
                                 )
                             }
                         }

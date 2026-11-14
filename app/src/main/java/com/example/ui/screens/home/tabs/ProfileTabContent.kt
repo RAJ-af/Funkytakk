@@ -518,7 +518,7 @@ fun ProfileTabContent(
                         }
                     }
 
-                    // Circular Avatar with Green Online Dot (Top-Right) & Flag (Bottom-Right)
+                    // Circular Avatar with Presence Ring & Bottom-Right Overlapping Flag
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomStart)
@@ -532,6 +532,7 @@ fun ProfileTabContent(
                             isOnline = true,
                             countryCode = profileCountryCode,
                             userId = myUid,
+                            showFlagBadge = true,
                             enableFrameAnimation = true
                         )
                     }
@@ -549,75 +550,56 @@ fun ProfileTabContent(
                 ) {
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Row: Name, Verified Tick, "Online" Pill Badge, and Right-aligned Country Flag
+                    // Row: Name, Verified Tick, and "Online" Pill Badge
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.weight(1f),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            val myUid = SupabaseSessionManager.getUserId(context)
-                            com.example.store.DecoratedUserName(
-                                userId = myUid,
-                                name = profileDisplayName,
-                                fontSize = 24.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                defaultColor = funkyColors.ink
-                            )
+                        val myUid = SupabaseSessionManager.getUserId(context)
+                        com.example.store.DecoratedUserName(
+                            userId = myUid,
+                            name = profileDisplayName,
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            defaultColor = funkyColors.ink
+                        )
 
-                            // Blue Verified Badge (Custom Canvas Drawn)
-                            if (isVerified) {
-                                ProfileVerifiedBadge(modifier = Modifier.size(18.dp))
-                            }
-
-                            // Profile Badges (e.g. Founder, Early Adopter, etc.)
-                            if (userBadges.isNotEmpty()) {
-                                ProfileBadgesRow(badges = userBadges, badgeSize = 20.dp)
-                            }
-
-                            // Green "Online" Status Pill
-                            Box(
-                                modifier = Modifier
-                                    .background(
-                                        if (funkyColors.isDark) Color(0xFF143523) else Color(0xFFEBFDF2),
-                                        RoundedCornerShape(100.dp)
-                                    )
-                                    .padding(horizontal = 8.dp, vertical = 3.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(6.dp)
-                                            .background(Color(0xFF16A34A), CircleShape)
-                                    )
-                                    Text(
-                                        text = "Online",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF22C55E)
-                                    )
-                                }
-                            }
+                        // Blue Verified Badge (Custom Canvas Drawn)
+                        if (isVerified) {
+                            ProfileVerifiedBadge(modifier = Modifier.size(18.dp))
                         }
 
-                        if (profileCountryCode.isNotBlank() && profileCountryCode.lowercase() != "un") {
-                            Spacer(modifier = Modifier.width(8.dp))
-                            CircleFlag(
-                                countryCode = profileCountryCode,
-                                allowProgramming = false,
-                                contentDescription = profileCountry,
-                                modifier = Modifier
-                                    .size(22.dp)
-                                    .clip(CircleShape)
-                                    .border(1.dp, funkyColors.line, CircleShape)
-                            )
+                        // Profile Badges (e.g. Founder, Early Adopter, etc.)
+                        if (userBadges.isNotEmpty()) {
+                            ProfileBadgesRow(badges = userBadges, badgeSize = 20.dp)
+                        }
+
+                        // Green "Online" Status Pill
+                        Box(
+                            modifier = Modifier
+                                .background(
+                                    if (funkyColors.isDark) Color(0xFF143523) else Color(0xFFEBFDF2),
+                                    RoundedCornerShape(100.dp)
+                                )
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .background(Color(0xFF16A34A), CircleShape)
+                                )
+                                Text(
+                                    text = "Online",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF22C55E)
+                                )
+                            }
                         }
                     }
 
@@ -1116,7 +1098,7 @@ fun ProfileTabContent(
                 // -------------------------------------------------------------
                 item {
                     ProfileCardContainer(
-                        title = "Gifts Received (${giftsReceived.size}) 🎁",
+                        title = "Gifts Received (${giftsReceived.size})",
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 5.dp)
                     ) {
                         if (isGiftsLoading && giftsReceived.isEmpty()) {
@@ -1124,7 +1106,7 @@ fun ProfileTabContent(
                                 modifier = Modifier.fillMaxWidth().height(60.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                CircularProgressIndicator(modifier = Modifier.size(22.dp), color = GoldAccent)
+                                CircularProgressIndicator(modifier = Modifier.size(22.dp), color = funkyColors.mango)
                             }
                         } else if (giftsReceived.isEmpty()) {
                             Column(
@@ -1132,20 +1114,17 @@ fun ProfileTabContent(
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text(
-                                    text = "🎁",
-                                    fontSize = 28.sp
+                                    text = "No gifts received yet.",
+                                    fontSize = 13.sp,
+                                    color = funkyColors.ink,
+                                    fontWeight = FontWeight.SemiBold
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "No gifts received yet.",
-                                    fontSize = 13.sp,
-                                    color = Color(0xFF64748B),
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Text(
                                     text = "Chat and practice languages to receive animated gifts from friends!",
                                     fontSize = 11.5.sp,
-                                    color = Color(0xFF94A3B8)
+                                    color = funkyColors.mute,
+                                    textAlign = TextAlign.Center
                                 )
                             }
                         } else {
@@ -1161,8 +1140,8 @@ fun ProfileTabContent(
                                             Surface(
                                                 modifier = Modifier.weight(1f),
                                                 shape = RoundedCornerShape(12.dp),
-                                                color = Color(0xFFFFFBEB),
-                                                border = BorderStroke(1.dp, Color(0xFFFDE68A))
+                                                color = funkyColors.soft,
+                                                border = BorderStroke(1.dp, funkyColors.line)
                                             ) {
                                                 Row(
                                                     modifier = Modifier.padding(8.dp),
@@ -1178,7 +1157,12 @@ fun ProfileTabContent(
                                                                 modifier = Modifier.fillMaxSize()
                                                             )
                                                         } else {
-                                                            Text("🎁", fontSize = 18.sp)
+                                                            Icon(
+                                                                painter = painterResource(id = com.example.R.drawable.ic_sparkle),
+                                                                contentDescription = null,
+                                                                tint = funkyColors.mango,
+                                                                modifier = Modifier.size(20.dp)
+                                                            )
                                                         }
                                                     }
                                                     Spacer(modifier = Modifier.width(8.dp))
@@ -1187,7 +1171,7 @@ fun ProfileTabContent(
                                                             text = name,
                                                             fontSize = 12.sp,
                                                             fontWeight = FontWeight.Bold,
-                                                            color = Color(0xFF0F172A),
+                                                            color = funkyColors.ink,
                                                             maxLines = 1,
                                                             overflow = TextOverflow.Ellipsis
                                                         )
@@ -1195,7 +1179,7 @@ fun ProfileTabContent(
                                                             text = "x${items.size}",
                                                             fontSize = 11.sp,
                                                             fontWeight = FontWeight.ExtraBold,
-                                                            color = Color(0xFFB45309)
+                                                            color = funkyColors.mango
                                                         )
                                                     }
                                                 }
@@ -1220,7 +1204,7 @@ fun ProfileTabContent(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(46.dp)
-                                .border(width = 0.5.dp, color = Color(0xFFE2E8F0)),
+                                .border(width = 0.5.dp, color = funkyColors.line),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             // 1. Grid icon for Posts
@@ -1232,14 +1216,14 @@ fun ProfileTabContent(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    CustomGridIcon(color = if (selectedFeedTab == 0) Color(0xFFFFD43B) else Color(0xFF475569))
+                                    CustomGridIcon(color = if (selectedFeedTab == 0) funkyColors.mango else funkyColors.mute)
                                     Spacer(modifier = Modifier.height(3.dp))
                                     if (selectedFeedTab == 0) {
                                         Box(
                                             modifier = Modifier
                                                 .width(20.dp)
                                                 .height(2.5.dp)
-                                                .background(Color(0xFFFFD43B), CircleShape)
+                                                .background(funkyColors.mango, CircleShape)
                                         )
                                     } else {
                                         Spacer(modifier = Modifier.height(2.5.dp))
@@ -1256,14 +1240,14 @@ fun ProfileTabContent(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    CustomReelsIcon(color = if (selectedFeedTab == 1) Color(0xFFFFD43B) else Color(0xFF475569))
+                                    CustomReelsIcon(color = if (selectedFeedTab == 1) funkyColors.mango else funkyColors.mute)
                                     Spacer(modifier = Modifier.height(3.dp))
                                     if (selectedFeedTab == 1) {
                                         Box(
                                             modifier = Modifier
                                                 .width(20.dp)
                                                 .height(2.5.dp)
-                                                .background(Color(0xFFFFD43B), CircleShape)
+                                                .background(funkyColors.mango, CircleShape)
                                         )
                                     } else {
                                         Spacer(modifier = Modifier.height(2.5.dp))
@@ -1280,14 +1264,14 @@ fun ProfileTabContent(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    CustomTaggedIcon(color = if (selectedFeedTab == 2) Color(0xFFFFD43B) else Color(0xFF475569))
+                                    CustomTaggedIcon(color = if (selectedFeedTab == 2) funkyColors.mango else funkyColors.mute)
                                     Spacer(modifier = Modifier.height(3.dp))
                                     if (selectedFeedTab == 2) {
                                         Box(
                                             modifier = Modifier
                                                 .width(20.dp)
                                                 .height(2.5.dp)
-                                                .background(Color(0xFFFFD43B), CircleShape)
+                                                .background(funkyColors.mango, CircleShape)
                                         )
                                     } else {
                                         Spacer(modifier = Modifier.height(2.5.dp))
@@ -1309,7 +1293,7 @@ fun ProfileTabContent(
                             contentAlignment = Alignment.Center
                         ) {
                             CircularProgressIndicator(
-                                color = Color(0xFFFFD43B),
+                                color = funkyColors.mango,
                                 modifier = Modifier.size(32.dp)
                             )
                         }
@@ -1325,7 +1309,7 @@ fun ProfileTabContent(
                             Text(
                                 text = "No posts shared yet",
                                 fontSize = 14.sp,
-                                color = Color(0xFF64748B),
+                                color = funkyColors.mute,
                                 fontWeight = FontWeight.Medium
                             )
                         }
@@ -1720,7 +1704,7 @@ fun ProfileTabContent(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.White)
+                .background(funkyColors.bg)
         ) {
             ChatBackupScreen(
                 onBackClick = { showChatBackupScreen = false }

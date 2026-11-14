@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -11,16 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Group
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,8 +20,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -38,6 +33,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
+import com.example.ui.components.SoftGroupIcon
+import com.example.ui.theme.LocalFunkyColors
 
 @Composable
 fun RoomEndedScreen(
@@ -64,6 +61,7 @@ fun RoomEndedScreen(
         onBackToHome()
     }
 
+    val funkyColors = LocalFunkyColors.current
     val effectivePeopleCount = if (peopleJoinedCount > 0) peopleJoinedCount else (if (totalJoins > 0) totalJoins else 1)
     val effectiveMinutes = if (totalTimeMinutes > 0) totalTimeMinutes else (if (durationSeconds > 0) durationSeconds / 60 else 0)
 
@@ -86,7 +84,7 @@ fun RoomEndedScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFFFFDF5))
+            .background(funkyColors.bg)
             // 2. Downward swipe gesture to close
             .pointerInput(Unit) {
                 detectVerticalDragGestures(
@@ -143,10 +141,10 @@ fun RoomEndedScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Close,
+                            painter = painterResource(id = R.drawable.ic_close),
                             contentDescription = "Close",
                             tint = Color.White,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
@@ -178,14 +176,14 @@ fun RoomEndedScreen(
                             .width(14.dp)
                             .height(4.dp)
                             .rotate(-25f)
-                            .background(Color(0xFFFFB800), RoundedCornerShape(2.dp))
+                            .background(funkyColors.mango, RoundedCornerShape(2.dp))
                     )
                     Box(
                         modifier = Modifier
                             .width(14.dp)
                             .height(4.dp)
                             .rotate(25f)
-                            .background(Color(0xFFFFB800), RoundedCornerShape(2.dp))
+                            .background(funkyColors.mango, RoundedCornerShape(2.dp))
                     )
                 }
 
@@ -193,7 +191,7 @@ fun RoomEndedScreen(
                     text = "Room ended!",
                     fontSize = 32.sp,
                     fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF0F172A)
+                    color = funkyColors.ink
                 )
 
                 // Right festive sparks
@@ -207,14 +205,14 @@ fun RoomEndedScreen(
                             .width(14.dp)
                             .height(4.dp)
                             .rotate(25f)
-                            .background(Color(0xFFFFB800), RoundedCornerShape(2.dp))
+                            .background(funkyColors.mango, RoundedCornerShape(2.dp))
                     )
                     Box(
                         modifier = Modifier
                             .width(14.dp)
                             .height(4.dp)
                             .rotate(-25f)
-                            .background(Color(0xFFFFB800), RoundedCornerShape(2.dp))
+                            .background(funkyColors.mango, RoundedCornerShape(2.dp))
                     )
                 }
             }
@@ -226,7 +224,7 @@ fun RoomEndedScreen(
                 text = roomTitle,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFF1E293B),
+                color = funkyColors.ink,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(horizontal = 28.dp)
             )
@@ -236,7 +234,7 @@ fun RoomEndedScreen(
             Text(
                 text = "That was a lovely little gathering.\nSee you in the next one!",
                 fontSize = 14.sp,
-                color = Color(0xFF64748B),
+                color = funkyColors.mute,
                 textAlign = TextAlign.Center,
                 lineHeight = 20.sp,
                 modifier = Modifier.padding(horizontal = 32.dp)
@@ -250,8 +248,8 @@ fun RoomEndedScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 24.dp)
                     .clip(RoundedCornerShape(24.dp))
-                    .background(Color(0xFFFFFDF5))
-                    .border(1.dp, Color(0xFFFEE685), RoundedCornerShape(24.dp))
+                    .background(funkyColors.surface)
+                    .border(1.dp, funkyColors.line, RoundedCornerShape(24.dp))
                     .padding(vertical = 18.dp, horizontal = 18.dp)
             ) {
                 Row(
@@ -266,14 +264,12 @@ fun RoomEndedScreen(
                         Box(
                             modifier = Modifier
                                 .size(48.dp)
-                                .background(Color(0xFFFEF3C7), CircleShape),
+                                .background(funkyColors.soft, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Group,
-                                contentDescription = "People",
-                                tint = Color(0xFFD97706),
-                                modifier = Modifier.size(24.dp)
+                            SoftGroupIcon(
+                                modifier = Modifier.size(22.dp),
+                                color = funkyColors.mango
                             )
                         }
                         Spacer(modifier = Modifier.width(12.dp))
@@ -282,12 +278,12 @@ fun RoomEndedScreen(
                                 text = "$effectivePeopleCount",
                                 fontSize = 20.sp,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = Color(0xFF0F172A)
+                                color = funkyColors.ink
                             )
                             Text(
                                 text = "People joined",
                                 fontSize = 12.sp,
-                                color = Color(0xFF64748B),
+                                color = funkyColors.mute,
                                 fontWeight = FontWeight.Medium
                             )
                         }
@@ -298,7 +294,7 @@ fun RoomEndedScreen(
                         modifier = Modifier
                             .height(44.dp)
                             .width(1.dp)
-                            .background(Color(0xFFFDE68A))
+                            .background(funkyColors.line)
                     )
 
                     Spacer(modifier = Modifier.width(14.dp))
@@ -311,14 +307,12 @@ fun RoomEndedScreen(
                         Box(
                             modifier = Modifier
                                 .size(48.dp)
-                                .background(Color(0xFFFEF3C7), CircleShape),
+                                .background(funkyColors.soft, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Schedule,
-                                contentDescription = "Total time",
-                                tint = Color(0xFFD97706),
-                                modifier = Modifier.size(24.dp)
+                            RoomEndedClockIcon(
+                                color = funkyColors.mango,
+                                modifier = Modifier.size(22.dp)
                             )
                         }
                         Spacer(modifier = Modifier.width(12.dp))
@@ -327,12 +321,12 @@ fun RoomEndedScreen(
                                 text = if (effectiveMinutes > 0) "$effectiveMinutes min" else "${durationSeconds}s",
                                 fontSize = 20.sp,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = Color(0xFF0F172A)
+                                color = funkyColors.ink
                             )
                             Text(
                                 text = "Total time",
                                 fontSize = 12.sp,
-                                color = Color(0xFF64748B),
+                                color = funkyColors.mute,
                                 fontWeight = FontWeight.Medium
                             )
                         }
@@ -347,9 +341,14 @@ fun RoomEndedScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 24.dp)
-                    .shadow(elevation = 2.dp, shape = RoundedCornerShape(20.dp), spotColor = Color.Black.copy(alpha = 0.05f))
+                    .shadow(
+                        elevation = 2.dp,
+                        shape = RoundedCornerShape(20.dp),
+                        spotColor = Color.Black.copy(alpha = 0.08f)
+                    )
                     .clip(RoundedCornerShape(20.dp))
-                    .background(Color.White)
+                    .background(funkyColors.surface)
+                    .border(1.dp, funkyColors.line, RoundedCornerShape(20.dp))
                     .padding(16.dp)
             ) {
                 Row(
@@ -359,14 +358,14 @@ fun RoomEndedScreen(
                     Box(
                         modifier = Modifier
                             .size(44.dp)
-                            .background(Color(0xFFDCFCE7), CircleShape),
+                            .background(funkyColors.ok.copy(alpha = 0.16f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Check,
+                            painter = painterResource(id = R.drawable.ic_check),
                             contentDescription = "Status",
-                            tint = Color(0xFF16A34A),
-                            modifier = Modifier.size(24.dp)
+                            tint = funkyColors.ok,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                     Spacer(modifier = Modifier.width(14.dp))
@@ -375,13 +374,13 @@ fun RoomEndedScreen(
                             text = reasonTitle,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A)
+                            color = funkyColors.ink
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = reasonSubtitle,
                             fontSize = 12.sp,
-                            color = Color(0xFF64748B),
+                            color = funkyColors.mute,
                             lineHeight = 16.sp
                         )
                     }
@@ -396,7 +395,11 @@ fun RoomEndedScreen(
                     .fillMaxWidth()
                     .height(54.dp)
                     .padding(horizontal = 24.dp)
-                    .shadow(elevation = 4.dp, shape = RoundedCornerShape(27.dp), spotColor = Color(0xFFFFB800).copy(alpha = 0.4f))
+                    .shadow(
+                        elevation = 4.dp,
+                        shape = RoundedCornerShape(27.dp),
+                        spotColor = funkyColors.mango.copy(alpha = 0.4f)
+                    )
                     .clip(RoundedCornerShape(27.dp))
                     .background(
                         Brush.horizontalGradient(
@@ -416,14 +419,14 @@ fun RoomEndedScreen(
                         Box(
                             modifier = Modifier
                                 .size(28.dp)
-                                .background(Color.Black, CircleShape),
+                                .background(funkyColors.onMango, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Add,
+                                painter = painterResource(id = R.drawable.ic_plus),
                                 contentDescription = null,
-                                tint = Color(0xFFFFB800),
-                                modifier = Modifier.size(18.dp)
+                                tint = funkyColors.mango,
+                                modifier = Modifier.size(16.dp)
                             )
                         }
                         Spacer(modifier = Modifier.width(12.dp))
@@ -431,14 +434,14 @@ fun RoomEndedScreen(
                             text = "Create another room",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.Black
+                            color = funkyColors.onMango
                         )
                     }
 
                     Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                        painter = painterResource(id = R.drawable.ic_arrow_right),
                         contentDescription = "Next",
-                        tint = Color.Black,
+                        tint = funkyColors.onMango,
                         modifier = Modifier.size(18.dp)
                     )
                 }
@@ -453,8 +456,8 @@ fun RoomEndedScreen(
                     .height(54.dp)
                     .padding(horizontal = 24.dp)
                     .clip(RoundedCornerShape(27.dp))
-                    .background(Color.White)
-                    .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(27.dp))
+                    .background(funkyColors.surface)
+                    .border(1.dp, funkyColors.line, RoundedCornerShape(27.dp))
                     .clickable {
                         onClose()
                         onBackToHome()
@@ -466,22 +469,54 @@ fun RoomEndedScreen(
                     horizontalArrangement = Arrangement.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Home,
+                        painter = painterResource(id = R.drawable.ic_home),
                         contentDescription = "Home",
-                        tint = Color(0xFF0F172A),
-                        modifier = Modifier.size(20.dp)
+                        tint = funkyColors.ink,
+                        modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = "Back to Home",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0F172A)
+                        color = funkyColors.ink
                     )
                 }
             }
 
             Spacer(modifier = Modifier.height(36.dp))
         }
+    }
+}
+
+@Composable
+private fun RoomEndedClockIcon(
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val strokeWidth = size.minDimension * 0.11f
+        val radius = (size.minDimension - strokeWidth) / 2f
+        val center = Offset(size.width / 2f, size.height / 2f)
+        drawCircle(
+            color = color,
+            radius = radius,
+            center = center,
+            style = Stroke(width = strokeWidth)
+        )
+        drawLine(
+            color = color,
+            start = center,
+            end = Offset(center.x, center.y - radius * 0.52f),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = color,
+            start = center,
+            end = Offset(center.x + radius * 0.42f, center.y + radius * 0.18f),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round
+        )
     }
 }

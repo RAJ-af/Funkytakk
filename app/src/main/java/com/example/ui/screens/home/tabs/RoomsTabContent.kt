@@ -1,32 +1,32 @@
 package com.example.ui.screens.home.tabs
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Podcasts
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.theme.GoldAccent
+import com.example.ui.components.FunkyMicIcon
+import com.example.ui.theme.LocalFunkyColors
 
 @Composable
 fun RoomsTabContent(
     onCreateRoom: () -> Unit
 ) {
+    val funkyColors = LocalFunkyColors.current
     Column(
         modifier = Modifier.fillMaxSize()
     ) {
         TabRow(
             selectedTabIndex = 0,
-            containerColor = Color.White
+            containerColor = funkyColors.surface,
+            contentColor = funkyColors.ink
         ) {
-            Tab(selected = true, onClick = {}, text = { Text("Active Conversations", fontWeight = FontWeight.Bold) })
-            Tab(selected = false, onClick = {}, text = { Text("Scheduled Audio") })
+            Tab(selected = true, onClick = {}, text = { Text("Active Conversations", fontWeight = FontWeight.Bold, color = funkyColors.ink) })
+            Tab(selected = false, onClick = {}, text = { Text("Scheduled Audio", color = funkyColors.mute) })
         }
 
         Box(
@@ -39,27 +39,33 @@ fun RoomsTabContent(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.padding(24.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Podcasts,
-                    contentDescription = null,
-                    modifier = Modifier.size(64.dp),
-                    tint = GoldAccent
+                FunkyMicIcon(
+                    color = funkyColors.mango,
+                    modifier = Modifier.size(64.dp)
                 )
                 Spacer(modifier = Modifier.height(16.dp))
-                Text("Ready to start practicing speaking?", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = "Ready to start practicing speaking?",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = funkyColors.ink
+                )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = "Browse the rooms list or click the action below to create your own instant voice lounge.",
                     textAlign = TextAlign.Center,
-                    color = Color.Gray,
+                    color = funkyColors.mute,
                     fontSize = 14.sp
                 )
                 Spacer(modifier = Modifier.height(24.dp))
                 Button(
                     onClick = onCreateRoom,
-                    colors = ButtonDefaults.buttonColors(containerColor = GoldAccent)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = funkyColors.mango,
+                        contentColor = funkyColors.onMango
+                    )
                 ) {
-                    Text("Start Voice Lounge", color = Color.Black, fontWeight = FontWeight.ExtraBold)
+                    Text("Start Voice Lounge", color = funkyColors.onMango, fontWeight = FontWeight.ExtraBold)
                 }
             }
         }

@@ -13,10 +13,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -35,10 +31,24 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.AuthState
 import com.example.AuthViewModel
+import com.example.ui.components.FunkyGlobeIcon
+import com.example.ui.components.FunkyLockIcon
+import com.example.ui.components.FunkyTranslateIcon
+import com.example.ui.components.SoftBackIcon
+import com.example.ui.components.SoftCakeIcon
+import com.example.ui.components.SoftCheckIcon
+import com.example.ui.components.SoftCloseIcon
+import com.example.ui.components.SoftFaceIcon
+import com.example.ui.components.SoftForwardArrowIcon
+import com.example.ui.components.SoftGroupIcon
+import com.example.ui.components.SoftLocationPinIcon
+import com.example.ui.components.SoftPersonIcon
+import com.example.ui.components.SoftPlusIcon
+import com.example.ui.components.SoftSearchIcon
+import com.example.ui.components.SoftWarningIcon
+import com.example.ui.theme.LocalFunkyColors
 import kotlinx.coroutines.launch
 import java.util.Calendar
-import androidx.compose.material.icons.filled.Translate
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.SpanStyle
@@ -64,9 +74,13 @@ fun OnboardingStepIndicator(
     totalSteps: Int,
     onBackClick: () -> Unit
 ) {
+    val colors = LocalFunkyColors.current
+    val pillBg = if (colors.isDark) colors.soft else Color(0xFFF1F5F9)
+    val trackBg = if (colors.isDark) colors.line else Color(0xFFF1F5F9)
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = Color.White
+        color = colors.bg
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Row(
@@ -81,23 +95,22 @@ fun OnboardingStepIndicator(
                     onClick = onBackClick,
                     modifier = Modifier.size(48.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Go back instruction arrow",
-                        tint = Color.Black
+                    SoftBackIcon(
+                        size = 22.dp,
+                        color = colors.ink
                     )
                 }
 
                 // Centered step status pill
                 Surface(
-                    color = Color(0xFFF1F5F9),
+                    color = pillBg,
                     shape = RoundedCornerShape(100.dp),
                 ) {
                     Text(
                         text = "Step $currentStep of $totalSteps",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.Black.copy(alpha = 0.8f),
+                        color = colors.ink,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                     )
                 }
@@ -111,7 +124,7 @@ fun OnboardingStepIndicator(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(4.dp)
-                    .background(Color(0xFFF1F5F9))
+                    .background(trackBg)
             ) {
                 val fraction = currentStep.toFloat() / totalSteps.toFloat()
                 Box(
@@ -137,6 +150,8 @@ fun OnboardingProfileScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val colors = LocalFunkyColors.current
+    val iconCircleBg = if (colors.isDark) colors.soft else LightGoldBg
     val authState by viewModel.authState.collectAsState()
 
     var username by remember { mutableStateOf(initialUsername.lowercase()) }
@@ -192,7 +207,7 @@ fun OnboardingProfileScreen(
                 onBackClick = onBack
             )
         },
-        containerColor = Color.White
+        containerColor = colors.bg
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -218,7 +233,7 @@ fun OnboardingProfileScreen(
                         text = "Create Your Profile",
                         fontSize = 32.sp,
                         fontWeight = FontWeight.Black,
-                        color = Color.Black,
+                        color = colors.ink,
                         lineHeight = 38.sp,
                         textAlign = TextAlign.Center
                     )
@@ -227,7 +242,7 @@ fun OnboardingProfileScreen(
                         text = "Tell others who you are",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Medium,
-                        color = Color.Black.copy(alpha = 0.5f),
+                        color = colors.mute,
                         textAlign = TextAlign.Center
                     )
                 }
@@ -262,7 +277,7 @@ fun OnboardingProfileScreen(
                                 modifier = Modifier
                                     .size(96.dp)
                                     .clip(CircleShape)
-                                    .background(LightGoldBg),
+                                    .background(iconCircleBg),
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (useCustomAvatar && customAvatarPath.isNotEmpty()) {
@@ -294,11 +309,9 @@ fun OnboardingProfileScreen(
                                 .clickable { launcher.launch("image/*") },
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = "Choose custom picture",
-                                tint = Color.Black,
-                                modifier = Modifier.size(20.dp)
+                            SoftPlusIcon(
+                                size = 20.dp,
+                                color = Color.Black
                             )
                         }
                     }
@@ -308,7 +321,7 @@ fun OnboardingProfileScreen(
                         text = "Add Photo / Tap to cycle avatars",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color.Black.copy(alpha = 0.6f),
+                        color = colors.mute,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.clickable {
                             isShowingAvatarGrid = !isShowingAvatarGrid
@@ -320,7 +333,7 @@ fun OnboardingProfileScreen(
                 if (isShowingAvatarGrid) {
                     item {
                         Card(
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
+                            colors = CardDefaults.cardColors(containerColor = if (colors.isDark) colors.surface else Color(0xFFF8FAFC)),
                             shape = RoundedCornerShape(16.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -329,7 +342,7 @@ fun OnboardingProfileScreen(
                                     text = "Choose your special avatar identity:",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color.Black.copy(alpha = 0.6f),
+                                    color = colors.mute,
                                     modifier = Modifier.padding(bottom = 8.dp)
                                 )
                                 Row(
@@ -370,7 +383,7 @@ fun OnboardingProfileScreen(
                             text = "Username",
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.Black,
+                            color = colors.ink,
                             modifier = Modifier.padding(bottom = 6.dp)
                         )
                         OutlinedTextField(
@@ -379,12 +392,11 @@ fun OnboardingProfileScreen(
                                 // Restrict username to letters, numbers, underscore and auto-lowercase
                                 username = input.filter { it.isLetterOrDigit() || it == '_' }.lowercase()
                             },
-                            placeholder = { Text("Enter your username") },
+                            placeholder = { Text("Enter your username", color = colors.mute) },
                             leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Default.Person,
-                                    contentDescription = "User info guide icon",
-                                    tint = Color.Black.copy(alpha = 0.4f)
+                                SoftPersonIcon(
+                                    size = 18.dp,
+                                    color = colors.mute
                                 )
                             },
                             shape = RoundedCornerShape(16.dp),
@@ -392,12 +404,12 @@ fun OnboardingProfileScreen(
                                 .fillMaxWidth()
                                 .testTag("username_input"),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.Black,
-                                unfocusedTextColor = Color.Black,
+                                focusedTextColor = colors.ink,
+                                unfocusedTextColor = colors.ink,
                                 focusedBorderColor = GoldAccent,
-                                unfocusedBorderColor = Color.Black.copy(alpha = 0.12f),
-                                focusedContainerColor = Color.White,
-                                unfocusedContainerColor = Color.White
+                                unfocusedBorderColor = colors.line,
+                                focusedContainerColor = colors.surface,
+                                unfocusedContainerColor = colors.surface
                             ),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                             singleLine = true
@@ -406,7 +418,7 @@ fun OnboardingProfileScreen(
                         Text(
                             text = "This will be your unique ID on the platform",
                             fontSize = 12.sp,
-                            color = Color.Black.copy(alpha = 0.45f)
+                            color = colors.mute
                         )
                     }
                 }
@@ -421,19 +433,19 @@ fun OnboardingProfileScreen(
                             text = "Display Name",
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.Black,
+                            color = colors.ink,
                             modifier = Modifier.padding(bottom = 6.dp)
                         )
                         OutlinedTextField(
                             value = displayName,
                             onValueChange = { displayName = it },
-                            placeholder = { Text("Enter your display name") },
+                            placeholder = { Text("Enter your display name", color = colors.mute) },
                             leadingIcon = {
                                 Text(
                                     text = "Aa",
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color.Black.copy(alpha = 0.4f),
+                                    color = colors.mute,
                                     modifier = Modifier.padding(start = 12.dp, end = 2.dp)
                                 )
                             },
@@ -442,12 +454,12 @@ fun OnboardingProfileScreen(
                                 .fillMaxWidth()
                                 .testTag("display_name_input"),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.Black,
-                                unfocusedTextColor = Color.Black,
+                                focusedTextColor = colors.ink,
+                                unfocusedTextColor = colors.ink,
                                 focusedBorderColor = GoldAccent,
-                                unfocusedBorderColor = Color.Black.copy(alpha = 0.12f),
-                                focusedContainerColor = Color.White,
-                                unfocusedContainerColor = Color.White
+                                unfocusedBorderColor = colors.line,
+                                focusedContainerColor = colors.surface,
+                                unfocusedContainerColor = colors.surface
                             ),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                             singleLine = true
@@ -456,7 +468,7 @@ fun OnboardingProfileScreen(
                         Text(
                             text = "This is how your name will appear to others",
                             fontSize = 12.sp,
-                            color = Color.Black.copy(alpha = 0.45f)
+                            color = colors.mute
                         )
                     }
                 }
@@ -525,11 +537,9 @@ fun OnboardingProfileScreen(
                             color = Color.Black
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = "Forward step arrow",
-                            tint = Color.Black,
-                            modifier = Modifier.size(18.dp)
+                        SoftForwardArrowIcon(
+                            size = 18.dp,
+                            color = Color.Black
                         )
                     }
                 }
@@ -548,6 +558,8 @@ fun OnboardingAgeScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val colors = LocalFunkyColors.current
+    val iconCircleBg = if (colors.isDark) colors.soft else LightGoldBg
     val scope = rememberCoroutineScope()
 
     // Wheels for Birth Date selection setup
@@ -628,7 +640,7 @@ fun OnboardingAgeScreen(
                 onBackClick = onBack
             )
         },
-        containerColor = Color.White
+        containerColor = colors.bg
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -653,14 +665,12 @@ fun OnboardingAgeScreen(
                         modifier = Modifier
                             .size(72.dp)
                             .clip(CircleShape)
-                            .background(LightGoldBg),
+                            .background(iconCircleBg),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Cake,
-                            contentDescription = null,
-                            tint = GoldAccent,
-                            modifier = Modifier.size(32.dp)
+                        SoftCakeIcon(
+                            size = 32.dp,
+                            color = GoldAccent
                         )
                     }
 
@@ -671,7 +681,7 @@ fun OnboardingAgeScreen(
                         text = "What's Your Age?",
                         fontSize = 32.sp,
                         fontWeight = FontWeight.Black,
-                        color = Color.Black,
+                        color = colors.ink,
                         lineHeight = 38.sp,
                         textAlign = TextAlign.Center
                     )
@@ -680,7 +690,7 @@ fun OnboardingAgeScreen(
                         text = "This helps us personalize your experience",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Medium,
-                        color = Color.Black.copy(alpha = 0.5f),
+                        color = colors.mute,
                         textAlign = TextAlign.Center
                     )
                 }
@@ -694,8 +704,9 @@ fun OnboardingAgeScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, Color.Black.copy(alpha = 0.08f), RoundedCornerShape(24.dp))
-                            .background(Color(0xFFFAFAFA))
+                            .clip(RoundedCornerShape(24.dp))
+                            .border(1.dp, colors.line, RoundedCornerShape(24.dp))
+                            .background(colors.surface)
                             .padding(16.dp),
                         horizontalArrangement = Arrangement.SpaceEvenly,
                         verticalAlignment = Alignment.CenterVertically
@@ -705,7 +716,7 @@ fun OnboardingAgeScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text(text = "MONTH", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                            Text(text = "MONTH", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = colors.mute)
                             Spacer(modifier = Modifier.height(12.dp))
                             
                             Box(
@@ -736,7 +747,7 @@ fun OnboardingAgeScreen(
                                             text = month,
                                             fontSize = if (isSelected) 18.sp else 14.sp,
                                             fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Normal,
-                                            color = if (isSelected) Color.Black else Color.Black.copy(alpha = 0.4f),
+                                            color = if (isSelected) colors.ink else colors.mute.copy(alpha = 0.6f),
                                             modifier = Modifier
                                                 .padding(vertical = 8.dp)
                                                 .clickable { 
@@ -757,7 +768,7 @@ fun OnboardingAgeScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text(text = "DAY", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                            Text(text = "DAY", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = colors.mute)
                             Spacer(modifier = Modifier.height(12.dp))
                             
                             Box(
@@ -787,7 +798,7 @@ fun OnboardingAgeScreen(
                                             text = day.toString(),
                                             fontSize = if (isSelected) 18.sp else 14.sp,
                                             fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Normal,
-                                            color = if (isSelected) Color.Black else Color.Black.copy(alpha = 0.4f),
+                                            color = if (isSelected) colors.ink else colors.mute.copy(alpha = 0.6f),
                                             modifier = Modifier
                                                 .padding(vertical = 8.dp)
                                                 .clickable { 
@@ -808,7 +819,7 @@ fun OnboardingAgeScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier.weight(1.5f)
                         ) {
-                            Text(text = "YEAR", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                            Text(text = "YEAR", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = colors.mute)
                             Spacer(modifier = Modifier.height(12.dp))
                             
                             Box(
@@ -838,7 +849,7 @@ fun OnboardingAgeScreen(
                                             text = year.toString(),
                                             fontSize = if (isSelected) 18.sp else 14.sp,
                                             fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Normal,
-                                            color = if (isSelected) Color.Black else Color.Black.copy(alpha = 0.4f),
+                                            color = if (isSelected) colors.ink else colors.mute.copy(alpha = 0.6f),
                                             modifier = Modifier
                                                 .padding(vertical = 8.dp)
                                                 .clickable { 
@@ -861,7 +872,11 @@ fun OnboardingAgeScreen(
                     val dobText = "${months[selectedMonthIndex]} $selectedDay, $selectedYear"
                     Card(
                         colors = CardDefaults.cardColors(
-                            containerColor = if (isAgeValid) Color(0xFFF0FDF4) else Color(0xFFFEF2F2)
+                            containerColor = if (isAgeValid) {
+                                if (colors.isDark) Color(0xFF14532D).copy(alpha = 0.35f) else Color(0xFFF0FDF4)
+                            } else {
+                                if (colors.isDark) Color(0xFF7F1D1D).copy(alpha = 0.35f) else Color(0xFFFEF2F2)
+                            }
                         ),
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth(),
@@ -888,13 +903,17 @@ fun OnboardingAgeScreen(
                                     text = "Selected Date of Birth:",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (isAgeValid) Color(0xFF2E7D32) else Color(0xFFC62828)
+                                    color = if (isAgeValid) {
+                                        if (colors.isDark) Color(0xFF4ADE80) else Color(0xFF2E7D32)
+                                    } else {
+                                        if (colors.isDark) Color(0xFFFCA5A5) else Color(0xFFC62828)
+                                    }
                                 )
                                 Text(
                                     text = dobText,
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Black,
-                                    color = Color.Black
+                                    color = colors.ink
                                 )
                             }
 
@@ -902,13 +921,23 @@ fun OnboardingAgeScreen(
                                 color = if (isAgeValid) Color(0xFF4CAF50) else Color(0xFFE53935),
                                 shape = RoundedCornerShape(100.dp)
                             ) {
-                                Text(
-                                    text = "Age: $calculatedAge ${if (isAgeValid) "✓" else "✕"}",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                                )
+                                ) {
+                                    Text(
+                                        text = "Age: $calculatedAge",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                    if (isAgeValid) {
+                                        SoftCheckIcon(size = 12.dp, color = Color.White)
+                                    } else {
+                                        SoftCloseIcon(size = 12.dp, color = Color.White)
+                                    }
+                                }
                             }
                         }
                     }
@@ -918,18 +947,30 @@ fun OnboardingAgeScreen(
                 if (!isAgeValid) {
                     item {
                         Card(
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF1F2)),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (colors.isDark) Color(0xFF7F1D1D).copy(alpha = 0.35f) else Color(0xFFFFF1F2)
+                            ),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(
-                                text = "⚠️ You must be at least 15 years old to join FunkyTalk.",
-                                color = Color(0xFFBE123C),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.padding(12.dp),
-                                textAlign = TextAlign.Center
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                SoftWarningIcon(
+                                    size = 16.dp,
+                                    color = if (colors.isDark) Color(0xFFFCA5A5) else Color(0xFFBE123C)
+                                )
+                                Text(
+                                    text = "You must be at least 15 years old to join FunkyTalk.",
+                                    color = if (colors.isDark) Color(0xFFFCA5A5) else Color(0xFFBE123C),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
                     }
                 }
@@ -943,18 +984,16 @@ fun OnboardingAgeScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Person,
-                            contentDescription = "Public visibility icon",
-                            tint = Color.Black.copy(alpha = 0.35f),
-                            modifier = Modifier.size(14.dp)
+                        SoftPersonIcon(
+                            size = 14.dp,
+                            color = colors.mute
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "Your age and display data will be visible on your profile",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color.Black.copy(alpha = 0.45f)
+                            color = colors.mute
                         )
                     }
                     Spacer(modifier = Modifier.height(24.dp))
@@ -991,11 +1030,9 @@ fun OnboardingAgeScreen(
                         color = Color.Black
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                        contentDescription = "Forward step arrow",
-                        tint = Color.Black,
-                        modifier = Modifier.size(18.dp)
+                    SoftForwardArrowIcon(
+                        size = 18.dp,
+                        color = Color.Black
                     )
                 }
             }
@@ -1013,6 +1050,8 @@ fun OnboardingGenderScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val colors = LocalFunkyColors.current
+    val iconCircleBg = if (colors.isDark) colors.soft else LightGoldBg
     var selectedGender by remember { mutableStateOf(initialGender) }
 
     Scaffold(
@@ -1023,7 +1062,7 @@ fun OnboardingGenderScreen(
                 onBackClick = onBack
             )
         },
-        containerColor = Color.White
+        containerColor = colors.bg
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -1048,14 +1087,12 @@ fun OnboardingGenderScreen(
                         modifier = Modifier
                             .size(72.dp)
                             .clip(CircleShape)
-                            .background(LightGoldBg),
+                            .background(iconCircleBg),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Group,
-                            contentDescription = null,
-                            tint = GoldAccent,
-                            modifier = Modifier.size(32.dp)
+                        SoftGroupIcon(
+                            size = 32.dp,
+                            color = GoldAccent
                         )
                     }
 
@@ -1066,7 +1103,7 @@ fun OnboardingGenderScreen(
                         text = "What's Your Gender?",
                         fontSize = 32.sp,
                         fontWeight = FontWeight.Black,
-                        color = Color.Black,
+                        color = colors.ink,
                         lineHeight = 38.sp,
                         textAlign = TextAlign.Center
                     )
@@ -1075,7 +1112,7 @@ fun OnboardingGenderScreen(
                         text = "This helps us personalize your experience",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Medium,
-                        color = Color.Black.copy(alpha = 0.5f),
+                        color = colors.mute,
                         textAlign = TextAlign.Center
                     )
                 }
@@ -1097,12 +1134,14 @@ fun OnboardingGenderScreen(
                                 .clickable { selectedGender = "Male" }
                                 .testTag("gender_male"),
                             colors = CardDefaults.cardColors(
-                                containerColor = if (isMaleSelected) Color(0xFFEFF6FF) else Color.White
+                                containerColor = if (isMaleSelected) {
+                                    if (colors.isDark) Color(0xFF1E3A8A).copy(alpha = 0.35f) else Color(0xFFEFF6FF)
+                                } else colors.surface
                             ),
                             shape = RoundedCornerShape(24.dp),
                             border = CardDefaults.outlinedCardBorder().copy(
                                 brush = androidx.compose.ui.graphics.SolidColor(
-                                    if (isMaleSelected) Color(0xFF3B82F6) else Color.Black.copy(alpha = 0.08f)
+                                    if (isMaleSelected) Color(0xFF3B82F6) else colors.line
                                 )
                             ),
                             elevation = CardDefaults.cardElevation(defaultElevation = if (isMaleSelected) 2.dp else 0.dp)
@@ -1114,18 +1153,18 @@ fun OnboardingGenderScreen(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Face,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(48.dp).padding(top = 8.dp),
-                                    tint = Color(0xFF3B82F6)
-                                )
+                                Box(modifier = Modifier.padding(top = 8.dp)) {
+                                    SoftFaceIcon(
+                                        size = 48.dp,
+                                        color = Color(0xFF3B82F6)
+                                    )
+                                }
 
                                 Text(
                                     text = "Male",
                                     fontSize = 18.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color.Black
+                                    color = colors.ink
                                 )
 
                                 // Custom radio button indicator
@@ -1135,7 +1174,7 @@ fun OnboardingGenderScreen(
                                         .clip(CircleShape)
                                         .border(
                                             width = if (isMaleSelected) 6.dp else 2.dp,
-                                            color = if (isMaleSelected) Color(0xFF3B82F6) else Color.Black.copy(alpha = 0.2f),
+                                            color = if (isMaleSelected) Color(0xFF3B82F6) else colors.line,
                                             shape = CircleShape
                                         )
                                 )
@@ -1151,12 +1190,14 @@ fun OnboardingGenderScreen(
                                 .clickable { selectedGender = "Female" }
                                 .testTag("gender_female"),
                             colors = CardDefaults.cardColors(
-                                containerColor = if (isFemaleSelected) Color(0xFFFDF2F8) else Color.White
+                                containerColor = if (isFemaleSelected) {
+                                    if (colors.isDark) Color(0xFF831843).copy(alpha = 0.35f) else Color(0xFFFDF2F8)
+                                } else colors.surface
                             ),
                             shape = RoundedCornerShape(24.dp),
                             border = CardDefaults.outlinedCardBorder().copy(
                                 brush = androidx.compose.ui.graphics.SolidColor(
-                                    if (isFemaleSelected) Color(0xFFEC4899) else Color.Black.copy(alpha = 0.08f)
+                                    if (isFemaleSelected) Color(0xFFEC4899) else colors.line
                                 )
                             ),
                             elevation = CardDefaults.cardElevation(defaultElevation = if (isFemaleSelected) 2.dp else 0.dp)
@@ -1168,18 +1209,18 @@ fun OnboardingGenderScreen(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Face,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(48.dp).padding(top = 8.dp),
-                                    tint = Color(0xFFEC4899)
-                                )
+                                Box(modifier = Modifier.padding(top = 8.dp)) {
+                                    SoftFaceIcon(
+                                        size = 48.dp,
+                                        color = Color(0xFFEC4899)
+                                    )
+                                }
 
                                 Text(
                                     text = "Female",
                                     fontSize = 18.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color.Black
+                                    color = colors.ink
                                 )
 
                                 // Custom radio button indicator
@@ -1189,7 +1230,7 @@ fun OnboardingGenderScreen(
                                         .clip(CircleShape)
                                         .border(
                                             width = if (isFemaleSelected) 6.dp else 2.dp,
-                                            color = if (isFemaleSelected) Color(0xFFEC4899) else Color.Black.copy(alpha = 0.2f),
+                                            color = if (isFemaleSelected) Color(0xFFEC4899) else colors.line,
                                             shape = CircleShape
                                         )
                                 )
@@ -1207,18 +1248,16 @@ fun OnboardingGenderScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Person,
-                            contentDescription = "Public visibility icon",
-                            tint = Color.Black.copy(alpha = 0.35f),
-                            modifier = Modifier.size(14.dp)
+                        SoftPersonIcon(
+                            size = 14.dp,
+                            color = colors.mute
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "Your gender will be visible on your profile",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.Black.copy(alpha = 0.45f)
+                            color = colors.mute
                         )
                     }
                     Spacer(modifier = Modifier.height(24.dp))
@@ -1254,11 +1293,9 @@ fun OnboardingGenderScreen(
                         color = Color.Black
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                        contentDescription = "Forward step arrow",
-                        tint = Color.Black,
-                        modifier = Modifier.size(18.dp)
+                    SoftForwardArrowIcon(
+                        size = 18.dp,
+                        color = Color.Black
                     )
                 }
             }
@@ -1276,6 +1313,9 @@ fun OnboardingCountryScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val colors = LocalFunkyColors.current
+    val iconCircleBg = if (colors.isDark) colors.soft else LightGoldBg
+    val selectedCardBg = if (colors.isDark) colors.soft else LightGoldBg
     var searchQuery by remember { mutableStateOf("") }
     var selectedCountry by remember {
         mutableStateOf<Country?>(
@@ -1310,7 +1350,7 @@ fun OnboardingCountryScreen(
                 onBackClick = onBack
             )
         },
-        containerColor = Color.White
+        containerColor = colors.bg
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -1333,14 +1373,12 @@ fun OnboardingCountryScreen(
                     Box(
                         modifier = Modifier
                             .size(110.dp)
-                            .background(LightGoldBg, CircleShape),
+                            .background(iconCircleBg, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.Public,
-                                contentDescription = null,
-                                tint = GoldAccent,
+                            FunkyGlobeIcon(
+                                color = GoldAccent,
                                 modifier = Modifier.size(52.dp)
                             )
                             Box(
@@ -1348,14 +1386,12 @@ fun OnboardingCountryScreen(
                                     .padding(top = 16.dp, start = 16.dp)
                                     .size(24.dp)
                                     .background(GoldAccent, CircleShape)
-                                    .border(2.dp, Color.White, CircleShape),
+                                    .border(2.dp, colors.bg, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Place,
-                                    contentDescription = null,
-                                    tint = Color.Black,
-                                    modifier = Modifier.size(12.dp)
+                                SoftLocationPinIcon(
+                                    size = 12.dp,
+                                    color = Color.Black
                                 )
                             }
                         }
@@ -1363,13 +1399,13 @@ fun OnboardingCountryScreen(
                     Spacer(modifier = Modifier.height(12.dp))
                     
                     val annotatedTitle = buildAnnotatedString {
-                        withStyle(style = SpanStyle(color = Color.Black, fontWeight = FontWeight.Bold)) {
+                        withStyle(style = SpanStyle(color = colors.ink, fontWeight = FontWeight.Bold)) {
                             append("Where are ")
                         }
                         withStyle(style = SpanStyle(color = GoldAccent, fontWeight = FontWeight.Black)) {
                             append("you")
                         }
-                        withStyle(style = SpanStyle(color = Color.Black, fontWeight = FontWeight.Bold)) {
+                        withStyle(style = SpanStyle(color = colors.ink, fontWeight = FontWeight.Bold)) {
                             append(" from?")
                         }
                     }
@@ -1383,7 +1419,7 @@ fun OnboardingCountryScreen(
                     Text(
                         text = "This helps us connect you with people from your country and nearby.",
                         fontSize = 14.sp,
-                        color = Color.Black.copy(alpha = 0.5f),
+                        color = colors.mute,
                         textAlign = TextAlign.Center,
                         lineHeight = 18.sp,
                         modifier = Modifier.padding(horizontal = 16.dp)
@@ -1394,25 +1430,24 @@ fun OnboardingCountryScreen(
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
-                        placeholder = { Text("Search country...", color = Color.Gray, fontSize = 14.sp) },
+                        placeholder = { Text("Search country...", color = colors.mute, fontSize = 14.sp) },
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("search_country_field"),
                         shape = RoundedCornerShape(16.dp),
                         leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Default.Search,
-                                contentDescription = "Search",
-                                tint = Color.Gray
+                            SoftSearchIcon(
+                                size = 18.dp,
+                                color = colors.mute
                             )
                         },
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.Black,
-                            unfocusedTextColor = Color.Black,
+                            focusedTextColor = colors.ink,
+                            unfocusedTextColor = colors.ink,
                             focusedBorderColor = GoldAccent,
-                            unfocusedBorderColor = Color.LightGray.copy(alpha = 0.5f),
-                            focusedContainerColor = Color(0xFFF8FAFC),
-                            unfocusedContainerColor = Color(0xFFF8FAFC)
+                            unfocusedBorderColor = colors.line,
+                            focusedContainerColor = colors.surface,
+                            unfocusedContainerColor = colors.surface
                         ),
                         singleLine = true
                     )
@@ -1424,7 +1459,7 @@ fun OnboardingCountryScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .border(1.5.dp, GoldAccent, RoundedCornerShape(16.dp)),
-                            colors = CardDefaults.cardColors(containerColor = LightGoldBg),
+                            colors = CardDefaults.cardColors(containerColor = selectedCardBg),
                             shape = RoundedCornerShape(16.dp)
                         ) {
                             Row(
@@ -1447,7 +1482,7 @@ fun OnboardingCountryScreen(
                                         text = country.name,
                                         fontSize = 16.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color.Black
+                                        color = colors.ink
                                     )
                                 }
                                 Box(
@@ -1456,7 +1491,7 @@ fun OnboardingCountryScreen(
                                         .background(GoldAccent, CircleShape),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text("✓", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    SoftCheckIcon(size = 14.dp, color = Color.Black)
                                 }
                             }
                         }
@@ -1473,7 +1508,7 @@ fun OnboardingCountryScreen(
                                 text = "Popular",
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.Black,
+                                color = colors.ink,
                                 modifier = Modifier.padding(vertical = 4.dp)
                             )
                             val popularChunks = popular.chunked(2)
@@ -1490,12 +1525,12 @@ fun OnboardingCountryScreen(
                                                 .clickable { selectedCountry = country }
                                                 .border(
                                                     width = if (isSelected) 1.5.dp else 1.dp,
-                                                    color = if (isSelected) GoldAccent else Color(0xFFE2E8F0),
+                                                    color = if (isSelected) GoldAccent else colors.line,
                                                     shape = RoundedCornerShape(12.dp)
                                                 ),
                                             shape = RoundedCornerShape(12.dp),
                                             colors = CardDefaults.cardColors(
-                                                containerColor = if (isSelected) LightGoldBg else Color.White
+                                                containerColor = if (isSelected) selectedCardBg else colors.surface
                                             )
                                         ) {
                                             Row(
@@ -1514,7 +1549,7 @@ fun OnboardingCountryScreen(
                                                     text = country.name,
                                                     fontSize = 13.sp,
                                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                                    color = Color.Black
+                                                    color = colors.ink
                                                 )
                                             }
                                         }
@@ -1536,7 +1571,7 @@ fun OnboardingCountryScreen(
                             text = if (searchQuery.isBlank()) "All Countries" else "Search Results",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.Black
+                            color = colors.ink
                         )
                     }
                 }
@@ -1564,7 +1599,7 @@ fun OnboardingCountryScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(if (isSelected) LightGoldBg else Color.Transparent)
+                                    .background(if (isSelected) selectedCardBg else Color.Transparent)
                                     .clickable { selectedCountry = country }
                                     .padding(vertical = 10.dp, horizontal = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -1583,17 +1618,15 @@ fun OnboardingCountryScreen(
                                         text = country.name,
                                         fontSize = 14.sp,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        color = Color.Black
+                                        color = colors.ink
                                     )
                                 }
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                    contentDescription = "Select",
-                                    tint = if (isSelected) GoldAccent else Color.LightGray.copy(alpha = 0.5f),
-                                    modifier = Modifier.size(16.dp)
+                                SoftForwardArrowIcon(
+                                    size = 16.dp,
+                                    color = if (isSelected) GoldAccent else colors.mute.copy(alpha = 0.5f)
                                 )
                             }
-                            HorizontalDivider(color = Color.Black.copy(alpha = 0.05f))
+                            HorizontalDivider(color = colors.line)
                         }
                     }
                 }
@@ -1605,16 +1638,14 @@ fun OnboardingCountryScreen(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier.padding(bottom = 16.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Lock,
-                            contentDescription = "Secure lock",
-                            tint = Color.Gray,
+                        FunkyLockIcon(
+                            color = colors.mute,
                             modifier = Modifier.size(14.dp)
                         )
                         Text(
                             text = "Your exact location will never be shared.",
                             fontSize = 12.sp,
-                            color = Color.Gray
+                            color = colors.mute
                         )
                     }
                 }
@@ -1648,11 +1679,9 @@ fun OnboardingCountryScreen(
                         color = Color.Black
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                        contentDescription = "Forward link arrow",
-                        tint = Color.Black,
-                        modifier = Modifier.size(18.dp)
+                    SoftForwardArrowIcon(
+                        size = 18.dp,
+                        color = Color.Black
                     )
                 }
             }
@@ -1693,6 +1722,8 @@ fun OnboardingLanguageScreenBase(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val colors = LocalFunkyColors.current
+    val iconCircleBg = if (colors.isDark) colors.soft else LightGoldBg
     var searchQuery by remember { mutableStateOf("") }
     val selectedLanguages = remember {
         mutableStateListOf<SelectedLanguageWithLevel>().apply {
@@ -1744,18 +1775,18 @@ fun OnboardingLanguageScreenBase(
                         text = "Choose Level for ${editingLang.name}",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = Color.Black
+                        color = colors.ink
                     )
                     Text(
                         text = "Show off how well you vibe in this language!",
                         fontSize = 12.sp,
-                        color = Color.Gray,
+                        color = colors.mute,
                         modifier = Modifier.padding(top = 2.dp)
                     )
                 }
             },
             shape = RoundedCornerShape(28.dp),
-            containerColor = Color.White,
+            containerColor = colors.surface,
             text = {
                 Column(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -1769,12 +1800,12 @@ fun OnboardingLanguageScreenBase(
                                 .clickable { tempSelectedLevelCode = level.tag }
                                 .border(
                                     width = if (isSelected) 2.dp else 1.dp,
-                                    color = if (isSelected) GoldAccent else Color(0xFFE2E8F0),
+                                    color = if (isSelected) GoldAccent else colors.line,
                                     shape = RoundedCornerShape(16.dp)
                                 ),
                             shape = RoundedCornerShape(16.dp),
                             colors = CardDefaults.cardColors(
-                                containerColor = if (isSelected) LightGoldBg else Color.White
+                                containerColor = if (isSelected) iconCircleBg else colors.surface
                             )
                         ) {
                             Row(
@@ -1788,24 +1819,24 @@ fun OnboardingLanguageScreenBase(
                                     modifier = Modifier
                                         .size(36.dp)
                                         .background(
-                                            if (isSelected) GoldAccent.copy(alpha = 0.2f) else Color(0xFFF1F5F9),
+                                            if (isSelected) GoldAccent.copy(alpha = 0.2f) else colors.soft,
                                             CircleShape
                                         ),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text(level.badge, fontSize = 18.sp)
+                                    Text(level.badge, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = colors.ink)
                                 }
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = level.tag,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color.Black
+                                        color = colors.ink
                                     )
                                     Text(
                                         text = level.subtitle,
                                         fontSize = 11.sp,
-                                        color = Color.Gray
+                                        color = colors.mute
                                     )
                                 }
                                 Box(
@@ -1814,7 +1845,7 @@ fun OnboardingLanguageScreenBase(
                                         .clip(CircleShape)
                                         .border(
                                             width = if (isSelected) 6.dp else 2.dp,
-                                            color = if (isSelected) GoldAccent else Color.LightGray.copy(alpha = 0.5f),
+                                            color = if (isSelected) GoldAccent else colors.line,
                                             shape = CircleShape
                                         )
                                 )
@@ -1847,7 +1878,7 @@ fun OnboardingLanguageScreenBase(
             },
             dismissButton = {
                 TextButton(onClick = { languageForLevelSelect = null }) {
-                    Text("Cancel", color = Color.Gray, fontWeight = FontWeight.Bold)
+                    Text("Cancel", color = colors.mute, fontWeight = FontWeight.Bold)
                 }
             }
         )
@@ -1867,7 +1898,7 @@ fun OnboardingLanguageScreenBase(
                 }
             )
         },
-        containerColor = Color.White
+        containerColor = colors.bg
     ) { innerPadding ->
         Box(
             modifier = Modifier
@@ -1895,13 +1926,11 @@ fun OnboardingLanguageScreenBase(
                             modifier = Modifier
                                 .size(80.dp)
                                 .clip(CircleShape)
-                                .background(LightGoldBg),
+                                .background(iconCircleBg),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Translate,
-                                contentDescription = "Translation illustration icon",
-                                tint = GoldAccent,
+                            FunkyTranslateIcon(
+                                color = GoldAccent,
                                 modifier = Modifier.size(38.dp)
                             )
                         }
@@ -1912,7 +1941,7 @@ fun OnboardingLanguageScreenBase(
                             text = titleAnnotated,
                             fontSize = 28.sp,
                             fontWeight = FontWeight.Black,
-                            color = Color.Black,
+                            color = colors.ink,
                             lineHeight = 36.sp,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.fillMaxWidth()
@@ -1921,7 +1950,7 @@ fun OnboardingLanguageScreenBase(
                         Text(
                             text = subtitle,
                             fontSize = 14.sp,
-                            color = Color.Black.copy(alpha = 0.5f),
+                            color = colors.mute,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -1943,12 +1972,12 @@ fun OnboardingLanguageScreenBase(
                                         text = "Selected (${selectedLanguages.size}/3)",
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color.Black.copy(alpha = 0.6f)
+                                        color = colors.ink.copy(alpha = 0.7f)
                                     )
                                     Text(
                                         text = "Tap to change level",
                                         fontSize = 11.sp,
-                                        color = Color.Gray
+                                        color = colors.mute
                                     )
                                 }
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -1961,7 +1990,7 @@ fun OnboardingLanguageScreenBase(
                                                     tempSelectedLevelCode = selected.level.tag
                                                     languageForLevelSelect = selected.language
                                                 },
-                                            colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFDF5)),
+                                            colors = CardDefaults.cardColors(containerColor = iconCircleBg),
                                             border = BorderStroke(1.dp, GoldAccent),
                                             shape = RoundedCornerShape(16.dp)
                                         ) {
@@ -1986,7 +2015,7 @@ fun OnboardingLanguageScreenBase(
                                                             text = selected.language.name,
                                                             fontSize = 14.sp,
                                                             fontWeight = FontWeight.Bold,
-                                                            color = Color.Black
+                                                            color = colors.ink
                                                         )
                                                         Text(
                                                             text = selected.level.tag,
@@ -2001,11 +2030,9 @@ fun OnboardingLanguageScreenBase(
                                                     onClick = { selectedLanguages.remove(selected) },
                                                     modifier = Modifier.size(28.dp)
                                                 ) {
-                                                    Text(
-                                                        text = "✕",
-                                                        fontSize = 14.sp,
-                                                        color = Color.Black.copy(alpha = 0.5f),
-                                                        fontWeight = FontWeight.Bold
+                                                    SoftCloseIcon(
+                                                        size = 14.dp,
+                                                        color = colors.mute
                                                     )
                                                 }
                                             }
@@ -2023,12 +2050,11 @@ fun OnboardingLanguageScreenBase(
                                 searchQuery = it
                                 isBrowseAllOpen = true
                             },
-                            placeholder = { Text("Search 250+ languages...", color = Color.Gray, fontSize = 14.sp) },
+                            placeholder = { Text("Search 250+ languages...", color = colors.mute, fontSize = 14.sp) },
                             leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Default.Search,
-                                    contentDescription = "Search icon",
-                                    tint = Color.Black.copy(alpha = 0.4f)
+                                SoftSearchIcon(
+                                    size = 18.dp,
+                                    color = colors.mute
                                 )
                             },
                             modifier = Modifier
@@ -2036,11 +2062,11 @@ fun OnboardingLanguageScreenBase(
                                 .clickable { isBrowseAllOpen = true },
                             enabled = false,
                             colors = OutlinedTextFieldDefaults.colors(
-                                disabledTextColor = Color.Black,
-                                disabledBorderColor = Color.Black.copy(alpha = 0.12f),
-                                disabledPlaceholderColor = Color.Black.copy(alpha = 0.4f),
-                                disabledLeadingIconColor = Color.Black.copy(alpha = 0.4f),
-                                disabledContainerColor = Color.White
+                                disabledTextColor = colors.ink,
+                                disabledBorderColor = colors.line,
+                                disabledPlaceholderColor = colors.mute,
+                                disabledLeadingIconColor = colors.mute,
+                                disabledContainerColor = colors.surface
                             ),
                             shape = RoundedCornerShape(16.dp)
                         )
@@ -2055,7 +2081,7 @@ fun OnboardingLanguageScreenBase(
                                 text = "Popular",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.Black.copy(alpha = 0.6f),
+                                color = colors.ink.copy(alpha = 0.7f),
                                 modifier = Modifier.padding(bottom = 8.dp)
                             )
 
@@ -2086,10 +2112,12 @@ fun OnboardingLanguageScreenBase(
                                                             }
                                                         }
                                                     },
-                                                colors = CardDefaults.cardColors(containerColor = Color.White),
+                                                colors = CardDefaults.cardColors(
+                                                    containerColor = if (isSelected) iconCircleBg else colors.surface
+                                                ),
                                                 border = BorderStroke(
                                                     width = if (isSelected) 2.dp else 1.dp,
-                                                    color = if (isSelected) GoldAccent else Color(0xFFF1F5F9)
+                                                    color = if (isSelected) GoldAccent else colors.line
                                                 ),
                                                 shape = RoundedCornerShape(12.dp)
                                             ) {
@@ -2111,7 +2139,7 @@ fun OnboardingLanguageScreenBase(
                                                         text = lang.name,
                                                         fontSize = 11.sp,
                                                         fontWeight = FontWeight.Bold,
-                                                        color = Color.Black
+                                                        color = colors.ink
                                                     )
                                                 }
                                             }
@@ -2132,8 +2160,8 @@ fun OnboardingLanguageScreenBase(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable { isBrowseAllOpen = true },
-                            colors = CardDefaults.cardColors(containerColor = Color.White),
-                            border = BorderStroke(1.dp, Color(0xFFF1F5F9)),
+                            colors = CardDefaults.cardColors(containerColor = colors.surface),
+                            border = BorderStroke(1.dp, colors.line),
                             shape = RoundedCornerShape(16.dp)
                         ) {
                             Row(
@@ -2148,13 +2176,11 @@ fun OnboardingLanguageScreenBase(
                                         modifier = Modifier
                                             .size(40.dp)
                                             .clip(CircleShape)
-                                            .background(LightGoldBg),
+                                            .background(iconCircleBg),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Language,
-                                            contentDescription = null,
-                                            tint = GoldAccent,
+                                        FunkyGlobeIcon(
+                                            color = GoldAccent,
                                             modifier = Modifier.size(20.dp)
                                         )
                                     }
@@ -2164,21 +2190,19 @@ fun OnboardingLanguageScreenBase(
                                             text = "Browse all languages",
                                             fontSize = 15.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = Color.Black
+                                            color = colors.ink
                                         )
                                         Text(
                                             text = "250+ languages available",
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Medium,
-                                            color = Color.Black.copy(alpha = 0.5f)
+                                            color = colors.mute
                                         )
                                     }
                                 }
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                    contentDescription = "Arrow right icon",
-                                    tint = Color.Black.copy(alpha = 0.4f),
-                                    modifier = Modifier.size(18.dp)
+                                SoftForwardArrowIcon(
+                                    size = 18.dp,
+                                    color = colors.mute
                                 )
                             }
                         }
@@ -2192,10 +2216,8 @@ fun OnboardingLanguageScreenBase(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Lock,
-                                contentDescription = "Lock indicator",
-                                tint = Color.Black.copy(alpha = 0.35f),
+                            FunkyLockIcon(
+                                color = colors.mute,
                                 modifier = Modifier.size(14.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
@@ -2203,7 +2225,7 @@ fun OnboardingLanguageScreenBase(
                                 text = "Your selected languages and GenZ levels will be public so everyone knows what you speak!",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.Black.copy(alpha = 0.45f),
+                                color = colors.mute,
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.padding(horizontal = 12.dp)
                             )
@@ -2238,11 +2260,9 @@ fun OnboardingLanguageScreenBase(
                             color = Color.Black
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = "Forward arrow",
-                            tint = Color.Black,
-                            modifier = Modifier.size(18.dp)
+                        SoftForwardArrowIcon(
+                            size = 18.dp,
+                            color = Color.Black
                         )
                     }
                 }
@@ -2252,7 +2272,7 @@ fun OnboardingLanguageScreenBase(
             if (isBrowseAllOpen) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = Color.White
+                    color = colors.bg
                 ) {
                     var overlayQuery by remember { mutableStateOf("") }
                     val filteredGrouped = remember(overlayQuery) {
@@ -2280,10 +2300,9 @@ fun OnboardingLanguageScreenBase(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             IconButton(onClick = { isBrowseAllOpen = false }) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "Back back",
-                                    tint = Color.Black
+                                SoftBackIcon(
+                                    size = 22.dp,
+                                    color = colors.ink
                                 )
                             }
                             Spacer(modifier = Modifier.width(8.dp))
@@ -2291,25 +2310,24 @@ fun OnboardingLanguageScreenBase(
                                 text = "Choose Language (${selectedLanguages.size}/3)",
                                 fontSize = 20.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.Black
+                                color = colors.ink
                             )
                         }
 
                         OutlinedTextField(
                             value = overlayQuery,
                             onValueChange = { overlayQuery = it },
-                            placeholder = { Text("Search 250+ languages...") },
+                            placeholder = { Text("Search 250+ languages...", color = colors.mute) },
                             leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Default.Search,
-                                    contentDescription = "Search icon",
-                                    tint = Color.Black.copy(alpha = 0.4f)
+                                SoftSearchIcon(
+                                    size = 18.dp,
+                                    color = colors.mute
                                 )
                             },
                             trailingIcon = {
                                 if (overlayQuery.isNotEmpty()) {
                                     IconButton(onClick = { overlayQuery = "" }) {
-                                        Text("✕", fontWeight = FontWeight.Bold, color = Color.Black.copy(alpha = 0.5f))
+                                        SoftCloseIcon(size = 14.dp, color = colors.mute)
                                     }
                                 }
                             },
@@ -2318,12 +2336,12 @@ fun OnboardingLanguageScreenBase(
                                 .padding(horizontal = 24.dp, vertical = 8.dp),
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.Black,
-                                unfocusedTextColor = Color.Black,
+                                focusedTextColor = colors.ink,
+                                unfocusedTextColor = colors.ink,
                                 focusedBorderColor = GoldAccent,
-                                unfocusedBorderColor = Color.Black.copy(alpha = 0.12f),
-                                focusedContainerColor = Color.White,
-                                unfocusedContainerColor = Color.White
+                                unfocusedBorderColor = colors.line,
+                                focusedContainerColor = colors.surface,
+                                unfocusedContainerColor = colors.surface
                             ),
                             shape = RoundedCornerShape(16.dp)
                         )
@@ -2353,7 +2371,7 @@ fun OnboardingLanguageScreenBase(
                                                 text = "Popular",
                                                 fontSize = 14.sp,
                                                 fontWeight = FontWeight.Bold,
-                                                color = Color.Black.copy(alpha = 0.6f)
+                                                color = colors.ink.copy(alpha = 0.7f)
                                             )
                                         }
                                         Spacer(modifier = Modifier.height(12.dp))
@@ -2385,10 +2403,12 @@ fun OnboardingLanguageScreenBase(
                                                                 }
                                                             }
                                                         },
-                                                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                                                    colors = CardDefaults.cardColors(
+                                                        containerColor = if (isSelected) iconCircleBg else colors.surface
+                                                    ),
                                                     border = BorderStroke(
                                                         width = if (isSelected) 2.dp else 1.dp,
-                                                        color = if (isSelected) GoldAccent else Color(0xFFF1F5F9)
+                                                        color = if (isSelected) GoldAccent else colors.line
                                                     ),
                                                     shape = RoundedCornerShape(12.dp)
                                                 ) {
@@ -2410,7 +2430,7 @@ fun OnboardingLanguageScreenBase(
                                                             text = pLang.name,
                                                             fontSize = 11.sp,
                                                             fontWeight = FontWeight.Bold,
-                                                            color = Color.Black
+                                                            color = colors.ink
                                                         )
                                                     }
                                                 }
@@ -2423,7 +2443,7 @@ fun OnboardingLanguageScreenBase(
                                             text = "All Languages",
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = Color.Black.copy(alpha = 0.6f),
+                                            color = colors.ink.copy(alpha = 0.7f),
                                             modifier = Modifier.padding(horizontal = 12.dp)
                                         )
                                         Spacer(modifier = Modifier.height(8.dp))
@@ -2468,17 +2488,17 @@ fun OnboardingLanguageScreenBase(
                                                     modifier = Modifier
                                                         .size(40.dp)
                                                         .clip(CircleShape)
-                                                        .background(if (isSelected) LightGoldBg else Color(0xFFFFFBEB)),
+                                                        .background(if (isSelected) GoldAccent else colors.soft),
                                                     contentAlignment = Alignment.Center
                                                 ) {
                                                     if (isSelected) {
-                                                        Text("✓", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                                        SoftCheckIcon(size = 16.dp, color = Color.Black)
                                                     } else {
                                                         Text(
                                                             text = lang.initials,
                                                             fontSize = 14.sp,
                                                             fontWeight = FontWeight.Bold,
-                                                            color = Color.Black
+                                                            color = colors.ink
                                                         )
                                                     }
                                                 }
@@ -2487,17 +2507,15 @@ fun OnboardingLanguageScreenBase(
                                                     text = lang.name,
                                                     fontSize = 16.sp,
                                                     fontWeight = FontWeight.Medium,
-                                                    color = Color.Black
+                                                    color = colors.ink
                                                 )
                                             }
-                                            Icon(
-                                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                                contentDescription = "Select language navigation arrow",
-                                                tint = if (isSelected) GoldAccent else Color.Black.copy(alpha = 0.25f),
-                                                modifier = Modifier.size(16.dp)
+                                            SoftForwardArrowIcon(
+                                                size = 16.dp,
+                                                color = if (isSelected) GoldAccent else colors.mute.copy(alpha = 0.5f)
                                             )
                                         }
-                                        HorizontalDivider(color = Color.Black.copy(alpha = 0.05f))
+                                        HorizontalDivider(color = colors.line)
                                     }
                                 }
                             }

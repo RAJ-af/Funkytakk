@@ -46,31 +46,38 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.automirrored.filled.ExitToApp
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Send
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Face
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.material3.*
+import com.example.ui.components.FunkyChatIcon
+import com.example.ui.components.FunkyDoubleCheckIcon
+import com.example.ui.components.FunkyLockIcon
+import com.example.ui.components.FunkyPlayIcon
+import com.example.ui.components.FunkySendIcon
+import com.example.ui.components.FunkyVerticalMoreIcon
+import com.example.ui.components.SoftBackIcon
+import com.example.ui.components.SoftBellIcon
+import com.example.ui.components.SoftCheckIcon
+import com.example.ui.components.SoftCloseIcon
+import com.example.ui.components.SoftExitIcon
+import com.example.ui.components.SoftEyeIcon
+import com.example.ui.components.SoftFaceIcon
+import com.example.ui.components.SoftForwardArrowIcon
+import com.example.ui.components.SoftHeartIcon
+import com.example.ui.components.SoftHourglassIcon
+import com.example.ui.components.SoftImageIcon
+import com.example.ui.components.SoftMicIcon
+import com.example.ui.components.SoftMoonIcon
+import com.example.ui.components.SoftMusicNoteIcon
+import com.example.ui.components.SoftPersonIcon
+import com.example.ui.components.SoftPlusIcon
+import com.example.ui.components.SoftSearchIcon
+import com.example.ui.components.SoftSettingsGearIcon
+import com.example.ui.components.SoftShareIcon
+import com.example.ui.components.SoftSparkleIcon
+import com.example.ui.components.SoftSunIcon
+import com.example.ui.components.SoftWarningIcon
+import com.example.ui.theme.LocalFunkyColors
 import androidx.compose.runtime.*
 import com.example.ui.components.Soft3DFloatingBubble
 import com.example.ui.components.Soft3DReportShield
@@ -853,7 +860,8 @@ fun VoiceRoomScreen(
             val isForeground = currentLifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
             if (isForeground && activeRoomId.isNotBlank()) {
                 try {
-                    val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
+                    val token = SupabaseSessionManager.getBearerToken(context)
+                    val partsRes = SupabaseClient.api.getRoomParticipants(auth = token, roomIdEq = "eq.$activeRoomId")
                     if (partsRes.isSuccessful) {
                         val freshList = partsRes.body() ?: emptyList()
                         withContext(Dispatchers.Main) {
@@ -869,14 +877,16 @@ fun VoiceRoomScreen(
         renderedMessageCount = 6
         withContext(Dispatchers.IO) {
             try {
-                val roomRes = SupabaseClient.api.getVoiceRoomById(idEq = "eq.$activeRoomId")
+                val token = SupabaseSessionManager.getBearerToken(context)
+                val roomRes = SupabaseClient.api.getVoiceRoomById(auth = token, idEq = "eq.$activeRoomId")
                 var roomObj = if (roomRes.isSuccessful) roomRes.body()?.firstOrNull() else null
                 if (roomObj == null || roomObj.is_live == false || roomObj.status == "ended") {
-                    // First 10s grace period: retry 3 times with 2s delay to prevent false room ended triggers on room creation
+                    // Grace period + refreshed auth check: retry 3 times to avoid false auto-close on newly created private rooms
                     for (retry in 1..3) {
-                        delay(2000)
+                        delay(1500)
                         try {
-                            val retryRes = SupabaseClient.api.getVoiceRoomById(idEq = "eq.$activeRoomId")
+                            val freshToken = SupabaseSessionManager.getAuthenticatedBearerToken(context) ?: SupabaseSessionManager.getBearerToken(context)
+                            val retryRes = SupabaseClient.api.getVoiceRoomById(auth = freshToken, idEq = "eq.$activeRoomId")
                             if (retryRes.isSuccessful) {
                                 val candidate = retryRes.body()?.firstOrNull()
                                 if (candidate != null && candidate.is_live == true && candidate.status != "ended") {
@@ -888,7 +898,13 @@ fun VoiceRoomScreen(
                     }
                 }
 
-                if (roomObj == null || roomObj.is_live == false || roomObj.status == "ended") {
+                if (roomObj != null && (roomObj.is_live == false || roomObj.status == "ended")) {
+                    withContext(Dispatchers.Main) {
+                        triggerRoomEnded("host_ended", "initial_fetch_room_ended")
+                    }
+                    return@withContext
+                }
+                if (roomObj == null) {
                     withContext(Dispatchers.Main) {
                         triggerRoomEnded("host_ended", "initial_fetch_room_not_found_after_retries")
                     }
@@ -922,7 +938,7 @@ fun VoiceRoomScreen(
                         }
                     } catch (_: Exception) {}
                 }
-                val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
+                val partsRes = SupabaseClient.api.getRoomParticipants(auth = token, roomIdEq = "eq.$activeRoomId")
                 val dbList = if (partsRes.isSuccessful) partsRes.body() ?: emptyList() else emptyList()
                 val liveList = com.example.realtime.VoiceRoomRealtimeManager.getLiveParticipants(activeRoomId)
                 val combined = (dbList + liveList).distinctBy { it.user_id }.toMutableList()
@@ -973,7 +989,7 @@ fun VoiceRoomScreen(
                 )
 
                 // Query existing messages ordered by created_at
-                val msgsRes = SupabaseClient.api.getRoomMessages(roomIdEq = "eq.$activeRoomId")
+                val msgsRes = SupabaseClient.api.getRoomMessages(auth = token, roomIdEq = "eq.$activeRoomId")
                 if (msgsRes.isSuccessful) {
                     val list = msgsRes.body() ?: emptyList()
                     Log.d("VoiceRoomScreen", "[InitialFetch] Fetched ${list.size} room_messages for room $activeRoomId")
@@ -1128,7 +1144,8 @@ fun VoiceRoomScreen(
                         // Fetch fresh list from API in background on any participant update event
                         scope.launch(Dispatchers.IO) {
                             try {
-                                val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
+                                val token = SupabaseSessionManager.getBearerToken(context)
+                                val partsRes = SupabaseClient.api.getRoomParticipants(auth = token, roomIdEq = "eq.$activeRoomId")
                                 if (partsRes.isSuccessful) {
                                     val list = partsRes.body() ?: emptyList()
                                     withContext(Dispatchers.Main) {
@@ -1160,7 +1177,8 @@ fun VoiceRoomScreen(
                         ) {
                             scope.launch(Dispatchers.IO) {
                                 try {
-                                    val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
+                                    val token = SupabaseSessionManager.getBearerToken(context)
+                                    val partsRes = SupabaseClient.api.getRoomParticipants(auth = token, roomIdEq = "eq.$activeRoomId")
                                     if (partsRes.isSuccessful) {
                                         val list = partsRes.body() ?: emptyList()
                                         withContext(Dispatchers.Main) {
@@ -1360,7 +1378,8 @@ fun VoiceRoomScreen(
                                 }
                                 scope.launch(Dispatchers.IO) {
                                     try {
-                                        val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
+                                        val token = SupabaseSessionManager.getBearerToken(context)
+                                        val partsRes = SupabaseClient.api.getRoomParticipants(auth = token, roomIdEq = "eq.$activeRoomId")
                                         if (partsRes.isSuccessful) {
                                             val list = partsRes.body() ?: emptyList()
                                             withContext(Dispatchers.Main) {
@@ -1408,7 +1427,8 @@ fun VoiceRoomScreen(
             }
             withContext(Dispatchers.IO) {
                 try {
-                    val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
+                    val token = SupabaseSessionManager.getBearerToken(context)
+                    val partsRes = SupabaseClient.api.getRoomParticipants(auth = token, roomIdEq = "eq.$activeRoomId")
                     if (partsRes.isSuccessful) {
                         val list = partsRes.body() ?: emptyList()
                         withContext(Dispatchers.Main) {
@@ -1424,16 +1444,19 @@ fun VoiceRoomScreen(
         while (isActive && activeRoomId.isNotBlank()) {
             delay(4000)
             try {
-                // 1. Fetch room status & enforce server-authoritative 3-minute grace period
-                val roomsRes = SupabaseClient.api.getVoiceRoomById(idEq = "eq.$activeRoomId")
+                // 1. Fetch room status & enforce server-authoritative 3-minute grace period (authenticated for private rooms)
+                val pollToken = SupabaseSessionManager.getBearerToken(context)
+                val roomsRes = SupabaseClient.api.getVoiceRoomById(auth = pollToken, idEq = "eq.$activeRoomId")
                 if (roomsRes.isSuccessful) {
                     var roomObj = roomsRes.body()?.firstOrNull()
-                    if (roomObj == null && (System.currentTimeMillis() - roomEnteredAt) < 10_000L) {
-                        // 10s grace period: retry 3 times at 2s intervals before treating missing row as ended
-                        for (retry in 1..3) {
-                            delay(2000)
+                    if (roomObj == null) {
+                        // Retry with fresh authenticated bearer token before treating missing row as ended
+                        val maxRetries = if ((System.currentTimeMillis() - roomEnteredAt) < 10_000L) 3 else 1
+                        for (retry in 1..maxRetries) {
+                            delay(if (maxRetries > 1) 2000 else 800)
                             try {
-                                val retryRes = SupabaseClient.api.getVoiceRoomById(idEq = "eq.$activeRoomId")
+                                val freshToken = SupabaseSessionManager.getAuthenticatedBearerToken(context) ?: pollToken
+                                val retryRes = SupabaseClient.api.getVoiceRoomById(auth = freshToken, idEq = "eq.$activeRoomId")
                                 if (retryRes.isSuccessful && !retryRes.body().isNullOrEmpty()) {
                                     roomObj = retryRes.body()!!.first()
                                     break
@@ -1484,7 +1507,7 @@ fun VoiceRoomScreen(
                 }
 
                 // 2. Fetch room participants
-                val partsRes = SupabaseClient.api.getRoomParticipants(roomIdEq = "eq.$activeRoomId")
+                val partsRes = SupabaseClient.api.getRoomParticipants(auth = pollToken, roomIdEq = "eq.$activeRoomId")
                 if (partsRes.isSuccessful) {
                     val list = partsRes.body() ?: emptyList()
                     val liveList = com.example.realtime.VoiceRoomRealtimeManager.getLiveParticipants(activeRoomId)
@@ -2131,12 +2154,9 @@ fun VoiceRoomScreen(
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                        contentDescription = "Back",
-                        tint = currentTheme.primaryTextColor,
+                    Box(
                         modifier = Modifier
-                            .size(24.dp)
+                            .size(28.dp)
                             .clickable {
                                 if (isCurrentUserHost) {
                                     showHostLeaveDialog = true
@@ -2146,8 +2166,14 @@ fun VoiceRoomScreen(
                                     }
                                     onBack()
                                 }
-                            }
-                    )
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        SoftBackIcon(
+                            size = 20.dp,
+                            color = currentTheme.primaryTextColor
+                        )
+                    }
                     
                     Spacer(modifier = Modifier.width(8.dp))
                     
@@ -2211,11 +2237,9 @@ fun VoiceRoomScreen(
                             .clickable { showThreeDotMenu = true },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.MoreVert,
-                            contentDescription = "More",
-                            tint = currentTheme.primaryTextColor,
-                            modifier = Modifier.size(24.dp)
+                        FunkyVerticalMoreIcon(
+                            color = currentTheme.primaryTextColor,
+                            modifier = Modifier.size(22.dp)
                         )
                         
                         val menuBg = if (currentTheme.isDark) Color(0xFF1E293B).copy(alpha = 0.98f) else Color.White
@@ -2365,7 +2389,11 @@ fun VoiceRoomScreen(
                                 .background(Color(0xFFF59E0B).copy(alpha = 0.2f)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("💬", fontSize = 18.sp)
+                            FunkyChatIcon(
+                                color = Color(0xFFF59E0B),
+                                isFilled = true,
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                         Spacer(modifier = Modifier.width(10.dp))
                         Column(modifier = Modifier.weight(1f)) {
@@ -2400,11 +2428,9 @@ fun VoiceRoomScreen(
                             onClick = { showOverlayBanner = false },
                             modifier = Modifier.size(28.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Dismiss",
-                                tint = currentTheme.secondaryTextColor,
-                                modifier = Modifier.size(16.dp)
+                            SoftCloseIcon(
+                                size = 16.dp,
+                                color = currentTheme.secondaryTextColor
                             )
                         }
                     }
@@ -2426,7 +2452,7 @@ fun VoiceRoomScreen(
                             .padding(horizontal = 14.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("⏳", fontSize = 18.sp)
+                        SoftHourglassIcon(size = 18.dp, color = Color(0xFFB45309))
                         Spacer(modifier = Modifier.width(10.dp))
                         val mins = hostAwaySecondsLeft!! / 60
                         val secs = hostAwaySecondsLeft!! % 60
@@ -2465,10 +2491,8 @@ fun VoiceRoomScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.weight(1f)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Lock,
-                                contentDescription = "Private Room Icon",
-                                tint = if (isRoomDarkMode) Color(0xFFFBBF24) else Color(0xFFB45309),
+                            FunkyLockIcon(
+                                color = if (isRoomDarkMode) Color(0xFFFBBF24) else Color(0xFFB45309),
                                 modifier = Modifier.size(20.dp)
                             )
                             Spacer(modifier = Modifier.width(10.dp))
@@ -2502,11 +2526,9 @@ fun VoiceRoomScreen(
                                 .size(36.dp)
                                 .background(if (isRoomDarkMode) Color.White.copy(alpha = 0.1f) else Color.White, CircleShape)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Share,
-                                contentDescription = "Copy Code",
-                                tint = if (isRoomDarkMode) Color.White else Color.Black,
-                                modifier = Modifier.size(16.dp)
+                            SoftShareIcon(
+                                size = 16.dp,
+                                color = if (isRoomDarkMode) Color.White else Color.Black
                             )
                         }
                     }
@@ -2767,7 +2789,7 @@ fun VoiceRoomScreen(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(16.dp))
+                        SoftWarningIcon(size = 16.dp, color = Color(0xFFD97706))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "Community Warning Active (1h): Messaging disabled. ${myModerationStatus?.reason?.let { "($it)" } ?: ""}",
@@ -2790,7 +2812,7 @@ fun VoiceRoomScreen(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Lock, contentDescription = null, tint = Color(0xFF4B5563), modifier = Modifier.size(16.dp))
+                        FunkyLockIcon(color = Color(0xFF4B5563), modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "Moderation Mute: Outgoing messages are disabled.",
@@ -2880,10 +2902,8 @@ fun VoiceRoomScreen(
                                 .clickable { onSendRoomMessage(chatInputValue) },
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Send,
-                                contentDescription = "Send",
-                                tint = Color.White,
+                            FunkySendIcon(
+                                color = Color.White,
                                 modifier = Modifier.size(14.dp)
                             )
                         }
@@ -3518,21 +3538,20 @@ fun VoiceRoomScreen(
             onDismiss = { showGiftSheet = false },
             onGiftSentSuccess = { giftName, recipientName, qty, coinsSpent ->
                 // Ephemeral notification Toast
-                Toast.makeText(context, "🎁 Sent $qty $giftName to $recipientName!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Sent $qty $giftName to $recipientName!", Toast.LENGTH_SHORT).show()
             }
         )
     }
 
     // Suspension Modal Dialog (Active moderation enforcement)
     if (myModerationStatus?.action_type == "suspend" && ModerationManager.isActionActive(myModerationStatus)) {
+        val funkyColors = LocalFunkyColors.current
         AlertDialog(
             onDismissRequest = { /* Modal cannot be dismissed without leaving */ },
             icon = {
-                Icon(
-                    imageVector = Icons.Default.Warning,
-                    contentDescription = "Suspended",
-                    tint = Color(0xFFDC2626),
-                    modifier = Modifier.size(36.dp)
+                SoftWarningIcon(
+                    size = 36.dp,
+                    color = Color(0xFFDC2626)
                 )
             },
             title = {
@@ -3540,7 +3559,7 @@ fun VoiceRoomScreen(
                     text = "Account Suspended",
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp,
-                    color = Color(0xFF1E293B)
+                    color = funkyColors.ink
                 )
             },
             text = {
@@ -3548,10 +3567,10 @@ fun VoiceRoomScreen(
                     Text(
                         text = "Your access to Funkytalk voice rooms has been suspended due to moderation policy violations.",
                         fontSize = 14.sp,
-                        color = Color(0xFF475569)
+                        color = funkyColors.mute
                     )
                     Surface(
-                        color = Color(0xFFFEF2F2),
+                        color = if (funkyColors.isDark) Color(0xFF7F1D1D).copy(alpha = 0.35f) else Color(0xFFFEF2F2),
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -3560,14 +3579,14 @@ fun VoiceRoomScreen(
                                 text = "Reason: ${myModerationStatus?.reason ?: "Violation of Community Guidelines"}",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = Color(0xFF991B1B)
+                                color = if (funkyColors.isDark) Color(0xFFFCA5A5) else Color(0xFF991B1B)
                             )
                             if (!myModerationStatus?.expires_at.isNullOrBlank()) {
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
                                     text = "Suspension expires: ${myModerationStatus?.expires_at}",
                                     fontSize = 12.sp,
-                                    color = Color(0xFFB91C1C)
+                                    color = if (funkyColors.isDark) Color(0xFFFECACA) else Color(0xFFB91C1C)
                                 )
                             }
                         }
@@ -3583,7 +3602,7 @@ fun VoiceRoomScreen(
                 }
             },
             shape = RoundedCornerShape(20.dp),
-            containerColor = Color.White
+            containerColor = funkyColors.surface
         )
     }
 
@@ -3952,10 +3971,8 @@ fun ChatBottomSheetContent(privateChats: List<PrivateChatItem>, selectedThemeInd
                     .background(Color(0xFFFEF3C7), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.Lock,
-                    contentDescription = "Locked",
-                    tint = Color(0xFFD97706),
+                FunkyLockIcon(
+                    color = Color(0xFFD97706),
                     modifier = Modifier.size(32.dp)
                 )
             }
@@ -3985,9 +4002,9 @@ fun ChatBottomSheetContent(privateChats: List<PrivateChatItem>, selectedThemeInd
                 visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {
                     IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                        Icon(
-                            imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                            contentDescription = null,
+                        SoftEyeIcon(
+                            visible = passwordVisible,
+                            size = 20.dp,
                             tint = if (currentTheme.isDark) Color.White.copy(alpha = 0.6f) else Color.Gray
                         )
                     }
@@ -4078,7 +4095,12 @@ fun ChatBottomSheetContent(privateChats: List<PrivateChatItem>, selectedThemeInd
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 8.dp),
             placeholder = { Text("Search chats or users", color = if (currentTheme.isDark) Color.White.copy(alpha = 0.5f) else Color.Gray) },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = if (currentTheme.isDark) Color.White.copy(alpha = 0.6f) else Color.Gray) },
+            leadingIcon = {
+                SoftSearchIcon(
+                    size = 18.dp,
+                    color = if (currentTheme.isDark) Color.White.copy(alpha = 0.6f) else Color.Gray
+                )
+            },
             colors = TextFieldDefaults.colors(
                 focusedContainerColor = if (currentTheme.isDark) Color.Black.copy(alpha = 0.25f) else Color(0xFFF9FAFB),
                 unfocusedContainerColor = if (currentTheme.isDark) Color.Black.copy(alpha = 0.25f) else Color(0xFFF9FAFB),
@@ -5663,11 +5685,9 @@ fun ReportRoomBottomSheetContent(
                     .clip(CircleShape)
                     .background(closeBtnBg)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Close",
-                    tint = closeBtnTint,
-                    modifier = Modifier.size(18.dp)
+                SoftCloseIcon(
+                    size = 18.dp,
+                    color = closeBtnTint
                 )
             }
         }
@@ -5748,11 +5768,9 @@ fun ReportRoomBottomSheetContent(
                     contentAlignment = Alignment.Center
                 ) {
                     if (isSelected) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = null,
-                            tint = if (isDark) Color(0xFF451A03) else Color.White,
-                            modifier = Modifier.size(14.dp)
+                        SoftCheckIcon(
+                            size = 14.dp,
+                            color = if (isDark) Color(0xFF451A03) else Color.White
                         )
                     }
                 }
@@ -5810,12 +5828,21 @@ fun ReportRoomBottomSheetContent(
                             )
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
-                        Text(
-                            text = "✓ $recentMessageCount Attached",
-                            color = if (isDark) Color(0xFF34D399) else Color(0xFF15803D),
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.ExtraBold
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            SoftCheckIcon(
+                                size = 10.dp,
+                                color = if (isDark) Color(0xFF34D399) else Color(0xFF15803D)
+                            )
+                            Text(
+                                text = "$recentMessageCount Attached",
+                                color = if (isDark) Color(0xFF34D399) else Color(0xFF15803D),
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
                     }
                 }
             }
@@ -5851,12 +5878,21 @@ fun ReportRoomBottomSheetContent(
                             )
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
-                        Text(
-                            text = "✓ $activeParticipantsCount Members",
-                            color = if (isDark) Color(0xFF34D399) else Color(0xFF15803D),
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.ExtraBold
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            SoftCheckIcon(
+                                size = 10.dp,
+                                color = if (isDark) Color(0xFF34D399) else Color(0xFF15803D)
+                            )
+                            Text(
+                                text = "$activeParticipantsCount Members",
+                                color = if (isDark) Color(0xFF34D399) else Color(0xFF15803D),
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
                     }
                 }
             }
@@ -5924,18 +5960,21 @@ fun ReportRoomBottomSheetContent(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Soft3DScreenshotIcon(modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
+                            SoftCheckIcon(
+                                size = 11.dp,
+                                color = if (isDark) Color(0xFF34D399) else Color(0xFF047857)
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
                             Text(
-                                text = "✓ Screenshot",
+                                text = "Screenshot",
                                 fontSize = 11.sp,
                                 color = if (isDark) Color(0xFF34D399) else Color(0xFF047857),
                                 fontWeight = FontWeight.Bold
                             )
                         }
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Remove Screenshot",
-                            tint = if (isDark) Color(0xFF34D399) else Color(0xFF047857),
-                            modifier = Modifier.size(16.dp)
+                        SoftCloseIcon(
+                            size = 16.dp,
+                            color = if (isDark) Color(0xFF34D399) else Color(0xFF047857)
                         )
                     }
                 } else {
@@ -5999,18 +6038,21 @@ fun ReportRoomBottomSheetContent(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Soft3DVideoCamIcon(modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
+                            SoftCheckIcon(
+                                size = 11.dp,
+                                color = if (isDark) Color(0xFF34D399) else Color(0xFF047857)
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
                             Text(
-                                text = "✓ Clip",
+                                text = "Clip",
                                 fontSize = 11.sp,
                                 color = if (isDark) Color(0xFF34D399) else Color(0xFF047857),
                                 fontWeight = FontWeight.Bold
                             )
                         }
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Remove Clip",
-                            tint = if (isDark) Color(0xFF34D399) else Color(0xFF047857),
-                            modifier = Modifier.size(16.dp)
+                        SoftCloseIcon(
+                            size = 16.dp,
+                            color = if (isDark) Color(0xFF34D399) else Color(0xFF047857)
                         )
                     }
                 } else {
@@ -6338,8 +6380,12 @@ fun OneToOneChatBottomSheetContent(
                             Spacer(modifier = Modifier.width(6.dp))
                             Box(modifier = Modifier.size(8.dp).background(LiveGreen, CircleShape))
                         }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(text = "🌙 11:10 PM", fontSize = 11.sp, color = secondaryTextColor)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            SoftMoonIcon(size = 11.dp, color = secondaryTextColor)
+                            Text(text = "11:10 PM", fontSize = 11.sp, color = secondaryTextColor)
                         }
                     }
                 }
@@ -6495,7 +6541,10 @@ fun OneToOneChatBottomSheetContent(
                                         Text(text = msg.time, fontSize = 10.sp, color = secondaryTextColor)
                                         if (alignEnd) {
                                             Spacer(modifier = Modifier.width(4.dp))
-                                            Text(text = "✓✓", fontSize = 11.sp, color = Color(0xFF00C4FF), fontWeight = FontWeight.Bold)
+                                            FunkyDoubleCheckIcon(
+                                                color = Color(0xFF00C4FF),
+                                                modifier = Modifier.size(14.dp)
+                                            )
                                         }
                                     }
                                 }
@@ -6513,7 +6562,7 @@ fun OneToOneChatBottomSheetContent(
                                     ) {
                                         Text("AI", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00C4FF))
                                         Spacer(modifier = Modifier.width(2.dp))
-                                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(8.dp), tint = Color.Gray)
+                                        FunkyPlayIcon(color = Color.Gray, modifier = Modifier.size(8.dp))
                                     }
                                 }
                             }
@@ -6555,7 +6604,7 @@ fun OneToOneChatBottomSheetContent(
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(text = "Translate...", fontSize = 12.sp, color = secondaryTextColor)
                 }
-                Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color.Gray)
+                SoftSearchIcon(size = 14.dp, color = Color.Gray)
             }
 
             // Input Field Row
@@ -6580,12 +6629,14 @@ fun OneToOneChatBottomSheetContent(
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Mic,
-                        contentDescription = "Mic",
-                        tint = secondaryTextColor,
-                        modifier = Modifier.size(20.dp).clickable { }
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clickable { },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        SoftMicIcon(size = 20.dp, color = secondaryTextColor)
+                    }
                     Spacer(modifier = Modifier.width(8.dp))
                     androidx.compose.foundation.text.BasicTextField(
                         value = typedMsg,
@@ -6646,11 +6697,21 @@ fun OneToOneChatBottomSheetContent(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(imageVector = Icons.Default.Share, contentDescription = "Gallery", tint = Color.Gray, modifier = Modifier.size(22.dp).clickable {})
-                Icon(imageVector = Icons.Default.Face, contentDescription = "Emojis", tint = Color.Gray, modifier = Modifier.size(22.dp).clickable {})
-                Icon(imageVector = Icons.Default.Add, contentDescription = "Call", tint = Color.Gray, modifier = Modifier.size(22.dp).clickable {})
-                CustomGiftBoxIcon(tint = Color(0xFFEC4899), modifier = Modifier.size(22.dp).clickable {})
-                Icon(imageVector = Icons.Default.Star, contentDescription = "Heart", tint = Color(0xFFEC4899), modifier = Modifier.size(22.dp).clickable {})
+                Box(modifier = Modifier.size(28.dp).clickable {}, contentAlignment = Alignment.Center) {
+                    SoftImageIcon(size = 22.dp, color = Color.Gray)
+                }
+                Box(modifier = Modifier.size(28.dp).clickable {}, contentAlignment = Alignment.Center) {
+                    SoftFaceIcon(size = 22.dp, color = Color.Gray)
+                }
+                Box(modifier = Modifier.size(28.dp).clickable {}, contentAlignment = Alignment.Center) {
+                    SoftPlusIcon(size = 22.dp, color = Color.Gray)
+                }
+                Box(modifier = Modifier.size(28.dp).clickable {}, contentAlignment = Alignment.Center) {
+                    CustomGiftBoxIcon(tint = Color(0xFFEC4899), modifier = Modifier.size(22.dp))
+                }
+                Box(modifier = Modifier.size(28.dp).clickable {}, contentAlignment = Alignment.Center) {
+                    SoftHeartIcon(isLiked = true, size = 22.dp, color = Color(0xFFEC4899))
+                }
             }
         }
     }
@@ -6687,13 +6748,13 @@ fun MoreFeaturesBottomSheetContent(
         Spacer(modifier = Modifier.height(24.dp))
 
         // Grid of Features
-        val features = listOf(
-            "Video" to Icons.Default.PlayArrow,
-            "Minigame" to Icons.Default.Star,
-            "Message" to Icons.Default.Notifications,
-            "Mic effect" to Icons.Default.Face,
-            "Music" to Icons.Default.MoreVert,
-            "Setting" to Icons.Default.Search
+        val features: List<Pair<String, @Composable () -> Unit>> = listOf(
+            "Video" to { FunkyPlayIcon(color = textColor, modifier = Modifier.size(24.dp)) },
+            "Minigame" to { SoftSparkleIcon(size = 26.dp, color = textColor) },
+            "Message" to { SoftBellIcon(size = 26.dp, color = textColor) },
+            "Mic effect" to { SoftFaceIcon(size = 26.dp, color = textColor) },
+            "Music" to { SoftMusicNoteIcon(size = 26.dp, color = textColor) },
+            "Setting" to { SoftSettingsGearIcon(size = 26.dp, color = textColor) }
         )
 
         val context = androidx.compose.ui.platform.LocalContext.current
@@ -6701,7 +6762,7 @@ fun MoreFeaturesBottomSheetContent(
             val chunks = features.chunked(3)
             chunks.forEach { row ->
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    row.forEach { (name, icon) ->
+                    row.forEach { (name, iconContent) ->
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier.weight(1f).clickable { Toast.makeText(context, "Coming Soon!", Toast.LENGTH_SHORT).show() }
@@ -6712,12 +6773,7 @@ fun MoreFeaturesBottomSheetContent(
                                     .background(if (isDarkMode) Color.White.copy(alpha = 0.08f) else Color(0xFFF3F4F6), RoundedCornerShape(18.dp)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = icon,
-                                    contentDescription = name,
-                                    tint = textColor,
-                                    modifier = Modifier.size(28.dp)
-                                )
+                                iconContent()
                             }
                             Spacer(modifier = Modifier.height(10.dp))
                             Text(
@@ -6764,10 +6820,11 @@ fun MoreFeaturesBottomSheetContent(
                             ),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = if (theme.isDark) "🌙" else "☀️",
-                            fontSize = 28.sp
-                        )
+                        if (theme.isDark) {
+                            SoftMoonIcon(size = 28.dp, color = Color(0xFFFBBF24))
+                        } else {
+                            SoftSunIcon(size = 28.dp, color = Color(0xFFF59E0B))
+                        }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
@@ -6788,20 +6845,28 @@ fun HostLeaveRoomSheet(
     onLeaveOnly: () -> Unit,
     onEndRoom: () -> Unit
 ) {
+    val funkyColors = LocalFunkyColors.current
+    val isDark = funkyColors.isDark
     var selectedOption by remember { mutableStateOf(0) } // 0 = Leave room, 1 = End room
     var showEndConfirmDialog by remember { mutableStateOf(false) }
 
     if (showEndConfirmDialog) {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { showEndConfirmDialog = false },
+            containerColor = funkyColors.surface,
             title = {
-                Text(text = "End room for everyone?", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text(
+                    text = "End room for everyone?",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = funkyColors.ink
+                )
             },
             text = {
                 Text(
                     text = "This will close the room immediately for all participants and clear all seats.",
                     fontSize = 14.sp,
-                    color = Color(0xFF64748B)
+                    color = funkyColors.mute
                 )
             },
             confirmButton = {
@@ -6821,11 +6886,16 @@ fun HostLeaveRoomSheet(
                 androidx.compose.material3.TextButton(
                     onClick = { showEndConfirmDialog = false }
                 ) {
-                    Text("Cancel", color = Color(0xFF64748B))
+                    Text("Cancel", color = funkyColors.mute)
                 }
             }
         )
     }
+
+    val sheetBg = if (isDark) funkyColors.surface else Color(0xFFFFFDF8)
+    val closeCircleBg = if (isDark) funkyColors.soft else Color(0xFFF1F5F9)
+    val unselectedCardBg = if (isDark) funkyColors.soft else Color(0xFFFAF9F6)
+    val unselectedBorder = if (isDark) funkyColors.line else Color(0xFFE2E8F0)
 
     androidx.compose.ui.window.Dialog(
         onDismissRequest = onDismiss
@@ -6834,7 +6904,8 @@ fun HostLeaveRoomSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(32.dp))
-                .background(Color(0xFFFFFDF8))
+                .background(sheetBg)
+                .border(1.dp, funkyColors.line, RoundedCornerShape(32.dp))
                 .padding(20.dp)
         ) {
             Column(
@@ -6851,7 +6922,7 @@ fun HostLeaveRoomSheet(
                             .width(38.dp)
                             .height(4.dp)
                             .clip(RoundedCornerShape(2.dp))
-                            .background(Color(0xFFE2E8F0))
+                            .background(unselectedBorder)
                             .align(Alignment.Center)
                     )
 
@@ -6860,17 +6931,12 @@ fun HostLeaveRoomSheet(
                         modifier = Modifier
                             .size(32.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFFF1F5F9))
+                            .background(closeCircleBg)
                             .clickable { onDismiss() }
                             .align(Alignment.CenterEnd),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = "✕",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF64748B)
-                        )
+                        SoftCloseIcon(size = 15.dp, color = funkyColors.mute)
                     }
                 }
 
@@ -6892,7 +6958,7 @@ fun HostLeaveRoomSheet(
                     text = "Leave Room?",
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0F172A)
+                    color = funkyColors.ink
                 )
 
                 Spacer(modifier = Modifier.height(6.dp))
@@ -6900,7 +6966,7 @@ fun HostLeaveRoomSheet(
                 Text(
                     text = "As the Host, you can leave temporarily or end the session completely for everyone.",
                     fontSize = 13.sp,
-                    color = Color(0xFF64748B),
+                    color = funkyColors.mute,
                     textAlign = TextAlign.Center,
                     lineHeight = 18.sp,
                     modifier = Modifier.padding(horizontal = 8.dp)
@@ -6914,10 +6980,14 @@ fun HostLeaveRoomSheet(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(20.dp))
-                        .background(if (isOption0Selected) Color(0xFFFFFBEB) else Color(0xFFFAF9F6))
+                        .background(
+                            if (isOption0Selected) {
+                                if (isDark) Color(0xFF78350F).copy(alpha = 0.35f) else Color(0xFFFFFBEB)
+                            } else unselectedCardBg
+                        )
                         .border(
                             width = if (isOption0Selected) 1.5.dp else 1.dp,
-                            color = if (isOption0Selected) Color(0xFFFFC107) else Color(0xFFE2E8F0),
+                            color = if (isOption0Selected) Color(0xFFFFC107) else unselectedBorder,
                             shape = RoundedCornerShape(20.dp)
                         )
                         .clickable { selectedOption = 0 }
@@ -6931,14 +7001,12 @@ fun HostLeaveRoomSheet(
                             modifier = Modifier
                                 .size(48.dp)
                                 .clip(RoundedCornerShape(16.dp))
-                                .background(Color(0xFFFEF3C7)),
+                                .background(if (isDark) Color(0xFF78350F).copy(alpha = 0.55f) else Color(0xFFFEF3C7)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Person,
-                                contentDescription = null,
-                                tint = Color(0xFFD97706),
-                                modifier = Modifier.size(24.dp)
+                            SoftPersonIcon(
+                                size = 24.dp,
+                                color = if (isDark) Color(0xFFFBBF24) else Color(0xFFD97706)
                             )
                         }
 
@@ -6949,13 +7017,13 @@ fun HostLeaveRoomSheet(
                                 text = "Leave room",
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0F172A)
+                                color = funkyColors.ink
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = "Keeps room active with floating chat head. You have a 3-minute grace period to return.",
                                 fontSize = 11.sp,
-                                color = Color(0xFF64748B),
+                                color = funkyColors.mute,
                                 lineHeight = 15.sp
                             )
                         }
@@ -6970,7 +7038,7 @@ fun HostLeaveRoomSheet(
                                 .background(if (isOption0Selected) Color(0xFFFFC107) else Color.Transparent)
                                 .border(
                                     width = if (isOption0Selected) 0.dp else 1.5.dp,
-                                    color = if (isOption0Selected) Color.Transparent else Color(0xFFCBD5E1),
+                                    color = if (isOption0Selected) Color.Transparent else unselectedBorder,
                                     shape = CircleShape
                                 ),
                             contentAlignment = Alignment.Center
@@ -6995,10 +7063,14 @@ fun HostLeaveRoomSheet(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(20.dp))
-                        .background(if (isOption1Selected) Color(0xFFFEF2F2) else Color(0xFFFAF9F6))
+                        .background(
+                            if (isOption1Selected) {
+                                if (isDark) Color(0xFF7F1D1D).copy(alpha = 0.38f) else Color(0xFFFEF2F2)
+                            } else unselectedCardBg
+                        )
                         .border(
                             width = if (isOption1Selected) 1.5.dp else 1.dp,
-                            color = if (isOption1Selected) Color(0xFFEF4444) else Color(0xFFFEE2E2),
+                            color = if (isOption1Selected) Color(0xFFEF4444) else (if (isDark) Color(0xFFEF4444).copy(alpha = 0.35f) else Color(0xFFFEE2E2)),
                             shape = RoundedCornerShape(20.dp)
                         )
                         .clickable { selectedOption = 1 }
@@ -7012,14 +7084,12 @@ fun HostLeaveRoomSheet(
                             modifier = Modifier
                                 .size(48.dp)
                                 .clip(RoundedCornerShape(16.dp))
-                                .background(Color(0xFFFEE2E2)),
+                                .background(if (isDark) Color(0xFF7F1D1D).copy(alpha = 0.55f) else Color(0xFFFEE2E2)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ExitToApp,
-                                contentDescription = null,
-                                tint = Color(0xFFEF4444),
-                                modifier = Modifier.size(24.dp)
+                            SoftExitIcon(
+                                size = 24.dp,
+                                color = Color(0xFFEF4444)
                             )
                         }
 
@@ -7030,13 +7100,13 @@ fun HostLeaveRoomSheet(
                                 text = "End room",
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0F172A)
+                                color = funkyColors.ink
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = "Closes the room for all participants immediately and clears all seats.",
                                 fontSize = 11.sp,
-                                color = Color(0xFF64748B),
+                                color = funkyColors.mute,
                                 lineHeight = 15.sp
                             )
                         }
@@ -7051,7 +7121,7 @@ fun HostLeaveRoomSheet(
                                 .background(if (isOption1Selected) Color(0xFFEF4444) else Color.Transparent)
                                 .border(
                                     width = if (isOption1Selected) 0.dp else 1.5.dp,
-                                    color = if (isOption1Selected) Color.Transparent else Color(0xFFCBD5E1),
+                                    color = if (isOption1Selected) Color.Transparent else unselectedBorder,
                                     shape = CircleShape
                                 ),
                             contentAlignment = Alignment.Center
@@ -7104,11 +7174,9 @@ fun HostLeaveRoomSheet(
                             color = Color.Black
                         )
                         Spacer(modifier = Modifier.width(10.dp))
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = "Continue",
-                            tint = Color.Black,
-                            modifier = Modifier.size(18.dp)
+                        SoftForwardArrowIcon(
+                            size = 18.dp,
+                            color = Color.Black
                         )
                     }
                 }
@@ -7120,7 +7188,7 @@ fun HostLeaveRoomSheet(
                     text = "Cancel",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFF64748B),
+                    color = funkyColors.mute,
                     modifier = Modifier
                         .clip(RoundedCornerShape(12.dp))
                         .clickable { onDismiss() }

@@ -7,18 +7,17 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import com.example.ui.components.SoftCrownIcon
+import com.example.ui.components.SoftPersonIcon
+import com.example.ui.components.SoftPlusIcon
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -283,19 +282,15 @@ private fun EmptySpeakerSeatItem(
                     )
                 }
                 isCurrentUserSpeakerOrHost -> {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = "Available slot",
-                        tint = secondaryText.copy(alpha = 0.35f),
-                        modifier = Modifier.size(22.dp)
+                    SoftPersonIcon(
+                        size = 22.dp,
+                        color = secondaryText.copy(alpha = 0.35f)
                     )
                 }
                 else -> {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "Request slot",
-                        tint = accentColor,
-                        modifier = Modifier.size(24.dp)
+                    SoftPlusIcon(
+                        size = 22.dp,
+                        color = accentColor
                     )
                 }
             }
@@ -377,12 +372,18 @@ fun VoiceSpeakerItem(
                         .background(Color(0xFFFFD700), RoundedCornerShape(10.dp))
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) {
-                    Text(
-                        text = "👑 HOST",
-                        color = Color.Black,
-                        fontSize = 8.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        SoftCrownIcon(size = 10.dp, color = Color.Black)
+                        Text(
+                            text = "HOST",
+                            color = Color.Black,
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
 

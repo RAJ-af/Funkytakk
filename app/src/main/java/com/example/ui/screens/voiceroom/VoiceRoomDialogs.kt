@@ -7,14 +7,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Group
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Videocam
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import com.example.ui.components.SoftCloseIcon
+import com.example.ui.components.SoftCrownIcon
+import com.example.ui.components.SoftGroupIcon
+import com.example.ui.components.SoftMicIcon
+import com.example.ui.components.SoftVideoIcon
+import com.example.ui.theme.LocalFunkyColors
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,6 +42,14 @@ fun MicrophoneAccessDialog(
     onDismiss: () -> Unit,
     onAllow: () -> Unit
 ) {
+    val colors = LocalFunkyColors.current
+    val dialogBg = if (colors.isDark) colors.surface else Color(0xFFFFFDF5)
+    val borderCol = if (colors.isDark) colors.line else Color(0xFFFDE68A)
+    val closeBg = if (colors.isDark) colors.soft else Color(0xFFF1F5F9)
+    val closeTint = if (colors.isDark) colors.ink else Color(0xFF475569)
+    val titleCol = colors.ink
+    val subCol = colors.mute
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -50,8 +58,8 @@ fun MicrophoneAccessDialog(
             modifier = Modifier
                 .fillMaxWidth(0.9f)
                 .clip(RoundedCornerShape(32.dp))
-                .background(Color(0xFFFFFDF5))
-                .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(32.dp))
+                .background(dialogBg)
+                .border(1.dp, borderCol, RoundedCornerShape(32.dp))
                 .padding(24.dp)
         ) {
             Column(
@@ -66,15 +74,13 @@ fun MicrophoneAccessDialog(
                     Box(
                         modifier = Modifier
                             .size(32.dp)
-                            .background(Color(0xFFF1F5F9), CircleShape)
+                            .background(closeBg, CircleShape)
                             .clickable { onDismiss() },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Close",
-                            tint = Color(0xFF475569),
-                            modifier = Modifier.size(18.dp)
+                        SoftCloseIcon(
+                            size = 16.dp,
+                            color = closeTint
                         )
                     }
                 }
@@ -101,7 +107,7 @@ fun MicrophoneAccessDialog(
                     text = "Allow Microphone Access?",
                     fontSize = 22.sp,
                     fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF0F172A),
+                    color = titleCol,
                     textAlign = TextAlign.Center
                 )
 
@@ -111,7 +117,7 @@ fun MicrophoneAccessDialog(
                 Text(
                     text = "We need your microphone permission to enable voice and video chat, so you can talk, make friends, and enjoy all the features on FunkyTalk.",
                     fontSize = 13.sp,
-                    color = Color(0xFF64748B),
+                    color = subCol,
                     textAlign = TextAlign.Center,
                     lineHeight = 18.sp,
                     modifier = Modifier.padding(horizontal = 8.dp)
@@ -133,15 +139,13 @@ fun MicrophoneAccessDialog(
                                 .background(Color(0xFFFEF08A), CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Mic,
-                                contentDescription = null,
-                                tint = Color(0xFF854D0E),
-                                modifier = Modifier.size(24.dp)
+                            SoftMicIcon(
+                                size = 22.dp,
+                                color = Color(0xFF854D0E)
                             )
                         }
                         Spacer(modifier = Modifier.height(6.dp))
-                        Text("Voice Chat", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF334155))
+                        Text("Voice Chat", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = titleCol)
                     }
 
                     // Video Chat
@@ -152,15 +156,13 @@ fun MicrophoneAccessDialog(
                                 .background(Color(0xFFBBF7D0), CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Videocam,
-                                contentDescription = null,
-                                tint = Color(0xFF166534),
-                                modifier = Modifier.size(24.dp)
+                            SoftVideoIcon(
+                                size = 22.dp,
+                                color = Color(0xFF166534)
                             )
                         }
                         Spacer(modifier = Modifier.height(6.dp))
-                        Text("Video Chat", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF334155))
+                        Text("Video Chat", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = titleCol)
                     }
 
                     // Meet New Friends
@@ -171,15 +173,13 @@ fun MicrophoneAccessDialog(
                                 .background(Color(0xFFFBCFE8), CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Group,
-                                contentDescription = null,
-                                tint = Color(0xFF9D174D),
-                                modifier = Modifier.size(24.dp)
+                            SoftGroupIcon(
+                                size = 22.dp,
+                                color = Color(0xFF9D174D)
                             )
                         }
                         Spacer(modifier = Modifier.height(6.dp))
-                        Text("Meet New Friends", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF334155))
+                        Text("Meet New Friends", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = titleCol)
                     }
                 }
 
@@ -196,8 +196,8 @@ fun MicrophoneAccessDialog(
                             .weight(1f)
                             .height(50.dp)
                             .clip(RoundedCornerShape(25.dp))
-                            .background(Color(0xFFFFFDF5))
-                            .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(25.dp))
+                            .background(dialogBg)
+                            .border(1.dp, borderCol, RoundedCornerShape(25.dp))
                             .clickable { onDismiss() },
                         contentAlignment = Alignment.Center
                     ) {
@@ -205,7 +205,7 @@ fun MicrophoneAccessDialog(
                             text = "Not Now",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A)
+                            color = titleCol
                         )
                     }
 
@@ -249,6 +249,14 @@ fun InviteToTalkDialog(
     onDismiss: () -> Unit,
     onAccept: () -> Unit
 ) {
+    val colors = LocalFunkyColors.current
+    val dialogBg = if (colors.isDark) colors.surface else Color(0xFFFFFDF5)
+    val borderCol = if (colors.isDark) colors.line else Color(0xFFFDE68A)
+    val closeBg = if (colors.isDark) colors.soft else Color(0xFFF1F5F9)
+    val closeTint = if (colors.isDark) colors.ink else Color(0xFF475569)
+    val titleCol = colors.ink
+    val subCol = colors.mute
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -257,8 +265,8 @@ fun InviteToTalkDialog(
             modifier = Modifier
                 .fillMaxWidth(0.9f)
                 .clip(RoundedCornerShape(32.dp))
-                .background(Color(0xFFFFFDF5))
-                .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(32.dp))
+                .background(dialogBg)
+                .border(1.dp, borderCol, RoundedCornerShape(32.dp))
                 .padding(24.dp)
         ) {
             Column(
@@ -273,15 +281,13 @@ fun InviteToTalkDialog(
                     Box(
                         modifier = Modifier
                             .size(32.dp)
-                            .background(Color(0xFFF1F5F9), CircleShape)
+                            .background(closeBg, CircleShape)
                             .clickable { onDismiss() },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Close",
-                            tint = Color(0xFF475569),
-                            modifier = Modifier.size(18.dp)
+                        SoftCloseIcon(
+                            size = 16.dp,
+                            color = closeTint
                         )
                     }
                 }
@@ -322,12 +328,18 @@ fun InviteToTalkDialog(
                         .background(Color(0xFFFEF08A), RoundedCornerShape(12.dp))
                         .padding(horizontal = 10.dp, vertical = 3.dp)
                 ) {
-                    Text(
-                        text = "👑 Admin",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF854D0E)
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        SoftCrownIcon(size = 12.dp, color = Color(0xFF854D0E))
+                        Text(
+                            text = "Admin",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF854D0E)
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -337,7 +349,7 @@ fun InviteToTalkDialog(
                     text = "$hostName invites you to talk",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF0F172A),
+                    color = titleCol,
                     textAlign = TextAlign.Center
                 )
 
@@ -347,7 +359,7 @@ fun InviteToTalkDialog(
                 Text(
                     text = "Join the conversation and connect with people in this room.",
                     fontSize = 13.sp,
-                    color = Color(0xFF64748B),
+                    color = subCol,
                     textAlign = TextAlign.Center,
                     lineHeight = 18.sp,
                     modifier = Modifier.padding(horizontal = 12.dp)
@@ -368,10 +380,10 @@ fun InviteToTalkDialog(
                                 .background(Color(0xFFFEF08A), CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.Mic, contentDescription = null, tint = Color(0xFF854D0E), modifier = Modifier.size(22.dp))
+                            SoftMicIcon(size = 20.dp, color = Color(0xFF854D0E))
                         }
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text("Voice Chat", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF334155))
+                        Text("Voice Chat", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = titleCol)
                     }
 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -381,10 +393,10 @@ fun InviteToTalkDialog(
                                 .background(Color(0xFFBBF7D0), CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.Videocam, contentDescription = null, tint = Color(0xFF166534), modifier = Modifier.size(22.dp))
+                            SoftVideoIcon(size = 20.dp, color = Color(0xFF166534))
                         }
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text("Video Chat", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF334155))
+                        Text("Video Chat", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = titleCol)
                     }
 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -394,10 +406,10 @@ fun InviteToTalkDialog(
                                 .background(Color(0xFFFBCFE8), CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.Group, contentDescription = null, tint = Color(0xFF9D174D), modifier = Modifier.size(22.dp))
+                            SoftGroupIcon(size = 20.dp, color = Color(0xFF9D174D))
                         }
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text("Meet New Friends", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF334155))
+                        Text("Meet New Friends", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = titleCol)
                     }
                 }
 
@@ -413,12 +425,12 @@ fun InviteToTalkDialog(
                             .weight(1f)
                             .height(50.dp)
                             .clip(RoundedCornerShape(25.dp))
-                            .background(Color(0xFFFFFDF5))
-                            .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(25.dp))
+                            .background(dialogBg)
+                            .border(1.dp, borderCol, RoundedCornerShape(25.dp))
                             .clickable { onDismiss() },
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("Not Now", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                        Text("Not Now", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = titleCol)
                     }
 
                     Box(
@@ -433,7 +445,7 @@ fun InviteToTalkDialog(
                             .clickable { onAccept() },
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("👋 Join Talk", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0F172A))
+                        Text("Join Talk", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF0F172A))
                     }
                 }
             }

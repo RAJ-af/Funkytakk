@@ -1922,6 +1922,615 @@ fun SoftSearchIcon(
     }
 }
 
+@Composable
+fun SoftMicIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    color: Color = Color.Black
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.10f
+
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(w * 0.34f, h * 0.12f),
+            size = Size(w * 0.32f, h * 0.48f),
+            cornerRadius = CornerRadius(w * 0.16f, w * 0.16f),
+            style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+
+        drawArc(
+            color = color,
+            startAngle = 0f,
+            sweepAngle = 180f,
+            useCenter = false,
+            topLeft = Offset(w * 0.22f, h * 0.26f),
+            size = Size(w * 0.56f, h * 0.46f),
+            style = Stroke(width = sw, cap = StrokeCap.Round)
+        )
+
+        drawLine(color, Offset(w * 0.50f, h * 0.72f), Offset(w * 0.50f, h * 0.88f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(w * 0.34f, h * 0.88f), Offset(w * 0.66f, h * 0.88f), strokeWidth = sw, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+fun SoftMicOffIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    color: Color = Color(0xFF9CA3AF)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.10f
+
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(w * 0.34f, h * 0.12f),
+            size = Size(w * 0.32f, h * 0.48f),
+            cornerRadius = CornerRadius(w * 0.16f, w * 0.16f),
+            style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+
+        drawArc(
+            color = color,
+            startAngle = 15f,
+            sweepAngle = 150f,
+            useCenter = false,
+            topLeft = Offset(w * 0.22f, h * 0.26f),
+            size = Size(w * 0.56f, h * 0.46f),
+            style = Stroke(width = sw, cap = StrokeCap.Round)
+        )
+
+        drawLine(color, Offset(w * 0.50f, h * 0.72f), Offset(w * 0.50f, h * 0.88f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(w * 0.34f, h * 0.88f), Offset(w * 0.66f, h * 0.88f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(w * 0.16f, h * 0.18f), Offset(w * 0.84f, h * 0.84f), strokeWidth = sw * 1.1f, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+fun SoftAddPhotoIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 24.dp,
+    color: Color = Color(0xFFF59E0B)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.09f
+
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(w * 0.12f, h * 0.22f),
+            size = Size(w * 0.66f, h * 0.62f),
+            cornerRadius = CornerRadius(w * 0.12f, w * 0.12f),
+            style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+
+        val mountain = Path().apply {
+            moveTo(w * 0.18f, h * 0.74f)
+            lineTo(w * 0.36f, h * 0.52f)
+            lineTo(w * 0.50f, h * 0.66f)
+            lineTo(w * 0.62f, h * 0.50f)
+            lineTo(w * 0.72f, h * 0.74f)
+        }
+        drawPath(mountain, color, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+
+        // Plus badge in top right
+        drawCircle(color = color, radius = w * 0.16f, center = Offset(w * 0.78f, h * 0.24f))
+        drawLine(Color.White, Offset(w * 0.78f, h * 0.15f), Offset(w * 0.78f, h * 0.33f), strokeWidth = sw * 0.9f, cap = StrokeCap.Round)
+        drawLine(Color.White, Offset(w * 0.69f, h * 0.24f), Offset(w * 0.87f, h * 0.24f), strokeWidth = sw * 0.9f, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+fun SoftMegaphoneIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 18.dp,
+    color: Color = Color(0xFF64748B)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.10f
+
+        val horn = Path().apply {
+            moveTo(w * 0.18f, h * 0.42f)
+            lineTo(w * 0.74f, h * 0.20f)
+            lineTo(w * 0.74f, h * 0.76f)
+            lineTo(w * 0.18f, h * 0.54f)
+            close()
+        }
+        drawPath(horn, color = color, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawLine(color, Offset(w * 0.28f, h * 0.58f), Offset(w * 0.34f, h * 0.84f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawArc(
+            color = color,
+            startAngle = -35f,
+            sweepAngle = 70f,
+            useCenter = false,
+            topLeft = Offset(w * 0.72f, h * 0.30f),
+            size = Size(w * 0.18f, h * 0.36f),
+            style = Stroke(width = sw, cap = StrokeCap.Round)
+        )
+    }
+}
+
+@Composable
+fun SoftPersonOffIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 18.dp,
+    color: Color = Color(0xFF64748B)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.10f
+
+        drawCircle(color = color, radius = w * 0.18f, center = Offset(w * 0.50f, h * 0.30f), style = Stroke(width = sw))
+        drawArc(
+            color = color,
+            startAngle = 180f,
+            sweepAngle = 180f,
+            useCenter = false,
+            topLeft = Offset(w * 0.18f, h * 0.54f),
+            size = Size(w * 0.64f, h * 0.38f),
+            style = Stroke(width = sw, cap = StrokeCap.Round)
+        )
+        drawLine(color, Offset(w * 0.16f, h * 0.16f), Offset(w * 0.84f, h * 0.84f), strokeWidth = sw * 1.1f, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+fun SoftHelpIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 18.dp,
+    color: Color = Color(0xFF64748B)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.10f
+
+        drawCircle(color = color, radius = w * 0.40f, center = Offset(w * 0.5f, h * 0.5f), style = Stroke(width = sw))
+        val qPath = Path().apply {
+            moveTo(w * 0.38f, h * 0.36f)
+            cubicTo(w * 0.38f, h * 0.24f, w * 0.62f, h * 0.24f, w * 0.62f, h * 0.38f)
+            cubicTo(w * 0.62f, h * 0.48f, w * 0.50f, h * 0.48f, w * 0.50f, h * 0.58f)
+        }
+        drawPath(qPath, color = color, style = Stroke(width = sw, cap = StrokeCap.Round))
+        drawCircle(color = color, radius = sw * 0.65f, center = Offset(w * 0.50f, h * 0.72f))
+    }
+}
+
+@Composable
+fun SoftDocumentIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    color: Color = Color(0xFFFFB300)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.10f
+
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(w * 0.20f, h * 0.12f),
+            size = Size(w * 0.60f, h * 0.76f),
+            cornerRadius = CornerRadius(w * 0.10f, w * 0.10f),
+            style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+        drawLine(color, Offset(w * 0.34f, h * 0.36f), Offset(w * 0.66f, h * 0.36f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(w * 0.34f, h * 0.52f), Offset(w * 0.66f, h * 0.52f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(w * 0.34f, h * 0.68f), Offset(w * 0.54f, h * 0.68f), strokeWidth = sw, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+fun SoftOpenInNewIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 18.dp,
+    color: Color = Color(0xFF8E8E93)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.11f
+
+        val boxPath = Path().apply {
+            moveTo(w * 0.48f, h * 0.22f)
+            lineTo(w * 0.20f, h * 0.22f)
+            lineTo(w * 0.20f, h * 0.80f)
+            lineTo(w * 0.78f, h * 0.80f)
+            lineTo(w * 0.78f, h * 0.52f)
+        }
+        drawPath(boxPath, color = color, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawLine(color, Offset(w * 0.48f, h * 0.52f), Offset(w * 0.84f, h * 0.16f), strokeWidth = sw, cap = StrokeCap.Round)
+        val head = Path().apply {
+            moveTo(w * 0.60f, h * 0.16f)
+            lineTo(w * 0.84f, h * 0.16f)
+            lineTo(w * 0.84f, h * 0.40f)
+        }
+        drawPath(head, color = color, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+@Composable
+fun SoftForwardArrowIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 18.dp,
+    color: Color = Color.Black
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.12f
+
+        drawLine(color, Offset(w * 0.20f, h * 0.50f), Offset(w * 0.78f, h * 0.50f), strokeWidth = sw, cap = StrokeCap.Round)
+        val head = Path().apply {
+            moveTo(w * 0.52f, h * 0.24f)
+            lineTo(w * 0.78f, h * 0.50f)
+            lineTo(w * 0.52f, h * 0.76f)
+        }
+        drawPath(head, color = color, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+@Composable
+fun SoftCakeIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 32.dp,
+    color: Color = Color(0xFFFFC529)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.08f
+
+        // Cake base
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(w * 0.16f, h * 0.46f),
+            size = Size(w * 0.68f, h * 0.38f),
+            cornerRadius = CornerRadius(w * 0.10f, w * 0.10f),
+            style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+        // Frosting wave
+        val wave = Path().apply {
+            moveTo(w * 0.16f, h * 0.60f)
+            quadraticTo(w * 0.33f, h * 0.70f, w * 0.50f, h * 0.60f)
+            quadraticTo(w * 0.67f, h * 0.70f, w * 0.84f, h * 0.60f)
+        }
+        drawPath(wave, color = color, style = Stroke(width = sw, cap = StrokeCap.Round))
+        // Candle & flame
+        drawLine(color, Offset(w * 0.50f, h * 0.46f), Offset(w * 0.50f, h * 0.30f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawCircle(color = color, radius = w * 0.06f, center = Offset(w * 0.50f, h * 0.18f))
+    }
+}
+
+@Composable
+fun SoftLocationPinIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 14.dp,
+    color: Color = Color.Black
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.12f
+
+        val pin = Path().apply {
+            moveTo(w * 0.50f, h * 0.88f)
+            cubicTo(w * 0.20f, h * 0.58f, w * 0.20f, h * 0.24f, w * 0.50f, h * 0.14f)
+            cubicTo(w * 0.80f, h * 0.24f, w * 0.80f, h * 0.58f, w * 0.50f, h * 0.88f)
+            close()
+        }
+        drawPath(pin, color = color, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawCircle(color = color, radius = w * 0.10f, center = Offset(w * 0.50f, h * 0.40f))
+    }
+}
+
+@Composable
+fun SoftFaceIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 44.dp,
+    color: Color = Color(0xFF3B82F6)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.08f
+
+        drawCircle(color = color, radius = w * 0.38f, center = Offset(w * 0.5f, h * 0.5f), style = Stroke(width = sw))
+        drawCircle(color = color, radius = w * 0.055f, center = Offset(w * 0.37f, h * 0.42f))
+        drawCircle(color = color, radius = w * 0.055f, center = Offset(w * 0.63f, h * 0.42f))
+        val smile = Path().apply {
+            moveTo(w * 0.34f, h * 0.58f)
+            quadraticTo(w * 0.50f, h * 0.72f, w * 0.66f, h * 0.58f)
+        }
+        drawPath(smile, color = color, style = Stroke(width = sw, cap = StrokeCap.Round))
+    }
+}
+
+@Composable
+fun SoftShopBagIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    color: Color = Color(0xFFFFB627)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.10f
+
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(w * 0.18f, h * 0.32f),
+            size = Size(w * 0.64f, h * 0.54f),
+            cornerRadius = CornerRadius(w * 0.10f, w * 0.10f),
+            style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+        drawArc(
+            color = color,
+            startAngle = 180f,
+            sweepAngle = 180f,
+            useCenter = false,
+            topLeft = Offset(w * 0.32f, h * 0.12f),
+            size = Size(w * 0.36f, h * 0.34f),
+            style = Stroke(width = sw, cap = StrokeCap.Round)
+        )
+    }
+}
+
+@Composable
+fun SoftCoinIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 16.dp,
+    color: Color = Color(0xFFF59E0B)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        drawCircle(color = color, radius = w * 0.44f, center = Offset(w * 0.5f, h * 0.5f))
+        drawCircle(
+            color = Color.White.copy(alpha = 0.45f),
+            radius = w * 0.28f,
+            center = Offset(w * 0.5f, h * 0.5f),
+            style = Stroke(width = w * 0.09f)
+        )
+    }
+}
+
+@Composable
+fun SoftGiftBoxIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 24.dp,
+    color: Color = Color(0xFFF59E0B)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.09f
+
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(w * 0.18f, h * 0.36f),
+            size = Size(w * 0.64f, h * 0.50f),
+            cornerRadius = CornerRadius(w * 0.08f, w * 0.08f),
+            style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+        drawLine(color, Offset(w * 0.14f, h * 0.36f), Offset(w * 0.86f, h * 0.36f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(w * 0.50f, h * 0.36f), Offset(w * 0.50f, h * 0.86f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawCircle(color = color, radius = w * 0.10f, center = Offset(w * 0.38f, h * 0.24f), style = Stroke(width = sw))
+        drawCircle(color = color, radius = w * 0.10f, center = Offset(w * 0.62f, h * 0.24f), style = Stroke(width = sw))
+    }
+}
+
+@Composable
+fun SoftInfoIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 18.dp,
+    color: Color = Color(0xFF64748B)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.10f
+        drawCircle(color = color, radius = w * 0.40f, center = Offset(w * 0.5f, h * 0.5f), style = Stroke(width = sw))
+        drawCircle(color = color, radius = sw * 0.65f, center = Offset(w * 0.5f, h * 0.30f))
+        drawLine(color, Offset(w * 0.5f, h * 0.46f), Offset(w * 0.5f, h * 0.72f), strokeWidth = sw, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+fun SoftExitIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    color: Color = Color(0xFFEF4444)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.10f
+        val frame = Path().apply {
+            moveTo(w * 0.52f, h * 0.16f)
+            lineTo(w * 0.20f, h * 0.16f)
+            lineTo(w * 0.20f, h * 0.84f)
+            lineTo(w * 0.52f, h * 0.84f)
+        }
+        drawPath(frame, color = color, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawLine(color, Offset(w * 0.42f, h * 0.50f), Offset(w * 0.84f, h * 0.50f), strokeWidth = sw, cap = StrokeCap.Round)
+        val arrow = Path().apply {
+            moveTo(w * 0.66f, h * 0.32f)
+            lineTo(w * 0.84f, h * 0.50f)
+            lineTo(w * 0.66f, h * 0.68f)
+        }
+        drawPath(arrow, color = color, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+@Composable
+fun SoftBellIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 24.dp,
+    color: Color = Color.Black
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.09f
+        val bell = Path().apply {
+            moveTo(w * 0.26f, h * 0.62f)
+            lineTo(w * 0.26f, h * 0.42f)
+            cubicTo(w * 0.26f, h * 0.22f, w * 0.74f, h * 0.22f, w * 0.74f, h * 0.42f)
+            lineTo(w * 0.74f, h * 0.62f)
+            lineTo(w * 0.84f, h * 0.72f)
+            lineTo(w * 0.16f, h * 0.72f)
+            close()
+        }
+        drawPath(bell, color = color, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawLine(color, Offset(w * 0.42f, h * 0.84f), Offset(w * 0.58f, h * 0.84f), strokeWidth = sw, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+fun SoftCrownIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 14.dp,
+    color: Color = Color(0xFFFFB627)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val crown = Path().apply {
+            moveTo(w * 0.14f, h * 0.76f)
+            lineTo(w * 0.10f, h * 0.30f)
+            lineTo(w * 0.34f, h * 0.52f)
+            lineTo(w * 0.50f, h * 0.20f)
+            lineTo(w * 0.66f, h * 0.52f)
+            lineTo(w * 0.90f, h * 0.30f)
+            lineTo(w * 0.86f, h * 0.76f)
+            close()
+        }
+        drawPath(crown, color = color)
+    }
+}
+
+@Composable
+fun SoftMusicNoteIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 24.dp,
+    color: Color = Color.Black
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.09f
+        drawCircle(color = color, radius = w * 0.14f, center = Offset(w * 0.34f, h * 0.74f))
+        drawCircle(color = color, radius = w * 0.14f, center = Offset(w * 0.72f, h * 0.66f))
+        drawLine(color, Offset(w * 0.46f, h * 0.72f), Offset(w * 0.46f, h * 0.22f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(w * 0.84f, h * 0.64f), Offset(w * 0.84f, h * 0.16f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(w * 0.46f, h * 0.22f), Offset(w * 0.84f, h * 0.16f), strokeWidth = sw * 1.2f, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+fun SoftSettingsGearIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 24.dp,
+    color: Color = Color.Black
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.10f
+        val cx = w * 0.5f
+        val cy = h * 0.5f
+        drawCircle(color = color, radius = w * 0.24f, center = Offset(cx, cy), style = Stroke(width = sw))
+        for (i in 0 until 8) {
+            val angle = Math.toRadians((i * 45).toDouble())
+            val sx = cx + (w * 0.28f * kotlin.math.cos(angle)).toFloat()
+            val sy = cy + (h * 0.28f * kotlin.math.sin(angle)).toFloat()
+            val ex = cx + (w * 0.40f * kotlin.math.cos(angle)).toFloat()
+            val ey = cy + (h * 0.40f * kotlin.math.sin(angle)).toFloat()
+            drawLine(color, Offset(sx, sy), Offset(ex, ey), strokeWidth = sw, cap = StrokeCap.Round)
+        }
+    }
+}
+
+@Composable
+fun SoftSunIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 26.dp,
+    color: Color = Color(0xFFF59E0B)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.09f
+        val cx = w * 0.5f
+        val cy = h * 0.5f
+        drawCircle(color = color, radius = w * 0.22f, center = Offset(cx, cy))
+        for (i in 0 until 8) {
+            val angle = Math.toRadians((i * 45).toDouble())
+            val sx = cx + (w * 0.30f * kotlin.math.cos(angle)).toFloat()
+            val sy = cy + (h * 0.30f * kotlin.math.sin(angle)).toFloat()
+            val ex = cx + (w * 0.42f * kotlin.math.cos(angle)).toFloat()
+            val ey = cy + (h * 0.42f * kotlin.math.sin(angle)).toFloat()
+            drawLine(color, Offset(sx, sy), Offset(ex, ey), strokeWidth = sw, cap = StrokeCap.Round)
+        }
+    }
+}
+
+@Composable
+fun SoftMoonIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 26.dp,
+    color: Color = Color(0xFFFBBF24)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val moon = Path().apply {
+            moveTo(w * 0.64f, h * 0.16f)
+            cubicTo(w * 0.30f, h * 0.18f, w * 0.16f, h * 0.54f, w * 0.42f, h * 0.78f)
+            cubicTo(w * 0.64f, h * 0.92f, w * 0.86f, h * 0.72f, w * 0.82f, h * 0.56f)
+            cubicTo(w * 0.62f, h * 0.68f, w * 0.42f, h * 0.48f, w * 0.64f, h * 0.16f)
+            close()
+        }
+        drawPath(moon, color = color)
+    }
+}
+
+@Composable
+fun SoftHourglassIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 18.dp,
+    color: Color = Color(0xFFB45309)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.10f
+        drawLine(color, Offset(w * 0.24f, h * 0.16f), Offset(w * 0.76f, h * 0.16f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(color, Offset(w * 0.24f, h * 0.84f), Offset(w * 0.76f, h * 0.84f), strokeWidth = sw, cap = StrokeCap.Round)
+        val glass = Path().apply {
+            moveTo(w * 0.28f, h * 0.16f)
+            lineTo(w * 0.72f, h * 0.16f)
+            lineTo(w * 0.50f, h * 0.50f)
+            lineTo(w * 0.72f, h * 0.84f)
+            lineTo(w * 0.28f, h * 0.84f)
+            lineTo(w * 0.50f, h * 0.50f)
+            close()
+        }
+        drawPath(glass, color = color, style = Stroke(width = sw * 0.85f, join = StrokeJoin.Round))
+    }
+}
+
+
 
 
 

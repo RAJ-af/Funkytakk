@@ -38,6 +38,7 @@ import com.example.R
 import com.example.ui.components.SoftHeadsetIcon
 import com.example.ui.components.SoftShieldIcon
 import com.example.ui.theme.GoldAccent
+import com.example.ui.theme.LocalFunkyColors
 import kotlinx.coroutines.*
 
 @Composable
@@ -46,6 +47,7 @@ fun AccountUnderReviewScreen(
     onReviewEnded: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
     var showExplanationDialog by remember { mutableStateOf(true) }
     var isChecking by remember { mutableStateOf(false) }
 
@@ -93,7 +95,7 @@ fun AccountUnderReviewScreen(
             ) {
                 Surface(
                     shape = RoundedCornerShape(28.dp),
-                    color = Color.White,
+                    color = funkyColors.surface,
                     shadowElevation = 16.dp,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -121,7 +123,7 @@ fun AccountUnderReviewScreen(
                             text = "Your Account is Under Review",
                             fontSize = 20.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF0F172A),
+                            color = funkyColors.ink,
                             textAlign = TextAlign.Center
                         )
 
@@ -131,7 +133,7 @@ fun AccountUnderReviewScreen(
                         Text(
                             text = "You can't access your account right now. Someone has reported your account, and our team is verifying it according to our community guidelines.",
                             fontSize = 13.5.sp,
-                            color = Color(0xFF475569),
+                            color = funkyColors.mute,
                             textAlign = TextAlign.Center,
                             lineHeight = 19.sp
                         )
@@ -141,8 +143,11 @@ fun AccountUnderReviewScreen(
                         // Note card
                         Surface(
                             shape = RoundedCornerShape(14.dp),
-                            color = Color(0xFFFFFBEB),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFDE68A)),
+                            color = if (funkyColors.isDark) funkyColors.soft else Color(0xFFFFFBEB),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (funkyColors.isDark) funkyColors.mango.copy(alpha = 0.4f) else Color(0xFFFDE68A)
+                            ),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
@@ -154,7 +159,7 @@ fun AccountUnderReviewScreen(
                                 Text(
                                     text = "Our team is currently checking your account. We'll notify you once the review is complete.",
                                     fontSize = 12.sp,
-                                    color = Color(0xFF92400E),
+                                    color = if (funkyColors.isDark) funkyColors.ink else Color(0xFF92400E),
                                     lineHeight = 16.sp
                                 )
                             }
@@ -190,7 +195,7 @@ fun AccountUnderReviewScreen(
 
     // Persistent locked screen (Shown underneath and after dismissing explanation)
     Scaffold(
-        containerColor = Color(0xFFFCFBF7)
+        containerColor = funkyColors.bg
     ) { padding ->
         Column(
             modifier = Modifier
@@ -217,7 +222,7 @@ fun AccountUnderReviewScreen(
                 text = "Your Account is Under Review",
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Black,
-                color = Color(0xFF0F172A),
+                color = funkyColors.ink,
                 textAlign = TextAlign.Center
             )
 
@@ -226,7 +231,7 @@ fun AccountUnderReviewScreen(
             Text(
                 text = "Our moderation team is reviewing your account activity in accordance with our community safety standards.",
                 fontSize = 14.sp,
-                color = Color(0xFF64748B),
+                color = funkyColors.mute,
                 textAlign = TextAlign.Center,
                 lineHeight = 20.sp
             )
@@ -235,8 +240,11 @@ fun AccountUnderReviewScreen(
 
             Surface(
                 shape = RoundedCornerShape(16.dp),
-                color = Color(0xFFFEF3C7),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFCD34D)),
+                color = if (funkyColors.isDark) funkyColors.soft else Color(0xFFFEF3C7),
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (funkyColors.isDark) funkyColors.mango.copy(alpha = 0.4f) else Color(0xFFFCD34D)
+                ),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
@@ -244,13 +252,13 @@ fun AccountUnderReviewScreen(
                         text = "What happens next?",
                         fontSize = 13.5.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF92400E)
+                        color = if (funkyColors.isDark) funkyColors.mango else Color(0xFF92400E)
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "• The review usually takes less than 24 hours.\n• You will automatically be unlocked once completed.\n• If needed, our team will message you via Support Chat.",
                         fontSize = 12.5.sp,
-                        color = Color(0xFF78350F),
+                        color = if (funkyColors.isDark) funkyColors.ink else Color(0xFF78350F),
                         lineHeight = 18.sp
                     )
                 }
@@ -284,20 +292,20 @@ fun AccountUnderReviewScreen(
             } else {
                 Surface(
                     shape = RoundedCornerShape(16.dp),
-                    color = Color(0xFFF1F5F9),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    color = funkyColors.surface,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, funkyColors.line),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        SoftShieldIcon(size = 20.dp, color = Color(0xFF64748B))
+                        SoftShieldIcon(size = 20.dp, color = funkyColors.mute)
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
                             text = "Our team will message you here if they need anything.",
                             fontSize = 13.sp,
-                            color = Color(0xFF475569),
+                            color = funkyColors.mute,
                             lineHeight = 18.sp
                         )
                     }
@@ -333,12 +341,12 @@ fun AccountUnderReviewScreen(
                 enabled = !isChecking
             ) {
                 if (isChecking) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color(0xFF64748B))
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = funkyColors.mute)
                     Spacer(modifier = Modifier.width(6.dp))
                 }
                 Text(
                     text = if (isChecking) "Checking..." else "Refresh Status",
-                    color = Color(0xFF64748B),
+                    color = funkyColors.mute,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium
                 )

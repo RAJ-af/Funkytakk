@@ -950,8 +950,8 @@ fun CuteIcon(
 }
 
 /**
- * Compatible ImageVector overlay helper that automatically maps any standard Material Design
- * ImageVector (e.g. Icons.Default.Home) into our cute/soft emoji representations.
+ * Compatible ImageVector overlay helper that automatically maps standard vector icons
+ * into our cute/soft custom representations.
  */
 @Composable
 fun Icon(

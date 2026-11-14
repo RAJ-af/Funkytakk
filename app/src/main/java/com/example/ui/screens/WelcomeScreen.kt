@@ -32,6 +32,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
+import com.example.ui.components.SoftForwardArrowIcon
+import com.example.ui.theme.LocalFunkyColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -40,9 +42,10 @@ import kotlin.math.roundToInt
 fun WelcomeScreen(
     onGetStartedClick: () -> Unit
 ) {
+    val colors = LocalFunkyColors.current
     Scaffold(
         modifier = Modifier.fillMaxSize(),
-        containerColor = Color(0xFFFAFAEE) // Warm off-white / cream background
+        containerColor = colors.bg
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -53,13 +56,13 @@ fun WelcomeScreen(
         ) {
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 1. LOGO: FunkyTalk branding (Black + Yellow, no extra emoji)
+            // 1. LOGO: FunkyTalk branding
             Text(
                 text = buildAnnotatedString {
-                    withStyle(style = SpanStyle(color = Color(0xFF141414), fontWeight = FontWeight.Black)) {
+                    withStyle(style = SpanStyle(color = colors.ink, fontWeight = FontWeight.Black)) {
                         append("Funky")
                     }
-                    withStyle(style = SpanStyle(color = Color(0xFFF6C945), fontWeight = FontWeight.Black)) {
+                    withStyle(style = SpanStyle(color = colors.mango, fontWeight = FontWeight.Black)) {
                         append("Talk")
                     }
                 },
@@ -73,10 +76,10 @@ fun WelcomeScreen(
             // 2. HEADLINE (Large, bold, highly readable, natural line wrapping)
             Text(
                 text = buildAnnotatedString {
-                    withStyle(style = SpanStyle(color = Color(0xFF141414))) {
+                    withStyle(style = SpanStyle(color = colors.ink)) {
                         append("Learn a new language\nand get a ")
                     }
-                    withStyle(style = SpanStyle(color = Color(0xFFF6C945))) {
+                    withStyle(style = SpanStyle(color = colors.mango)) {
                         append("new soul.")
                     }
                 },
@@ -94,7 +97,7 @@ fun WelcomeScreen(
                 text = "Connect with real people, practice naturally and discover new cultures.",
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Normal,
-                color = Color(0xFF5A5A5A),
+                color = colors.mute,
                 lineHeight = 22.sp,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -110,19 +113,22 @@ fun WelcomeScreen(
                 SubtleFeatureChip(
                     iconRes = R.drawable.ic_comment,
                     label = "Chat",
-                    backgroundColor = Color(0xFFFFF9E4),
+                    backgroundColor = if (colors.isDark) colors.soft else Color(0xFFFFF9E4),
+                    contentColor = colors.ink,
                     modifier = Modifier.weight(1f)
                 )
                 SubtleFeatureChip(
                     iconRes = R.drawable.ic_discover,
                     label = "Make Friends",
-                    backgroundColor = Color(0xFFFDF0F2),
+                    backgroundColor = if (colors.isDark) Color(0xFF4C1D24) else Color(0xFFFDF0F2),
+                    contentColor = colors.ink,
                     modifier = Modifier.weight(1.35f)
                 )
                 SubtleFeatureChip(
                     iconRes = R.drawable.ic_globe,
                     label = "Explore",
-                    backgroundColor = Color(0xFFF0F4FF),
+                    backgroundColor = if (colors.isDark) Color(0xFF1E293B) else Color(0xFFF0F4FF),
+                    contentColor = colors.ink,
                     modifier = Modifier.weight(1.15f)
                 )
             }
@@ -165,6 +171,7 @@ private fun SubtleFeatureChip(
     @DrawableRes iconRes: Int,
     label: String,
     backgroundColor: Color,
+    contentColor: Color = Color(0xFF2C2C2C),
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -183,7 +190,7 @@ private fun SubtleFeatureChip(
             Icon(
                 painter = painterResource(id = iconRes),
                 contentDescription = null,
-                tint = Color(0xFF2C2C2C),
+                tint = contentColor,
                 modifier = Modifier.size(13.dp)
             )
             Spacer(modifier = Modifier.width(5.dp))
@@ -191,7 +198,7 @@ private fun SubtleFeatureChip(
                 text = label,
                 fontSize = 11.5.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = Color(0xFF2C2C2C),
+                color = contentColor,
                 maxLines = 1
             )
         }
@@ -260,16 +267,14 @@ private fun SlideToConnectButton(
                     .offset { IntOffset((progress * 15).roundToInt(), 0) }
             )
 
-            // Right side subtle »» indicator
-            Text(
-                text = "»»",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Black,
-                color = Color.Black,
+            // Right side subtle slide arrow indicator
+            Box(
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
                     .alpha(((chevronAlpha + progress * 0.5f).coerceIn(0.3f, 1f)) * (1f - (if (isLockedState) 1f else 0f)))
-            )
+            ) {
+                SoftForwardArrowIcon(size = 18.dp, color = Color.Black)
+            }
         }
 
         // White circular draggable thumb on LEFT

@@ -6,17 +6,12 @@ import android.content.Context
 import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,10 +19,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.AuthViewModel
 import com.example.DeletionReceiptData
+import com.example.ui.components.SoftCheckmarkBadge
+import com.example.ui.components.SoftCopyIcon
+import com.example.ui.components.SoftShareIcon
+import com.example.ui.theme.LocalFunkyColors
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -38,6 +38,8 @@ fun AccountDeletionReceiptScreen(
     onDone: () -> Unit
 ) {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
+    val isDark = funkyColors.isDark
     var isFinishing by remember { mutableStateOf(false) }
 
     fun finishAndSignOut() {
@@ -75,7 +77,7 @@ fun AccountDeletionReceiptScreen(
     }
 
     Scaffold(
-        containerColor = Color(0xFFFFFDF5)
+        containerColor = funkyColors.bg
     ) { paddingValues ->
         Column(
             modifier = Modifier
@@ -86,11 +88,10 @@ fun AccountDeletionReceiptScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Icon(
-                imageVector = Icons.Default.CheckCircle,
-                contentDescription = "Success",
-                tint = Color(0xFF10B981),
-                modifier = Modifier.size(72.dp)
+            SoftCheckmarkBadge(
+                size = 72.dp,
+                badgeColor = funkyColors.ok,
+                checkColor = Color.White
             )
 
             Spacer(modifier = Modifier.height(18.dp))
@@ -99,7 +100,7 @@ fun AccountDeletionReceiptScreen(
                 text = "Deletion Scheduled",
                 fontSize = 22.sp,
                 fontWeight = FontWeight.ExtraBold,
-                color = Color(0xFF0F172A)
+                color = funkyColors.ink
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -107,8 +108,9 @@ fun AccountDeletionReceiptScreen(
             Text(
                 text = "Your account has been scheduled for permanent deletion.",
                 fontSize = 13.sp,
-                color = Color(0xFF64748B),
+                color = funkyColors.mute,
                 lineHeight = 18.sp,
+                textAlign = TextAlign.Center,
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
 
@@ -116,9 +118,9 @@ fun AccountDeletionReceiptScreen(
 
             // Receipt Box
             Surface(
-                color = Color.White,
+                color = funkyColors.surface,
                 shape = RoundedCornerShape(20.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                border = BorderStroke(1.dp, funkyColors.line),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
@@ -129,7 +131,7 @@ fun AccountDeletionReceiptScreen(
                         text = "RECEIPT NUMBER",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF94A3B8),
+                        color = funkyColors.mute,
                         letterSpacing = 1.sp
                     )
 
@@ -140,7 +142,7 @@ fun AccountDeletionReceiptScreen(
                             text = receipt.receiptId,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A)
+                            color = funkyColors.ink
                         )
                     }
 
@@ -154,11 +156,13 @@ fun AccountDeletionReceiptScreen(
                                 clipboard.setPrimaryClip(clip)
                                 Toast.makeText(context, "Receipt copied to clipboard", Toast.LENGTH_SHORT).show()
                             },
-                            shape = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, funkyColors.line),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = funkyColors.ink)
                         ) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy", modifier = Modifier.size(16.dp))
+                            SoftCopyIcon(size = 16.dp, color = funkyColors.ink)
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Copy", fontSize = 12.sp)
+                            Text("Copy", fontSize = 12.sp, color = funkyColors.ink)
                         }
 
                         OutlinedButton(
@@ -170,23 +174,25 @@ fun AccountDeletionReceiptScreen(
                                 }
                                 context.startActivity(Intent.createChooser(shareIntent, "Share Receipt"))
                             },
-                            shape = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, funkyColors.line),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = funkyColors.ink)
                         ) {
-                            Icon(Icons.Default.Share, contentDescription = "Share", modifier = Modifier.size(16.dp))
+                            SoftShareIcon(size = 16.dp, color = funkyColors.ink)
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Share", fontSize = 12.sp)
+                            Text("Share", fontSize = 12.sp, color = funkyColors.ink)
                         }
                     }
 
                     Spacer(modifier = Modifier.height(18.dp))
-                    HorizontalDivider(color = Color(0xFFF1F5F9))
+                    HorizontalDivider(color = funkyColors.line)
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Text(
                         text = "PERMANENT PURGE DATE",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF94A3B8),
+                        color = funkyColors.mute,
                         letterSpacing = 1.sp
                     )
 
@@ -196,7 +202,7 @@ fun AccountDeletionReceiptScreen(
                         text = formattedDate,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFFDC2626)
+                        color = funkyColors.danger
                     )
                 }
             }
@@ -205,15 +211,15 @@ fun AccountDeletionReceiptScreen(
 
             // Notice
             Surface(
-                color = Color(0xFFEFF6FF),
+                color = if (isDark) funkyColors.soft else Color(0xFFEFF6FF),
                 shape = RoundedCornerShape(16.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFBFDBFE)),
+                border = BorderStroke(1.dp, if (isDark) funkyColors.line else Color(0xFFBFDBFE)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
                     text = "We also emailed you this receipt. To cancel, sign in before that date.",
                     fontSize = 12.sp,
-                    color = Color(0xFF1D4ED8),
+                    color = if (isDark) funkyColors.ink else Color(0xFF1D4ED8),
                     lineHeight = 17.sp,
                     modifier = Modifier.padding(14.dp)
                 )
@@ -226,15 +232,18 @@ fun AccountDeletionReceiptScreen(
                 onClick = { finishAndSignOut() },
                 enabled = !isFinishing,
                 shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F172A)),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = funkyColors.mango,
+                    contentColor = funkyColors.onMango
+                ),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp)
             ) {
                 if (isFinishing) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White)
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = funkyColors.onMango)
                 } else {
-                    Text("Done", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text("Done", color = funkyColors.onMango, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }

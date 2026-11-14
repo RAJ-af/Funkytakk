@@ -192,12 +192,12 @@ object GiftManager {
      * Sends a gift to a recipient inside a voice room via RPC send_room_gift.
      * Updates wallet balance immediately from returned remaining_balance.
      * Maps errors:
-     * - insufficient_coins -> "Coins कम हैं"
-     * - recipient_not_in_room -> "यह user अब room में नहीं है"
-     * - room_not_live -> "Room खत्म हो चुका है"
-     * - rate_limited -> "थोड़ा धीरे भेजो"
-     * - account_restricted -> "आपका खाता अभी gift नहीं भेज सकता"
-     * - other -> "Gift नहीं भेजा जा सका, फिर कोशिश करो"
+     * - insufficient_coins -> "Insufficient coins"
+     * - recipient_not_in_room -> "This user is no longer in the room"
+     * - room_not_live -> "Room has ended"
+     * - rate_limited -> "Sending too fast, please slow down"
+     * - account_restricted -> "Your account cannot send gifts right now"
+     * - other -> "Could not send gift, please try again"
      */
     suspend fun sendRoomGift(
         context: Context,
@@ -266,23 +266,23 @@ object GiftManager {
     }
 
     /**
-     * Maps backend error codes to user-facing Hindi error messages per spec.
+     * Maps backend error codes to user-facing English error messages.
      */
     fun mapRoomGiftError(rawError: String): String {
         val lower = rawError.lowercase()
         return when {
             lower.contains("insufficient_coins") || lower.contains("insufficient") || lower.contains("not enough coins") ->
-                "Coins कम हैं"
+                "Insufficient coins"
             lower.contains("recipient_not_in_room") ->
-                "यह user अब room में नहीं है"
+                "This user is no longer in the room"
             lower.contains("room_not_live") || lower.contains("room ended") || lower.contains("not_live") ->
-                "Room खत्म हो चुका है"
+                "Room has ended"
             lower.contains("rate_limited") || lower.contains("too many requests") ->
-                "थोड़ा धीरे भेजो"
+                "Sending too fast, please slow down"
             lower.contains("account_restricted") || lower.contains("restricted") ->
-                "आपका खाता अभी gift नहीं भेज सकता"
+                "Your account cannot send gifts right now"
             else ->
-                "Gift नहीं भेजा जा सका, फिर कोशिश करो"
+                "Could not send gift, please try again"
         }
     }
 

@@ -8,8 +8,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -30,6 +28,7 @@ import com.example.SupabaseSessionManager
 import com.example.ui.components.CircleFlag
 import com.example.ui.components.SoftCloseIcon
 import com.example.ui.components.SoftGlobeIcon
+import com.example.ui.theme.LocalFunkyColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -42,6 +41,7 @@ fun FollowersListBottomSheet(
     onUserClick: (profile: DiscoverableProfile) -> Unit
 ) {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     val userList = remember { mutableStateListOf<DiscoverableProfile>() }
@@ -107,7 +107,7 @@ fun FollowersListBottomSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = Color.White,
+        containerColor = funkyColors.surface,
         shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
     ) {
         Column(
@@ -126,17 +126,17 @@ fun FollowersListBottomSheet(
                     text = if (showFollowers) "Followers" else "Following",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Black,
-                    color = Color(0xFF0F172A)
+                    color = funkyColors.ink
                 )
                 Box(
                     modifier = Modifier
                         .size(32.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFFF1F5F9))
+                        .background(funkyColors.soft)
                         .clickable { onDismiss() },
                     contentAlignment = Alignment.Center
                 ) {
-                    SoftCloseIcon(size = 14.dp, color = Color(0xFF64748B))
+                    SoftCloseIcon(size = 14.dp, color = funkyColors.mute)
                 }
             }
 
@@ -149,7 +149,7 @@ fun FollowersListBottomSheet(
                         .height(200.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator(color = Color(0xFFFFD43B))
+                    CircularProgressIndicator(color = funkyColors.mango)
                 }
             } else if (errorMessage != null) {
                 Box(
@@ -160,7 +160,7 @@ fun FollowersListBottomSheet(
                 ) {
                     Text(
                         text = errorMessage ?: "",
-                        color = Color.Red,
+                        color = funkyColors.danger,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium
                     )
@@ -174,7 +174,7 @@ fun FollowersListBottomSheet(
                 ) {
                     Text(
                         text = if (showFollowers) "No followers yet." else "Not following anyone yet.",
-                        color = Color(0xFF64748B),
+                        color = funkyColors.mute,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium
                     )
@@ -211,6 +211,7 @@ fun FollowersListBottomSheet(
                                 isOnline = user.is_online ?: false,
                                 countryCode = user.country_code,
                                 userId = targetUid,
+                                showFlagBadge = true,
                                 enableFrameAnimation = false
                             )
 
@@ -225,26 +226,14 @@ fun FollowersListBottomSheet(
                                     name = user.profile_name ?: user.username ?: "Anonymous",
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold,
-                                    defaultColor = Color(0xFF0F172A)
+                                    defaultColor = funkyColors.ink
                                 )
                                 Text(
                                     text = "@${user.username ?: "anonymous"}",
                                     fontSize = 12.sp,
-                                    color = Color(0xFF64748B),
+                                    color = funkyColors.mute,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
-                                )
-                            }
-
-                            // Country flag
-                            Box(
-                                modifier = Modifier
-                                    .size(24.dp)
-                                    .clip(CircleShape)
-                            ) {
-                                CircleFlag(
-                                    countryCode = user.country_code ?: "us",
-                                    modifier = Modifier.fillMaxSize()
                                 )
                             }
                         }

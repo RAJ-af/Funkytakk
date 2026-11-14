@@ -1,8 +1,10 @@
 package com.example.ui.components
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -14,6 +16,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 
@@ -214,8 +217,10 @@ fun DiscoverSquareAvatarWithFlag(
     isOnline: Boolean,
     modifier: Modifier = Modifier,
     avatarSize: Dp = 80.dp,
-    flagSize: Dp = 26.dp
+    flagSize: Dp = 24.dp
 ) {
+    val funkyColors = com.example.ui.theme.LocalFunkyColors.current
+    val borderColor = if (isOnline) Color(0xFF10B981) else funkyColors.line
     Box(
         modifier = modifier.size(avatarSize),
         contentAlignment = Alignment.Center
@@ -234,7 +239,29 @@ fun DiscoverSquareAvatarWithFlag(
             modifier = Modifier
                 .fillMaxSize()
                 .clip(RoundedCornerShape(20.dp))
-                .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(20.dp))
+                .border(if (isOnline) 2.dp else 1.dp, borderColor, RoundedCornerShape(20.dp))
         )
+
+        val cleanCountry = countryCode.trim()
+        if (cleanCountry.isNotBlank() && cleanCountry.lowercase() != "un") {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 3.dp, y = 3.dp)
+                    .zIndex(5f)
+                    .size(flagSize)
+                    .background(funkyColors.surface, androidx.compose.foundation.shape.CircleShape)
+                    .border(2.dp, funkyColors.surface, androidx.compose.foundation.shape.CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                CircleFlag(
+                    countryCode = cleanCountry,
+                    allowProgramming = false,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                )
+            }
+        }
     }
 }

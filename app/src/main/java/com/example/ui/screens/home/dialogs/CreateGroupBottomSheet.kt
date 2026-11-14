@@ -51,6 +51,7 @@ import com.example.repository.EncryptedChatRepository
 import com.example.repository.GroupChatRepository
 import com.example.ui.components.*
 import com.example.ui.theme.GoldAccent
+import com.example.ui.theme.LocalFunkyColors
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -150,6 +151,7 @@ fun CreateGroupBottomSheet(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val funkyColors = LocalFunkyColors.current
 
     // Step state: 1 = Group Profile & Info, 2 = Invite Eligible Members
     var currentStep by remember { mutableStateOf(1) }
@@ -380,7 +382,7 @@ fun CreateGroupBottomSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Color.White,
+        containerColor = funkyColors.surface,
         dragHandle = {
             Box(
                 modifier = Modifier
@@ -393,7 +395,7 @@ fun CreateGroupBottomSheet(
                         .width(38.dp)
                         .height(4.dp)
                         .clip(RoundedCornerShape(2.dp))
-                        .background(Color(0xFFE5E7EB))
+                        .background(funkyColors.line)
                 )
             }
         },
@@ -421,11 +423,11 @@ fun CreateGroupBottomSheet(
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFFF3F4F6))
+                                .background(funkyColors.bg)
                                 .clickable { currentStep = 1 },
                             contentAlignment = Alignment.Center
                         ) {
-                            GroupBackIcon(size = 16.dp, color = Color(0xFF111827))
+                            GroupBackIcon(size = 16.dp, color = funkyColors.ink)
                         }
                         Spacer(modifier = Modifier.width(10.dp))
                     } else {
@@ -433,11 +435,11 @@ fun CreateGroupBottomSheet(
                             modifier = Modifier
                                 .size(38.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0xFFFEF3C7))
-                                .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(12.dp)),
+                                .background(funkyColors.soft)
+                                .border(1.dp, funkyColors.mango.copy(alpha = 0.45f), RoundedCornerShape(12.dp)),
                             contentAlignment = Alignment.Center
                         ) {
-                            GroupUsersIcon(size = 20.dp, color = Color(0xFFB45309))
+                            GroupUsersIcon(size = 20.dp, color = if (funkyColors.isDark) funkyColors.mango else Color(0xFFB45309))
                         }
                         Spacer(modifier = Modifier.width(12.dp))
                     }
@@ -447,12 +449,12 @@ fun CreateGroupBottomSheet(
                             text = if (currentStep == 1) "Create Group Chat" else "Invite Members",
                             fontSize = 19.sp,
                             fontWeight = FontWeight.Black,
-                            color = Color(0xFF111827)
+                            color = funkyColors.ink
                         )
                         Text(
                             text = if (currentStep == 1) "Step 1 of 2: Details & Photo" else "Step 2 of 2: Select connections",
                             fontSize = 12.sp,
-                            color = Color(0xFF6B7280)
+                            color = funkyColors.mute
                         )
                     }
                 }
@@ -461,17 +463,17 @@ fun CreateGroupBottomSheet(
                     modifier = Modifier
                         .size(34.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFFF3F4F6))
+                        .background(funkyColors.bg)
                         .clickable { onDismiss() },
                     contentAlignment = Alignment.Center
                 ) {
-                    SoftCloseIcon(size = 14.dp, color = Color(0xFF6B7280))
+                    SoftCloseIcon(size = 14.dp, color = funkyColors.mute)
                 }
             }
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Step Progress Bar (Warm Gold & Smooth Gray)
+            // Step Progress Bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -483,14 +485,14 @@ fun CreateGroupBottomSheet(
                         .weight(1f)
                         .fillMaxHeight()
                         .clip(RoundedCornerShape(2.dp))
-                        .background(GoldAccent)
+                        .background(funkyColors.mango)
                 )
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
                         .clip(RoundedCornerShape(2.dp))
-                        .background(if (currentStep == 2) GoldAccent else Color(0xFFE5E7EB))
+                        .background(if (currentStep == 2) funkyColors.mango else funkyColors.line)
                 )
             }
 
@@ -513,13 +515,13 @@ fun CreateGroupBottomSheet(
                                 text = "Group Photo",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = Color(0xFF111827)
+                                color = funkyColors.ink
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = "Choose a preset cover or upload your own",
                                 fontSize = 12.sp,
-                                color = Color(0xFF6B7280)
+                                color = funkyColors.mute
                             )
                             Spacer(modifier = Modifier.height(10.dp))
 
@@ -530,14 +532,15 @@ fun CreateGroupBottomSheet(
                                 // Add Custom Photo (Warm Amber Styling)
                                 item {
                                     val isCustomSelected = customAvatarUri != null && selectedAvatar == customAvatarUri.toString()
+                                    val amberTone = if (funkyColors.isDark) funkyColors.mango else Color(0xFFB45309)
                                     Box(
                                         modifier = Modifier
                                             .size(76.dp)
                                             .clip(RoundedCornerShape(16.dp))
-                                            .background(Color(0xFFFFFBEB))
+                                            .background(funkyColors.soft)
                                             .dashedBorder(
                                                 width = 1.6.dp,
-                                                color = if (isCustomSelected) Color(0xFFD97706) else Color(0xFFF59E0B),
+                                                color = if (isCustomSelected) funkyColors.mango else funkyColors.mango.copy(alpha = 0.65f),
                                                 cornerRadius = 16.dp
                                             )
                                             .clickable {
@@ -561,13 +564,13 @@ fun CreateGroupBottomSheet(
                                                 horizontalAlignment = Alignment.CenterHorizontally,
                                                 verticalArrangement = Arrangement.Center
                                             ) {
-                                                GroupCameraIcon(size = 22.dp, color = Color(0xFFB45309))
+                                                GroupCameraIcon(size = 22.dp, color = amberTone)
                                                 Spacer(modifier = Modifier.height(4.dp))
                                                 Text(
                                                     text = "Add Photo",
                                                     fontSize = 11.sp,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = Color(0xFFB45309)
+                                                    color = amberTone
                                                 )
                                             }
                                         }
@@ -584,7 +587,7 @@ fun CreateGroupBottomSheet(
                                             .border(
                                                 BorderStroke(
                                                     width = if (isSelected) 3.dp else 1.dp,
-                                                    color = if (isSelected) GoldAccent else Color(0xFFE5E7EB)
+                                                    color = if (isSelected) funkyColors.mango else funkyColors.line
                                                 ),
                                                 RoundedCornerShape(16.dp)
                                             )
@@ -608,10 +611,10 @@ fun CreateGroupBottomSheet(
                                                     .align(Alignment.BottomEnd)
                                                     .offset(x = (-4).dp, y = (-4).dp)
                                                     .clip(CircleShape)
-                                                    .background(GoldAccent),
+                                                    .background(funkyColors.mango),
                                                 contentAlignment = Alignment.Center
                                             ) {
-                                                GroupCheckIcon(size = 10.dp, color = Color.Black)
+                                                GroupCheckIcon(size = 10.dp, color = funkyColors.onMango)
                                             }
                                         }
                                     }
@@ -627,7 +630,7 @@ fun CreateGroupBottomSheet(
                                 text = "Group Name",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = Color(0xFF111827)
+                                color = funkyColors.ink
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             Box(
@@ -635,15 +638,15 @@ fun CreateGroupBottomSheet(
                                     .fillMaxWidth()
                                     .height(52.dp)
                                     .clip(RoundedCornerShape(16.dp))
-                                    .background(Color(0xFFF9FAFB))
-                                    .border(BorderStroke(1.2.dp, if (groupName.isNotBlank()) Color(0xFFFEF08A) else Color(0xFFE5E7EB)), RoundedCornerShape(16.dp))
+                                    .background(funkyColors.bg)
+                                    .border(BorderStroke(1.2.dp, if (groupName.isNotBlank()) funkyColors.mango.copy(alpha = 0.7f) else funkyColors.line), RoundedCornerShape(16.dp))
                                     .padding(horizontal = 16.dp),
                                 contentAlignment = Alignment.CenterStart
                             ) {
                                 if (groupName.isEmpty()) {
                                     Text(
                                         text = "e.g. Anime Club, Japanese Learners...",
-                                        color = Color(0xFF9CA3AF),
+                                        color = funkyColors.mute,
                                         fontSize = 14.sp
                                     )
                                 }
@@ -652,18 +655,18 @@ fun CreateGroupBottomSheet(
                                     onValueChange = { if (it.length <= 60) groupName = it },
                                     singleLine = true,
                                     textStyle = TextStyle(
-                                        color = Color(0xFF111827),
+                                        color = funkyColors.ink,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.SemiBold
                                     ),
-                                    cursorBrush = SolidColor(Color.Black),
+                                    cursorBrush = SolidColor(funkyColors.mango),
                                     modifier = Modifier.fillMaxWidth()
                                 )
                             }
                             Text(
                                 text = "${groupName.length}/60",
                                 fontSize = 11.5.sp,
-                                color = Color(0xFF9CA3AF),
+                                color = funkyColors.mute,
                                 modifier = Modifier
                                     .align(Alignment.End)
                                     .padding(top = 4.dp)
@@ -678,7 +681,7 @@ fun CreateGroupBottomSheet(
                                 text = "Description (Optional)",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = Color(0xFF111827)
+                                color = funkyColors.ink
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             Box(
@@ -686,15 +689,15 @@ fun CreateGroupBottomSheet(
                                     .fillMaxWidth()
                                     .height(88.dp)
                                     .clip(RoundedCornerShape(16.dp))
-                                    .background(Color(0xFFF9FAFB))
-                                    .border(BorderStroke(1.2.dp, Color(0xFFE5E7EB)), RoundedCornerShape(16.dp))
+                                    .background(funkyColors.bg)
+                                    .border(BorderStroke(1.2.dp, funkyColors.line), RoundedCornerShape(16.dp))
                                     .padding(horizontal = 16.dp, vertical = 12.dp),
                                 contentAlignment = Alignment.TopStart
                             ) {
                                 if (groupDescription.isEmpty()) {
                                     Text(
                                         text = "What is this group about?",
-                                        color = Color(0xFF9CA3AF),
+                                        color = funkyColors.mute,
                                         fontSize = 13.5.sp
                                     )
                                 }
@@ -702,18 +705,18 @@ fun CreateGroupBottomSheet(
                                     value = groupDescription,
                                     onValueChange = { if (it.length <= 200) groupDescription = it },
                                     textStyle = TextStyle(
-                                        color = Color(0xFF111827),
+                                        color = funkyColors.ink,
                                         fontSize = 13.5.sp,
                                         fontWeight = FontWeight.Normal
                                     ),
-                                    cursorBrush = SolidColor(Color.Black),
+                                    cursorBrush = SolidColor(funkyColors.mango),
                                     modifier = Modifier.fillMaxSize()
                                 )
                             }
                             Text(
                                 text = "${groupDescription.length}/200",
                                 fontSize = 11.5.sp,
-                                color = Color(0xFF9CA3AF),
+                                color = funkyColors.mute,
                                 modifier = Modifier
                                     .align(Alignment.End)
                                     .padding(top = 4.dp)
@@ -725,27 +728,27 @@ fun CreateGroupBottomSheet(
                     item {
                         Surface(
                             shape = RoundedCornerShape(16.dp),
-                            color = Color(0xFFF0FDF4),
-                            border = BorderStroke(1.dp, Color(0xFFBBF7D0)),
+                            color = if (funkyColors.isDark) funkyColors.ok.copy(alpha = 0.14f) else Color(0xFFF0FDF4),
+                            border = BorderStroke(1.dp, if (funkyColors.isDark) funkyColors.ok.copy(alpha = 0.35f) else Color(0xFFBBF7D0)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
                                 modifier = Modifier.padding(14.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                GroupE2EEShieldIcon(size = 20.dp, color = Color(0xFF16A34A))
+                                GroupE2EEShieldIcon(size = 20.dp, color = funkyColors.ok)
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
                                     Text(
                                         text = "End-to-End Encrypted Group",
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF15803D)
+                                        color = if (funkyColors.isDark) Color(0xFF6EE7B7) else Color(0xFF15803D)
                                     )
                                     Text(
                                         text = "All chats and shared media are protected by local encryption.",
                                         fontSize = 11.5.sp,
-                                        color = Color(0xFF166534)
+                                        color = if (funkyColors.isDark) Color(0xFFA7F3D0) else Color(0xFF166534)
                                     )
                                 }
                             }
@@ -756,30 +759,31 @@ fun CreateGroupBottomSheet(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Next Step Button (Vibrant FunkyTalk Gold)
+                val isStep1Valid = groupName.trim().isNotBlank()
                 Button(
                     onClick = {
-                        if (groupName.trim().isBlank()) {
+                        if (!isStep1Valid) {
                             Toast.makeText(context, "Please enter a group name", Toast.LENGTH_SHORT).show()
                             return@Button
                         }
                         currentStep = 2
                     },
-                    enabled = groupName.trim().isNotBlank(),
+                    enabled = isStep1Valid,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(52.dp),
                     shape = RoundedCornerShape(16.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = GoldAccent,
-                        contentColor = Color.Black,
-                        disabledContainerColor = Color(0xFFFEF3C7),
-                        disabledContentColor = Color(0xFF9CA3AF)
+                        containerColor = funkyColors.mango,
+                        contentColor = funkyColors.onMango,
+                        disabledContainerColor = funkyColors.soft,
+                        disabledContentColor = funkyColors.mute
                     ),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
                 ) {
                     Text(
                         text = "Next: Add Members",
-                        color = Color.Black,
+                        color = if (isStep1Valid) funkyColors.onMango else funkyColors.mute,
                         fontWeight = FontWeight.Black,
                         fontSize = 15.sp
                     )
@@ -800,20 +804,20 @@ fun CreateGroupBottomSheet(
                     item {
                         Surface(
                             shape = RoundedCornerShape(14.dp),
-                            color = Color(0xFFFFFBEB),
-                            border = BorderStroke(1.dp, Color(0xFFFEF08A)),
+                            color = funkyColors.soft,
+                            border = BorderStroke(1.dp, funkyColors.mango.copy(alpha = 0.35f)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
                                 modifier = Modifier.padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                GroupTinyLockIcon(size = 15.dp, color = Color(0xFFB45309))
+                                GroupTinyLockIcon(size = 15.dp, color = if (funkyColors.isDark) funkyColors.mango else Color(0xFFB45309))
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Text(
                                     text = "You can invite users you follow, your followers, or people you've chatted with.",
                                     fontSize = 12.sp,
-                                    color = Color(0xFF92400E),
+                                    color = if (funkyColors.isDark) funkyColors.ink else Color(0xFF92400E),
                                     lineHeight = 16.sp
                                 )
                             }
@@ -837,7 +841,8 @@ fun CreateGroupBottomSheet(
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(50.dp))
-                                        .background(if (isSelected) Color(0xFFFFC529) else Color(0xFFF3F4F6))
+                                        .background(if (isSelected) funkyColors.mango else funkyColors.bg)
+                                        .border(1.dp, if (isSelected) funkyColors.mango else funkyColors.line, RoundedCornerShape(50.dp))
                                         .clickable { selectedCategoryFilter = title }
                                         .padding(horizontal = 14.dp, vertical = 7.dp)
                                 ) {
@@ -845,7 +850,7 @@ fun CreateGroupBottomSheet(
                                         text = "$title ($count)",
                                         fontSize = 12.sp,
                                         fontWeight = if (isSelected) FontWeight.Black else FontWeight.SemiBold,
-                                        color = if (isSelected) Color.Black else Color(0xFF4B5563)
+                                        color = if (isSelected) funkyColors.onMango else funkyColors.mute
                                     )
                                 }
                             }
@@ -859,8 +864,8 @@ fun CreateGroupBottomSheet(
                                 .fillMaxWidth()
                                 .height(46.dp)
                                 .clip(RoundedCornerShape(14.dp))
-                                .background(Color(0xFFF9FAFB))
-                                .border(BorderStroke(1.dp, Color(0xFFE5E7EB)), RoundedCornerShape(14.dp))
+                                .background(funkyColors.bg)
+                                .border(BorderStroke(1.dp, funkyColors.line), RoundedCornerShape(14.dp))
                                 .padding(horizontal = 14.dp),
                             contentAlignment = Alignment.CenterStart
                         ) {
@@ -868,13 +873,13 @@ fun CreateGroupBottomSheet(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                GroupSearchIcon(size = 17.dp, color = Color(0xFF9CA3AF))
+                                GroupSearchIcon(size = 17.dp, color = funkyColors.mute)
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Box(modifier = Modifier.weight(1f)) {
                                     if (searchQuery.isEmpty()) {
                                         Text(
                                             text = "Search name or username...",
-                                            color = Color(0xFF9CA3AF),
+                                            color = funkyColors.mute,
                                             fontSize = 13.5.sp
                                         )
                                     }
@@ -882,8 +887,8 @@ fun CreateGroupBottomSheet(
                                         value = searchQuery,
                                         onValueChange = { searchQuery = it },
                                         singleLine = true,
-                                        textStyle = TextStyle(color = Color(0xFF111827), fontSize = 13.5.sp, fontWeight = FontWeight.Medium),
-                                        cursorBrush = SolidColor(Color.Black),
+                                        textStyle = TextStyle(color = funkyColors.ink, fontSize = 13.5.sp, fontWeight = FontWeight.Medium),
+                                        cursorBrush = SolidColor(funkyColors.mango),
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                 }
@@ -892,11 +897,11 @@ fun CreateGroupBottomSheet(
                                         modifier = Modifier
                                             .size(22.dp)
                                             .clip(CircleShape)
-                                            .background(Color(0xFFE5E7EB))
+                                            .background(funkyColors.line)
                                             .clickable { searchQuery = "" },
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        GroupCloseIcon(size = 9.dp, color = Color(0xFF4B5563))
+                                        GroupCloseIcon(size = 9.dp, color = funkyColors.ink)
                                     }
                                 }
                             }
@@ -916,13 +921,13 @@ fun CreateGroupBottomSheet(
                                         text = "Selected Members",
                                         fontSize = 12.5.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF111827)
+                                        color = funkyColors.ink
                                     )
                                     Text(
                                         text = "${selectedMemberIds.size} selected",
                                         fontSize = 11.5.sp,
                                         fontWeight = FontWeight.SemiBold,
-                                        color = Color(0xFFD97706)
+                                        color = if (funkyColors.isDark) funkyColors.mango else Color(0xFFD97706)
                                     )
                                 }
                                 Spacer(modifier = Modifier.height(6.dp))
@@ -934,8 +939,8 @@ fun CreateGroupBottomSheet(
                                         val contact = eligibleContacts.find { it.userId == id }
                                         Surface(
                                             shape = RoundedCornerShape(50.dp),
-                                            color = Color(0xFFFFFBEB),
-                                            border = BorderStroke(1.dp, Color(0xFFFEF08A))
+                                            color = funkyColors.soft,
+                                            border = BorderStroke(1.dp, funkyColors.mango.copy(alpha = 0.45f))
                                         ) {
                                             Row(
                                                 modifier = Modifier.padding(start = 4.dp, top = 3.dp, bottom = 3.dp, end = 8.dp),
@@ -955,13 +960,13 @@ fun CreateGroupBottomSheet(
                                                         modifier = Modifier
                                                             .size(24.dp)
                                                             .clip(CircleShape)
-                                                            .background(Color(0xFFD97706)),
+                                                            .background(funkyColors.mango),
                                                         contentAlignment = Alignment.Center
                                                     ) {
                                                         Text(
                                                             text = (contact?.displayName ?: "U").take(1).uppercase(),
                                                             fontSize = 11.sp,
-                                                            color = Color.White,
+                                                            color = funkyColors.onMango,
                                                             fontWeight = FontWeight.Black
                                                         )
                                                     }
@@ -971,18 +976,18 @@ fun CreateGroupBottomSheet(
                                                     text = contact?.displayName ?: "User",
                                                     fontSize = 12.sp,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = Color(0xFF92400E)
+                                                    color = funkyColors.ink
                                                 )
                                                 Spacer(modifier = Modifier.width(6.dp))
                                                 Box(
                                                     modifier = Modifier
                                                         .size(16.dp)
                                                         .clip(CircleShape)
-                                                        .background(Color(0xFFFDE68A))
+                                                        .background(funkyColors.mango.copy(alpha = 0.28f))
                                                         .clickable { selectedMemberIds.remove(id) },
                                                     contentAlignment = Alignment.Center
                                                 ) {
-                                                    GroupCloseIcon(size = 7.dp, color = Color(0xFF92400E))
+                                                    GroupCloseIcon(size = 7.dp, color = funkyColors.ink)
                                                 }
                                             }
                                         }
@@ -996,8 +1001,8 @@ fun CreateGroupBottomSheet(
                     item {
                         Surface(
                             shape = RoundedCornerShape(18.dp),
-                            color = Color(0xFFF9FAFB),
-                            border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+                            color = funkyColors.bg,
+                            border = BorderStroke(1.dp, funkyColors.line),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             if (isLoadingContacts) {
@@ -1009,7 +1014,7 @@ fun CreateGroupBottomSheet(
                                 ) {
                                     CircularProgressIndicator(
                                         modifier = Modifier.size(26.dp),
-                                        color = GoldAccent,
+                                        color = funkyColors.mango,
                                         strokeWidth = 2.5.dp
                                     )
                                 }
@@ -1021,7 +1026,7 @@ fun CreateGroupBottomSheet(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        GroupUsersIcon(size = 32.dp, color = Color(0xFF9CA3AF))
+                                        GroupUsersIcon(size = 32.dp, color = funkyColors.mute)
                                         Spacer(modifier = Modifier.height(10.dp))
                                         Text(
                                             text = if (searchQuery.isNotBlank()) {
@@ -1032,7 +1037,7 @@ fun CreateGroupBottomSheet(
                                                 "You can only invite people you follow, your followers, or people you've chatted with. Start a chat or follow users to invite them!"
                                             },
                                             fontSize = 13.sp,
-                                            color = Color(0xFF6B7280),
+                                            color = funkyColors.mute,
                                             textAlign = TextAlign.Center,
                                             lineHeight = 18.sp
                                         )
@@ -1070,14 +1075,15 @@ fun CreateGroupBottomSheet(
                                                     modifier = Modifier
                                                         .size(42.dp)
                                                         .clip(CircleShape)
-                                                        .background(Color(0xFF1E293B)),
+                                                        .background(funkyColors.soft)
+                                                        .border(1.dp, funkyColors.line, CircleShape),
                                                     contentAlignment = Alignment.Center
                                                 ) {
                                                     Text(
                                                         text = contact.displayName.take(1).uppercase(),
                                                         fontWeight = FontWeight.Black,
                                                         fontSize = 16.sp,
-                                                        color = Color.White
+                                                        color = funkyColors.ink
                                                     )
                                                 }
                                             }
@@ -1090,7 +1096,7 @@ fun CreateGroupBottomSheet(
                                                     text = contact.displayName,
                                                     fontSize = 14.5.sp,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = Color(0xFF111827),
+                                                    color = funkyColors.ink,
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis
                                                 )
@@ -1102,21 +1108,21 @@ fun CreateGroupBottomSheet(
                                                     Text(
                                                         text = contact.languages,
                                                         fontSize = 11.5.sp,
-                                                        color = Color(0xFF6B7280),
+                                                        color = funkyColors.mute,
                                                         fontWeight = FontWeight.Medium
                                                     )
                                                     if (contact.sources.contains(ContactSource.FOLLOWING)) {
                                                         Box(
                                                             modifier = Modifier
                                                                 .clip(RoundedCornerShape(4.dp))
-                                                                .background(Color(0xFFDCFCE7))
+                                                                .background(if (funkyColors.isDark) funkyColors.ok.copy(alpha = 0.2f) else Color(0xFFDCFCE7))
                                                                 .padding(horizontal = 5.dp, vertical = 1.dp)
                                                         ) {
                                                             Text(
                                                                 text = "Following",
                                                                 fontSize = 9.5.sp,
                                                                 fontWeight = FontWeight.Bold,
-                                                                color = Color(0xFF15803D)
+                                                                color = if (funkyColors.isDark) Color(0xFF6EE7B7) else Color(0xFF15803D)
                                                             )
                                                         }
                                                     }
@@ -1124,14 +1130,14 @@ fun CreateGroupBottomSheet(
                                                         Box(
                                                             modifier = Modifier
                                                                 .clip(RoundedCornerShape(4.dp))
-                                                                .background(Color(0xFFFEF3C7))
+                                                                .background(funkyColors.soft)
                                                                 .padding(horizontal = 5.dp, vertical = 1.dp)
                                                         ) {
                                                             Text(
                                                                 text = "Follower",
                                                                 fontSize = 9.5.sp,
                                                                 fontWeight = FontWeight.Bold,
-                                                                color = Color(0xFFB45309)
+                                                                color = if (funkyColors.isDark) funkyColors.mango else Color(0xFFB45309)
                                                             )
                                                         }
                                                     }
@@ -1139,14 +1145,14 @@ fun CreateGroupBottomSheet(
                                                         Box(
                                                             modifier = Modifier
                                                                 .clip(RoundedCornerShape(4.dp))
-                                                                .background(Color(0xFFE0E7FF))
+                                                                .background(if (funkyColors.isDark) Color(0xFF312E81).copy(alpha = 0.6f) else Color(0xFFE0E7FF))
                                                                 .padding(horizontal = 5.dp, vertical = 1.dp)
                                                         ) {
                                                             Text(
                                                                 text = "In Chat",
                                                                 fontSize = 9.5.sp,
                                                                 fontWeight = FontWeight.Bold,
-                                                                color = Color(0xFF4338CA)
+                                                                color = if (funkyColors.isDark) Color(0xFFA5B4FC) else Color(0xFF4338CA)
                                                             )
                                                         }
                                                     }
@@ -1159,24 +1165,24 @@ fun CreateGroupBottomSheet(
                                                     modifier = Modifier
                                                         .size(24.dp)
                                                         .clip(CircleShape)
-                                                        .background(GoldAccent),
+                                                        .background(funkyColors.mango),
                                                     contentAlignment = Alignment.Center
                                                 ) {
-                                                    GroupCheckIcon(size = 12.dp, color = Color.Black)
+                                                    GroupCheckIcon(size = 12.dp, color = funkyColors.onMango)
                                                 }
                                             } else {
                                                 Box(
                                                     modifier = Modifier
                                                         .size(24.dp)
                                                         .clip(CircleShape)
-                                                        .border(BorderStroke(1.8.dp, Color(0xFFD1D5DB)), CircleShape)
+                                                        .border(BorderStroke(1.8.dp, funkyColors.line), CircleShape)
                                                 )
                                             }
                                         }
 
                                         if (index < filteredContacts.lastIndex) {
                                             HorizontalDivider(
-                                                color = Color(0xFFF3F4F6),
+                                                color = funkyColors.line,
                                                 thickness = 1.dp,
                                                 modifier = Modifier.padding(start = 68.dp)
                                             )
@@ -1191,6 +1197,7 @@ fun CreateGroupBottomSheet(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Bottom Create CTA Button
+                val canCreate = groupName.isNotBlank() && !isCreating
                 Button(
                     onClick = {
                         if (groupName.isBlank()) {
@@ -1247,29 +1254,30 @@ fun CreateGroupBottomSheet(
                             }
                         }
                     },
-                    enabled = groupName.isNotBlank() && !isCreating,
+                    enabled = canCreate,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(52.dp),
                     shape = RoundedCornerShape(16.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = GoldAccent,
-                        contentColor = Color.Black,
-                        disabledContainerColor = Color(0xFFFEF3C7),
-                        disabledContentColor = Color(0xFF9CA3AF)
+                        containerColor = funkyColors.mango,
+                        contentColor = funkyColors.onMango,
+                        disabledContainerColor = funkyColors.soft,
+                        disabledContentColor = funkyColors.mute
                     ),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
                 ) {
+                    val ctaTextColor = if (canCreate) funkyColors.onMango else funkyColors.mute
                     if (isCreating) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.Black, strokeWidth = 2.dp)
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), color = funkyColors.onMango, strokeWidth = 2.dp)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Creating Group...", color = Color.Black, fontWeight = FontWeight.Black, fontSize = 15.sp)
+                        Text("Creating Group...", color = ctaTextColor, fontWeight = FontWeight.Black, fontSize = 15.sp)
                     } else {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            GroupUsersIcon(size = 20.dp, color = Color.Black)
+                            GroupUsersIcon(size = 20.dp, color = ctaTextColor)
                             Text(
                                 text = if (selectedMemberIds.isNotEmpty()) "Create Group (${selectedMemberIds.size} Members)" else "Create Group Chat",
-                                color = Color.Black,
+                                color = ctaTextColor,
                                 fontWeight = FontWeight.Black,
                                 fontSize = 15.sp
                             )

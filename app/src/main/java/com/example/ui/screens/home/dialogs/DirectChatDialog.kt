@@ -5,9 +5,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import com.example.ui.screens.chat.DirectChatScreen
 import com.example.ui.screens.home.models.DirectChat
+import com.example.ui.theme.LocalFunkyColors
 
 @Composable
 fun DirectChatDialog(
@@ -16,6 +16,7 @@ fun DirectChatDialog(
     onDismiss: () -> Unit,
     onSendMessage: (String) -> Unit
 ) {
+    val funkyColors = LocalFunkyColors.current
     val lang = contact.isNativeLanguage.lowercase()
     val flagCode = when {
         lang.contains("jp") || lang.contains("japan") -> "jp"
@@ -46,7 +47,7 @@ fun DirectChatDialog(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFFAFAEE))
+            .background(funkyColors.bg)
     ) {
         DirectChatScreen(
             partnerUserId = contact.id,

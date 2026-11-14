@@ -28,6 +28,7 @@ import com.example.BlockedGroupRow
 import com.example.repository.GroupChatRepository
 import com.example.ui.components.GroupBlockBanIcon
 import com.example.ui.components.GroupUsersIcon
+import com.example.ui.theme.LocalFunkyColors
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -37,6 +38,7 @@ fun BlockedGroupsBottomSheet(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val funkyColors = LocalFunkyColors.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     var isLoading by remember { mutableStateOf(true) }
@@ -65,7 +67,7 @@ fun BlockedGroupsBottomSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Color.White,
+        containerColor = funkyColors.surface,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         dragHandle = {
             Box(
@@ -74,7 +76,7 @@ fun BlockedGroupsBottomSheet(
                     .width(40.dp)
                     .height(4.dp)
                     .clip(RoundedCornerShape(50))
-                    .background(Color(0xFFE5E7EB))
+                    .background(funkyColors.line)
             )
         }
     ) {
@@ -93,11 +95,11 @@ fun BlockedGroupsBottomSheet(
                     modifier = Modifier
                         .size(44.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFFFEF2F2))
-                        .border(1.dp, Color(0xFFFECACA), CircleShape),
+                        .background(funkyColors.danger.copy(alpha = 0.14f))
+                        .border(1.dp, funkyColors.danger.copy(alpha = 0.3f), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
-                    GroupBlockBanIcon(size = 20.dp, color = Color(0xFFDC2626))
+                    GroupBlockBanIcon(size = 20.dp, color = funkyColors.danger)
                 }
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
@@ -105,12 +107,12 @@ fun BlockedGroupsBottomSheet(
                         text = "Blocked groups",
                         fontSize = 19.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFF111827)
+                        color = funkyColors.ink
                     )
                     Text(
                         text = "Groups you have blocked cannot re-invite you until unblocked",
                         fontSize = 12.5.sp,
-                        color = Color(0xFF6B7280)
+                        color = funkyColors.mute
                     )
                 }
             }
@@ -126,7 +128,7 @@ fun BlockedGroupsBottomSheet(
                         contentAlignment = Alignment.Center
                     ) {
                         CircularProgressIndicator(
-                            color = Color(0xFFFFC529),
+                            color = funkyColors.mango,
                             modifier = Modifier.size(32.dp)
                         )
                     }
@@ -141,12 +143,12 @@ fun BlockedGroupsBottomSheet(
                         Text(
                             text = errorMessage ?: "Failed to load blocked groups",
                             fontSize = 13.5.sp,
-                            color = Color(0xFFDC2626),
+                            color = funkyColors.danger,
                             textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(10.dp))
                         TextButton(onClick = { loadBlockedGroups() }) {
-                            Text("Retry", fontWeight = FontWeight.Bold, color = Color(0xFFB45309))
+                            Text("Retry", fontWeight = FontWeight.Bold, color = funkyColors.mango)
                         }
                     }
                 }
@@ -162,24 +164,24 @@ fun BlockedGroupsBottomSheet(
                             modifier = Modifier
                                 .size(64.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFFF9FAFB))
-                                .border(1.dp, Color(0xFFF3F4F6), CircleShape),
+                                .background(funkyColors.bg)
+                                .border(1.dp, funkyColors.line, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            GroupUsersIcon(size = 28.dp, color = Color(0xFF9CA3AF))
+                            GroupUsersIcon(size = 28.dp, color = funkyColors.mute)
                         }
                         Spacer(modifier = Modifier.height(14.dp))
                         Text(
                             text = "No blocked groups",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF111827)
+                            color = funkyColors.ink
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = "Any groups you block will appear here.",
                             fontSize = 13.sp,
-                            color = Color(0xFF6B7280),
+                            color = funkyColors.mute,
                             textAlign = TextAlign.Center
                         )
                     }
@@ -201,8 +203,8 @@ fun BlockedGroupsBottomSheet(
                             Surface(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(18.dp),
-                                color = Color(0xFFF9FAFB),
-                                border = BorderStroke(1.dp, Color(0xFFF3F4F6))
+                                color = funkyColors.bg,
+                                border = BorderStroke(1.dp, funkyColors.line)
                             ) {
                                 Row(
                                     modifier = Modifier
@@ -219,7 +221,7 @@ fun BlockedGroupsBottomSheet(
                                             modifier = Modifier
                                                 .size(44.dp)
                                                 .clip(CircleShape)
-                                                .background(Color(0xFFFEF3C7)),
+                                                .background(funkyColors.soft),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             if (!item.avatar_url.isNullOrBlank()) {
@@ -236,7 +238,7 @@ fun BlockedGroupsBottomSheet(
                                                     text = groupTitle.take(1).uppercase(),
                                                     fontSize = 16.sp,
                                                     fontWeight = FontWeight.ExtraBold,
-                                                    color = Color(0xFFB45309)
+                                                    color = funkyColors.mango
                                                 )
                                             }
                                         }
@@ -248,14 +250,14 @@ fun BlockedGroupsBottomSheet(
                                                 text = groupTitle,
                                                 fontSize = 15.sp,
                                                 fontWeight = FontWeight.Bold,
-                                                color = Color(0xFF111827),
+                                                color = funkyColors.ink,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                             Text(
                                                 text = blockedDateLabel,
                                                 fontSize = 12.sp,
-                                                color = Color(0xFF6B7280)
+                                                color = funkyColors.mute
                                             )
                                         }
                                     }
@@ -286,10 +288,10 @@ fun BlockedGroupsBottomSheet(
                                         },
                                         enabled = !isUnblocking,
                                         shape = RoundedCornerShape(50.dp),
-                                        border = BorderStroke(1.dp, Color(0xFFD1D5DB)),
+                                        border = BorderStroke(1.dp, funkyColors.line),
                                         colors = ButtonDefaults.outlinedButtonColors(
-                                            containerColor = Color.White,
-                                            contentColor = Color(0xFF111827)
+                                            containerColor = funkyColors.surface,
+                                            contentColor = funkyColors.ink
                                         ),
                                         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                                         modifier = Modifier
@@ -298,7 +300,7 @@ fun BlockedGroupsBottomSheet(
                                     ) {
                                         if (isUnblocking) {
                                             CircularProgressIndicator(
-                                                color = Color(0xFF111827),
+                                                color = funkyColors.ink,
                                                 strokeWidth = 2.dp,
                                                 modifier = Modifier.size(14.dp)
                                             )

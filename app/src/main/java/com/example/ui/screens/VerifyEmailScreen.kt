@@ -6,10 +6,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.MarkEmailRead
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,6 +20,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.AuthState
 import com.example.AuthViewModel
+import com.example.ui.components.SoftCheckBadge
+import com.example.ui.components.SoftMailIcon
+import com.example.ui.components.SoftRefreshIcon
+import com.example.ui.theme.LocalFunkyColors
 
 @Composable
 fun VerifyEmailScreen(
@@ -32,6 +32,7 @@ fun VerifyEmailScreen(
     onBackClick: () -> Unit
 ) {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
     val authState by viewModel.authState.collectAsState()
 
     var userEmail by remember { mutableStateOf("your email") }
@@ -68,7 +69,7 @@ fun VerifyEmailScreen(
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
-        containerColor = Color.White
+        containerColor = funkyColors.bg
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -91,15 +92,21 @@ fun VerifyEmailScreen(
                     modifier = Modifier
                         .size(90.dp)
                         .clip(RoundedCornerShape(24.dp))
-                        .background(Color(0xFFFFF4D4)),
+                        .background(funkyColors.soft),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = if (isVerified) Icons.Default.MarkEmailRead else Icons.Default.Email,
-                        contentDescription = "Mail Verification pending",
-                        tint = Color(0xFFFFB300),
-                        modifier = Modifier.size(44.dp)
+                    SoftMailIcon(
+                        size = 44.dp,
+                        color = funkyColors.mango
                     )
+                    if (isVerified) {
+                        SoftCheckBadge(
+                            modifier = Modifier
+                                .size(22.dp)
+                                .align(Alignment.BottomEnd)
+                                .offset(x = (-6).dp, y = (-6).dp)
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
@@ -108,7 +115,7 @@ fun VerifyEmailScreen(
                     text = "Verify your email",
                     fontSize = 26.sp,
                     fontWeight = FontWeight.Black,
-                    color = Color.Black,
+                    color = funkyColors.ink,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.testTag("verify_email_header")
                 )
@@ -118,7 +125,7 @@ fun VerifyEmailScreen(
                 Text(
                     text = "We have sent a verification link to:\n$userEmail\n\nPlease check your email inbox and click the verification link to verify your account.",
                     fontSize = 14.sp,
-                    color = Color(0xFF6B6E7B),
+                    color = funkyColors.mute,
                     lineHeight = 20.sp,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.padding(horizontal = 12.dp)
@@ -126,9 +133,9 @@ fun VerifyEmailScreen(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                // Beautiful interactive status check card with automated loading state
+                // Interactive status check card with automated loading state
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF9F9FB)),
+                    colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -142,7 +149,7 @@ fun VerifyEmailScreen(
                         horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         CircularProgressIndicator(
-                            color = Color(0xFFFF9E00),
+                            color = funkyColors.mango,
                             strokeWidth = 3.dp,
                             modifier = Modifier.size(22.dp)
                         )
@@ -151,12 +158,12 @@ fun VerifyEmailScreen(
                                 text = "Awaiting verification...",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
-                                color = Color.Black
+                                color = funkyColors.ink
                             )
                             Text(
                                 text = "Auto-checking every few seconds.",
                                 fontSize = 12.sp,
-                                color = Color(0xFF8E8E93)
+                                color = funkyColors.mute
                             )
                         }
                     }
@@ -183,14 +190,14 @@ fun VerifyEmailScreen(
                         .height(52.dp)
                         .testTag("open_email_app_button"),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF141414),
-                        contentColor = Color.White
+                        containerColor = if (funkyColors.isDark) funkyColors.surface else Color(0xFF141414),
+                        contentColor = if (funkyColors.isDark) funkyColors.ink else Color.White
                     ),
                     shape = RoundedCornerShape(26.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Email,
-                        contentDescription = "Email App",
+                    SoftMailIcon(
+                        size = 20.dp,
+                        color = if (funkyColors.isDark) funkyColors.ink else Color.White,
                         modifier = Modifier.padding(end = 8.dp)
                     )
                     Text(
@@ -212,14 +219,14 @@ fun VerifyEmailScreen(
                         .height(52.dp)
                         .testTag("verify_otp_button"),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFFF9E00),
-                        contentColor = Color.White
+                        containerColor = funkyColors.mango,
+                        contentColor = funkyColors.onMango
                     ),
                     shape = RoundedCornerShape(26.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = "Refresh",
+                    SoftRefreshIcon(
+                        size = 20.dp,
+                        color = funkyColors.onMango,
                         modifier = Modifier.padding(end = 8.dp)
                     )
                     Text(
@@ -243,10 +250,10 @@ fun VerifyEmailScreen(
                         .height(52.dp)
                         .testTag("resend_email_button"),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (cooldownSeconds == 0) Color(0xFFF5F5F7) else Color(0xFFF1F5F9),
-                        contentColor = if (cooldownSeconds == 0) Color.Black else Color.Gray,
-                        disabledContainerColor = Color(0xFFF1F5F9),
-                        disabledContentColor = Color.Gray
+                        containerColor = funkyColors.surface,
+                        contentColor = if (cooldownSeconds == 0) funkyColors.ink else funkyColors.mute,
+                        disabledContainerColor = funkyColors.soft,
+                        disabledContentColor = funkyColors.mute
                     ),
                     shape = RoundedCornerShape(26.dp),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
@@ -268,7 +275,7 @@ fun VerifyEmailScreen(
                 ) {
                     Text(
                         text = "Back to Sign Up / Log In",
-                        color = Color(0xFFFF9E00),
+                        color = funkyColors.mango,
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
                     )

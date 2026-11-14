@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,12 +20,14 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.components.CircleFlag
+import com.example.R
 import com.example.ui.components.FunJokeDialog
+import com.example.ui.components.FunkySmileyIcon
 import com.example.ui.components.PresenceAvatar
 import com.example.ui.screens.home.models.FollowedFriend
 import com.example.ui.screens.home.models.GoldDark
@@ -119,7 +122,7 @@ fun ActiveFriendsRow(
             contentPadding = PaddingValues(horizontal = 2.dp),
             verticalAlignment = Alignment.Top
         ) {
-            // 1. DEDICATED FUN CIRCLE ICON: "Fun Jokes"
+            // 1. Fun Jokes circle
             item {
                 val infiniteTransition = rememberInfiniteTransition(label = "joke_shimmer")
                 val shimmerScale by infiniteTransition.animateFloat(
@@ -167,9 +170,10 @@ fun ActiveFriendsRow(
                                     .background(if (isDark) funkyColors.soft else Color(0xFFFFFBEB)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text(
-                                    text = "🎭",
-                                    fontSize = 24.sp
+                                FunkySmileyIcon(
+                                    color = funkyColors.mango,
+                                    modifier = Modifier.size(26.dp),
+                                    strokeWidth = 2.0f
                                 )
                             }
                         }
@@ -179,11 +183,16 @@ fun ActiveFriendsRow(
                                 .size(20.dp)
                                 .align(Alignment.BottomEnd)
                                 .clip(CircleShape)
-                                .background(Color(0xFFFFB627))
+                                .background(funkyColors.mango)
                                 .border(1.5.dp, funkyColors.surface, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("😂", fontSize = 11.sp)
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_sparkle),
+                                contentDescription = "Fun Jokes",
+                                tint = funkyColors.onMango,
+                                modifier = Modifier.size(11.dp)
+                            )
                         }
                     }
 
@@ -207,7 +216,7 @@ fun ActiveFriendsRow(
                 }
             }
 
-            // 2. FRIENDS LIST with right-side flag & clean status text (no moons)
+            // 2. FRIENDS LIST with overlapping bottom-right country flag on circular DP
             itemsIndexed(activeFriendsList) { _, friend ->
                 val isOnlineUser = friend.isOnline
 
@@ -230,51 +239,49 @@ fun ActiveFriendsRow(
                         isSpeaking = friend.isSpeaking,
                         isOnline = isOnlineUser,
                         countryCode = friend.flagCode,
-                        showFlagBadge = false,
+                        showFlagBadge = true,
                         userId = friend.id,
                         enableFrameAnimation = false
                     )
 
                     Spacer(modifier = Modifier.height(4.dp))
+                    com.example.store.DecoratedUserName(
+                        userId = friend.id,
+                        name = friend.name,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        defaultColor = if (isOnlineUser) funkyColors.ink else funkyColors.mute
+                    )
+
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
-                        Box(modifier = Modifier.weight(1f, fill = false)) {
-                            com.example.store.DecoratedUserName(
-                                userId = friend.id,
-                                name = friend.name,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                defaultColor = if (isOnlineUser) funkyColors.ink else funkyColors.mute
+                        if (isOnlineUser && friend.isSpeaking) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_mic),
+                                contentDescription = null,
+                                tint = GoldDark,
+                                modifier = Modifier.size(10.dp)
                             )
                         }
-                        if (friend.flagCode.isNotBlank()) {
-                            CircleFlag(
-                                countryCode = friend.flagCode,
-                                modifier = Modifier
-                                    .size(14.dp)
-                                    .clip(CircleShape)
-                            )
-                        }
+                        Text(
+                            text = when {
+                                isOnlineUser && friend.isSpeaking -> "Speaking"
+                                isOnlineUser -> "Online"
+                                else -> "Offline"
+                            },
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = when {
+                                isOnlineUser && friend.isSpeaking -> GoldDark
+                                isOnlineUser -> if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A)
+                                else -> funkyColors.mute
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
-
-                    Text(
-                        text = when {
-                            isOnlineUser && friend.isSpeaking -> "Speaking 🎙️"
-                            isOnlineUser -> "Online"
-                            else -> "Offline"
-                        },
-                        fontSize = 9.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = when {
-                            isOnlineUser && friend.isSpeaking -> GoldDark
-                            isOnlineUser -> if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A)
-                            else -> funkyColors.mute
-                        },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
                 }
             }
         }

@@ -8,7 +8,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -17,6 +16,7 @@ import com.example.UserProfile
 import com.example.ui.screens.home.components.*
 import com.example.ui.screens.home.models.CustomRoom
 import com.example.ui.screens.home.models.FollowedFriend
+import com.example.ui.theme.LocalFunkyColors
 
 @Composable
 fun HomeTabContent(
@@ -25,8 +25,9 @@ fun HomeTabContent(
     roomsList: List<CustomRoom>,
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
-    selectedLanguageFilter: String,
+    selectedLanguageFilters: Set<String>,
     onLanguageSelected: (String) -> Unit,
+    filterSpeakOrLearnMode: String = "They speak",
     filterOnlyLive: Boolean,
     filterByLevel: String,
     selectedSortOption: String,
@@ -38,6 +39,13 @@ fun HomeTabContent(
     onOpenFilter: () -> Unit,
     onJoinRoom: (CustomRoom) -> Unit
 ) {
+    val funkyColors = LocalFunkyColors.current
+    val chipSelectedLanguage = when (selectedLanguageFilters.size) {
+        0 -> "All"
+        1 -> selectedLanguageFilters.first()
+        else -> ""
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 24.dp)
@@ -53,7 +61,7 @@ fun HomeTabContent(
             )
         }
 
-        // 2. MOTIVATIONAL GREETING CARD (SUN & PAPER PLANE)
+        // 2. MOTIVATIONAL GREETING CARD
         item {
             HomeGreetingCard(
                 currentUserProfile = currentUserProfile
@@ -79,26 +87,48 @@ fun HomeTabContent(
         // 4. LANGUAGE CATEGORIES HORIZONTAL PILLS ROW
         item {
             LanguageFilterChips(
-                selectedLanguageFilter = selectedLanguageFilter,
+                selectedLanguageFilter = chipSelectedLanguage,
+                selectedLanguages = selectedLanguageFilters,
                 onLanguageSelected = onLanguageSelected
             )
         }
 
         // 5. HIGH-FIDELITY ACTIVE ROOM CARDS LIST
-        val filteredRooms = roomsList.filter {
-            val matchesLang = (selectedLanguageFilter == "All" || it.language.equals(selectedLanguageFilter, ignoreCase = true))
-            val matchesQuery = (searchQuery.isBlank() || it.title.contains(searchQuery, ignoreCase = true) || it.subtitle.contains(searchQuery, ignoreCase = true) || it.language.contains(searchQuery, ignoreCase = true))
-            val matchesLive = (!filterOnlyLive || it.badgeText == "LIVE")
+        val filteredRooms = roomsList.filter { room ->
+            val matchesLang = if (selectedLanguageFilters.isEmpty()) {
+                true
+            } else if (filterSpeakOrLearnMode == "They're learning") {
+                selectedLanguageFilters.any { targetLang ->
+                    room.hostLearningLanguages.any { it.equals(targetLang, ignoreCase = true) } ||
+                        room.language.equals(targetLang, ignoreCase = true) ||
+                        room.subtitle.contains(targetLang, ignoreCase = true) ||
+                        room.title.contains(targetLang, ignoreCase = true)
+                }
+            } else {
+                selectedLanguageFilters.any { targetLang ->
+                    room.language.equals(targetLang, ignoreCase = true) ||
+                        room.hostNativeLanguages.any { it.equals(targetLang, ignoreCase = true) }
+                }
+            }
+            val matchesQuery = searchQuery.isBlank() ||
+                room.title.contains(searchQuery, ignoreCase = true) ||
+                room.subtitle.contains(searchQuery, ignoreCase = true) ||
+                room.language.contains(searchQuery, ignoreCase = true)
+            val matchesLive = !filterOnlyLive || room.badgeText == "LIVE"
             val matchesLevel = when (filterByLevel) {
-                "All" -> true
-                "Beginner" -> it.tag.contains("Beginner", ignoreCase = true) || it.subtitle.contains("Beginner", ignoreCase = true) || it.title.contains("Beginner", ignoreCase = true)
-                "Intermediate" -> it.tag.contains("Intermediate", ignoreCase = true) || it.subtitle.contains("Intermediate", ignoreCase = true) || it.title.contains("Intermediate", ignoreCase = true)
-                "Advanced" -> it.tag.contains("Advanced", ignoreCase = true) ||
-                    it.subtitle.contains("Advanced", ignoreCase = true) ||
-                    it.title.contains("Advanced", ignoreCase = true) ||
-                    it.tag.contains("Fluent", ignoreCase = true) ||
-                    it.title.contains("Idioms", ignoreCase = true) ||
-                    it.tag.contains("hospitality", ignoreCase = true)
+                "All", "All Levels" -> true
+                "Beginner" -> room.tag.contains("Beginner", ignoreCase = true) ||
+                    room.subtitle.contains("Beginner", ignoreCase = true) ||
+                    room.title.contains("Beginner", ignoreCase = true)
+                "Intermediate" -> room.tag.contains("Intermediate", ignoreCase = true) ||
+                    room.subtitle.contains("Intermediate", ignoreCase = true) ||
+                    room.title.contains("Intermediate", ignoreCase = true)
+                "Advanced" -> room.tag.contains("Advanced", ignoreCase = true) ||
+                    room.subtitle.contains("Advanced", ignoreCase = true) ||
+                    room.title.contains("Advanced", ignoreCase = true) ||
+                    room.tag.contains("Fluent", ignoreCase = true) ||
+                    room.title.contains("Idioms", ignoreCase = true) ||
+                    room.tag.contains("hospitality", ignoreCase = true)
                 else -> true
             }
             matchesLang && matchesQuery && matchesLive && matchesLevel
@@ -106,7 +136,7 @@ fun HomeTabContent(
             when (selectedSortOption) {
                 "Popular" -> compareByDescending { it.speakingCount + it.listeningCount }
                 "Most Listeners" -> compareByDescending { it.listeningCount }
-                else -> compareBy { it.id } // Order by original ID sequence for Recently Active
+                else -> compareBy { it.id }
             }
         )
 
@@ -123,13 +153,13 @@ fun HomeTabContent(
                             painter = painterResource(id = R.drawable.ic_search_off),
                             contentDescription = null,
                             modifier = Modifier.size(48.dp),
-                            tint = Color.LightGray
+                            tint = funkyColors.mute.copy(alpha = 0.65f)
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
                             text = "No matching rooms found",
                             fontWeight = FontWeight.SemiBold,
-                            color = Color.Gray
+                            color = funkyColors.mute
                         )
                     }
                 }

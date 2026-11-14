@@ -6,11 +6,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -23,12 +20,14 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.UserProfile
+import com.example.ui.components.FunkySendIcon
+import com.example.ui.theme.LocalAppDarkTheme
+import com.example.ui.theme.LocalFunkyColors
 import java.util.Calendar
 
 private enum class TimeOfDay {
@@ -51,39 +50,41 @@ fun HomeGreetingCard(
 ) {
     val calendar = remember { Calendar.getInstance() }
     val hour = calendar.get(Calendar.HOUR_OF_DAY)
+    val isDark = LocalAppDarkTheme.current
+    val funkyColors = LocalFunkyColors.current
 
-    val config = remember(hour) {
+    val config = remember(hour, isDark, funkyColors) {
         when {
             hour in 5..11 -> GreetingConfig(
                 greeting = "Good Morning",
-                subtitle = "Start your day with a fun conversation ✨",
-                accentColor = Color(0xFFF59E0B),
-                containerBg = Color(0xFFFFFBEB),
-                borderColor = Color(0xFFFDE68A).copy(alpha = 0.7f),
+                subtitle = "Start your day with a fun conversation",
+                accentColor = if (isDark) funkyColors.mango else Color(0xFFF59E0B),
+                containerBg = if (isDark) funkyColors.surface else Color(0xFFFFFBEB),
+                borderColor = if (isDark) funkyColors.line else Color(0xFFFDE68A).copy(alpha = 0.7f),
                 timeOfDay = TimeOfDay.MORNING
             )
             hour in 12..16 -> GreetingConfig(
                 greeting = "Good Afternoon",
-                subtitle = "Take a break and practice with friends ☕",
-                accentColor = Color(0xFFD97706),
-                containerBg = Color(0xFFFFFDF5),
-                borderColor = Color(0xFFFCD34D).copy(alpha = 0.6f),
+                subtitle = "Take a break and practice with friends",
+                accentColor = if (isDark) funkyColors.mango else Color(0xFFD97706),
+                containerBg = if (isDark) funkyColors.surface else Color(0xFFFFFDF5),
+                borderColor = if (isDark) funkyColors.line else Color(0xFFFCD34D).copy(alpha = 0.6f),
                 timeOfDay = TimeOfDay.AFTERNOON
             )
             hour in 17..20 -> GreetingConfig(
                 greeting = "Good Evening",
-                subtitle = "Unwind and connect in lively voice circles 🌇",
-                accentColor = Color(0xFFEA580C),
-                containerBg = Color(0xFFFFF7ED),
-                borderColor = Color(0xFFFED7AA).copy(alpha = 0.7f),
+                subtitle = "Unwind and connect in lively voice circles",
+                accentColor = if (isDark) Color(0xFFFB923C) else Color(0xFFEA580C),
+                containerBg = if (isDark) funkyColors.surface else Color(0xFFFFF7ED),
+                borderColor = if (isDark) funkyColors.line else Color(0xFFFED7AA).copy(alpha = 0.7f),
                 timeOfDay = TimeOfDay.EVENING
             )
             else -> GreetingConfig(
                 greeting = "Good Night",
-                subtitle = "Night owls are practicing speaking right now 🌙",
-                accentColor = Color(0xFF6366F1),
-                containerBg = Color(0xFFF6F6FD),
-                borderColor = Color(0xFFE0E7FF).copy(alpha = 0.8f),
+                subtitle = "Night owls are practicing speaking right now",
+                accentColor = if (isDark) Color(0xFFA5B4FC) else Color(0xFF6366F1),
+                containerBg = if (isDark) funkyColors.surface else Color(0xFFF6F6FD),
+                borderColor = if (isDark) funkyColors.line else Color(0xFFE0E7FF).copy(alpha = 0.8f),
                 timeOfDay = TimeOfDay.NIGHT
             )
         }
@@ -118,7 +119,7 @@ fun HomeGreetingCard(
                 modifier = Modifier
                     .size(46.dp)
                     .clip(CircleShape)
-                    .background(config.accentColor.copy(alpha = 0.12f)),
+                    .background(config.accentColor.copy(alpha = 0.14f)),
                 contentAlignment = Alignment.Center
             ) {
                 Canvas(modifier = Modifier.size(28.dp)) {
@@ -128,7 +129,6 @@ fun HomeGreetingCard(
 
                     when (config.timeOfDay) {
                         TimeOfDay.MORNING, TimeOfDay.AFTERNOON -> {
-                            // Minimalist Geometric Sun
                             val sunRadius = w * 0.26f
                             drawCircle(
                                 color = config.accentColor,
@@ -154,9 +154,7 @@ fun HomeGreetingCard(
                             }
                         }
                         TimeOfDay.EVENING -> {
-                            // Minimalist Sunset Horizon
                             val sunRadius = w * 0.28f
-                            // Upper semi-circle
                             drawArc(
                                 color = config.accentColor,
                                 startAngle = 180f,
@@ -165,7 +163,6 @@ fun HomeGreetingCard(
                                 topLeft = Offset(center.x - sunRadius, center.y - sunRadius),
                                 size = Size(sunRadius * 2, sunRadius * 2)
                             )
-                            // Horizon line
                             drawLine(
                                 color = config.accentColor,
                                 start = Offset(w * 0.12f, center.y + 1.dp.toPx()),
@@ -173,7 +170,6 @@ fun HomeGreetingCard(
                                 strokeWidth = 2.dp.toPx(),
                                 cap = StrokeCap.Round
                             )
-                            // Water reflection dash
                             drawLine(
                                 color = config.accentColor.copy(alpha = 0.5f),
                                 start = Offset(w * 0.25f, center.y + 5.dp.toPx()),
@@ -183,7 +179,6 @@ fun HomeGreetingCard(
                             )
                         }
                         TimeOfDay.NIGHT -> {
-                            // Minimalist Crescent Moon & Star
                             val moonPath = Path().apply {
                                 moveTo(w * 0.65f, h * 0.15f)
                                 cubicTo(
@@ -202,7 +197,6 @@ fun HomeGreetingCard(
                                 path = moonPath,
                                 color = config.accentColor
                             )
-                            // Delicate star
                             val starX = w * 0.78f
                             val starY = h * 0.32f
                             drawLine(
@@ -226,7 +220,6 @@ fun HomeGreetingCard(
 
             Spacer(modifier = Modifier.width(14.dp))
 
-            // Center Clean Typography Section
             Column(
                 modifier = Modifier.weight(1f)
             ) {
@@ -238,7 +231,7 @@ fun HomeGreetingCard(
                         text = finalGreeting,
                         fontSize = 19.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFF1F2937)
+                        color = funkyColors.ink
                     )
                     Text(
                         text = ", $displayGreetName",
@@ -258,24 +251,21 @@ fun HomeGreetingCard(
                     fontSize = 13.sp,
                     lineHeight = 17.sp,
                     fontWeight = FontWeight.Medium,
-                    color = Color(0xFF4B5563)
+                    color = funkyColors.mute
                 )
             }
 
             Spacer(modifier = Modifier.width(10.dp))
 
-            // Minimalist decorative plane / icon flourish
             Box(
                 modifier = Modifier
                     .size(38.dp)
                     .clip(CircleShape)
-                    .background(config.accentColor.copy(alpha = 0.08f)),
+                    .background(config.accentColor.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.Send,
-                    contentDescription = null,
-                    tint = config.accentColor.copy(alpha = 0.85f),
+                FunkySendIcon(
+                    color = config.accentColor,
                     modifier = Modifier
                         .size(16.dp)
                         .rotate(-35f)

@@ -18,11 +18,11 @@ val languageBanners = mapOf(
         BannerOption("Sakura Petals GIF", "https://i.giphy.com/media/3o7TKSjRrfIPjeiVyM/giphy.gif")
     ),
     "English" to listOf(
-        BannerOption("London Big Ben", "https://images.unsplash.com/photo-1513635269975-59663e0ca1ad?w=800"),
+        BannerOption("Misty Peaks", "https://images.unsplash.com/photo-1519681393784-d120267933ba?w=800"),
         BannerOption("New York Skyline", "https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?w=800"),
         BannerOption("Misty Woodland", "https://images.unsplash.com/photo-1447752875215-b2761acb3c5d?w=800"),
         BannerOption("Cozy Coffee Lounge", "https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?w=800"),
-        BannerOption("Rainy Window GIF", "https://i.giphy.com/media/Lmq2eMv782q88/giphy.gif")
+        BannerOption("Twilight Rain GIF", "https://i.giphy.com/media/l0HlRnAWXxn0MhKLK/giphy.gif")
     ),
     "Korean" to listOf(
         BannerOption("Seoul Sunset", "https://images.unsplash.com/photo-1538481199705-c710c4e965fc?w=800"),
@@ -32,13 +32,13 @@ val languageBanners = mapOf(
         BannerOption("Neon Seoul GIF", "https://i.giphy.com/media/26tn33aiTi1jkl6H6/giphy.gif")
     ),
     "Spanish" to listOf(
-        BannerOption("Barcelona Cathedral", "https://images.unsplash.com/photo-1509840144506-2c990f23a7f7?w=800"),
+        BannerOption("Alpine Sunset", "https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=800"),
         BannerOption("Madrid Royal", "https://images.unsplash.com/photo-1539650116574-8efeb43e2750?w=800"),
-        BannerOption("Spanish Archways", "https://images.unsplash.com/photo-1485081669829-bacb8c7bb1f3?w=800")
+        BannerOption("Coastal Horizon", "https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=800")
     ),
     "Chinese" to listOf(
-        BannerOption("Shanghai Bund Sunset", "https://images.unsplash.com/photo-1474181487882-5abf3f016c2d?w=800"),
-        BannerOption("The Great Wall", "https://images.unsplash.com/photo-1508504509543-191d5ac64987?w=800"),
+        BannerOption("City Twilight", "https://images.unsplash.com/photo-1514565131-fce0801e5785?w=800"),
+        BannerOption("Starry Lanterns", "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=800"),
         BannerOption("Beijing Dusk", "https://images.unsplash.com/photo-1490730141103-6cac27aaab94?w=800")
     ),
     "French" to listOf(
@@ -62,7 +62,7 @@ val defaultBannersList = listOf(
     BannerOption("Taj Mahal Agra", "https://images.unsplash.com/photo-1564507592333-c60657eea523?w=800"),
     BannerOption("Scenic Mountains", "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=800"),
     BannerOption("Golden Shoreline", "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800"),
-    BannerOption("Lo-fi Study GIF", "https://i.giphy.com/media/Lmq2eMv782q88/giphy.gif"),
+    BannerOption("Neon Lights GIF", "https://i.giphy.com/media/3o7abB06u9bNzA8lu8/giphy.gif"),
     BannerOption("Cyberpunk Highway", "https://images.unsplash.com/photo-1515621061946-eff1c2a352bd?w=800"),
     BannerOption("Historic Library", "https://images.unsplash.com/photo-1521587760476-6c12a4b040da?w=800")
 )
@@ -82,7 +82,7 @@ object BannerPack {
     )
 
     val animatedGifs = listOf(
-        BannerOption("Lo-fi Study Rain", "https://i.giphy.com/media/Lmq2eMv782q88/giphy.gif"),
+        BannerOption("Cosmic Flow", "https://i.giphy.com/media/OkJat1YNdoD3W/giphy.gif"),
         BannerOption("Sakura Breeze", "https://i.giphy.com/media/3o7TKSjRrfIPjeiVyM/giphy.gif"),
         BannerOption("Neon Cyberpunk City", "https://i.giphy.com/media/xT9IgzoKnwFNmISR8I/giphy.gif"),
         BannerOption("Sunset Express Train", "https://i.giphy.com/media/3oKIPnAiaMCws8nOsE/giphy.gif"),
@@ -93,7 +93,9 @@ object BannerPack {
         BannerOption("Twilight Rain", "https://i.giphy.com/media/l0HlRnAWXxn0MhKLK/giphy.gif"),
         BannerOption("Neon Lights Loop", "https://i.giphy.com/media/3o7abB06u9bNzA8lu8/giphy.gif"),
         BannerOption("Anime Clouds Drift", "https://i.giphy.com/media/26ufdipQqU2lhNA4g/giphy.gif"),
-        BannerOption("Coffee Steam Loop", "https://i.giphy.com/media/l3vR85PnGsBwu1PFK/giphy.gif")
+        BannerOption("Coffee Steam Loop", "https://i.giphy.com/media/l3vR85PnGsBwu1PFK/giphy.gif"),
+        BannerOption("Evening City Pulse", "https://i.giphy.com/media/13HgwGsXF0aiGY/giphy.gif"),
+        BannerOption("Soft Bokeh Glow", "https://i.giphy.com/media/3oz8xIsloV7zOmt81G/giphy.gif")
     )
 
     val worldwideScenics = listOf(

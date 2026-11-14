@@ -1,6 +1,5 @@
 package com.example.ui.screens.voiceroom
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -9,17 +8,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Group
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Lightbulb
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.SignalCellularAlt
-import androidx.compose.material.icons.filled.Whatshot
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,36 +16,45 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.ui.components.CircleFlag
+import com.example.ui.theme.LocalFunkyColors
 
 /**
  * Filter Rooms Bottom Sheet Content
- * Matches Image 5 (Title "Filter Rooms", Reset button, Sort By pills, Language grid with checkboxes, Level grid, Apply Filters yellow button)
+ * Supports dual light/dark themes, drawable icons (zero Material Icons & zero emojis),
+ * functional "Select multiple" languages, and functional "They speak" / "They're learning" mode.
  */
 @Composable
 fun FilterRoomsSheetContent(
     initialSortBy: String = "Popular",
-    initialLanguage: String = "All Languages",
+    initialLanguages: Set<String> = emptySet(),
     initialLevel: String = "All Levels",
-    onApply: (sortBy: String, language: String, level: String) -> Unit,
+    initialSpeakOrLearnMode: String = "They speak",
+    onApply: (sortBy: String, languages: Set<String>, level: String, speakOrLearnMode: String) -> Unit,
     onReset: () -> Unit
 ) {
+    val funkyColors = LocalFunkyColors.current
     var sortBy by remember { mutableStateOf(initialSortBy) }
-    var selectedLanguage by remember { mutableStateOf(initialLanguage) }
-    var selectedLevel by remember { mutableStateOf(initialLevel) }
-    var selectMultipleLanguage by remember { mutableStateOf(false) }
+    var selectMultipleLanguage by remember { mutableStateOf(initialLanguages.size > 1) }
+    var selectedLanguages by remember { mutableStateOf(initialLanguages) }
+    var selectedLevel by remember { mutableStateOf(if (initialLevel == "All") "All Levels" else initialLevel) }
+    var speakOrLearnTab by remember { mutableStateOf(initialSpeakOrLearnMode) }
+
+    val selectedBg = if (funkyColors.isDark) funkyColors.mango.copy(alpha = 0.20f) else Color(0xFFFEF9C3)
+    val selectedBorder = funkyColors.mango
+    val selectedText = if (funkyColors.isDark) funkyColors.mango else Color(0xFF854D0E)
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .fillMaxHeight(0.88f)
-            .background(Color(0xFFFFFDF5))
+            .background(funkyColors.bg)
             .navigationBarsPadding()
             .padding(horizontal = 20.dp, vertical = 12.dp)
             .verticalScroll(rememberScrollState())
@@ -74,20 +71,20 @@ fun FilterRoomsSheetContent(
                         text = "Filter ",
                         fontSize = 26.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFF0F172A)
+                        color = funkyColors.ink
                     )
                     Text(
                         text = "Rooms",
                         fontSize = 26.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFFFFB800)
+                        color = funkyColors.mango
                     )
                 }
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = "Find the perfect room to join",
                     fontSize = 13.sp,
-                    color = Color(0xFF64748B)
+                    color = funkyColors.mute
                 )
             }
 
@@ -95,24 +92,27 @@ fun FilterRoomsSheetContent(
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(20.dp))
-                    .background(Color(0xFFF1F5F9))
+                    .background(funkyColors.soft)
+                    .border(1.dp, funkyColors.line, RoundedCornerShape(20.dp))
                     .clickable {
                         sortBy = "Popular"
-                        selectedLanguage = "All Languages"
+                        selectMultipleLanguage = false
+                        selectedLanguages = emptySet()
                         selectedLevel = "All Levels"
+                        speakOrLearnTab = "They speak"
                         onReset()
                     }
                     .padding(horizontal = 14.dp, vertical = 8.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        imageVector = Icons.Default.Refresh,
+                        painter = painterResource(id = R.drawable.ic_refresh),
                         contentDescription = "Reset",
-                        tint = Color(0xFF0F172A),
+                        tint = funkyColors.ink,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Reset", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                    Text("Reset", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = funkyColors.ink)
                 }
             }
         }
@@ -120,42 +120,53 @@ fun FilterRoomsSheetContent(
         Spacer(modifier = Modifier.height(20.dp))
 
         // Sort By Section
-        Text("✨ Sort By", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                painter = painterResource(id = R.drawable.ic_sparkle),
+                contentDescription = null,
+                tint = funkyColors.mango,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Sort By", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = funkyColors.ink)
+        }
         Spacer(modifier = Modifier.height(10.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             val sortOptions = listOf(
-                Triple("Popular", "🔥", Icons.Default.Whatshot),
-                Triple("Recently Active", "🕒", Icons.Default.Schedule),
-                Triple("Most Listeners", "👥", Icons.Default.Group)
+                "Popular" to R.drawable.ic_flame,
+                "Recently Active" to R.drawable.ic_refresh,
+                "Most Listeners" to R.drawable.ic_profile
             )
-            sortOptions.forEach { (label, _, icon) ->
+            sortOptions.forEach { (label, iconRes) ->
                 val isSelected = sortBy == label
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(20.dp))
-                        .background(if (isSelected) Color(0xFFFEF08A) else Color.White)
-                        .border(1.dp, if (isSelected) Color(0xFFFFD000) else Color(0xFFE2E8F0), RoundedCornerShape(20.dp))
+                        .background(if (isSelected) selectedBg else funkyColors.surface)
+                        .border(1.dp, if (isSelected) selectedBorder else funkyColors.line, RoundedCornerShape(20.dp))
                         .clickable { sortBy = label }
                         .padding(vertical = 10.dp, horizontal = 8.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            imageVector = icon,
+                            painter = painterResource(id = iconRes),
                             contentDescription = null,
-                            tint = if (isSelected) Color(0xFF854D0E) else Color(0xFF64748B),
-                            modifier = Modifier.size(16.dp)
+                            tint = if (isSelected) selectedText else funkyColors.mute,
+                            modifier = Modifier.size(15.dp)
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
+                        Spacer(modifier = Modifier.width(5.dp))
                         Text(
                             text = label,
                             fontSize = 11.sp,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isSelected) Color(0xFF854D0E) else Color(0xFF334155)
+                            color = if (isSelected) selectedText else funkyColors.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -171,16 +182,34 @@ fun FilterRoomsSheetContent(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("🌐 Language", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_globe),
+                    contentDescription = null,
+                    tint = funkyColors.mango,
+                    modifier = Modifier.size(17.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Language", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = funkyColors.ink)
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Select multiple", fontSize = 12.sp, color = Color(0xFF64748B))
+                Text("Select multiple", fontSize = 12.sp, color = funkyColors.mute)
                 Spacer(modifier = Modifier.width(6.dp))
                 Switch(
                     checked = selectMultipleLanguage,
-                    onCheckedChange = { selectMultipleLanguage = it },
-                    colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFFFFB800))
+                    onCheckedChange = { enabled ->
+                        selectMultipleLanguage = enabled
+                        if (!enabled && selectedLanguages.size > 1) {
+                            selectedLanguages = setOf(selectedLanguages.first())
+                        }
+                    },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = funkyColors.onMango,
+                        checkedTrackColor = funkyColors.mango,
+                        uncheckedThumbColor = funkyColors.mute,
+                        uncheckedTrackColor = funkyColors.soft,
+                        uncheckedBorderColor = funkyColors.line
+                    )
                 )
             }
         }
@@ -188,46 +217,32 @@ fun FilterRoomsSheetContent(
         Spacer(modifier = Modifier.height(10.dp))
 
         // "They speak" vs "They're learning" Segmented Control
-        var speakOrLearnTab by remember { mutableStateOf("They speak") }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xFFFEF9C3))
+                .background(if (funkyColors.isDark) funkyColors.soft else Color(0xFFFEF3C7))
+                .border(1.dp, funkyColors.line, RoundedCornerShape(24.dp))
                 .padding(4.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(38.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(if (speakOrLearnTab == "They speak") Color.White else Color.Transparent)
-                    .clickable { speakOrLearnTab = "They speak" },
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "They speak",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0F172A)
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(38.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(if (speakOrLearnTab == "They're learning") Color.White else Color.Transparent)
-                    .clickable { speakOrLearnTab = "They're learning" },
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "They're learning",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF0F172A)
-                )
+            listOf("They speak", "They're learning").forEach { option ->
+                val isSelected = speakOrLearnTab == option
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(38.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(if (isSelected) funkyColors.surface else Color.Transparent)
+                        .clickable { speakOrLearnTab = option },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = option,
+                        fontSize = 13.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        color = if (isSelected) funkyColors.ink else funkyColors.mute
+                    )
+                }
             }
         }
 
@@ -235,7 +250,7 @@ fun FilterRoomsSheetContent(
 
         // Language Grid (2 columns)
         val languages = listOf(
-            "All Languages" to "glob",
+            "All Languages" to "",
             "English" to "us",
             "Hindi" to "in",
             "Russian" to "ru",
@@ -255,14 +270,31 @@ fun FilterRoomsSheetContent(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     rowLangs.forEach { (langName, flagCode) ->
-                        val isSelected = selectedLanguage == langName
+                        val isAll = langName == "All Languages"
+                        val isSelected = if (isAll) {
+                            selectedLanguages.isEmpty()
+                        } else {
+                            selectedLanguages.any { it.equals(langName, ignoreCase = true) }
+                        }
                         Box(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(16.dp))
-                                .background(if (isSelected) Color(0xFFFEF9C3) else Color.White)
-                                .border(1.dp, if (isSelected) Color(0xFFFFD000) else Color(0xFFE2E8F0), RoundedCornerShape(16.dp))
-                                .clickable { selectedLanguage = langName }
+                                .background(if (isSelected) selectedBg else funkyColors.surface)
+                                .border(1.dp, if (isSelected) selectedBorder else funkyColors.line, RoundedCornerShape(16.dp))
+                                .clickable {
+                                    selectedLanguages = when {
+                                        isAll -> emptySet()
+                                        selectMultipleLanguage -> {
+                                            if (selectedLanguages.any { it.equals(langName, ignoreCase = true) }) {
+                                                selectedLanguages.filterNot { it.equals(langName, ignoreCase = true) }.toSet()
+                                            } else {
+                                                selectedLanguages + langName
+                                            }
+                                        }
+                                        else -> setOf(langName)
+                                    }
+                                }
                                 .padding(horizontal = 12.dp, vertical = 10.dp)
                         ) {
                             Row(
@@ -270,14 +302,34 @@ fun FilterRoomsSheetContent(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    CircleFlag(countryCode = flagCode, modifier = Modifier.size(20.dp))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    if (isAll) {
+                                        Icon(
+                                            painter = painterResource(id = R.drawable.ic_globe),
+                                            contentDescription = null,
+                                            tint = if (isSelected) selectedText else funkyColors.mango,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    } else {
+                                        CircleFlag(
+                                            countryCode = flagCode,
+                                            allowProgramming = false,
+                                            modifier = Modifier
+                                                .size(20.dp)
+                                                .clip(CircleShape)
+                                        )
+                                    }
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
                                         text = langName,
                                         fontSize = 13.sp,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        color = Color(0xFF0F172A)
+                                        color = funkyColors.ink,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
 
@@ -285,15 +337,15 @@ fun FilterRoomsSheetContent(
                                 Box(
                                     modifier = Modifier
                                         .size(20.dp)
-                                        .background(if (isSelected) Color(0xFFFFB800) else Color.Transparent, CircleShape)
-                                        .border(1.dp, if (isSelected) Color(0xFFFFB800) else Color(0xFFCBD5E1), CircleShape),
+                                        .background(if (isSelected) funkyColors.mango else Color.Transparent, CircleShape)
+                                        .border(1.dp, if (isSelected) funkyColors.mango else funkyColors.line, CircleShape),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     if (isSelected) {
                                         Icon(
-                                            imageVector = Icons.Default.Check,
+                                            painter = painterResource(id = R.drawable.ic_check),
                                             contentDescription = null,
-                                            tint = Color.Black,
+                                            tint = funkyColors.onMango,
                                             modifier = Modifier.size(12.dp)
                                         )
                                     }
@@ -311,7 +363,16 @@ fun FilterRoomsSheetContent(
         Spacer(modifier = Modifier.height(24.dp))
 
         // Level Section
-        Text("📶 Level", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                painter = painterResource(id = R.drawable.ic_bars),
+                contentDescription = null,
+                tint = funkyColors.mango,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("Level", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = funkyColors.ink)
+        }
         Spacer(modifier = Modifier.height(12.dp))
 
         val levels = listOf("All Levels", "Beginner", "Intermediate", "Advanced")
@@ -327,8 +388,8 @@ fun FilterRoomsSheetContent(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(16.dp))
-                                .background(if (isSelected) Color(0xFFFEF9C3) else Color.White)
-                                .border(1.dp, if (isSelected) Color(0xFFFFD000) else Color(0xFFE2E8F0), RoundedCornerShape(16.dp))
+                                .background(if (isSelected) selectedBg else funkyColors.surface)
+                                .border(1.dp, if (isSelected) selectedBorder else funkyColors.line, RoundedCornerShape(16.dp))
                                 .clickable { selectedLevel = lvl }
                                 .padding(horizontal = 12.dp, vertical = 10.dp)
                         ) {
@@ -339,32 +400,32 @@ fun FilterRoomsSheetContent(
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(
-                                        imageVector = Icons.Default.SignalCellularAlt,
+                                        painter = painterResource(id = R.drawable.ic_bars),
                                         contentDescription = null,
-                                        tint = if (isSelected) Color(0xFFD97706) else Color(0xFF64748B),
-                                        modifier = Modifier.size(18.dp)
+                                        tint = if (isSelected) selectedText else funkyColors.mute,
+                                        modifier = Modifier.size(16.dp)
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
                                         text = lvl,
                                         fontSize = 13.sp,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        color = Color(0xFF0F172A)
+                                        color = funkyColors.ink
                                     )
                                 }
 
                                 Box(
                                     modifier = Modifier
                                         .size(20.dp)
-                                        .background(if (isSelected) Color(0xFFFFB800) else Color.Transparent, CircleShape)
-                                        .border(1.dp, if (isSelected) Color(0xFFFFB800) else Color(0xFFCBD5E1), CircleShape),
+                                        .background(if (isSelected) funkyColors.mango else Color.Transparent, CircleShape)
+                                        .border(1.dp, if (isSelected) funkyColors.mango else funkyColors.line, CircleShape),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     if (isSelected) {
                                         Icon(
-                                            imageVector = Icons.Default.Check,
+                                            painter = painterResource(id = R.drawable.ic_check),
                                             contentDescription = null,
-                                            tint = Color.Black,
+                                            tint = funkyColors.onMango,
                                             modifier = Modifier.size(12.dp)
                                         )
                                     }
@@ -383,12 +444,12 @@ fun FilterRoomsSheetContent(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(54.dp)
-                .shadow(4.dp, RoundedCornerShape(27.dp), spotColor = Color(0xFFFFB800).copy(alpha = 0.4f))
+                .shadow(4.dp, RoundedCornerShape(27.dp), spotColor = funkyColors.mango.copy(alpha = 0.4f))
                 .clip(RoundedCornerShape(27.dp))
                 .background(
-                    Brush.horizontalGradient(listOf(Color(0xFFFFD000), Color(0xFFFFB800)))
+                    Brush.horizontalGradient(listOf(Color(0xFFFFD000), funkyColors.mango))
                 )
-                .clickable { onApply(sortBy, selectedLanguage, selectedLevel) },
+                .clickable { onApply(sortBy, selectedLanguages, selectedLevel, speakOrLearnTab) },
             contentAlignment = Alignment.Center
         ) {
             Row(
@@ -399,13 +460,13 @@ fun FilterRoomsSheetContent(
                     text = "Apply Filters",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.ExtraBold,
-                    color = Color.Black
+                    color = funkyColors.onMango
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                    painter = painterResource(id = R.drawable.ic_arrow_right),
                     contentDescription = null,
-                    tint = Color.Black,
+                    tint = funkyColors.onMango,
                     modifier = Modifier.size(18.dp)
                 )
             }
@@ -417,7 +478,6 @@ fun FilterRoomsSheetContent(
 
 /**
  * Chat Backup Screen Content
- * Matches Image 6 (3D cloud header banner, E2E card, Google Drive card, Backup status stats, Preferences toggles, Tip banner)
  */
 @Composable
 fun ChatBackupScreenContent(

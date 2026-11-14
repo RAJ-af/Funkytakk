@@ -11,11 +11,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.appendInlineContent
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import com.example.ui.components.SoftGiftBoxIcon
+import com.example.ui.components.SoftPlusIcon
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -147,7 +146,10 @@ fun RoomChatPanel(
                                     modifier = Modifier.size(20.dp)
                                 )
                             } else {
-                                Text(text = "🎁", fontSize = 15.sp)
+                                SoftGiftBoxIcon(
+                                    size = 16.dp,
+                                    color = if (currentTheme.isDark) Color(0xFFFFD54F) else Color(0xFFD97706)
+                                )
                             }
 
                             val boldColor = if (currentTheme.isDark) Color(0xFFFFD54F) else Color(0xFFD97706)
@@ -278,11 +280,9 @@ fun RoomChatPanel(
                                         modifier = Modifier.size(12.dp)
                                     )
                                 } else {
-                                    Icon(
-                                        imageVector = Icons.Default.Add,
-                                        contentDescription = "Request to Speak",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(14.dp)
+                                    SoftPlusIcon(
+                                        size = 14.dp,
+                                        color = Color.White
                                     )
                                 }
                             }

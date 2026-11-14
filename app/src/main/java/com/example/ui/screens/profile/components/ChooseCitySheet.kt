@@ -1,6 +1,8 @@
 package com.example.ui.screens.profile.components
 
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -11,9 +13,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -22,23 +21,17 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
 import com.example.ui.components.CircleFlag
-import kotlinx.coroutines.launch
-
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import com.example.ui.components.LocationConsentDialog
+import com.example.ui.theme.LocalFunkyColors
 import com.example.util.LocationDetector
-
-private val TextPrimary = Color(0xFF111827)
-private val TextSecondary = Color(0xFF4B5563)
-private val TextPlaceholder = Color(0xFF9CA3AF)
-private val PrimaryYellow = Color(0xFFF8C63D)
-private val BorderInactive = Color(0xFFD1D5DB)
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,6 +45,7 @@ fun ChooseCitySheet(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val funkyColors = LocalFunkyColors.current
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedCityName by remember { mutableStateOf(currentCity) }
@@ -144,14 +138,14 @@ fun ChooseCitySheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Color.White,
+        containerColor = funkyColors.surface,
         dragHandle = {
             Box(
                 modifier = Modifier
                     .padding(vertical = 10.dp)
                     .width(44.dp)
                     .height(4.dp)
-                    .background(Color(0xFFE5E7EB), RoundedCornerShape(2.dp))
+                    .background(funkyColors.line, RoundedCornerShape(2.dp))
             )
         },
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
@@ -175,7 +169,7 @@ fun ChooseCitySheet(
                     text = "Choose your city",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
-                    color = TextPrimary
+                    color = funkyColors.ink
                 )
 
                 Row(
@@ -186,7 +180,8 @@ fun ChooseCitySheet(
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(20.dp))
-                            .background(Color(0xFFF3F4F6))
+                            .background(funkyColors.soft)
+                            .border(1.dp, funkyColors.line, RoundedCornerShape(20.dp))
                             .clickable { onCountryClick() }
                             .padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -198,7 +193,8 @@ fun ChooseCitySheet(
                         ) {
                             CircleFlag(
                                 countryCode = currentCountryCode,
-                                modifier = Modifier.fillMaxSize()
+                                modifier = Modifier.fillMaxSize(),
+                                allowProgramming = false
                             )
                         }
                         Spacer(modifier = Modifier.width(6.dp))
@@ -206,14 +202,14 @@ fun ChooseCitySheet(
                             text = currentCountryName,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
-                            color = TextPrimary
+                            color = funkyColors.ink
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Icon(
-                            imageVector = Icons.Default.ArrowDropDown,
+                            painter = painterResource(id = R.drawable.ic_chevron_down),
                             contentDescription = "Change country",
-                            tint = TextSecondary,
-                            modifier = Modifier.size(16.dp)
+                            tint = funkyColors.mute,
+                            modifier = Modifier.size(14.dp)
                         )
                     }
 
@@ -226,8 +222,8 @@ fun ChooseCitySheet(
                             onDismiss()
                         },
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = PrimaryYellow,
-                            contentColor = TextPrimary
+                            containerColor = funkyColors.mango,
+                            contentColor = funkyColors.onMango
                         ),
                         shape = RoundedCornerShape(20.dp),
                         contentPadding = PaddingValues(horizontal = 18.dp, vertical = 6.dp),
@@ -238,7 +234,7 @@ fun ChooseCitySheet(
                             text = "Done",
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp,
-                            color = TextPrimary
+                            color = funkyColors.onMango
                         )
                     }
                 }
@@ -249,8 +245,8 @@ fun ChooseCitySheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp)
-                    .background(Color(0xFFF9FAFB), RoundedCornerShape(14.dp))
-                    .border(1.dp, Color(0xFFE5E7EB), RoundedCornerShape(14.dp))
+                    .background(funkyColors.bg, RoundedCornerShape(14.dp))
+                    .border(1.dp, funkyColors.line, RoundedCornerShape(14.dp))
                     .padding(horizontal = 14.dp),
                 contentAlignment = Alignment.CenterStart
             ) {
@@ -259,10 +255,10 @@ fun ChooseCitySheet(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Search,
+                        painter = painterResource(id = R.drawable.ic_search),
                         contentDescription = "Search",
-                        tint = TextPlaceholder,
-                        modifier = Modifier.size(20.dp)
+                        tint = funkyColors.mute,
+                        modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     BasicTextField(
@@ -271,10 +267,10 @@ fun ChooseCitySheet(
                         singleLine = true,
                         textStyle = TextStyle(
                             fontSize = 15.sp,
-                            color = TextPrimary,
+                            color = funkyColors.ink,
                             fontWeight = FontWeight.Normal
                         ),
-                        cursorBrush = SolidColor(TextPrimary),
+                        cursorBrush = SolidColor(funkyColors.mango),
                         modifier = Modifier.weight(1f),
                         decorationBox = { innerTextField ->
                             if (searchQuery.isEmpty()) {
@@ -282,7 +278,7 @@ fun ChooseCitySheet(
                                     text = "Search cities in $currentCountryName...",
                                     style = TextStyle(
                                         fontSize = 14.sp,
-                                        color = TextPlaceholder
+                                        color = funkyColors.mute
                                     )
                                 )
                             }
@@ -306,8 +302,8 @@ fun ChooseCitySheet(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(14.dp))
-                            .background(Color(0xFFFFFBEB))
-                            .border(1.dp, Color(0xFFFEF3C7), RoundedCornerShape(14.dp))
+                            .background(funkyColors.mango.copy(alpha = if (funkyColors.isDark) 0.14f else 0.18f))
+                            .border(1.dp, funkyColors.mango.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
                             .clickable {
                                 triggerLocationDetection()
                             }
@@ -322,14 +318,14 @@ fun ChooseCitySheet(
                             Box(
                                 modifier = Modifier
                                     .size(36.dp)
-                                    .background(PrimaryYellow.copy(alpha = 0.3f), CircleShape),
+                                    .background(funkyColors.mango.copy(alpha = 0.25f), CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.LocationOn,
+                                    painter = painterResource(id = R.drawable.ic_pin),
                                     contentDescription = "Location",
-                                    tint = Color(0xFFB45309),
-                                    modifier = Modifier.size(20.dp)
+                                    tint = funkyColors.mango,
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                             Spacer(modifier = Modifier.width(12.dp))
@@ -338,21 +334,21 @@ fun ChooseCitySheet(
                                     text = if (isDetectingLocation) "Detecting location..." else "Use my current location",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = TextPrimary
+                                    color = funkyColors.ink
                                 )
                                 Text(
                                     text = detectedCitySubtext,
                                     fontSize = 12.sp,
-                                    color = TextSecondary
+                                    color = funkyColors.mute
                                 )
                             }
                         }
 
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            painter = painterResource(id = R.drawable.ic_chevron_right),
                             contentDescription = "Go",
-                            tint = TextSecondary,
-                            modifier = Modifier.size(20.dp)
+                            tint = funkyColors.mute,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
@@ -365,7 +361,7 @@ fun ChooseCitySheet(
                             text = "POPULAR CITIES",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = TextSecondary,
+                            color = funkyColors.mute,
                             letterSpacing = 0.8.sp,
                             modifier = Modifier.padding(vertical = 4.dp)
                         )
@@ -381,10 +377,13 @@ fun ChooseCitySheet(
                                 Row(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(12.dp))
-                                        .background(if (isSelected) Color(0xFFFFF9E6) else Color(0xFFF9FAFB))
+                                        .background(
+                                            if (isSelected) funkyColors.mango.copy(alpha = 0.18f)
+                                            else funkyColors.soft
+                                        )
                                         .border(
                                             width = 1.dp,
-                                            color = if (isSelected) PrimaryYellow else Color(0xFFE5E7EB),
+                                            color = if (isSelected) funkyColors.mango else funkyColors.line,
                                             shape = RoundedCornerShape(12.dp)
                                         )
                                         .clickable {
@@ -394,17 +393,17 @@ fun ChooseCitySheet(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.Place,
+                                        painter = painterResource(id = R.drawable.ic_pin),
                                         contentDescription = null,
-                                        tint = if (isSelected) Color(0xFFB45309) else TextSecondary,
-                                        modifier = Modifier.size(16.dp)
+                                        tint = if (isSelected) funkyColors.mango else funkyColors.mute,
+                                        modifier = Modifier.size(15.dp)
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
                                         text = city.name,
                                         fontSize = 13.sp,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        color = TextPrimary
+                                        color = funkyColors.ink
                                     )
                                 }
                             }
@@ -419,7 +418,7 @@ fun ChooseCitySheet(
                         text = if (searchQuery.isBlank()) "ALL CITIES" else "SEARCH RESULTS",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = TextSecondary,
+                        color = funkyColors.mute,
                         letterSpacing = 0.8.sp,
                         modifier = Modifier.padding(vertical = 4.dp)
                     )
@@ -433,7 +432,10 @@ fun ChooseCitySheet(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
-                            .background(if (isSelected) Color(0xFFFFF9E6) else Color.Transparent)
+                            .background(
+                                if (isSelected) funkyColors.mango.copy(alpha = 0.16f)
+                                else Color.Transparent
+                            )
                             .clickable {
                                 selectedCityName = settlement.name
                             }
@@ -448,14 +450,14 @@ fun ChooseCitySheet(
                             Box(
                                 modifier = Modifier
                                     .size(32.dp)
-                                    .background(Color(0xFFF3F4F6), CircleShape),
+                                    .background(funkyColors.soft, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.LocationCity,
+                                    painter = painterResource(id = R.drawable.ic_pin),
                                     contentDescription = null,
-                                    tint = TextSecondary,
-                                    modifier = Modifier.size(18.dp)
+                                    tint = if (isSelected) funkyColors.mango else funkyColors.mute,
+                                    modifier = Modifier.size(16.dp)
                                 )
                             }
                             Spacer(modifier = Modifier.width(12.dp))
@@ -464,7 +466,7 @@ fun ChooseCitySheet(
                                     text = settlement.name,
                                     fontSize = 15.sp,
                                     fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                                    color = TextPrimary
+                                    color = funkyColors.ink
                                 )
                                 Text(
                                     text = if (settlement.countryName != currentCountryName) {
@@ -473,7 +475,7 @@ fun ChooseCitySheet(
                                         settlement.adminRegion
                                     },
                                     fontSize = 12.sp,
-                                    color = TextSecondary
+                                    color = funkyColors.mute
                                 )
                             }
                         }
@@ -483,21 +485,21 @@ fun ChooseCitySheet(
                             Box(
                                 modifier = Modifier
                                     .size(22.dp)
-                                    .background(PrimaryYellow, CircleShape),
+                                    .background(funkyColors.mango, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.Check,
+                                    painter = painterResource(id = R.drawable.ic_check),
                                     contentDescription = "Selected",
-                                    tint = TextPrimary,
-                                    modifier = Modifier.size(14.dp)
+                                    tint = funkyColors.onMango,
+                                    modifier = Modifier.size(13.dp)
                                 )
                             }
                         } else {
                             Box(
                                 modifier = Modifier
                                     .size(22.dp)
-                                    .border(1.5.dp, BorderInactive, CircleShape)
+                                    .border(1.5.dp, funkyColors.line, CircleShape)
                             )
                         }
                     }
@@ -510,8 +512,8 @@ fun ChooseCitySheet(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(14.dp))
-                            .background(Color(0xFFF9FAFB))
-                            .border(1.dp, Color(0xFFE5E7EB), RoundedCornerShape(14.dp))
+                            .background(funkyColors.bg)
+                            .border(1.dp, funkyColors.line, RoundedCornerShape(14.dp))
                             .clickable {
                                 manualCityInput = ""
                                 showManualInputDialog = true
@@ -527,13 +529,13 @@ fun ChooseCitySheet(
                             Box(
                                 modifier = Modifier
                                     .size(34.dp)
-                                    .background(Color(0xFFE5E7EB), CircleShape),
+                                    .background(funkyColors.soft, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.Edit,
+                                    painter = painterResource(id = R.drawable.ic_fix),
                                     contentDescription = "Enter manually",
-                                    tint = TextPrimary,
+                                    tint = funkyColors.ink,
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
@@ -543,21 +545,21 @@ fun ChooseCitySheet(
                                     text = "City not listed?",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = TextPrimary
+                                    color = funkyColors.ink
                                 )
                                 Text(
                                     text = "Enter it manually",
                                     fontSize = 12.sp,
-                                    color = TextSecondary
+                                    color = funkyColors.mute
                                 )
                             }
                         }
 
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            painter = painterResource(id = R.drawable.ic_chevron_right),
                             contentDescription = "Open",
-                            tint = TextSecondary,
-                            modifier = Modifier.size(20.dp)
+                            tint = funkyColors.mute,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                     Spacer(modifier = Modifier.height(20.dp))
@@ -570,14 +572,14 @@ fun ChooseCitySheet(
     if (showManualInputDialog) {
         AlertDialog(
             onDismissRequest = { showManualInputDialog = false },
-            containerColor = Color.White,
+            containerColor = funkyColors.surface,
             shape = RoundedCornerShape(20.dp),
             title = {
                 Text(
                     text = "Enter Custom City",
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
-                    color = TextPrimary
+                    color = funkyColors.ink
                 )
             },
             text = {
@@ -585,21 +587,24 @@ fun ChooseCitySheet(
                     Text(
                         text = "Enter the name of your city or town in $currentCountryName:",
                         fontSize = 13.sp,
-                        color = TextSecondary,
+                        color = funkyColors.mute,
                         modifier = Modifier.padding(bottom = 12.dp)
                     )
                     OutlinedTextField(
                         value = manualCityInput,
                         onValueChange = { manualCityInput = it },
-                        placeholder = { Text("e.g. Noida, Gurgaon", color = TextPlaceholder) },
+                        placeholder = { Text("e.g. Noida, Gurgaon", color = funkyColors.mute) },
                         singleLine = true,
-                        textStyle = TextStyle(fontSize = 15.sp, color = TextPrimary),
+                        textStyle = TextStyle(fontSize = 15.sp, color = funkyColors.ink),
                         shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = PrimaryYellow,
-                            unfocusedBorderColor = Color(0xFFD1D5DB),
-                            focusedContainerColor = Color(0xFFF9FAFB),
-                            unfocusedContainerColor = Color(0xFFF9FAFB)
+                            focusedBorderColor = funkyColors.mango,
+                            unfocusedBorderColor = funkyColors.line,
+                            focusedContainerColor = funkyColors.bg,
+                            unfocusedContainerColor = funkyColors.bg,
+                            focusedTextColor = funkyColors.ink,
+                            unfocusedTextColor = funkyColors.ink,
+                            cursorColor = funkyColors.mango
                         ),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -619,17 +624,17 @@ fun ChooseCitySheet(
                         }
                     },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = PrimaryYellow,
-                        contentColor = TextPrimary
+                        containerColor = funkyColors.mango,
+                        contentColor = funkyColors.onMango
                     ),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Save City", fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Text("Save City", fontWeight = FontWeight.Bold, color = funkyColors.onMango)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showManualInputDialog = false }) {
-                    Text("Cancel", color = TextSecondary)
+                    Text("Cancel", color = funkyColors.mute)
                 }
             }
         )

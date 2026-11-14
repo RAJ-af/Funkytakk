@@ -6,26 +6,19 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Female
-import androidx.compose.material.icons.filled.Male
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-
-private val TextPrimary = Color(0xFF111827)
-private val TextSecondary = Color(0xFF4B5563)
-private val PrimaryYellow = Color(0xFFF8C63D)
-private val CardSelectedBg = Color(0xFFFFFDF2)
-private val CardNormalBg = Color(0xFFF9FAFB)
-private val BorderInactive = Color(0xFFE5E7EB)
+import com.example.R
+import com.example.ui.screens.ProfileGenderFemaleIcon
+import com.example.ui.screens.ProfileGenderMaleIcon
+import com.example.ui.theme.LocalFunkyColors
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,6 +27,7 @@ fun SelectGenderSheet(
     onGenderSelected: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val funkyColors = LocalFunkyColors.current
     var selectedGender by remember { mutableStateOf(if (initialGender.equals("Female", ignoreCase = true)) "Female" else "Male") }
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -41,14 +35,14 @@ fun SelectGenderSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Color.White,
+        containerColor = funkyColors.surface,
         dragHandle = {
             Box(
                 modifier = Modifier
                     .padding(vertical = 10.dp)
                     .width(44.dp)
                     .height(4.dp)
-                    .background(Color(0xFFE5E7EB), RoundedCornerShape(2.dp))
+                    .background(funkyColors.line, RoundedCornerShape(2.dp))
             )
         },
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
@@ -66,7 +60,7 @@ fun SelectGenderSheet(
                 text = "Select gender",
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
-                color = TextPrimary,
+                color = funkyColors.ink,
                 modifier = Modifier
                     .align(Alignment.Start)
                     .padding(bottom = 20.dp)
@@ -79,10 +73,10 @@ fun SelectGenderSheet(
                     .fillMaxWidth()
                     .height(72.dp)
                     .clip(RoundedCornerShape(18.dp))
-                    .background(if (isMale) CardSelectedBg else CardNormalBg)
+                    .background(if (isMale) funkyColors.soft else funkyColors.bg)
                     .border(
                         width = 1.5.dp,
-                        color = if (isMale) PrimaryYellow else BorderInactive,
+                        color = if (isMale) funkyColors.mango else funkyColors.line,
                         shape = RoundedCornerShape(18.dp)
                     )
                     .clickable { selectedGender = "Male" }
@@ -95,16 +89,14 @@ fun SelectGenderSheet(
                         modifier = Modifier
                             .size(44.dp)
                             .background(
-                                if (isMale) PrimaryYellow.copy(alpha = 0.4f) else Color(0xFFE5E7EB),
+                                if (isMale) funkyColors.mango else funkyColors.surface,
                                 CircleShape
                             ),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Male,
-                            contentDescription = "Male",
-                            tint = TextPrimary,
-                            modifier = Modifier.size(26.dp)
+                        ProfileGenderMaleIcon(
+                            modifier = Modifier.size(22.dp),
+                            color = if (isMale) funkyColors.onMango else funkyColors.ink
                         )
                     }
                     Spacer(modifier = Modifier.width(16.dp))
@@ -112,7 +104,7 @@ fun SelectGenderSheet(
                         text = "Male",
                         fontSize = 17.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = TextPrimary
+                        color = funkyColors.ink
                     )
                 }
 
@@ -121,21 +113,21 @@ fun SelectGenderSheet(
                     Box(
                         modifier = Modifier
                             .size(24.dp)
-                            .background(PrimaryYellow, CircleShape),
+                            .background(funkyColors.mango, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Check,
+                            painter = painterResource(id = R.drawable.ic_check),
                             contentDescription = "Selected",
-                            tint = TextPrimary,
-                            modifier = Modifier.size(16.dp)
+                            tint = funkyColors.onMango,
+                            modifier = Modifier.size(14.dp)
                         )
                     }
                 } else {
                     Box(
                         modifier = Modifier
                             .size(24.dp)
-                            .border(1.5.dp, BorderInactive, CircleShape)
+                            .border(1.5.dp, funkyColors.line, CircleShape)
                     )
                 }
             }
@@ -149,10 +141,10 @@ fun SelectGenderSheet(
                     .fillMaxWidth()
                     .height(72.dp)
                     .clip(RoundedCornerShape(18.dp))
-                    .background(if (isFemale) CardSelectedBg else CardNormalBg)
+                    .background(if (isFemale) funkyColors.soft else funkyColors.bg)
                     .border(
                         width = 1.5.dp,
-                        color = if (isFemale) PrimaryYellow else BorderInactive,
+                        color = if (isFemale) funkyColors.mango else funkyColors.line,
                         shape = RoundedCornerShape(18.dp)
                     )
                     .clickable { selectedGender = "Female" }
@@ -165,16 +157,14 @@ fun SelectGenderSheet(
                         modifier = Modifier
                             .size(44.dp)
                             .background(
-                                if (isFemale) PrimaryYellow.copy(alpha = 0.4f) else Color(0xFFE5E7EB),
+                                if (isFemale) funkyColors.mango else funkyColors.surface,
                                 CircleShape
                             ),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Female,
-                            contentDescription = "Female",
-                            tint = TextPrimary,
-                            modifier = Modifier.size(26.dp)
+                        ProfileGenderFemaleIcon(
+                            modifier = Modifier.size(22.dp),
+                            color = if (isFemale) funkyColors.onMango else funkyColors.ink
                         )
                     }
                     Spacer(modifier = Modifier.width(16.dp))
@@ -182,7 +172,7 @@ fun SelectGenderSheet(
                         text = "Female",
                         fontSize = 17.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = TextPrimary
+                        color = funkyColors.ink
                     )
                 }
 
@@ -191,21 +181,21 @@ fun SelectGenderSheet(
                     Box(
                         modifier = Modifier
                             .size(24.dp)
-                            .background(PrimaryYellow, CircleShape),
+                            .background(funkyColors.mango, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Check,
+                            painter = painterResource(id = R.drawable.ic_check),
                             contentDescription = "Selected",
-                            tint = TextPrimary,
-                            modifier = Modifier.size(16.dp)
+                            tint = funkyColors.onMango,
+                            modifier = Modifier.size(14.dp)
                         )
                     }
                 } else {
                     Box(
                         modifier = Modifier
                             .size(24.dp)
-                            .border(1.5.dp, BorderInactive, CircleShape)
+                            .border(1.5.dp, funkyColors.line, CircleShape)
                     )
                 }
             }
@@ -219,8 +209,8 @@ fun SelectGenderSheet(
                     onDismiss()
                 },
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = PrimaryYellow,
-                    contentColor = TextPrimary
+                    containerColor = funkyColors.mango,
+                    contentColor = funkyColors.onMango
                 ),
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
@@ -231,7 +221,7 @@ fun SelectGenderSheet(
                     text = "Done",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
-                    color = TextPrimary
+                    color = funkyColors.onMango
                 )
             }
 
@@ -246,7 +236,7 @@ fun SelectGenderSheet(
                     text = "Cancel",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Medium,
-                    color = TextSecondary
+                    color = funkyColors.mute
                 )
             }
         }

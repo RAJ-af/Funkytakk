@@ -105,7 +105,8 @@ fun HomeScreen(
     var hideBottomBarForChatsOverlay by remember { mutableStateOf(false) }
     var hideBottomBarForProfileOverlay by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
-    var selectedLanguageFilter by remember { mutableStateOf("All") }
+    var selectedLanguageFilters by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var filterSpeakOrLearnMode by remember { mutableStateOf("They speak") }
 
     // Advanced search filter states
     var showFilterDialog by remember { mutableStateOf(false) }
@@ -177,8 +178,9 @@ fun HomeScreen(
 
         suspend fun refreshRoomsAndFriends() {
             try {
-                // 1. Fetch voice rooms from Supabase (only active, live rooms)
-                val roomsRes = SupabaseClient.api.getVoiceRooms()
+                // 1. Fetch voice rooms from Supabase (only active, live rooms) with authenticated bearer token
+                val authToken = SupabaseSessionManager.getBearerToken(context)
+                val roomsRes = SupabaseClient.api.getVoiceRooms(auth = authToken)
                 val supaRooms = (roomsRes.body() ?: emptyList()).filter {
                     (it.is_live == true) && (it.status != "ended")
                 }
@@ -196,7 +198,7 @@ fun HomeScreen(
                 }
 
                 // 3. Fetch room participants from Supabase and merge with live Realtime participants
-                val participantsRes = SupabaseClient.api.getAllRoomParticipants()
+                val participantsRes = SupabaseClient.api.getAllRoomParticipants(auth = authToken)
                 val supaParticipants = participantsRes.body() ?: emptyList()
                 val liveParticipants = com.example.realtime.VoiceRoomRealtimeManager.getAllLiveParticipants()
                 val allParticipants = (supaParticipants + liveParticipants).distinctBy { "${it.room_id}_${it.user_id}" }
@@ -290,6 +292,13 @@ fun HomeScreen(
                             }
                         }
 
+                        val hostProfile = supabaseProfiles.find { it.uid == r.host_id }
+                        val hostNatives = listOfNotNull(hostProfile?.nativeLanguage?.takeIf { it.isNotBlank() })
+                        val hostLearnings = (
+                            listOfNotNull(hostProfile?.learningLanguage?.takeIf { it.isNotBlank() }) +
+                                (hostProfile?.selectedLanguages ?: emptyList())
+                            ).distinct()
+
                         CustomRoom(
                             id = rId,
                             title = r.title ?: "Voice Circle",
@@ -303,12 +312,14 @@ fun HomeScreen(
                             listeningCount = realListening,
                             tag = r.level_tag.orEmpty().ifBlank { r.tag.orEmpty() }.ifBlank { "All Levels" },
                             bgGradient = gradBrush,
-                            imageUrl = r.banner_image_url.orEmpty().ifBlank { "https://images.unsplash.com/photo-1524492412937-b28074a5d7da?w=800" },
+                            imageUrl = r.banner_image_url.orEmpty().ifBlank { "drawable://img_anime_banner_sakura_station_1794610601752" },
                             overlayColor = overlayVal,
                             badgeText = decidedTag,
                             badgeColor = badgeColor,
                             avatars = roomAvatars,
-                            hostId = r.host_id ?: ""
+                            hostId = r.host_id ?: "",
+                            hostNativeLanguages = hostNatives,
+                            hostLearningLanguages = hostLearnings
                         )
                     }
                     roomsList = mapped
@@ -464,21 +475,6 @@ fun HomeScreen(
         )
     }
 
-    if (showFilterDialog) {
-        FilterRoomsDialog(
-            selectedSortOption = selectedSortOption,
-            onSortOptionChange = { selectedSortOption = it },
-            selectedLanguageFilter = selectedLanguageFilter,
-            onLanguageFilterChange = { selectedLanguageFilter = it },
-            filterByLevel = filterByLevel,
-            onLevelFilterChange = { filterByLevel = it },
-            filterOnlyLive = filterOnlyLive,
-            onFilterOnlyLiveChange = { filterOnlyLive = it },
-            onDismiss = { showFilterDialog = false },
-            onApply = { showFilterDialog = false }
-        )
-    }
-
     fun handleJoinEvent(event: SupabaseEvent) {
         selectedAmusementEvent = null
         showAmusementEventsDialog = false
@@ -557,7 +553,7 @@ fun HomeScreen(
 
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
-            containerColor = if (activeTab == "moments") Color.Black else funkyColors.bg,
+            containerColor = funkyColors.bg,
             bottomBar = {
                 if (!shouldHideBottomBar) {
                     HomeBottomBar(
@@ -572,7 +568,7 @@ fun HomeScreen(
                 targetState = activeTab,
                 label = "HomeSubNavigation",
                 modifier = Modifier.padding(
-                    if (activeTab == "moments" || shouldHideBottomBar) PaddingValues(bottom = 0.dp) else innerPadding
+                    if (shouldHideBottomBar) PaddingValues(bottom = 0.dp) else innerPadding
                 )
             ) { currentTab ->
                 when (currentTab) {
@@ -583,8 +579,11 @@ fun HomeScreen(
                             roomsList = roomsList,
                             searchQuery = searchQuery,
                             onSearchQueryChange = { searchQuery = it },
-                            selectedLanguageFilter = selectedLanguageFilter,
-                            onLanguageSelected = { selectedLanguageFilter = it },
+                            selectedLanguageFilters = selectedLanguageFilters,
+                            onLanguageSelected = { lang ->
+                                selectedLanguageFilters = if (lang == "All") emptySet() else setOf(lang)
+                            },
+                            filterSpeakOrLearnMode = filterSpeakOrLearnMode,
                             filterOnlyLive = filterOnlyLive,
                             filterByLevel = filterByLevel,
                             selectedSortOption = selectedSortOption,
@@ -757,11 +756,12 @@ fun HomeScreen(
     if (isAccountSuspended) {
         AlertDialog(
             onDismissRequest = { /* Cannot dismiss without resolving */ },
+            containerColor = funkyColors.surface,
             icon = {
                 Icon(
                     painter = painterResource(id = com.example.R.drawable.ic_alert),
                     contentDescription = "Suspended",
-                    tint = Color(0xFFDC2626),
+                    tint = funkyColors.danger,
                     modifier = Modifier.size(36.dp)
                 )
             },
@@ -770,7 +770,7 @@ fun HomeScreen(
                     text = "Account Suspended",
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp,
-                    color = Color(0xFFDC2626)
+                    color = funkyColors.danger
                 )
             },
             text = {
@@ -778,12 +778,12 @@ fun HomeScreen(
                     Text(
                         text = "Your account has been placed under active suspension by administrators for violating community safety policies.",
                         fontSize = 13.sp,
-                        color = Color(0xFF374151)
+                        color = funkyColors.ink
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                     Surface(
-                        color = Color(0xFFFEF2F2),
-                        shape = RoundedCornerShape(8.dp),
+                        color = funkyColors.danger.copy(alpha = 0.10f),
+                        shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(10.dp)) {
@@ -791,14 +791,14 @@ fun HomeScreen(
                                 text = "Reason: ${myModerationStatus?.reason ?: "Violation of Community Guidelines"}",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = Color(0xFF991B1B)
+                                color = funkyColors.danger
                             )
                             if (!myModerationStatus?.expires_at.isNullOrBlank()) {
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
                                     text = "Suspension expires: ${myModerationStatus?.expires_at}",
                                     fontSize = 12.sp,
-                                    color = Color(0xFFB91C1C)
+                                    color = funkyColors.danger.copy(alpha = 0.85f)
                                 )
                             }
                         }
@@ -812,7 +812,7 @@ fun HomeScreen(
                             myModerationStatus = com.example.ModerationManager.fetchMyModerationStatus(context)
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                    colors = ButtonDefaults.buttonColors(containerColor = funkyColors.danger)
                 ) {
                     Text("Refresh Status", color = Color.White)
                 }
@@ -824,23 +824,26 @@ fun HomeScreen(
         ModalBottomSheet(
             onDismissRequest = { showFilterDialog = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = Color(0xFFFFFDF5),
+            containerColor = funkyColors.bg,
             shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
         ) {
             com.example.ui.screens.voiceroom.FilterRoomsSheetContent(
                 initialSortBy = selectedSortOption,
-                initialLanguage = selectedLanguageFilter,
+                initialLanguages = selectedLanguageFilters,
                 initialLevel = filterByLevel,
-                onApply = { sortBy, lang, lvl ->
+                initialSpeakOrLearnMode = filterSpeakOrLearnMode,
+                onApply = { sortBy, langs, lvl, mode ->
                     selectedSortOption = sortBy
-                    selectedLanguageFilter = lang
+                    selectedLanguageFilters = langs
                     filterByLevel = lvl
+                    filterSpeakOrLearnMode = mode
                     showFilterDialog = false
                 },
                 onReset = {
                     selectedSortOption = "Popular"
-                    selectedLanguageFilter = "All"
+                    selectedLanguageFilters = emptySet()
                     filterByLevel = "All Levels"
+                    filterSpeakOrLearnMode = "They speak"
                     showFilterDialog = false
                 }
             )

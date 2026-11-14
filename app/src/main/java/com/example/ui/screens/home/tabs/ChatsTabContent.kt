@@ -78,6 +78,7 @@ fun ChatsTabContent(
 ) {
     val context = LocalContext.current
     val funkyColors = LocalFunkyColors.current
+    val isDark = funkyColors.isDark
     val scope = rememberCoroutineScope()
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf("All") } // "All", "Unread", "Language", "Groups"
@@ -255,7 +256,7 @@ fun ChatsTabContent(
                         text = buildAnnotatedString {
                             withStyle(
                                 style = SpanStyle(
-                                    color = Color.Black,
+                                    color = funkyColors.ink,
                                     fontWeight = FontWeight.ExtraBold,
                                     fontSize = 25.sp
                                 )
@@ -264,7 +265,7 @@ fun ChatsTabContent(
                             }
                             withStyle(
                                 style = SpanStyle(
-                                    color = Color(0xFFFFC529),
+                                    color = funkyColors.mango,
                                     fontWeight = FontWeight.ExtraBold,
                                     fontSize = 25.sp
                                 )
@@ -279,20 +280,22 @@ fun ChatsTabContent(
                             modifier = Modifier
                                 .size(40.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFFF3F4F6))
+                                .background(funkyColors.surface)
+                                .border(1.dp, funkyColors.line, CircleShape)
                                 .clickable { showOptionsMenu = true },
                             contentAlignment = Alignment.Center
                         ) {
-                            FunkyMoreIcon(color = Color.Black, modifier = Modifier.size(18.dp))
+                            FunkyMoreIcon(color = funkyColors.ink, modifier = Modifier.size(18.dp))
                         }
 
                         // Redesigned modern 3-dots menu with Soft Custom Icons
                         DropdownMenu(
                             expanded = showOptionsMenu,
                             onDismissRequest = { showOptionsMenu = false },
-                            modifier = Modifier
-                                .width(250.dp)
-                                .background(Color.White)
+                            shape = RoundedCornerShape(20.dp),
+                            containerColor = funkyColors.surface,
+                            border = BorderStroke(1.dp, funkyColors.line),
+                            modifier = Modifier.width(254.dp)
                         ) {
                             // 1. Create Group Option
                             DropdownMenuItem(
@@ -302,15 +305,15 @@ fun ChatsTabContent(
                                             modifier = Modifier
                                                 .size(30.dp)
                                                 .clip(CircleShape)
-                                                .background(Color(0xFFFEF3C7)),
+                                                .background(if (isDark) funkyColors.mango.copy(alpha = 0.16f) else Color(0xFFFEF3C7)),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            GroupUsersIcon(size = 16.dp, color = Color(0xFFD97706))
+                                            GroupUsersIcon(size = 16.dp, color = if (isDark) funkyColors.mango else Color(0xFFD97706))
                                         }
                                         Spacer(modifier = Modifier.width(10.dp))
                                         Text(
                                             text = "Create Group Chat",
-                                            color = Color.Black,
+                                            color = funkyColors.ink,
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.Bold
                                         )
@@ -333,23 +336,23 @@ fun ChatsTabContent(
                                             modifier = Modifier
                                                 .size(30.dp)
                                                 .clip(CircleShape)
-                                                .background(Color(0xFFFFFBEB))
-                                                .border(1.dp, Color(0xFFFEF08A), CircleShape),
+                                                .background(if (isDark) funkyColors.mango.copy(alpha = 0.14f) else Color(0xFFFFFBEB))
+                                                .border(1.dp, if (isDark) funkyColors.mango.copy(alpha = 0.35f) else Color(0xFFFEF08A), CircleShape),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            GroupRequestReviewIcon(size = 15.dp, color = Color(0xFFB45309))
+                                            GroupRequestReviewIcon(size = 15.dp, color = if (isDark) funkyColors.mango else Color(0xFFB45309))
                                         }
                                         Spacer(modifier = Modifier.width(10.dp))
                                         Text(
                                             text = "Review Requests",
-                                            color = Color.Black,
+                                            color = funkyColors.ink,
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.Bold,
                                             modifier = Modifier.weight(1f)
                                         )
                                         if (pendingInvites.isNotEmpty()) {
                                             Surface(
-                                                color = Color(0xFFFFC529),
+                                                color = funkyColors.mango,
                                                 shape = CircleShape
                                             ) {
                                                 Text(
@@ -357,7 +360,7 @@ fun ChatsTabContent(
                                                     modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
                                                     fontSize = 10.5.sp,
                                                     fontWeight = FontWeight.Black,
-                                                    color = Color.Black
+                                                    color = funkyColors.onMango
                                                 )
                                             }
                                         }
@@ -380,24 +383,34 @@ fun ChatsTabContent(
                                             modifier = Modifier
                                                 .size(30.dp)
                                                 .clip(CircleShape)
-                                                .background(if (isMinimalistMode) Color(0xFFFEF3C7) else Color(0xFFF3F4F6)),
+                                                .background(
+                                                    if (isMinimalistMode) {
+                                                        if (isDark) funkyColors.mango.copy(alpha = 0.16f) else Color(0xFFFEF3C7)
+                                                    } else {
+                                                        funkyColors.soft
+                                                    }
+                                                ),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             GroupMinimalistModeIcon(
                                                 size = 16.dp,
-                                                color = if (isMinimalistMode) Color(0xFFD97706) else Color(0xFF4B5563)
+                                                color = if (isMinimalistMode) {
+                                                    if (isDark) funkyColors.mango else Color(0xFFD97706)
+                                                } else {
+                                                    funkyColors.mute
+                                                }
                                             )
                                         }
                                         Spacer(modifier = Modifier.width(10.dp))
                                         Text(
                                             text = "Minimalist Mode",
-                                            color = Color.Black,
+                                            color = funkyColors.ink,
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.Bold,
                                             modifier = Modifier.weight(1f)
                                         )
                                         Surface(
-                                            color = if (isMinimalistMode) Color(0xFFFFC529) else Color(0xFFE5E7EB),
+                                            color = if (isMinimalistMode) funkyColors.mango else funkyColors.soft,
                                             shape = RoundedCornerShape(8.dp)
                                         ) {
                                             Text(
@@ -405,7 +418,7 @@ fun ChatsTabContent(
                                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                                                 fontSize = 10.sp,
                                                 fontWeight = FontWeight.Black,
-                                                color = if (isMinimalistMode) Color.Black else Color(0xFF6B7280)
+                                                color = if (isMinimalistMode) funkyColors.onMango else funkyColors.mute
                                             )
                                         }
                                     }
@@ -416,7 +429,7 @@ fun ChatsTabContent(
                                 }
                             )
 
-                            HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
+                            HorizontalDivider(color = funkyColors.line, thickness = 1.dp)
 
                             // 4. Blocked Users Option
                             DropdownMenuItem(
@@ -429,15 +442,15 @@ fun ChatsTabContent(
                                             modifier = Modifier
                                                 .size(30.dp)
                                                 .clip(CircleShape)
-                                                .background(Color(0xFFFEE2E2)),
+                                                .background(if (isDark) funkyColors.danger.copy(alpha = 0.18f) else Color(0xFFFEE2E2)),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            SoftBlockIcon(size = 16.dp, color = Color(0xFFDC2626))
+                                            SoftBlockIcon(size = 16.dp, color = funkyColors.danger)
                                         }
                                         Spacer(modifier = Modifier.width(10.dp))
                                         Text(
                                             text = "Blocked Users",
-                                            color = Color.Black,
+                                            color = funkyColors.ink,
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.Medium,
                                             modifier = Modifier.weight(1f)
@@ -446,7 +459,7 @@ fun ChatsTabContent(
                                             Box(
                                                 modifier = Modifier
                                                     .clip(RoundedCornerShape(10.dp))
-                                                    .background(Color(0xFFDC2626))
+                                                    .background(funkyColors.danger)
                                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                                             ) {
                                                 Text(
@@ -476,15 +489,15 @@ fun ChatsTabContent(
                                             modifier = Modifier
                                                 .size(30.dp)
                                                 .clip(CircleShape)
-                                                .background(Color(0xFFFEE2E2)),
+                                                .background(if (isDark) funkyColors.danger.copy(alpha = 0.18f) else Color(0xFFFEE2E2)),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            SoftBlockIcon(size = 16.dp, color = Color(0xFFDC2626))
+                                            SoftBlockIcon(size = 16.dp, color = funkyColors.danger)
                                         }
                                         Spacer(modifier = Modifier.width(10.dp))
                                         Text(
                                             text = "Blocked Groups",
-                                            color = Color.Black,
+                                            color = funkyColors.ink,
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.Medium,
                                             modifier = Modifier.weight(1f)
@@ -505,15 +518,15 @@ fun ChatsTabContent(
                                             modifier = Modifier
                                                 .size(30.dp)
                                                 .clip(CircleShape)
-                                                .background(Color(0xFFDBEAFE)),
+                                                .background(if (isDark) Color(0xFF3B82F6).copy(alpha = 0.18f) else Color(0xFFDBEAFE)),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            SoftMailIcon(size = 16.dp, color = Color(0xFF3B82F6))
+                                            SoftMailIcon(size = 16.dp, color = if (isDark) Color(0xFF60A5FA) else Color(0xFF3B82F6))
                                         }
                                         Spacer(modifier = Modifier.width(10.dp))
                                         Text(
                                             text = "Mark all as read",
-                                            color = Color.Black,
+                                            color = funkyColors.ink,
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.Medium
                                         )
@@ -539,15 +552,15 @@ fun ChatsTabContent(
                                             modifier = Modifier
                                                 .size(30.dp)
                                                 .clip(CircleShape)
-                                                .background(Color(0xFFD1FAE5)),
+                                                .background(if (isDark) funkyColors.ok.copy(alpha = 0.18f) else Color(0xFFD1FAE5)),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            SoftHeadsetIcon(size = 16.dp, color = Color(0xFF059669))
+                                            SoftHeadsetIcon(size = 16.dp, color = funkyColors.ok)
                                         }
                                         Spacer(modifier = Modifier.width(10.dp))
                                         Text(
                                             text = "Contact Support",
-                                            color = Color.Black,
+                                            color = funkyColors.ink,
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.Medium
                                         )
@@ -569,7 +582,7 @@ fun ChatsTabContent(
                                                 modifier = Modifier
                                                     .size(30.dp)
                                                     .clip(CircleShape)
-                                                    .background(Color(0xFFFEE2E2)),
+                                                    .background(if (isDark) funkyColors.danger.copy(alpha = 0.18f) else Color(0xFFFEE2E2)),
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 SoftLockIcon(size = 16.dp, isUnlocked = false)
@@ -577,7 +590,7 @@ fun ChatsTabContent(
                                             Spacer(modifier = Modifier.width(10.dp))
                                             Text(
                                                 text = "Lock chats vault",
-                                                color = Color(0xFFDC2626),
+                                                color = funkyColors.danger,
                                                 fontSize = 14.sp,
                                                 fontWeight = FontWeight.SemiBold
                                             )
@@ -591,7 +604,7 @@ fun ChatsTabContent(
                                 )
                             }
 
-                            HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
+                            HorizontalDivider(color = funkyColors.line, thickness = 1.dp)
 
                             // 8. Clear All Chats
                             DropdownMenuItem(
@@ -601,15 +614,15 @@ fun ChatsTabContent(
                                             modifier = Modifier
                                                 .size(30.dp)
                                                 .clip(CircleShape)
-                                                .background(Color(0xFFF3F4F6)),
+                                                .background(funkyColors.soft),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            SoftTrashIcon(size = 16.dp, color = Color(0xFF6B7280))
+                                            SoftTrashIcon(size = 16.dp, color = funkyColors.mute)
                                         }
                                         Spacer(modifier = Modifier.width(10.dp))
                                         Text(
                                             text = "Clear all chats",
-                                            color = Color(0xFF6B7280),
+                                            color = funkyColors.mute,
                                             fontSize = 13.sp
                                         )
                                     }
@@ -636,7 +649,7 @@ fun ChatsTabContent(
                         text = "Conversations",
                         fontSize = 32.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = Color.Black,
+                        color = funkyColors.ink,
                         letterSpacing = (-0.5).sp
                     )
 
@@ -648,11 +661,11 @@ fun ChatsTabContent(
                         Text(
                             text = "Keep the conversations going ",
                             fontSize = 15.sp,
-                            color = Color(0xFF6B7280),
+                            color = funkyColors.mute,
                             fontWeight = FontWeight.Normal
                         )
                         FunkyHeartIcon(
-                            color = Color(0xFFFFC529),
+                            color = funkyColors.mango,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -661,19 +674,21 @@ fun ChatsTabContent(
                         Spacer(modifier = Modifier.height(10.dp))
                         Surface(
                             shape = RoundedCornerShape(12.dp),
-                            color = Color(0xFFFEF2F2),
-                            border = BorderStroke(1.dp, Color(0xFFFCA5A5)),
+                            color = if (isDark) funkyColors.danger.copy(alpha = 0.14f) else Color(0xFFFEF2F2),
+                            border = BorderStroke(1.dp, if (isDark) funkyColors.danger.copy(alpha = 0.45f) else Color(0xFFFCA5A5)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                SoftWarningIcon(size = 16.dp, color = funkyColors.danger)
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "⚠️ ${failureStats.failedCount} ${if (failureStats.failedCount == 1) "message" else "messages"} could not be opened",
+                                    text = "${failureStats.failedCount} ${if (failureStats.failedCount == 1) "message" else "messages"} could not be opened",
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = Color(0xFF991B1B)
+                                    color = if (isDark) Color(0xFFFCA5A5) else Color(0xFF991B1B)
                                 )
                             }
                         }
@@ -690,8 +705,8 @@ fun ChatsTabContent(
                         .padding(horizontal = 20.dp)
                         .height(52.dp)
                         .clip(RoundedCornerShape(50.dp))
-                        .background(Color.White)
-                        .border(BorderStroke(1.dp, Color(0xFFE5E7EB)), RoundedCornerShape(50.dp))
+                        .background(funkyColors.surface)
+                        .border(BorderStroke(1.dp, funkyColors.line), RoundedCornerShape(50.dp))
                         .padding(horizontal = 18.dp),
                     contentAlignment = Alignment.CenterStart
                 ) {
@@ -700,7 +715,7 @@ fun ChatsTabContent(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         FunkySearchIcon(
-                            color = Color(0xFF9CA3AF),
+                            color = funkyColors.mute,
                             modifier = Modifier.size(20.dp)
                         )
 
@@ -710,7 +725,7 @@ fun ChatsTabContent(
                             if (searchQuery.isEmpty()) {
                                 Text(
                                     text = "Search conversations...",
-                                    color = Color(0xFF9CA3AF),
+                                    color = funkyColors.mute,
                                     fontSize = 15.sp
                                 )
                             }
@@ -719,11 +734,11 @@ fun ChatsTabContent(
                                 onValueChange = { searchQuery = it },
                                 singleLine = true,
                                 textStyle = TextStyle(
-                                    color = Color.Black,
+                                    color = funkyColors.ink,
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Normal
                                 ),
-                                cursorBrush = SolidColor(Color.Black),
+                                cursorBrush = SolidColor(funkyColors.mango),
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
@@ -746,7 +761,12 @@ fun ChatsTabContent(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(50.dp))
                                 .background(
-                                    if (isSelected) Color(0xFFFFC529) else Color(0xFFF3F4F6)
+                                    if (isSelected) funkyColors.mango else funkyColors.surface
+                                )
+                                .border(
+                                    1.dp,
+                                    if (isSelected) funkyColors.mango else funkyColors.line,
+                                    RoundedCornerShape(50.dp)
                                 )
                                 .clickable { selectedFilter = chipText }
                                 .padding(horizontal = 20.dp, vertical = 10.dp),
@@ -756,7 +776,7 @@ fun ChatsTabContent(
                                 text = chipText,
                                 fontSize = 14.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) Color.Black else Color(0xFF1F2937)
+                                color = if (isSelected) funkyColors.onMango else funkyColors.ink
                             )
                         }
                     }
@@ -778,9 +798,9 @@ fun ChatsTabContent(
                             }
                             .testTag("pinned_support_chat_item"),
                         shape = RoundedCornerShape(if (isMinimalistMode) 16.dp else 22.dp),
-                        color = Color.White,
-                        border = BorderStroke(1.2.dp, Color(0xFFFDE68A)),
-                        shadowElevation = if (isMinimalistMode) 0.dp else 1.dp
+                        color = funkyColors.surface,
+                        border = BorderStroke(1.2.dp, if (isDark) funkyColors.mango.copy(alpha = 0.5f) else Color(0xFFFDE68A)),
+                        shadowElevation = if (isMinimalistMode || isDark) 0.dp else 1.dp
                     ) {
                         Row(
                             modifier = Modifier
@@ -796,14 +816,14 @@ fun ChatsTabContent(
                                     modifier = Modifier
                                         .fillMaxSize()
                                         .clip(CircleShape)
-                                        .background(GoldAccent),
+                                        .background(funkyColors.mango),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         text = "FT",
                                         fontWeight = FontWeight.Black,
                                         fontSize = if (isMinimalistMode) 15.sp else 20.sp,
-                                        color = Color.Black
+                                        color = funkyColors.onMango
                                     )
                                 }
 
@@ -812,7 +832,7 @@ fun ChatsTabContent(
                                         .size(if (isMinimalistMode) 14.dp else 18.dp)
                                         .align(Alignment.BottomEnd)
                                         .clip(CircleShape)
-                                        .border(1.5.dp, Color.White, CircleShape),
+                                        .border(1.5.dp, funkyColors.surface, CircleShape),
                                     badgeColor = Color(0xFF3B82F6),
                                     checkColor = Color.White
                                 )
@@ -834,19 +854,19 @@ fun ChatsTabContent(
                                             text = "FunkyTalk",
                                             fontWeight = FontWeight.ExtraBold,
                                             fontSize = if (isMinimalistMode) 14.5.sp else 16.sp,
-                                            color = Color.Black
+                                            color = funkyColors.ink
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Box(
                                             modifier = Modifier
                                                 .clip(RoundedCornerShape(6.dp))
-                                                .background(Color(0xFFFFFBEB))
-                                                .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(6.dp))
+                                                .background(if (isDark) funkyColors.mango.copy(alpha = 0.16f) else Color(0xFFFFFBEB))
+                                                .border(1.dp, if (isDark) funkyColors.mango.copy(alpha = 0.45f) else Color(0xFFFDE68A), RoundedCornerShape(6.dp))
                                                 .padding(horizontal = 5.dp, vertical = 1.dp)
                                         ) {
                                             Text(
                                                 text = "SUPPORT",
-                                                color = Color(0xFFB45309),
+                                                color = if (isDark) funkyColors.mango else Color(0xFFB45309),
                                                 fontSize = 8.5.sp,
                                                 fontWeight = FontWeight.Black
                                             )
@@ -856,7 +876,7 @@ fun ChatsTabContent(
                                     Text(
                                         text = supportTime ?: "",
                                         fontSize = 11.5.sp,
-                                        color = Color(0xFF9CA3AF),
+                                        color = funkyColors.mute,
                                         fontWeight = FontWeight.Normal
                                     )
                                 }
@@ -866,12 +886,12 @@ fun ChatsTabContent(
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         SoftHeadsetIcon(
                                             size = 14.dp,
-                                            color = Color(0xFF10B981)
+                                            color = funkyColors.ok
                                         )
                                         Spacer(modifier = Modifier.width(4.dp))
                                         Text(
                                             text = "Official Support Channel",
-                                            color = Color(0xFF047857),
+                                            color = if (isDark) Color(0xFF34D399) else Color(0xFF047857),
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.SemiBold
                                         )
@@ -888,7 +908,7 @@ fun ChatsTabContent(
                                 ) {
                                     Text(
                                         text = supportPreview ?: "How can we help you today? Tap to chat.",
-                                        color = if (supportUnreadCount > 0) Color(0xFF1F2937) else Color(0xFF6B7280),
+                                        color = if (supportUnreadCount > 0) funkyColors.ink else funkyColors.mute,
                                         fontWeight = if (supportUnreadCount > 0) FontWeight.Bold else FontWeight.Normal,
                                         fontSize = if (isMinimalistMode) 12.sp else 13.sp,
                                         maxLines = 1,
@@ -902,12 +922,12 @@ fun ChatsTabContent(
                                             modifier = Modifier
                                                 .size(if (isMinimalistMode) 18.dp else 20.dp)
                                                 .clip(CircleShape)
-                                                .background(GoldAccent),
+                                                .background(funkyColors.mango),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Text(
                                                 text = "$supportUnreadCount",
-                                                color = Color.Black,
+                                                color = funkyColors.onMango,
                                                 fontSize = 10.5.sp,
                                                 fontWeight = FontWeight.Black
                                             )
@@ -941,7 +961,7 @@ fun ChatsTabContent(
                             text = if (searchQuery.isNotBlank()) "No conversations found" else "No conversations yet",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFF111827),
+                            color = funkyColors.ink,
                             textAlign = TextAlign.Center
                         )
 
@@ -954,7 +974,7 @@ fun ChatsTabContent(
                                 "All 1:1 messages are end-to-end encrypted.\nFind partners in Discover or create a group to start chatting."
                             },
                             fontSize = 13.sp,
-                            color = Color(0xFF6B7280),
+                            color = funkyColors.mute,
                             textAlign = TextAlign.Center,
                             lineHeight = 19.sp,
                             modifier = Modifier.padding(horizontal = 20.dp)
@@ -965,13 +985,13 @@ fun ChatsTabContent(
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Button(
                                     onClick = onNavigateToDiscover,
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFC529)),
+                                    colors = ButtonDefaults.buttonColors(containerColor = funkyColors.mango),
                                     shape = RoundedCornerShape(50.dp),
                                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
                                 ) {
                                     Text(
                                         text = "Discover People",
-                                        color = Color.Black,
+                                        color = funkyColors.onMango,
                                         fontWeight = FontWeight.ExtraBold,
                                         fontSize = 14.sp
                                     )
@@ -980,17 +1000,17 @@ fun ChatsTabContent(
                                 OutlinedButton(
                                     onClick = { showCreateGroupSheet = true },
                                     shape = RoundedCornerShape(50.dp),
-                                    border = BorderStroke(1.5.dp, Color(0xFFD97706)),
+                                    border = BorderStroke(1.5.dp, funkyColors.mango),
                                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
                                 ) {
                                     GroupUsersIcon(
-                                        color = Color(0xFF92400E),
+                                        color = if (isDark) funkyColors.mango else Color(0xFF92400E),
                                         size = 16.dp
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
                                         text = "New Group",
-                                        color = Color(0xFF92400E),
+                                        color = if (isDark) funkyColors.mango else Color(0xFF92400E),
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 14.sp
                                     )
@@ -1059,8 +1079,19 @@ fun ChatsTabContent(
                                 }
                             ),
                         shape = RoundedCornerShape(if (isMinimalistMode) 16.dp else 22.dp),
-                        color = if (isPinned) Color(0xFFFFFDF5) else Color.White,
-                        border = BorderStroke(1.dp, if (isPinned) Color(0xFFFDE68A) else Color(0xFFF0F0EE)),
+                        color = if (isPinned) {
+                            if (isDark) funkyColors.soft else Color(0xFFFFFDF5)
+                        } else {
+                            funkyColors.surface
+                        },
+                        border = BorderStroke(
+                            1.dp,
+                            if (isPinned) {
+                                if (isDark) funkyColors.mango.copy(alpha = 0.45f) else Color(0xFFFDE68A)
+                            } else {
+                                funkyColors.line
+                            }
+                        ),
                         shadowElevation = 0.dp
                     ) {
                         Row(
@@ -1074,6 +1105,7 @@ fun ChatsTabContent(
                                     avatarUrl = chat.avatar,
                                     size = if (isMinimalistMode) 40.dp else 56.dp,
                                     countryCode = if (isGroup) null else flagCode,
+                                    showFlagBadge = !isGroup,
                                     userId = if (!isGroup) chat.id else null,
                                     enableFrameAnimation = false
                                 )
@@ -1084,13 +1116,13 @@ fun ChatsTabContent(
                                             .size(if (isMinimalistMode) 15.dp else 20.dp)
                                             .align(Alignment.BottomEnd)
                                             .clip(CircleShape)
-                                            .background(GoldAccent)
-                                            .border(1.2.dp, Color.White, CircleShape),
+                                            .background(funkyColors.mango)
+                                            .border(1.2.dp, funkyColors.surface, CircleShape),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         GroupUsersIcon(
                                             size = if (isMinimalistMode) 9.dp else 12.dp,
-                                            color = Color.Black
+                                            color = funkyColors.onMango
                                         )
                                     }
                                 }
@@ -1113,14 +1145,14 @@ fun ChatsTabContent(
                                             name = chat.name,
                                             fontSize = if (isMinimalistMode) 14.5.sp else 16.sp,
                                             fontWeight = FontWeight.Bold,
-                                            defaultColor = Color.Black
+                                            defaultColor = funkyColors.ink
                                         )
 
                                         if (isPinned) {
                                             Spacer(modifier = Modifier.width(4.dp))
                                             GroupPinIcon(
                                                 size = if (isMinimalistMode) 12.dp else 14.dp,
-                                                color = Color(0xFFD97706)
+                                                color = funkyColors.mango
                                             )
                                         }
 
@@ -1128,7 +1160,7 @@ fun ChatsTabContent(
                                             Spacer(modifier = Modifier.width(4.dp))
                                             GroupMuteIcon(
                                                 size = if (isMinimalistMode) 12.dp else 14.dp,
-                                                color = Color(0xFF9CA3AF)
+                                                color = funkyColors.mute
                                             )
                                         }
 
@@ -1137,7 +1169,13 @@ fun ChatsTabContent(
                                         Box(
                                             modifier = Modifier
                                                 .clip(RoundedCornerShape(4.dp))
-                                                .background(if (isGroup) Color(0xFFFEF3C7) else Color(0xFFDCFCE7))
+                                                .background(
+                                                    if (isGroup) {
+                                                        if (isDark) funkyColors.mango.copy(alpha = 0.16f) else Color(0xFFFEF3C7)
+                                                    } else {
+                                                        if (isDark) funkyColors.ok.copy(alpha = 0.16f) else Color(0xFFDCFCE7)
+                                                    }
+                                                )
                                                 .padding(horizontal = 4.dp, vertical = 1.dp)
                                         ) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1146,19 +1184,20 @@ fun ChatsTabContent(
                                                         text = "GROUP",
                                                         fontSize = 8.5.sp,
                                                         fontWeight = FontWeight.Bold,
-                                                        color = Color(0xFF92400E)
+                                                        color = if (isDark) funkyColors.mango else Color(0xFF92400E)
                                                     )
                                                 } else {
+                                                    val e2eeColor = if (isDark) Color(0xFF4ADE80) else Color(0xFF15803D)
                                                     SoftTinyLockIcon(
                                                         size = 9.dp,
-                                                        tint = Color(0xFF15803D)
+                                                        tint = e2eeColor
                                                     )
                                                     Spacer(modifier = Modifier.width(2.dp))
                                                     Text(
                                                         text = "E2EE",
                                                         fontSize = 8.5.sp,
                                                         fontWeight = FontWeight.Bold,
-                                                        color = Color(0xFF15803D)
+                                                        color = e2eeColor
                                                     )
                                                 }
                                             }
@@ -1167,33 +1206,19 @@ fun ChatsTabContent(
 
                                     Spacer(modifier = Modifier.width(8.dp))
 
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        if (!isGroup && flagCode.isNotBlank()) {
-                                            CircleFlag(
-                                                countryCode = flagCode,
-                                                allowProgramming = false,
-                                                modifier = Modifier
-                                                    .size(16.dp)
-                                                    .clip(CircleShape)
-                                            )
-                                        }
-                                        Text(
-                                            text = chat.time,
-                                            fontSize = if (isMinimalistMode) 11.5.sp else 12.sp,
-                                            color = Color(0xFF9CA3AF),
-                                            fontWeight = FontWeight.Normal
-                                        )
-                                    }
+                                    Text(
+                                        text = chat.time,
+                                        fontSize = if (isMinimalistMode) 11.5.sp else 12.sp,
+                                        color = funkyColors.mute,
+                                        fontWeight = FontWeight.Normal
+                                    )
                                 }
 
                                 if (!isMinimalistMode) {
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
                                         text = chat.isNativeLanguage,
-                                        color = Color(0xFF6B7280),
+                                        color = funkyColors.mute,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Normal,
                                         maxLines = 1,
@@ -1211,7 +1236,7 @@ fun ChatsTabContent(
                                 ) {
                                     Text(
                                         text = chat.lastMsg,
-                                        color = if (chat.unreadCount > 0) Color(0xFF1F2937) else Color(0xFF6B7280),
+                                        color = if (chat.unreadCount > 0) funkyColors.ink else funkyColors.mute,
                                         fontWeight = if (chat.unreadCount > 0) FontWeight.SemiBold else FontWeight.Normal,
                                         fontSize = if (isMinimalistMode) 12.sp else 13.sp,
                                         maxLines = 1,
@@ -1230,13 +1255,13 @@ fun ChatsTabContent(
                                                     modifier = Modifier
                                                         .size(if (isMinimalistMode) 17.dp else 20.dp)
                                                         .clip(CircleShape)
-                                                        .background(Color(0xFFFEF3C7))
-                                                        .border(1.dp, Color(0xFFF59E0B), CircleShape),
+                                                        .background(if (isDark) funkyColors.mango.copy(alpha = 0.2f) else Color(0xFFFEF3C7))
+                                                        .border(1.dp, funkyColors.mango, CircleShape),
                                                     contentAlignment = Alignment.Center
                                                 ) {
                                                     Text(
                                                         text = "@",
-                                                        color = Color(0xFFB45309),
+                                                        color = if (isDark) funkyColors.mango else Color(0xFFB45309),
                                                         fontSize = if (isMinimalistMode) 10.sp else 11.5.sp,
                                                         fontWeight = FontWeight.ExtraBold
                                                     )
@@ -1247,12 +1272,12 @@ fun ChatsTabContent(
                                                     modifier = Modifier
                                                         .size(if (isMinimalistMode) 17.dp else 20.dp)
                                                         .clip(CircleShape)
-                                                        .background(Color(0xFFFFC529)),
+                                                        .background(funkyColors.mango),
                                                     contentAlignment = Alignment.Center
                                                 ) {
                                                     Text(
                                                         text = "${chat.unreadCount}",
-                                                        color = Color.Black,
+                                                        color = funkyColors.onMango,
                                                         fontSize = if (isMinimalistMode) 10.sp else 11.sp,
                                                         fontWeight = FontWeight.Black
                                                     )
@@ -1334,7 +1359,8 @@ fun ChatsTabContent(
                             .clip(RoundedCornerShape(28.dp))
                             .clickable(enabled = false) {},
                         shape = RoundedCornerShape(28.dp),
-                        color = Color.White,
+                        color = funkyColors.surface,
+                        border = BorderStroke(1.dp, funkyColors.line),
                         shadowElevation = 16.dp
                     ) {
                         Column(
@@ -1347,10 +1373,10 @@ fun ChatsTabContent(
                                 modifier = Modifier
                                     .size(56.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFFFEE2E2)),
+                                    .background(if (isDark) funkyColors.danger.copy(alpha = 0.18f) else Color(0xFFFEE2E2)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                SoftTrashIcon(size = 28.dp, color = Color(0xFFDC2626))
+                                SoftTrashIcon(size = 28.dp, color = funkyColors.danger)
                             }
 
                             Spacer(modifier = Modifier.height(16.dp))
@@ -1359,7 +1385,7 @@ fun ChatsTabContent(
                                 text = "Clear All Chats?",
                                 fontSize = 19.sp,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = Color(0xFF111827)
+                                color = funkyColors.ink
                             )
 
                             Spacer(modifier = Modifier.height(8.dp))
@@ -1367,7 +1393,7 @@ fun ChatsTabContent(
                             Text(
                                 text = "This will permanently erase all local encrypted messages across all direct conversations.",
                                 fontSize = 13.5.sp,
-                                color = Color(0xFF6B7280),
+                                color = funkyColors.mute,
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                                 lineHeight = 19.sp
                             )
@@ -1384,9 +1410,9 @@ fun ChatsTabContent(
                                         .weight(1f)
                                         .height(48.dp),
                                     shape = RoundedCornerShape(16.dp),
-                                    border = BorderStroke(1.dp, Color(0xFFE5E7EB))
+                                    border = BorderStroke(1.dp, funkyColors.line)
                                 ) {
-                                    Text("Cancel", color = Color(0xFF374151), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    Text("Cancel", color = funkyColors.ink, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                                 }
 
                                 Button(
@@ -1401,7 +1427,7 @@ fun ChatsTabContent(
                                         .weight(1f)
                                         .height(48.dp),
                                     shape = RoundedCornerShape(16.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                                    colors = ButtonDefaults.buttonColors(containerColor = funkyColors.danger)
                                 ) {
                                     Text("Clear All", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
                                 }
@@ -1460,6 +1486,8 @@ fun ChatsTabContent(
 @Composable
 private fun ModernUnlockPasswordCard() {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
+    val isDark = funkyColors.isDark
     val activity = context as? FragmentActivity
     val scope = rememberCoroutineScope()
 
@@ -1482,9 +1510,9 @@ private fun ModernUnlockPasswordCard() {
 
     Surface(
         shape = RoundedCornerShape(32.dp),
-        color = Color.White,
+        color = funkyColors.surface,
         shadowElevation = 24.dp,
-        border = BorderStroke(1.dp, Color(0xFFF1F5F9)),
+        border = BorderStroke(1.dp, funkyColors.line),
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp)
@@ -1498,14 +1526,14 @@ private fun ModernUnlockPasswordCard() {
             // Soft Badge with Custom Soft Lock Icon
             SoftIconBadge(
                 badgeSize = 64.dp,
-                backgroundColor = Color(0xFFEEF2FF),
-                borderColor = Color(0xFFC7D2FE)
+                backgroundColor = if (isDark) Color(0xFF4F46E5).copy(alpha = 0.18f) else Color(0xFFEEF2FF),
+                borderColor = if (isDark) Color(0xFF6366F1).copy(alpha = 0.4f) else Color(0xFFC7D2FE)
             ) {
                 SoftLockIcon(
                     size = 32.dp,
                     isUnlocked = false,
                     gradientColors = listOf(Color(0xFF6366F1), Color(0xFF4338CA)),
-                    shackleColor = Color(0xFFCBD5E1)
+                    shackleColor = if (isDark) Color(0xFF94A3B8) else Color(0xFFCBD5E1)
                 )
             }
 
@@ -1515,7 +1543,7 @@ private fun ModernUnlockPasswordCard() {
                 text = "Enter Password",
                 fontSize = 22.sp,
                 fontWeight = FontWeight.ExtraBold,
-                color = Color(0xFF111827),
+                color = funkyColors.ink,
                 textAlign = TextAlign.Center,
                 letterSpacing = (-0.3).sp
             )
@@ -1525,7 +1553,7 @@ private fun ModernUnlockPasswordCard() {
             Text(
                 text = "Chats are locked for your privacy. Enter your password to view conversations.",
                 fontSize = 13.sp,
-                color = Color(0xFF6B7280),
+                color = funkyColors.mute,
                 textAlign = TextAlign.Center,
                 lineHeight = 18.sp
             )
@@ -1551,22 +1579,23 @@ private fun ModernUnlockPasswordCard() {
                         SoftEyeIcon(
                             visible = passwordVisible,
                             size = 20.dp,
-                            tint = if (passwordVisible) Color(0xFF4F46E5) else Color(0xFF9CA3AF)
+                            tint = if (passwordVisible) funkyColors.mango else funkyColors.mute
                         )
                     }
                 },
                 textStyle = TextStyle(
-                    color = Color(0xFF111827),
+                    color = funkyColors.ink,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Normal
                 ),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color(0xFF111827),
-                    unfocusedTextColor = Color(0xFF111827),
-                    focusedBorderColor = Color(0xFF4F46E5),
-                    focusedLabelColor = Color(0xFF4338CA),
-                    cursorColor = Color(0xFF111827),
-                    unfocusedBorderColor = Color(0xFFE5E7EB)
+                    focusedTextColor = funkyColors.ink,
+                    unfocusedTextColor = funkyColors.ink,
+                    focusedBorderColor = funkyColors.mango,
+                    focusedLabelColor = funkyColors.mango,
+                    unfocusedLabelColor = funkyColors.mute,
+                    cursorColor = funkyColors.mango,
+                    unfocusedBorderColor = funkyColors.line
                 ),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = {
@@ -1590,17 +1619,17 @@ private fun ModernUnlockPasswordCard() {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color(0xFFFEF2F2), RoundedCornerShape(10.dp))
-                        .border(1.dp, Color(0xFFFEE2E2), RoundedCornerShape(10.dp))
+                        .background(if (isDark) funkyColors.danger.copy(alpha = 0.14f) else Color(0xFFFEF2F2), RoundedCornerShape(10.dp))
+                        .border(1.dp, if (isDark) funkyColors.danger.copy(alpha = 0.4f) else Color(0xFFFEE2E2), RoundedCornerShape(10.dp))
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    SoftWarningIcon(size = 18.dp, color = Color(0xFFDC2626))
+                    SoftWarningIcon(size = 18.dp, color = funkyColors.danger)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = err,
                         fontSize = 12.sp,
-                        color = Color(0xFFDC2626),
+                        color = funkyColors.danger,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -1628,17 +1657,17 @@ private fun ModernUnlockPasswordCard() {
                     .fillMaxWidth()
                     .height(52.dp),
                 shape = RoundedCornerShape(50.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF111827)),
+                colors = ButtonDefaults.buttonColors(containerColor = funkyColors.mango),
                 enabled = !isLoading
             ) {
                 if (isLoading) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = funkyColors.onMango, strokeWidth = 2.dp)
                 } else {
                     Text(
                         text = "Unlock Chats",
                         fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        fontWeight = FontWeight.ExtraBold,
+                        color = funkyColors.onMango
                     )
                 }
             }
@@ -1662,13 +1691,13 @@ private fun ModernUnlockPasswordCard() {
                         .fillMaxWidth()
                         .height(50.dp),
                     shape = RoundedCornerShape(50.dp),
-                    border = BorderStroke(1.dp, Color(0xFFE5E7EB))
+                    border = BorderStroke(1.dp, funkyColors.line)
                 ) {
-                    SoftFingerprintIcon(size = 20.dp, color = Color(0xFF374151))
+                    SoftFingerprintIcon(size = 20.dp, color = funkyColors.ink)
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
                         text = "Unlock with Biometrics",
-                        color = Color(0xFF374151),
+                        color = funkyColors.ink,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -1681,7 +1710,7 @@ private fun ModernUnlockPasswordCard() {
                 Text(
                     text = "Forgot password? Reset Vault",
                     fontSize = 12.sp,
-                    color = Color(0xFF9CA3AF),
+                    color = funkyColors.mute,
                     fontWeight = FontWeight.Medium
                 )
             }
@@ -1693,16 +1722,16 @@ private fun ModernUnlockPasswordCard() {
             onDismissRequest = { showResetDialog = false },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    SoftWarningIcon(size = 24.dp, color = Color(0xFFDC2626))
+                    SoftWarningIcon(size = 24.dp, color = funkyColors.danger)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Reset Chat Vault?", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Text("Reset Chat Vault?", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = funkyColors.ink)
                 }
             },
             text = {
                 Text(
                     "Resetting the vault permanently wipes the local encryption keys and erases all chat history on this device.\n\nMessages cannot be recovered from the server.",
                     fontSize = 13.sp,
-                    color = Color(0xFF4B5563)
+                    color = funkyColors.mute
                 )
             },
             confirmButton = {
@@ -1712,18 +1741,18 @@ private fun ModernUnlockPasswordCard() {
                         VaultSecurityManager.resetVault(context)
                         Toast.makeText(context, "Vault reset. Please set a new password.", Toast.LENGTH_SHORT).show()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                    colors = ButtonDefaults.buttonColors(containerColor = funkyColors.danger)
                 ) {
                     Text("Reset & Erase", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showResetDialog = false }) {
-                    Text("Cancel", color = Color(0xFF6B7280))
+                    Text("Cancel", color = funkyColors.mute)
                 }
             },
             shape = RoundedCornerShape(24.dp),
-            containerColor = Color.White
+            containerColor = funkyColors.surface
         )
     }
 }
@@ -1734,6 +1763,8 @@ private fun ModernUnlockPasswordCard() {
 @Composable
 private fun ModernSetupPasswordCard() {
     val context = LocalContext.current
+    val funkyColors = LocalFunkyColors.current
+    val isDark = funkyColors.isDark
     val activity = context as? FragmentActivity
     val scope = rememberCoroutineScope()
 
@@ -1752,9 +1783,9 @@ private fun ModernSetupPasswordCard() {
 
     Surface(
         shape = RoundedCornerShape(32.dp),
-        color = Color.White,
+        color = funkyColors.surface,
         shadowElevation = 24.dp,
-        border = BorderStroke(1.dp, Color(0xFFF1F5F9)),
+        border = BorderStroke(1.dp, funkyColors.line),
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp)
@@ -1767,8 +1798,8 @@ private fun ModernSetupPasswordCard() {
         ) {
             SoftIconBadge(
                 badgeSize = 64.dp,
-                backgroundColor = Color(0xFFFFFBEB),
-                borderColor = Color(0xFFFDE68A)
+                backgroundColor = if (isDark) funkyColors.mango.copy(alpha = 0.18f) else Color(0xFFFFFBEB),
+                borderColor = if (isDark) funkyColors.mango.copy(alpha = 0.45f) else Color(0xFFFDE68A)
             ) {
                 SoftLockIcon(
                     size = 32.dp,
@@ -1784,7 +1815,7 @@ private fun ModernSetupPasswordCard() {
                 text = "Set Up Chat Lock",
                 fontSize = 22.sp,
                 fontWeight = FontWeight.ExtraBold,
-                color = Color(0xFF111827),
+                color = funkyColors.ink,
                 textAlign = TextAlign.Center,
                 letterSpacing = (-0.3).sp
             )
@@ -1794,7 +1825,7 @@ private fun ModernSetupPasswordCard() {
             Text(
                 text = "Set a password to encrypt and secure your private conversations.",
                 fontSize = 13.sp,
-                color = Color(0xFF6B7280),
+                color = funkyColors.mute,
                 textAlign = TextAlign.Center,
                 lineHeight = 18.sp
             )
@@ -1820,22 +1851,23 @@ private fun ModernSetupPasswordCard() {
                         SoftEyeIcon(
                             visible = passwordVisible,
                             size = 20.dp,
-                            tint = if (passwordVisible) Color(0xFFB45309) else Color(0xFF9CA3AF)
+                            tint = if (passwordVisible) funkyColors.mango else funkyColors.mute
                         )
                     }
                 },
                 textStyle = TextStyle(
-                    color = Color(0xFF111827),
+                    color = funkyColors.ink,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Normal
                 ),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color(0xFF111827),
-                    unfocusedTextColor = Color(0xFF111827),
-                    focusedBorderColor = Color(0xFFFFC529),
-                    focusedLabelColor = Color(0xFFB45309),
-                    cursorColor = Color(0xFF111827),
-                    unfocusedBorderColor = Color(0xFFE5E7EB)
+                    focusedTextColor = funkyColors.ink,
+                    unfocusedTextColor = funkyColors.ink,
+                    focusedBorderColor = funkyColors.mango,
+                    focusedLabelColor = funkyColors.mango,
+                    unfocusedLabelColor = funkyColors.mute,
+                    cursorColor = funkyColors.mango,
+                    unfocusedBorderColor = funkyColors.line
                 ),
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp)
@@ -1862,22 +1894,23 @@ private fun ModernSetupPasswordCard() {
                         SoftEyeIcon(
                             visible = confirmPasswordVisible,
                             size = 20.dp,
-                            tint = if (confirmPasswordVisible) Color(0xFFB45309) else Color(0xFF9CA3AF)
+                            tint = if (confirmPasswordVisible) funkyColors.mango else funkyColors.mute
                         )
                     }
                 },
                 textStyle = TextStyle(
-                    color = Color(0xFF111827),
+                    color = funkyColors.ink,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Normal
                 ),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color(0xFF111827),
-                    unfocusedTextColor = Color(0xFF111827),
-                    focusedBorderColor = Color(0xFFFFC529),
-                    focusedLabelColor = Color(0xFFB45309),
-                    cursorColor = Color(0xFF111827),
-                    unfocusedBorderColor = Color(0xFFE5E7EB)
+                    focusedTextColor = funkyColors.ink,
+                    unfocusedTextColor = funkyColors.ink,
+                    focusedBorderColor = funkyColors.mango,
+                    focusedLabelColor = funkyColors.mango,
+                    unfocusedLabelColor = funkyColors.mute,
+                    cursorColor = funkyColors.mango,
+                    unfocusedBorderColor = funkyColors.line
                 ),
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp)
@@ -1887,8 +1920,8 @@ private fun ModernSetupPasswordCard() {
                 Spacer(modifier = Modifier.height(12.dp))
                 Surface(
                     shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFFF9FAFB),
-                    border = BorderStroke(1.dp, Color(0xFFF3F4F6)),
+                    color = funkyColors.soft,
+                    border = BorderStroke(1.dp, funkyColors.line),
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { enableBiometrics = !enableBiometrics }
@@ -1899,13 +1932,13 @@ private fun ModernSetupPasswordCard() {
                     ) {
                         SoftFingerprintIcon(
                             size = 22.dp,
-                            color = if (enableBiometrics) Color(0xFF2563EB) else Color(0xFF9CA3AF)
+                            color = if (enableBiometrics) Color(0xFF2563EB) else funkyColors.mute
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
                             text = "Enable Biometric unlock",
                             fontSize = 13.sp,
-                            color = Color(0xFF374151),
+                            color = funkyColors.ink,
                             fontWeight = FontWeight.Medium,
                             modifier = Modifier.weight(1f)
                         )
@@ -1913,8 +1946,8 @@ private fun ModernSetupPasswordCard() {
                             checked = enableBiometrics,
                             onCheckedChange = { enableBiometrics = it },
                             colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = Color(0xFF111827)
+                                checkedThumbColor = funkyColors.onMango,
+                                checkedTrackColor = funkyColors.mango
                             )
                         )
                     }
@@ -1926,17 +1959,17 @@ private fun ModernSetupPasswordCard() {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color(0xFFFEF2F2), RoundedCornerShape(10.dp))
-                        .border(1.dp, Color(0xFFFEE2E2), RoundedCornerShape(10.dp))
+                        .background(if (isDark) funkyColors.danger.copy(alpha = 0.14f) else Color(0xFFFEF2F2), RoundedCornerShape(10.dp))
+                        .border(1.dp, if (isDark) funkyColors.danger.copy(alpha = 0.4f) else Color(0xFFFEE2E2), RoundedCornerShape(10.dp))
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    SoftWarningIcon(size = 18.dp, color = Color(0xFFDC2626))
+                    SoftWarningIcon(size = 18.dp, color = funkyColors.danger)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = err,
                         fontSize = 12.sp,
-                        color = Color(0xFFDC2626),
+                        color = funkyColors.danger,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -1983,17 +2016,17 @@ private fun ModernSetupPasswordCard() {
                     .fillMaxWidth()
                     .height(52.dp),
                 shape = RoundedCornerShape(50.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF111827)),
+                colors = ButtonDefaults.buttonColors(containerColor = funkyColors.mango),
                 enabled = !isLoading
             ) {
                 if (isLoading) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = funkyColors.onMango, strokeWidth = 2.dp)
                 } else {
                     Text(
                         text = "Set Password & Unlock",
                         fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        fontWeight = FontWeight.ExtraBold,
+                        color = funkyColors.onMango
                     )
                 }
             }
