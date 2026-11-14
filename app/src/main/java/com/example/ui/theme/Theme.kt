@@ -1,5 +1,6 @@
 package com.example.ui.theme
 
+import android.app.Activity
 import android.content.Context
 import android.os.Build
 import androidx.compose.material3.MaterialTheme
@@ -10,12 +11,14 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -35,6 +38,7 @@ object AppThemeManager {
     @Volatile
     private var initialized = false
 
+    @Synchronized
     fun init(context: Context) {
         if (initialized) return
         val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -42,13 +46,14 @@ object AppThemeManager {
         initialized = true
     }
 
+    @Synchronized
     fun setDarkTheme(context: Context, isDark: Boolean) {
         _isDarkTheme.value = isDark
         initialized = true
         context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putBoolean(KEY_APP_DARK_THEME, isDark)
-            .apply()
+            .commit()
     }
 
     fun toggleDarkTheme(context: Context) {
@@ -139,11 +144,21 @@ fun MyApplicationTheme(
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
-    LaunchedEffect(Unit) {
-        AppThemeManager.init(context)
-    }
+    AppThemeManager.init(context)
     val storedDark by AppThemeManager.isDarkTheme.collectAsState()
     val effectiveDark = darkTheme ?: storedDark
+
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as? Activity)?.window
+            if (window != null) {
+                val controller = WindowCompat.getInsetsController(window, view)
+                controller.isAppearanceLightStatusBars = !effectiveDark
+                controller.isAppearanceLightNavigationBars = !effectiveDark
+            }
+        }
+    }
 
     val colorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {

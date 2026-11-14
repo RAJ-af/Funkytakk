@@ -32,7 +32,7 @@ import com.example.ui.screens.LanguageData
 @Composable
 fun RoomLanguageSelectionSheet(
     selectedLanguageName: String,
-    isDark: Boolean = isSystemInDarkTheme(),
+    isDark: Boolean = com.example.ui.theme.LocalAppDarkTheme.current,
     onLanguageSelected: (Language) -> Unit,
     onDismiss: () -> Unit
 ) {

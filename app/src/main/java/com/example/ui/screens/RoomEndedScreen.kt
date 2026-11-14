@@ -68,10 +68,10 @@ fun RoomEndedScreen(
     val effectiveMinutes = if (totalTimeMinutes > 0) totalTimeMinutes else (if (durationSeconds > 0) durationSeconds / 60 else 0)
 
     val reasonTitle = when (endedReason.lowercase()) {
-        "host_ended" -> "Host ने room बंद किया"
-        "host_timeout" -> "Host 3 मिनट से दूर था"
-        "moderation" -> "Moderator द्वारा room बंद किया गया"
-        else -> "Room समाप्त हो चुका है"
+        "host_ended" -> "Host ended the room"
+        "host_timeout" -> "Host was inactive for 3 mins"
+        "moderation" -> "Closed by moderator"
+        else -> "Room has ended"
     }
 
     val reasonSubtitle = when (endedReason.lowercase()) {

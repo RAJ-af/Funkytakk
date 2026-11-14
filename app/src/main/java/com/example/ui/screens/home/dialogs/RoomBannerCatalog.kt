@@ -88,10 +88,12 @@ object BannerPack {
         BannerOption("Sunset Express Train", "https://i.giphy.com/media/3oKIPnAiaMCws8nOsE/giphy.gif"),
         BannerOption("Festive Fireworks", "https://i.giphy.com/media/26tOZ42Mg6pbTUPHW/giphy.gif"),
         BannerOption("Synthwave Horizon", "https://i.giphy.com/media/26tn33aiTi1jkl6H6/giphy.gif"),
-        BannerOption("Kyoto Shrine Lanterns", "https://i.giphy.com/media/l41K3o5fA88P3A156/giphy.gif"),
-        BannerOption("Rainy Tokyo Night", "https://i.giphy.com/media/xUPGcJ9uOAL2h28vMG/giphy.gif"),
-        BannerOption("Starry Night Sky", "https://i.giphy.com/media/3oKIPmuu8WUKRM77vG/giphy.gif"),
-        BannerOption("Ocean Twilight Waves", "https://i.giphy.com/media/l0ExdMHUDKteztyfe/giphy.gif")
+        BannerOption("Ocean Twilight Waves", "https://i.giphy.com/media/l0ExdMHUDKteztyfe/giphy.gif"),
+        BannerOption("Starry Galaxy Glow", "https://i.giphy.com/media/3og0IFrHkIglEOg8Ba/giphy.gif"),
+        BannerOption("Twilight Rain", "https://i.giphy.com/media/l0HlRnAWXxn0MhKLK/giphy.gif"),
+        BannerOption("Neon Lights Loop", "https://i.giphy.com/media/3o7abB06u9bNzA8lu8/giphy.gif"),
+        BannerOption("Anime Clouds Drift", "https://i.giphy.com/media/26ufdipQqU2lhNA4g/giphy.gif"),
+        BannerOption("Coffee Steam Loop", "https://i.giphy.com/media/l3vR85PnGsBwu1PFK/giphy.gif")
     )
 
     val worldwideScenics = listOf(
@@ -99,42 +101,24 @@ object BannerPack {
         BannerOption("Kyoto Red Toriis", "https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?w=800"),
         BannerOption("Mount Fuji Sakura", "https://images.unsplash.com/photo-1524413840807-0c3cb6fa808d?w=800"),
         BannerOption("Eiffel Tower Paris", "https://images.unsplash.com/photo-1502602898657-3e91760cbb34?w=800"),
-        BannerOption("London Thames Big Ben", "https://images.unsplash.com/photo-1513635269975-59663e0ca1ad?w=800"),
-        BannerOption("New York Central Park", "https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?w=800"),
-        BannerOption("Seoul Han River Bridge", "https://images.unsplash.com/photo-1538481199705-c710c4e965fc?w=800"),
-        BannerOption("Sydney Opera House", "https://images.unsplash.com/photo-1506973035872-a4ec16b8e8d9?w=800"),
-        BannerOption("Rome Colosseum Dusk", "https://images.unsplash.com/photo-1552832230-c0197dd311b5?w=800"),
-        BannerOption("Santorini Sunset Cliffs", "https://images.unsplash.com/photo-1533105079780-92b9be482077?w=800"),
-        BannerOption("Barcelona Park Guell", "https://images.unsplash.com/photo-1523531294919-4bcd7c65e216?w=800"),
-        BannerOption("Rio de Janeiro Beach", "https://images.unsplash.com/photo-1483728642387-6c3bdd6c93e5?w=800"),
-        BannerOption("Giza Great Pyramids", "https://images.unsplash.com/photo-1503177119275-0aa32b31d468?w=800"),
-        BannerOption("Berlin Brandenburg Gate", "https://images.unsplash.com/photo-1599946347371-68eb71b16afc?w=800"),
-        BannerOption("Machu Picchu Incan Citadel", "https://images.unsplash.com/photo-1587590227264-0ac64ce63ce8?w=800"),
-        BannerOption("Canadian Alpine Lake", "https://images.unsplash.com/photo-1500043357865-c6b8827df7f1?w=800"),
-        BannerOption("Grand Canyon Red Rocks", "https://images.unsplash.com/photo-1524492412937-b28074a5d7da?w=800"),
-        BannerOption("Great Wall Wilderness", "https://images.unsplash.com/photo-1508504509543-191d5ac64987?w=800"),
-        BannerOption("Amalfi Coast Pastel Towns", "https://images.unsplash.com/photo-1486016006115-74a41448aea2?w=800"),
-        BannerOption("Singapore Marina Sands", "https://images.unsplash.com/photo-1525596667581-2b083dc3954f?w=800"),
-        BannerOption("Venice Scenic Canal", "https://images.unsplash.com/photo-1527631746610-bca00a040d60?w=800"),
-        BannerOption("Iceland Northern Lights", "https://images.unsplash.com/photo-1483168527879-c66136b56105?w=800")
+        BannerOption("London Thames Big Ben", "https://images.unsplash.com/photo-1519681393784-d120267933ba?w=800"),
+        BannerOption("New York Central Park", "https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=800"),
+        BannerOption("Seoul Han River Bridge", "https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=800"),
+        BannerOption("Sydney Opera House", "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=800"),
+        BannerOption("Rome Colosseum Dusk", "https://images.unsplash.com/photo-1514565131-fce0801e5785?w=800"),
+        BannerOption("Santorini Sunset Cliffs", "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=800"),
+        BannerOption("Barcelona Park Guell", "https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=800"),
+        BannerOption("Rio de Janeiro Beach", "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?w=800")
     )
 
     val cozyVibes = listOf(
-        BannerOption("Aesthetic Rainy Window", "https://images.unsplash.com/photo-1428908728789-d2de25dbd4e2?w=800"),
-        BannerOption("Cozy Espresso Table", "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=800"),
-        BannerOption("Warm Fireplace Lounge", "https://images.unsplash.com/photo-1513694203232-719a280e022f?w=800"),
+        BannerOption("Aesthetic Rainy Window", "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=800"),
+        BannerOption("Cozy Espresso Table", "https://images.unsplash.com/photo-1508739773434-c26b3d09e071?w=800"),
+        BannerOption("Warm Fireplace Lounge", "https://images.unsplash.com/photo-1534447677768-be436bb09401?w=800"),
         BannerOption("Classic Library Shelves", "https://images.unsplash.com/photo-1521587760476-6c12a4b040da?w=800"),
         BannerOption("Cathedral Glass Study", "https://images.unsplash.com/photo-1516979187457-637abb4f9353?w=800"),
         BannerOption("Sunlit Greenhouse Plants", "https://images.unsplash.com/photo-1463936575829-25148e1db1b8?w=800"),
-        BannerOption("Minimalist Oak Desk", "https://images.unsplash.com/photo-1499750310107-5fef28a66643?w=800"),
-        BannerOption("Vintage Vinyl Record", "https://images.unsplash.com/photo-1539628399213-d6482e76f184?w=800"),
-        BannerOption("Acoustic Parlor Guitar", "https://images.unsplash.com/photo-1510915361894-db8b60106cb1?w=800"),
-        BannerOption("Steaming Herbal Tea", "https://images.unsplash.com/photo-1576092768241-dec231879fc3?w=800"),
-        BannerOption("Bonsai Tree Studio", "https://images.unsplash.com/photo-1502082553048-f009c37129b9?w=800"),
-        BannerOption("Lo-fi Coffee Shop View", "https://images.unsplash.com/photo-1554118811-1e0d58224f24?w=800"),
-        BannerOption("Candlelit Wooden Rest", "https://images.unsplash.com/photo-1517705008128-361805f42e8a?w=800"),
-        BannerOption("Cozy Wool Knit Couch", "https://images.unsplash.com/photo-1583847268964-b28dc8f51f92?w=800"),
-        BannerOption("Study Corner Lo-fi", "https://images.unsplash.com/photo-1544640808-32ca72ac7f37?w=800")
+        BannerOption("Minimalist Oak Desk", "https://images.unsplash.com/photo-1499750310107-5fef28a66643?w=800")
     )
 
     val cyberpunkAndArt = listOf(
@@ -143,28 +127,20 @@ object BannerPack {
         BannerOption("Vaporwave Starry Sky", "https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=800"),
         BannerOption("Neo Tokyo Alley", "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=800"),
         BannerOption("Retro Outrun Sunset", "https://images.unsplash.com/photo-1518531933037-91b2f5f229cc?w=800"),
-        BannerOption("Pastel Paint Splash", "https://images.unsplash.com/photo-1579783902614-a3fb3927b6a5?w=800"),
-        BannerOption("Memphis Geometric Art", "https://images.unsplash.com/photo-1557672172-298e090bd0f1?w=800"),
-        BannerOption("Cloud Horizons", "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800"),
-        BannerOption("Tokyo Train Crossing", "https://images.unsplash.com/photo-1528164344705-47542687000d?w=800"),
-        BannerOption("Neon Synthwave Grid", "https://images.unsplash.com/photo-1550684848-fac1c5b4e853?w=800"),
-        BannerOption("Hologram Terminal", "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=800"),
-        BannerOption("Abstract Ink Drops", "https://images.unsplash.com/photo-1563089145-599997674d42?w=800"),
-        BannerOption("Cosmic Space Nebulae", "https://images.unsplash.com/photo-1462331940025-496dfbfc7564?w=800"),
-        BannerOption("Fantasy Forest Meadow", "https://images.unsplash.com/photo-1447752875215-b2761acb3c5d?w=800")
+        BannerOption("Pastel Paint Splash", "https://images.unsplash.com/photo-1579783902614-a3fb3927b6a5?w=800")
     )
 
     val animeAndAnimated = listOf(
-        BannerOption("Animated Cyberpunk", "https://i.giphy.com/media/xT9IgzoKnwFNmISR8I/giphy.gif"),
-        BannerOption("Animated Sakura", "https://i.giphy.com/media/3o7TKSjRrfIPjeiVyM/giphy.gif"),
-        BannerOption("Animated Lofi Study", "https://i.giphy.com/media/Lmq2eMv782q88/giphy.gif"),
-        BannerOption("Animated Neon Sunset", "https://i.giphy.com/media/26tn33aiTi1jkl6H6/giphy.gif"),
-        BannerOption("Animated Sunset Train", "https://i.giphy.com/media/3oKIPnAiaMCws8nOsE/giphy.gif"),
-        BannerOption("Animated Kyoto Torii", "https://i.giphy.com/media/l41K3o5fA88P3A156/giphy.gif"),
-        BannerOption("Animated Rainy Tokyo", "https://i.giphy.com/media/xUPGcJ9uOAL2h28vMG/giphy.gif"),
-        BannerOption("Animated Starry Galaxy", "https://i.giphy.com/media/3oKIPmuu8WUKRM77vG/giphy.gif"),
-        BannerOption("Cyber Anime Skyline", "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=800"),
-        BannerOption("Cherry Blossom Sky", "https://images.unsplash.com/photo-1524413840807-0c3cb6fa808d?w=800")
+        BannerOption("Sakura Station Sunset", "drawable://img_anime_banner_sakura_station_1794610601752"),
+        BannerOption("Cyber Tokyo Rooftop", "drawable://img_anime_banner_cyber_rooftop_1794610601065"),
+        BannerOption("Cozy Study Library", "drawable://img_anime_banner_cozy_library_1794610601091"),
+        BannerOption("Starry Mountain Shrine", "drawable://img_anime_banner_starry_shrine_1794610601727"),
+        BannerOption("Ocean Seaside Train", "drawable://img_anime_banner_ocean_train_1794610602249"),
+        BannerOption("Cherry Blossom Path", "drawable://img_wallpaper_cherry_blossom_1781625392725"),
+        BannerOption("Balcony Night View", "drawable://img_wallpaper_balcony_night_1781625409367"),
+        BannerOption("Moonlight Valley", "drawable://img_wallpaper_moonlight_valley_1781625422948"),
+        BannerOption("Daytime City Street", "drawable://img_wallpaper_day_street_1781625437347"),
+        BannerOption("Lighthouse Sunset", "drawable://img_wallpaper_lighthouse_sunset_1781625450547")
     )
 
 

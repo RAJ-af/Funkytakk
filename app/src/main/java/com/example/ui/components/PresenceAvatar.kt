@@ -317,14 +317,14 @@ fun PresenceAvatar(
                 )
             }
 
-            // Country Flag Badge Overlay only if explicitly requested
+            // Country Flag Badge Overlay only if explicitly requested (Bottom-Right corner)
             if (showFlagBadge && !finalCountryCode.isNullOrBlank()) {
-                val flagBadgeSize = (size.value * 0.28f).dp.coerceAtLeast(14.dp)
+                val flagBadgeSize = (size.value * 0.32f).dp.coerceAtLeast(15.dp)
                 val surfaceColor = MaterialTheme.colorScheme.surface
                 Box(
                     modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .offset(x = (-3).dp, y = 3.dp)
+                        .align(Alignment.BottomEnd)
+                        .offset(x = 2.dp, y = 2.dp)
                         .zIndex(5f)
                         .size(flagBadgeSize)
                         .background(surfaceColor, CircleShape)

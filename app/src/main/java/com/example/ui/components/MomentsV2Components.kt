@@ -1727,7 +1727,7 @@ fun CommentItemRow(
     isNestedReply: Boolean = false
 ) {
     val context = LocalContext.current
-    val isDark = isSystemInDarkTheme()
+    val isDark = com.example.ui.theme.LocalAppDarkTheme.current
     val inkColor = if (isDark) Color(0xFFFFF3DC) else Color(0xFF2B2118)
     val muteColor = if (isDark) Color(0xFFA89A82) else Color(0xFF8A7B66)
     val cardBg = if (isDark) Color(0xFF3A2D12) else Color(0xFFFFEFC2)

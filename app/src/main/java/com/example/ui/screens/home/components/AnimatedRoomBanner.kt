@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
 
 @Composable
@@ -22,8 +23,13 @@ fun AnimatedRoomBanner(
     overlayColor: Color,
     modifier: Modifier = Modifier
 ) {
-    val formattedImageUrl = androidx.compose.runtime.remember(imageUrl) {
-        if (imageUrl.contains("media.giphy.com/media/")) {
+    val context = LocalContext.current
+    val modelToLoad = androidx.compose.runtime.remember(imageUrl, context) {
+        if (imageUrl.startsWith("drawable://")) {
+            val resName = imageUrl.removePrefix("drawable://")
+            val resId = context.resources.getIdentifier(resName, "drawable", context.packageName)
+            if (resId != 0) resId else com.example.R.drawable.img_room_ended_hero
+        } else if (imageUrl.contains("media.giphy.com/media/")) {
             imageUrl.replace("media.giphy.com/media/", "i.giphy.com/media/")
         } else {
             imageUrl
@@ -209,7 +215,7 @@ fun AnimatedRoomBanner(
                         label = "zoom"
                     )
                     AsyncImage(
-                        model = formattedImageUrl,
+                        model = modelToLoad,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize().scale(scale)
@@ -246,7 +252,7 @@ fun AnimatedRoomBanner(
                         label = "glow"
                     )
                     AsyncImage(
-                        model = formattedImageUrl,
+                        model = modelToLoad,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
@@ -269,7 +275,7 @@ fun AnimatedRoomBanner(
                         label = "shimmer"
                     )
                     AsyncImage(
-                        model = formattedImageUrl,
+                        model = modelToLoad,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
@@ -308,7 +314,7 @@ fun AnimatedRoomBanner(
                         label = "nebula"
                     )
                     AsyncImage(
-                        model = formattedImageUrl,
+                        model = modelToLoad,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
@@ -331,7 +337,7 @@ fun AnimatedRoomBanner(
                         label = "rotate"
                     )
                     AsyncImage(
-                        model = formattedImageUrl,
+                        model = modelToLoad,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
@@ -370,7 +376,7 @@ fun AnimatedRoomBanner(
                         label = "vignette"
                     )
                     AsyncImage(
-                        model = formattedImageUrl,
+                        model = modelToLoad,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
@@ -398,7 +404,7 @@ fun AnimatedRoomBanner(
                         label = "aurora"
                     )
                     AsyncImage(
-                        model = formattedImageUrl,
+                        model = modelToLoad,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
@@ -435,7 +441,7 @@ fun AnimatedRoomBanner(
                         label = "ribbons"
                     )
                     AsyncImage(
-                        model = formattedImageUrl,
+                        model = modelToLoad,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
@@ -469,7 +475,7 @@ fun AnimatedRoomBanner(
                         label = "sparkle"
                     )
                     AsyncImage(
-                        model = formattedImageUrl,
+                        model = modelToLoad,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
@@ -510,7 +516,7 @@ fun AnimatedRoomBanner(
                         label = "blob"
                     )
                     AsyncImage(
-                        model = formattedImageUrl,
+                        model = modelToLoad,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
