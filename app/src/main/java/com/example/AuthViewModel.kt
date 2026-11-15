@@ -951,6 +951,8 @@ class AuthViewModel : ViewModel() {
         if (hostId != null) {
             _activeRoomHostId.value = hostId
         }
+        roomJoinedAtMs = System.currentTimeMillis()
+        TelemetryManager.logRoomJoined()
         
         val ctx = context
         val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
@@ -1155,6 +1157,11 @@ class AuthViewModel : ViewModel() {
         _activeRoomId.value = null
         _activeRoomTitle.value = null
         _activeRoomHostId.value = null
+        if (roomJoinedAtMs > 0L) {
+            val durationSec = ((System.currentTimeMillis() - roomJoinedAtMs) / 1000L).coerceAtLeast(0L)
+            TelemetryManager.logRoomLeft(durationSec)
+            roomJoinedAtMs = 0L
+        }
         _pendingSpeakerRequests.value = emptyList()
         _pendingSpeakerRequest.value = null
         _mySpeakerRequestStatus.value = null
@@ -1683,6 +1690,7 @@ class AuthViewModel : ViewModel() {
                     }
                     loadUserProfileFromSpOrFirestore(context, effectiveUid) { finalProfile ->
                         val initialVerified = isCustomVerified
+                        TelemetryManager.onLogin(effectiveUid)
                         _authState.value = AuthState.Success(
                             finalProfile.copy(
                                 isEmailVerified = initialVerified
@@ -1884,6 +1892,8 @@ class AuthViewModel : ViewModel() {
                                                         Log.w("AuthViewModel", "send-verification-email call status: ${sendRes.code()}")
                                                     }
 
+                                                    TelemetryManager.onLogin(userId)
+                                                    TelemetryManager.logSignupCompleted()
                                                     _authState.value = AuthState.Success(
                                                         UserProfile(
                                                             uid = userId,
@@ -2023,6 +2033,8 @@ class AuthViewModel : ViewModel() {
 
                                                     loadUserProfileFromSpOrFirestore(context, userId) { finalProfile ->
                                                         val finalProfileWithVerified = finalProfile.copy(isEmailVerified = isCustomVerified)
+                                                        TelemetryManager.onLogin(userId)
+                                                        TelemetryManager.logLoginCompleted()
                                                         _authState.value = AuthState.Success(finalProfileWithVerified)
                                                         com.example.service.PushNotificationManager.onUserLoggedIn(context)
 
@@ -2417,9 +2429,12 @@ class AuthViewModel : ViewModel() {
         }
     }
 
+    private var roomJoinedAtMs: Long = 0L
+
     fun loginWithGoogle(
-        context: Context, 
-        idToken: String, 
+        context: Context,
+        idToken: String,
+        isFromSignUpMode: Boolean = false,
         onSuccess: () -> Unit
     ) {
         _authState.value = AuthState.Loading
@@ -2430,7 +2445,17 @@ class AuthViewModel : ViewModel() {
             auth.signInWithCredential(credential)
                 .addOnSuccessListener { result ->
                     val user = result.user
+                    val isNewFirebaseUser = result.additionalUserInfo?.isNewUser ?: false
                     if (user != null) {
+                        if (isFromSignUpMode && !isNewFirebaseUser) {
+                            val existingEmail = user.email.orEmpty()
+                            try { auth.signOut() } catch (_: Exception) {}
+                            _authState.value = AuthState.AccountCollision(
+                                email = existingEmail,
+                                message = "An account with this email address already exists. Only one account is permitted per email address."
+                            )
+                            return@addOnSuccessListener
+                        }
                         user.getIdToken(true).addOnSuccessListener { tokenResult ->
                             val firebaseIdToken = tokenResult.token
                             if (!firebaseIdToken.isNullOrEmpty()) {
@@ -2494,8 +2519,10 @@ class AuthViewModel : ViewModel() {
                                         }
                                     }
 
-                                    loadUserProfileFromSpOrFirestore(context, sUserId) { finalProfile ->
+                                    loadUserProfileFromSpOrFirestore(context, sUserId, supaAccessToken) { finalProfile ->
                                         saveUserToFirestore(user, isVerified = true)
+                                        TelemetryManager.onLogin(sUserId)
+                                        if (isNewFirebaseUser) TelemetryManager.logSignupCompleted() else TelemetryManager.logLoginCompleted()
                                         _authState.value = AuthState.Success(finalProfile.copy(isEmailVerified = true))
                                         registerAndStartSession(context, sUserId)
                                         triggerSupabaseLoginNotification(
@@ -2519,6 +2546,8 @@ class AuthViewModel : ViewModel() {
                                 prefs.edit().putBoolean("custom_email_verified_${sUserId}", true).apply()
                                 loadUserProfileFromSpOrFirestore(context, sUserId) { finalProfile ->
                                     saveUserToFirestore(user, isVerified = true)
+                                    TelemetryManager.onLogin(sUserId)
+                                    if (isNewFirebaseUser) TelemetryManager.logSignupCompleted() else TelemetryManager.logLoginCompleted()
                                     _authState.value = AuthState.Success(finalProfile.copy(isEmailVerified = true))
                                     registerAndStartSession(context, sUserId)
                                     triggerSupabaseLoginNotification(context, user.email ?: "", finalProfile.displayName)
@@ -2537,6 +2566,8 @@ class AuthViewModel : ViewModel() {
                             prefs.edit().putBoolean("custom_email_verified_${sUserId}", true).apply()
                             loadUserProfileFromSpOrFirestore(context, sUserId) { finalProfile ->
                                 saveUserToFirestore(user, isVerified = true)
+                                TelemetryManager.onLogin(sUserId)
+                                if (isNewFirebaseUser) TelemetryManager.logSignupCompleted() else TelemetryManager.logLoginCompleted()
                                 _authState.value = AuthState.Success(finalProfile.copy(isEmailVerified = true))
                                 registerAndStartSession(context, sUserId)
                                 triggerSupabaseLoginNotification(context, user.email ?: "", finalProfile.displayName)
@@ -2574,6 +2605,8 @@ class AuthViewModel : ViewModel() {
         val currentProfileUid = (_authState.value as? AuthState.Success)?.user?.uid
         val effectiveUid = supabaseUid ?: currentProfileUid ?: firebaseAuth?.currentUser?.uid.orEmpty()
 
+        TelemetryManager.onLogout()
+        roomJoinedAtMs = 0L
         _authState.value = AuthState.Idle
         _sessionVerificationState.value = SessionVerificationState.Idle
 
@@ -3051,7 +3084,12 @@ class AuthViewModel : ViewModel() {
         }
     }
 
-    fun loadUserProfileFromSpOrFirestore(context: Context, userId: String, onComplete: (UserProfile) -> Unit = {}) {
+    fun loadUserProfileFromSpOrFirestore(
+        context: Context,
+        userId: String,
+        explicitAccessToken: String? = null,
+        onComplete: (UserProfile) -> Unit = {}
+    ) {
         val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
         val isCustomVerified = prefs.getBoolean("custom_email_verified_${userId}", false)
         val resolvedVerified = isCustomVerified
@@ -3116,18 +3154,37 @@ class AuthViewModel : ViewModel() {
 
         viewModelScope.launch {
             try {
-                val bearerToken = SupabaseSessionManager.getBearerToken(context)
+                var bearerToken = if (!explicitAccessToken.isNullOrBlank()) {
+                    "Bearer $explicitAccessToken"
+                } else {
+                    SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                        ?: SupabaseSessionManager.getBearerToken(context)
+                }
                 val supaUid = SupabaseSessionManager.getUserId(context)
                 val queryUid = if (supaUid != null && SupabaseSessionManager.isValidUuid(supaUid)) supaUid else userId
-                val response = SupabaseClient.api.getProfile(
+                var response = SupabaseClient.api.getProfile(
                     auth = bearerToken,
                     authUserIdEq = "eq.$queryUid"
                 )
+                if (response.code() == 401) {
+                    SupabaseSessionManager.forceRefreshSession(context)
+                    bearerToken = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                        ?: SupabaseSessionManager.getBearerToken(context)
+                    response = SupabaseClient.api.getProfile(
+                        auth = bearerToken,
+                        authUserIdEq = "eq.$queryUid"
+                    )
+                }
                 if (response.isSuccessful) {
                     val supaProfiles = response.body()
                     if (!supaProfiles.isNullOrEmpty()) {
                         val supaProfile = supaProfiles.first()
-                        val supaComplete = supaProfile.onboarding_complete == true
+                        val inferredComplete = !supaProfile.username.isNullOrBlank() &&
+                            !supaProfile.profile_name.isNullOrBlank() &&
+                            !supaProfile.gender.isNullOrBlank() &&
+                            !supaProfile.country.isNullOrBlank() &&
+                            !supaProfile.native_languages.isNullOrEmpty()
+                        val supaComplete = (supaProfile.onboarding_complete == true) || inferredComplete
                         val nativeStr = supaProfile.native_languages?.joinToString(", ")
                         val learningStr = supaProfile.learning_languages?.joinToString(", ")
                         val hobbiesList = supaProfile.hobbies ?: emptyList()

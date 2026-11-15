@@ -58,6 +58,8 @@ fun HomeScreen(
     onRoomClick: () -> Unit = {},
     onOpenNotifications: () -> Unit = {},
     onOpenSupportChat: (reportId: String?) -> Unit = {},
+    onOpenHelpSupport: () -> Unit = {},
+    onOpenFeedbackHub: (initialKind: String?) -> Unit = {},
     onDeleteAccountClick: () -> Unit = {}
 ) {
     val authState by viewModel.authState.collectAsState()
@@ -517,6 +519,11 @@ fun HomeScreen(
     val totalUnreadChatsBadge = remember(dmUnreadCount, joinedGroupsForBadge) {
         dmUnreadCount + joinedGroupsForBadge.sumOf { it.unreadCount.coerceAtLeast(0) }
     }
+    val supportUnreadCount by com.example.SupportChatManager.unreadCount.collectAsState()
+    val feedbackUpdatesCount by com.example.repository.FeedbackRepository.myUpdatesCount.collectAsState()
+    val profileAlertBadgeCount = remember(supportUnreadCount, feedbackUpdatesCount) {
+        supportUnreadCount.coerceAtLeast(0) + feedbackUpdatesCount.coerceAtLeast(0)
+    }
 
     val shouldHideBottomBar = remember(
         activeTab,
@@ -559,6 +566,7 @@ fun HomeScreen(
                     HomeBottomBar(
                         activeTab = activeTab,
                         unreadChatCount = totalUnreadChatsBadge,
+                        profileBadgeCount = profileAlertBadgeCount,
                         onTabSelected = { activeTab = it }
                     )
                 }
@@ -659,6 +667,7 @@ fun HomeScreen(
                     "chats" -> {
                         ChatsTabContent(
                             conversationsList = dynamicInitiatedChats,
+                            supabaseProfiles = supabaseProfiles,
                             onSelectChat = { chat ->
                                 activeChatWindowContact = chat
                             },
@@ -676,6 +685,8 @@ fun HomeScreen(
                             onLogoutClick = { showLogoutDialog = true },
                             viewModel = viewModel,
                             onOpenSupportChat = onOpenSupportChat,
+                            onOpenHelpSupport = onOpenHelpSupport,
+                            onOpenFeedbackHub = onOpenFeedbackHub,
                             onDeleteAccountClick = onDeleteAccountClick,
                             onOverlayVisibilityChange = { hideBottomBarForProfileOverlay = it }
                         )

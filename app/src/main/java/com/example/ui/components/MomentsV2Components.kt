@@ -152,7 +152,8 @@ fun MomentActionIconButton(
     contentDescription: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    containerColor: Color = Color.Black.copy(alpha = 0.38f)
+    containerColor: Color = Color.Black.copy(alpha = 0.38f),
+    countColor: Color = Color.White
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -180,7 +181,7 @@ fun MomentActionIconButton(
                 text = countText,
                 fontSize = 11.5.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = Color.White
+                color = countColor
             )
         }
     }
@@ -479,6 +480,7 @@ fun MomentV2Slide(
                 countText = formatMomentCount(moment.likes_count),
                 contentDescription = if (moment.liked_by_me) "Unlike moment" else "Like moment",
                 containerColor = actionChipBg,
+                countColor = overlayInk,
                 onClick = onToggleLike
             )
 
@@ -488,6 +490,7 @@ fun MomentV2Slide(
                 countText = formatMomentCount(moment.comments_count),
                 contentDescription = "Comments",
                 containerColor = actionChipBg,
+                countColor = overlayInk,
                 onClick = onOpenComments
             )
 
@@ -497,7 +500,8 @@ fun MomentV2Slide(
                 countText = if (moment.corrections_count > 0) formatMomentCount(moment.corrections_count) else "Fix",
                 contentDescription = "Native corrections",
                 onClick = onOpenCorrections,
-                containerColor = if (useLightUiContrast) Color(0xFF2B2118) else Color(0xFF2B2118).copy(alpha = 0.72f)
+                containerColor = if (useLightUiContrast) Color(0xFF2B2118) else Color(0xFF2B2118).copy(alpha = 0.72f),
+                countColor = overlayInk
             )
 
             MomentActionIconButton(
@@ -506,6 +510,7 @@ fun MomentV2Slide(
                 countText = "",
                 contentDescription = if (isBookmarked) "Remove bookmark" else "Bookmark moment",
                 containerColor = actionChipBg,
+                countColor = overlayInk,
                 onClick = onToggleBookmark
             )
 
@@ -515,6 +520,7 @@ fun MomentV2Slide(
                 countText = "",
                 contentDescription = "Share moment",
                 containerColor = actionChipBg,
+                countColor = overlayInk,
                 onClick = onShare
             )
         }
@@ -718,8 +724,8 @@ fun MomentV2Slide(
 
                     Surface(
                         shape = RoundedCornerShape(12.dp),
-                        color = Color(0xFFFFB627).copy(alpha = 0.28f),
-                        border = BorderStroke(1.dp, Color(0xFFFFB627).copy(alpha = 0.7f))
+                        color = if (useLightUiContrast) Color(0xFFFFECB3) else Color(0xFFFFB627).copy(alpha = 0.28f),
+                        border = BorderStroke(1.dp, if (useLightUiContrast) Color(0xFFD97706) else Color(0xFFFFB627).copy(alpha = 0.7f))
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -732,7 +738,7 @@ fun MomentV2Slide(
                             )
                             Text(
                                 text = langBadgeText,
-                                color = Color(0xFFFFE082),
+                                color = if (useLightUiContrast) Color(0xFF78350F) else Color(0xFFFFE082),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -743,12 +749,14 @@ fun MomentV2Slide(
                 items(moment.topics) { slug ->
                     Surface(
                         shape = RoundedCornerShape(12.dp),
-                        color = Color.White.copy(alpha = 0.18f)
+                        color = if (useLightUiContrast) funkyColors.surface.copy(alpha = 0.90f) else Color.White.copy(alpha = 0.18f),
+                        border = if (useLightUiContrast) BorderStroke(1.dp, funkyColors.line) else null
                     ) {
                         Text(
                             text = MomentsRepository.resolveTopicChipText(slug),
-                            color = Color.White,
+                            color = if (useLightUiContrast) funkyColors.ink else Color.White,
                             fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         )
                     }

@@ -201,6 +201,7 @@ object CloudinaryUploader {
                     return@withContext Result.failure(e)
                 } catch (e: Exception) {
                     Log.e(MOMENT_TAG, "Photo compression failed: ${e.javaClass.simpleName}: ${e.message}", e)
+                    TelemetryManager.recordMediaDecodeFailure("moment_photo", e)
                     // TODO remove detail before release
                     return@withContext Result.failure(
                         MomentUploadException("Upload failed (${e.javaClass.simpleName}: ${e.message ?: "compression error"})")
@@ -416,6 +417,7 @@ object CloudinaryUploader {
             retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
         } catch (e: Exception) {
             Log.w(MOMENT_TAG, "Unable to read local video duration before upload: ${e.message}")
+            TelemetryManager.recordMediaDecodeFailure("moment_video_duration", e)
             null
         } finally {
             try {
@@ -492,6 +494,7 @@ object CloudinaryUploader {
                 MOMENT_TAG,
                 "get-cloudinary-signature failed: http=${sigResp.code()} body=$rawBody"
             )
+            TelemetryManager.recordCloudinaryFailure("signature", "HTTP ${sigResp.code()}: $errMsg")
             // TODO remove detail before release
             throw MomentUploadException("Upload failed (${sigResp.code()}: $errMsg)")
         }
@@ -608,6 +611,7 @@ object CloudinaryUploader {
             MOMENT_TAG,
             "Cloudinary upload failed: url=$uploadUrl cloud_name=${sigData.cloud_name} folder=${sigData.folder} http=$httpCode message=$parsedMessage body=$respBodyStr"
         )
+        TelemetryManager.recordCloudinaryFailure("upload", "HTTP $httpCode: $parsedMessage")
 
         if (httpCode == 401 || parsedMessage.contains("signature", ignoreCase = true)) {
             synchronized(sigLock) { cachedMomentSignature = null }

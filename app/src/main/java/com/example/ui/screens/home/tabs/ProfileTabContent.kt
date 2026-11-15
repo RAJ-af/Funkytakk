@@ -91,6 +91,8 @@ fun ProfileTabContent(
     onLogoutClick: () -> Unit,
     viewModel: AuthViewModel? = null,
     onOpenSupportChat: (reportId: String?) -> Unit = {},
+    onOpenHelpSupport: () -> Unit = {},
+    onOpenFeedbackHub: (initialKind: String?) -> Unit = {},
     onDeleteAccountClick: () -> Unit = {},
     onOverlayVisibilityChange: (Boolean) -> Unit = {}
 ) {
@@ -145,6 +147,14 @@ fun ProfileTabContent(
     val savedBio = remember { prefs.getString("profile_bio_${userId}", null) }
     val savedCity = remember { prefs.getString("profile_city_${userId}", null) }
     val savedAge = remember { prefs.getInt("profile_age_${userId}", 0).takeIf { it > 0 } }
+    val savedNativeLang = remember {
+        prefs.getString("profile_native_lang_${userId}", null)
+            ?: (if (supaUid != userId) prefs.getString("profile_native_lang_${supaUid}", null) else null)
+    }
+    val savedLearningLang = remember {
+        prefs.getString("profile_learning_lang_${userId}", null)
+            ?: (if (supaUid != userId) prefs.getString("profile_learning_lang_${supaUid}", null) else null)
+    }
     val savedCover = remember {
         prefs.getString("profile_cover_${userId}", null)
             ?: (if (supaUid != userId) prefs.getString("profile_cover_${supaUid}", null) else null)
@@ -162,12 +172,22 @@ fun ProfileTabContent(
     var currentCity by remember(currentUserProfile.city) { mutableStateOf(currentUserProfile.city ?: savedCity ?: "") }
     var currentAge by remember(currentUserProfile.age) { mutableStateOf(currentUserProfile.age ?: savedAge ?: 19) }
     var currentGender by remember(currentUserProfile.gender) { mutableStateOf(currentUserProfile.gender?.ifBlank { "Female" } ?: "Female") }
+    var currentNativeLanguage by remember(currentUserProfile.nativeLanguage) {
+        mutableStateOf(currentUserProfile.nativeLanguage?.ifBlank { null } ?: savedNativeLang.orEmpty())
+    }
+    var currentLearningLanguage by remember(currentUserProfile.learningLanguage) {
+        mutableStateOf(currentUserProfile.learningLanguage?.ifBlank { null } ?: savedLearningLang.orEmpty())
+    }
     var isVerified by remember { mutableStateOf(false) }
     var isOnline by remember { mutableStateOf(true) }
     var postsCount by remember { mutableStateOf(0) }
     var followersCount by remember { mutableStateOf(0) }
     var followingCount by remember { mutableStateOf(0) }
     var currentJoinedText by remember { mutableStateOf("Joined recently") }
+
+    val supportUnread by com.example.SupportChatManager.unreadCount.collectAsState()
+    val feedbackUpdates by com.example.repository.FeedbackRepository.myUpdatesCount.collectAsState()
+    val helpTotalBadge = supportUnread + feedbackUpdates
 
     val momentsList = remember { mutableStateListOf<FeedPost>() }
     var isMomentsLoading by remember { mutableStateOf(false) }
@@ -259,6 +279,12 @@ fun ProfileTabContent(
                     if (!p.country.isNullOrBlank()) currentCountry = p.country
                     if (!p.city.isNullOrBlank()) currentCity = p.city
                     currentCountryCode = resolveCountryCode(p.country, p.country_code)
+                    if (!p.native_languages.isNullOrEmpty()) {
+                        currentNativeLanguage = p.native_languages.joinToString(", ")
+                    }
+                    if (!p.learning_languages.isNullOrEmpty()) {
+                        currentLearningLanguage = p.learning_languages.joinToString(", ")
+                    }
 
                     // Sync remote profile into SharedPreferences to avoid stale local cache
                     val prefsEditor = context.getSharedPreferences("funky_talk_prefs", android.content.Context.MODE_PRIVATE).edit()
@@ -299,9 +325,10 @@ fun ProfileTabContent(
         isAdmin = ModerationManager.checkIsAdmin(context)
         if (userId.isBlank()) return@LaunchedEffect
 
-        // Refresh coin wallet & catalog
+        // Refresh coin wallet, catalog & feedback badge
         GiftManager.refreshWallet(context)
         GiftManager.fetchCatalog(context)
+        com.example.repository.FeedbackRepository.refreshMyUpdatesCount(context)
 
         // Load live profile data immediately
         refreshProfileData()
@@ -418,16 +445,16 @@ fun ProfileTabContent(
     val profileGender = currentGender
 
     // Multi-language parsing (supports up to 3 stacked flags)
-    val parsedNative = remember(currentUserProfile.nativeLanguage, profileCountryCode) {
+    val parsedNative = remember(currentNativeLanguage, profileCountryCode) {
         LanguageResolver.parseLanguages(
-            currentUserProfile.nativeLanguage,
+            currentNativeLanguage,
             listOf(LanguageItem("Hindi", "HI", "in"), LanguageItem("English", "EN", "us"), LanguageItem("Marathi", "MR", "in"))
         )
     }
 
-    val parsedLearning = remember(currentUserProfile.learningLanguage) {
+    val parsedLearning = remember(currentLearningLanguage) {
         LanguageResolver.parseLanguages(
-            currentUserProfile.learningLanguage,
+            currentLearningLanguage,
             listOf(LanguageItem("Chinese", "ZH", "cn"), LanguageItem("Korean", "KO", "kr"), LanguageItem("Japanese", "JA", "jp"))
         )
     }
@@ -829,6 +856,86 @@ fun ProfileTabContent(
                                     fontWeight = FontWeight.Bold,
                                     color = funkyColors.onMango,
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Help & Support + Feedback Entry Card
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(18.dp))
+                            .clickable { onOpenHelpSupport() }
+                            .testTag("profile_help_support_card"),
+                        shape = RoundedCornerShape(18.dp),
+                        color = funkyColors.surface,
+                        border = BorderStroke(1.dp, funkyColors.line)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(if (funkyColors.isDark) Color(0xFF2563EB).copy(alpha = 0.2f) else Color(0xFFDBEAFE)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    com.example.ui.components.SoftHeadsetIcon(
+                                        size = 20.dp,
+                                        color = if (funkyColors.isDark) Color(0xFF60A5FA) else Color(0xFF2563EB)
+                                    )
+                                }
+                                Column {
+                                    Text(
+                                        text = "Help & Support",
+                                        fontSize = 14.5.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = funkyColors.ink
+                                    )
+                                    Text(
+                                        text = "24/7 support chat, bug reports & feature requests",
+                                        fontSize = 11.5.sp,
+                                        color = funkyColors.mute
+                                    )
+                                }
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                if (helpTotalBadge > 0) {
+                                    Box(
+                                        modifier = Modifier
+                                            .defaultMinSize(minWidth = 22.dp, minHeight = 22.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFFEF4444))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = if (helpTotalBadge > 99) "99+" else "$helpTotalBadge",
+                                            color = Color.White,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Black
+                                        )
+                                    }
+                                }
+                                com.example.ui.components.FunkyChevronRightIcon(
+                                    color = funkyColors.mute,
+                                    modifier = Modifier.size(16.dp)
                                 )
                             }
                         }
@@ -1520,6 +1627,14 @@ fun ProfileTabContent(
                 showSettingsScreen = false
                 showThemeStoreSheet = true
             },
+            onOpenHelpSupport = {
+                showSettingsScreen = false
+                onOpenHelpSupport()
+            },
+            onOpenFeedbackHub = {
+                showSettingsScreen = false
+                onOpenFeedbackHub(null)
+            },
             onOpenSupportChat = {
                 showSettingsScreen = false
                 onOpenSupportChat(null)
@@ -1612,7 +1727,9 @@ fun ProfileTabContent(
                 country = currentCountry,
                 countryCode = currentCountryCode,
                 age = currentAge,
-                gender = currentGender
+                gender = currentGender,
+                nativeLanguage = currentNativeLanguage.ifBlank { currentUserProfile.nativeLanguage },
+                learningLanguage = currentLearningLanguage.ifBlank { currentUserProfile.learningLanguage }
             ),
             viewModel = viewModel,
             onDismiss = {
@@ -1645,6 +1762,10 @@ fun ProfileTabContent(
                     ?: p.getString("profile_username_${supaUid}", null)
                 val updatedCover = p.getString("profile_cover_${userId}", null)
                     ?: p.getString("profile_cover_${supaUid}", null)
+                val updatedNative = p.getString("profile_native_lang_${userId}", null)
+                    ?: p.getString("profile_native_lang_${supaUid}", null)
+                val updatedLearning = p.getString("profile_learning_lang_${userId}", null)
+                    ?: p.getString("profile_learning_lang_${supaUid}", null)
 
                 if (!updatedCover.isNullOrBlank()) currentCoverUrl = updatedCover
                 if (!updatedBio.isNullOrBlank()) currentBio = updatedBio
@@ -1654,6 +1775,8 @@ fun ProfileTabContent(
                 if (!updatedCountryCode.isNullOrBlank()) currentCountryCode = updatedCountryCode
                 if (!updatedDisplayName.isNullOrBlank()) currentProfileName = updatedDisplayName
                 if (!updatedUsername.isNullOrBlank()) currentUsername = updatedUsername
+                if (!updatedNative.isNullOrBlank()) currentNativeLanguage = updatedNative
+                if (!updatedLearning.isNullOrBlank()) currentLearningLanguage = updatedLearning
             }
         )
     }

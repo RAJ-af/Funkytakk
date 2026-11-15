@@ -756,20 +756,44 @@ object EncryptedChatRepository {
 
         // Find or create conversation
         val existingConv = db.conversationDao().getConversation(conversationId)
+        val needsProfileSync = existingConv == null ||
+            existingConv.otherUserAvatar.isNullOrBlank() ||
+            existingConv.otherUserFlag.isNullOrBlank() ||
+            existingConv.otherUserName.isBlank() ||
+            existingConv.otherUserName == "FunkyTalk User"
+        val profileInfo = if (needsProfileSync) {
+            fetchSenderProfileInfo(context, senderId)
+        } else {
+            null
+        }
         if (existingConv != null) {
-            db.conversationDao().updateLastMessage(
-                conversationId = conversationId,
-                text = plaintext,
-                time = timestamp,
-                unreadDelta = if (isChatOpen) 0 else 1
-            )
+            if (profileInfo != null) {
+                db.conversationDao().updateLastMessageAndProfile(
+                    conversationId = conversationId,
+                    text = plaintext,
+                    time = timestamp,
+                    unreadDelta = if (isChatOpen) 0 else 1,
+                    name = profileInfo.first.takeIf { it != "FunkyTalk User" },
+                    avatar = profileInfo.second ?: existingConv.otherUserAvatar,
+                    flag = profileInfo.third ?: existingConv.otherUserFlag
+                )
+            } else {
+                db.conversationDao().updateLastMessage(
+                    conversationId = conversationId,
+                    text = plaintext,
+                    time = timestamp,
+                    unreadDelta = if (isChatOpen) 0 else 1
+                )
+            }
         } else {
             // Fetch sender profile details if available
-            val senderName = fetchSenderDisplayName(context, senderId)
+            val senderName = profileInfo?.first ?: "FunkyTalk User"
             val newConv = LocalDmConversation(
                 id = conversationId,
                 otherUserId = senderId,
                 otherUserName = senderName,
+                otherUserAvatar = profileInfo?.second,
+                otherUserFlag = profileInfo?.third,
                 lastMessageText = plaintext,
                 lastMessageTime = timestamp,
                 unreadCount = if (isChatOpen) 0 else 1,
@@ -935,19 +959,26 @@ object EncryptedChatRepository {
 
             // 6. Update or insert conversation in local Room DB
             val existingConv = db.conversationDao().getConversation(conversationId)
+            val partnerFlag = existingConv?.otherUserFlag?.takeIf { it.isNotBlank() }
+                ?: fetchSenderProfileInfo(context, resolvedUserId).third
+            val partnerAvatar = recipientAvatar?.takeIf { it.isNotBlank() }
+                ?: existingConv?.otherUserAvatar?.takeIf { it.isNotBlank() }
+                ?: fetchSenderProfileInfo(context, resolvedUserId).second
             val updatedConv = if (existingConv != null) {
                 existingConv.copy(
                     lastMessageText = text,
                     lastMessageTime = now,
                     otherUserName = recipientName.ifBlank { existingConv.otherUserName },
-                    otherUserAvatar = recipientAvatar ?: existingConv.otherUserAvatar
+                    otherUserAvatar = partnerAvatar,
+                    otherUserFlag = partnerFlag ?: existingConv.otherUserFlag
                 )
             } else {
                 LocalDmConversation(
                     id = conversationId,
                     otherUserId = recipientUserId,
                     otherUserName = recipientName,
-                    otherUserAvatar = recipientAvatar,
+                    otherUserAvatar = partnerAvatar,
+                    otherUserFlag = partnerFlag,
                     lastMessageText = text,
                     lastMessageTime = now,
                     unreadCount = 0,
@@ -1121,19 +1152,26 @@ object EncryptedChatRepository {
 
             val existingConv = db.conversationDao().getConversation(conversationId)
             val lastMsgPreview = if (messageType == "image") "📷 Photo" else "🎙️ Voice message"
+            val partnerFlag = existingConv?.otherUserFlag?.takeIf { it.isNotBlank() }
+                ?: fetchSenderProfileInfo(context, resolvedUserId).third
+            val partnerAvatar = recipientAvatar?.takeIf { it.isNotBlank() }
+                ?: existingConv?.otherUserAvatar?.takeIf { it.isNotBlank() }
+                ?: fetchSenderProfileInfo(context, resolvedUserId).second
             val updatedConv = if (existingConv != null) {
                 existingConv.copy(
                     lastMessageText = lastMsgPreview,
                     lastMessageTime = now,
                     otherUserName = recipientName.ifBlank { existingConv.otherUserName },
-                    otherUserAvatar = recipientAvatar ?: existingConv.otherUserAvatar
+                    otherUserAvatar = partnerAvatar,
+                    otherUserFlag = partnerFlag ?: existingConv.otherUserFlag
                 )
             } else {
                 LocalDmConversation(
                     id = conversationId,
                     otherUserId = resolvedUserId,
                     otherUserName = recipientName,
-                    otherUserAvatar = recipientAvatar,
+                    otherUserAvatar = partnerAvatar,
+                    otherUserFlag = partnerFlag,
                     lastMessageText = lastMsgPreview,
                     lastMessageTime = now,
                     unreadCount = 0,
@@ -1382,8 +1420,13 @@ object EncryptedChatRepository {
     }
 
     private suspend fun fetchSenderDisplayName(context: Context, senderId: String): String {
+        return fetchSenderProfileInfo(context, senderId).first
+    }
+
+    private suspend fun fetchSenderProfileInfo(context: Context, senderId: String): Triple<String, String?, String?> {
         return try {
-            val token = SupabaseSessionManager.getBearerToken(context)
+            val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                ?: SupabaseSessionManager.getBearerToken(context)
             val resp = SupabaseClient.api.getProfile(
                 apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
                 auth = token,
@@ -1391,12 +1434,18 @@ object EncryptedChatRepository {
             )
             if (resp.isSuccessful && !resp.body().isNullOrEmpty()) {
                 val profile = resp.body()!!.first()
-                profile.profile_name ?: profile.username ?: "FunkyTalk User"
+                val name = profile.profile_name?.takeIf { it.isNotBlank() }
+                    ?: profile.username?.takeIf { it.isNotBlank() }
+                    ?: "FunkyTalk User"
+                val avatar = profile.avatar_url?.takeIf { it.isNotBlank() }
+                val flag = com.example.ui.screens.home.tabs.resolveCountryCode(profile.country, profile.country_code)
+                    .takeIf { it.isNotBlank() }
+                Triple(name, avatar, flag)
             } else {
-                "FunkyTalk User"
+                Triple("FunkyTalk User", null, null)
             }
         } catch (e: Exception) {
-            "FunkyTalk User"
+            Triple("FunkyTalk User", null, null)
         }
     }
 

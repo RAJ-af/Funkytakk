@@ -1,12 +1,14 @@
 package com.example.ui.components
 
-import android.content.Context
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.*
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -14,16 +16,29 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -33,9 +48,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import com.example.AuthViewModel
@@ -45,10 +62,9 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /**
- * In-App Floating Bubble Overlay:
- * Replacement for the Dynamic Island. Visible when user is in an active room
- * but navigated elsewhere inside the app.
- * Matches Facebook Messenger chat-head style with organic satellite controls.
+ * In-App Side Dynamic Island Overlay:
+ * Docked flush to the left or right screen edge with concave edge-flared
+ * obsidian geometry, displaying quick Return-to-Room, Mute/Unmute, and Leave Room controls.
  */
 @Composable
 fun FloatingBubbleOverlay(
@@ -62,8 +78,6 @@ fun FloatingBubbleOverlay(
     val isSpeaking by VoiceRoomOverlayManager.isSpeaking.collectAsState()
     val isServiceRunning by VoiceRoomOverlayManager.isServiceRunning.collectAsState()
 
-    // If the system-level overlay service is actively rendering over the screen,
-    // don't render a duplicate inside the Compose hierarchy.
     if (isServiceRunning && OverlayPermissionHelper.canDrawOverlays(context)) {
         return
     }
@@ -79,11 +93,12 @@ fun FloatingBubbleOverlay(
     val density = LocalDensity.current
     val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
     val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
+    val islandWidthPx = with(density) { 62.dp.toPx() }
+    val islandHeightPx = with(density) { 206.dp.toPx() }
 
-    var offsetX by remember { mutableStateOf(screenWidthPx - with(density) { 90.dp.toPx() }) }
+    var offsetX by remember(screenWidthPx) { mutableStateOf((screenWidthPx - islandWidthPx).coerceAtLeast(0f)) }
     var offsetY by remember { mutableStateOf(with(density) { 180.dp.toPx() }) }
     var isSnappedToRight by remember { mutableStateOf(true) }
-    var isOptionsOpen by remember { mutableStateOf(false) }
 
     val coroutineScope = rememberCoroutineScope()
     val animatedOffsetX = remember { Animatable(offsetX) }
@@ -97,25 +112,12 @@ fun FloatingBubbleOverlay(
             .fillMaxSize()
             .zIndex(999f)
     ) {
-        // Backdrop to dismiss options when tapped outside
-        if (isOptionsOpen) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectTapGestures {
-                            isOptionsOpen = false
-                        }
-                    }
-            )
-        }
-
         Box(
             modifier = Modifier
                 .offset {
                     IntOffset(
-                        x = animatedOffsetX.value.roundToInt().coerceIn(0, (screenWidthPx - 100).roundToInt()),
-                        y = offsetY.roundToInt().coerceIn(60, (screenHeightPx - 200).roundToInt())
+                        x = animatedOffsetX.value.roundToInt().coerceIn(0, (screenWidthPx - islandWidthPx).roundToInt().coerceAtLeast(0)),
+                        y = offsetY.roundToInt().coerceIn(80, (screenHeightPx - islandHeightPx - 80f).roundToInt().coerceAtLeast(80))
                     )
                 }
         ) {
@@ -123,22 +125,24 @@ fun FloatingBubbleOverlay(
                 avatarUrl = avatarUrl,
                 isMicEnabled = isMicEnabled,
                 isSpeaking = isSpeaking,
-                isOptionsOpen = isOptionsOpen,
+                isOptionsOpen = true,
                 isSnappedToRight = isSnappedToRight,
-                onToggleOptions = { isOptionsOpen = !isOptionsOpen },
+                onToggleOptions = {},
                 onShortTap = { onNavigateToRoom() },
                 onDrag = { dx, dy ->
-                    offsetX += dx
-                    offsetY += dy
+                    offsetX = (offsetX + dx).coerceIn(0f, (screenWidthPx - islandWidthPx).coerceAtLeast(0f))
+                    offsetY = (offsetY + dy).coerceIn(80f, (screenHeightPx - islandHeightPx - 80f).coerceAtLeast(80f))
                 },
                 onDragEnd = {
-                    val targetX = if (offsetX + 40f < screenWidthPx / 2f) {
+                    val centerX = offsetX + islandWidthPx / 2f
+                    val targetX = if (centerX < screenWidthPx / 2f) {
                         isSnappedToRight = false
-                        16f
+                        0f
                     } else {
                         isSnappedToRight = true
-                        screenWidthPx - with(density) { 90.dp.toPx() }
+                        (screenWidthPx - islandWidthPx).coerceAtLeast(0f)
                     }
+                    offsetX = targetX
                     coroutineScope.launch {
                         animatedOffsetX.animateTo(
                             targetValue = targetX,
@@ -153,8 +157,7 @@ fun FloatingBubbleOverlay(
                     viewModel.toggleMic(context)
                 },
                 onLeaveRoom = {
-                    isOptionsOpen = false
-                    viewModel.leaveRoom(context, trigger = "floating_bubble_leave_button")
+                    viewModel.leaveRoom(context, trigger = "dynamic_island_leave_button")
                 }
             )
         }
@@ -162,243 +165,218 @@ fun FloatingBubbleOverlay(
 }
 
 /**
- * Reusable Floating Bubble with Satellite Options
- * Perfectly styled after reference screenshots:
- * - Golden glowing avatar circle with top-right indicator dot
- * - Organic metaball connector aura
- * - Upper satellite: Mic toggle (active gold / muted charcoal)
- * - Lower satellite: Coral red X to leave / cancel
+ * Reusable Docked Side Dynamic Island Control Surface
+ * Compatible signature for both in-app FloatingBubbleOverlay and system VoiceRoomOverlayService.
  */
 @Composable
 fun FloatingBubbleLayout(
     avatarUrl: String,
     isMicEnabled: Boolean,
     isSpeaking: Boolean,
-    isOptionsOpen: Boolean,
+    @Suppress("UNUSED_PARAMETER") isOptionsOpen: Boolean,
     isSnappedToRight: Boolean,
-    onToggleOptions: () -> Unit,
+    @Suppress("UNUSED_PARAMETER") onToggleOptions: () -> Unit,
     onShortTap: () -> Unit,
     onDrag: (Float, Float) -> Unit,
     onDragEnd: () -> Unit,
     onToggleMic: () -> Unit,
     onLeaveRoom: () -> Unit
 ) {
-    val goldBorder = Color(0xFFF59E0B)       // Vibrant amber/gold
-    val speakingDotColor = Color(0xFFFBBF24) // Yellow dot indicator on top-right rim
-    val redBorder = Color(0xFFFF4D6D)        // Coral red glowing ring for leave
+    val goldBorder = Color(0xFFFFB627)
+    val greenBorder = Color(0xFF10B981)
+    val coralRed = Color(0xFFFF4D6D)
+    val obsidian = Color(0xFF0B0A09)
 
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val glowPulse by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.06f,
+    val infiniteTransition = rememberInfiniteTransition(label = "islandPulse")
+    val speakAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.45f,
+        targetValue = 1.0f,
         animationSpec = infiniteRepeatable(
-            animation = tween(800, easing = FastOutSlowInEasing),
+            animation = tween(700, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "glowPulse"
+        label = "speakAlpha"
     )
 
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
-        modifier = Modifier
-            .wrapContentSize()
-            .padding(8.dp)
-    ) {
-        // When snapped to right edge, satellites appear to the LEFT
-        if (isSnappedToRight && isOptionsOpen) {
-            SatelliteOptions(
-                isMicEnabled = isMicEnabled,
-                goldBorder = goldBorder,
-                redBorder = redBorder,
-                isLeftAligned = true,
-                onToggleMic = onToggleMic,
-                onLeaveRoom = onLeaveRoom,
-                onClose = onToggleOptions
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-        }
-
-        // Main Circular Avatar Bubble
-        Box(
-            modifier = Modifier
-                .size(68.dp)
-                .pointerInput(Unit) {
-                    detectDragGestures(
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            onDrag(dragAmount.x, dragAmount.y)
-                        },
-                        onDragEnd = { onDragEnd() }
-                    )
-                }
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onTap = {
-                            if (isOptionsOpen) {
-                                onToggleOptions()
-                            } else {
-                                onShortTap()
-                            }
-                        },
-                        onLongPress = {
-                            onToggleOptions()
-                        }
-                    )
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            // Speaking pulse glow
-            if (isSpeaking) {
-                Box(
-                    modifier = Modifier
-                        .size(66.dp)
-                        .clip(CircleShape)
-                        .background(
-                            Brush.radialGradient(
-                                listOf(goldBorder.copy(alpha = 0.55f), Color.Transparent)
-                            )
-                        )
-                )
-            }
-
-            // Outer avatar container with golden border
-            Box(
-                modifier = Modifier
-                    .size(60.dp)
-                    .shadow(14.dp, CircleShape, spotColor = goldBorder)
-                    .clip(CircleShape)
-                    .border(BorderStroke(2.5.dp, goldBorder), CircleShape)
-                    .background(Color(0xFF0F0F12)),
-                contentAlignment = Alignment.Center
-            ) {
-                AsyncImage(
-                    model = avatarUrl,
-                    contentDescription = "Active Speaker Avatar",
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(CircleShape),
-                    contentScale = ContentScale.Crop
-                )
-            }
-
-            // Indicator dot at top-right rim (35-45 degrees, matching mockup)
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .offset(x = (-4).dp, y = 4.dp)
-                    .size(13.dp)
-                    .shadow(6.dp, CircleShape, spotColor = speakingDotColor)
-                    .clip(CircleShape)
-                    .background(speakingDotColor)
-                    .border(BorderStroke(1.5.dp, Color(0xFF0F0F12)), CircleShape)
-            )
-        }
-
-        // When snapped to left edge, satellites appear to the RIGHT
-        if (!isSnappedToRight && isOptionsOpen) {
-            Spacer(modifier = Modifier.width(6.dp))
-            SatelliteOptions(
-                isMicEnabled = isMicEnabled,
-                goldBorder = goldBorder,
-                redBorder = redBorder,
-                isLeftAligned = false,
-                onToggleMic = onToggleMic,
-                onLeaveRoom = onLeaveRoom,
-                onClose = onToggleOptions
-            )
-        }
-    }
-}
-
-/**
- * Satellite buttons column with fluid organic connector
- */
-@Composable
-private fun SatelliteOptions(
-    isMicEnabled: Boolean,
-    goldBorder: Color,
-    redBorder: Color,
-    isLeftAligned: Boolean,
-    onToggleMic: () -> Unit,
-    onLeaveRoom: () -> Unit,
-    onClose: () -> Unit
-) {
     Box(
         modifier = Modifier
-            .wrapContentSize()
-            .drawBehind {
-                // Organic fluid gradient aura connecting the satellites to the bubble
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            Color(0xFF1E1A24).copy(alpha = 0.92f),
-                            Color(0xFF18151E).copy(alpha = 0.6f),
-                            Color.Transparent
-                        ),
-                        center = center,
-                        radius = size.maxDimension * 0.75f
-                    )
+            .width(62.dp)
+            .height(206.dp)
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        onDrag(dragAmount.x, dragAmount.y)
+                    },
+                    onDragEnd = { onDragEnd() }
                 )
-            },
+            }
+            .drawBehind {
+                val w = size.width
+                val h = size.height
+                val flare = 12.dp.toPx()
+                val cornerR = 24.dp.toPx()
+
+                val islandPath = Path().apply {
+                    if (isSnappedToRight) {
+                        // Docked on RIGHT screen edge: top & bottom flare flush to x = w, inner edge curves left
+                        moveTo(w, 0f)
+                        cubicTo(w, flare * 0.7f, w - cornerR * 0.25f, flare, cornerR, flare)
+                        quadraticTo(0f, flare, 0f, flare + cornerR)
+                        lineTo(0f, h - flare - cornerR)
+                        quadraticTo(0f, h - flare, cornerR, h - flare)
+                        cubicTo(w - cornerR * 0.25f, h - flare, w, h - flare * 0.7f, w, h)
+                        close()
+                    } else {
+                        // Docked on LEFT screen edge: top & bottom flare flush to x = 0, inner edge curves right
+                        moveTo(0f, 0f)
+                        cubicTo(0f, flare * 0.7f, cornerR * 0.25f, flare, w - cornerR, flare)
+                        quadraticTo(w, flare, w, flare + cornerR)
+                        lineTo(w, h - flare - cornerR)
+                        quadraticTo(w, h - flare, w - cornerR, h - flare)
+                        cubicTo(cornerR * 0.25f, h - flare, 0f, h - flare * 0.7f, 0f, h)
+                        close()
+                    }
+                }
+
+                drawPath(path = islandPath, color = obsidian)
+                drawPath(
+                    path = islandPath,
+                    color = Color.White.copy(alpha = 0.14f),
+                    style = Stroke(width = 1.dp.toPx())
+                )
+            }
+            .padding(
+                start = if (isSnappedToRight) 6.dp else 4.dp,
+                end = if (isSnappedToRight) 4.dp else 6.dp,
+                top = 18.dp,
+                bottom = 18.dp
+            ),
         contentAlignment = Alignment.Center
     ) {
         Column(
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(vertical = 4.dp, horizontal = 2.dp)
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Satellite 1: Mic Toggle (Upper Circle)
+            // 1. Return to Voice Room (Avatar with speaking/amber ring)
             Box(
                 modifier = Modifier
                     .size(48.dp)
-                    .shadow(
-                        elevation = if (isMicEnabled) 12.dp else 4.dp,
-                        shape = CircleShape,
-                        spotColor = if (isMicEnabled) goldBorder else Color.Black
-                    )
-                    .clip(CircleShape)
-                    .background(
-                        if (isMicEnabled) Color(0xFF1E1A11) else Color(0xFF18181A)
-                    )
-                    .border(
-                        BorderStroke(
-                            width = if (isMicEnabled) 2.2.dp else 1.2.dp,
-                            color = if (isMicEnabled) goldBorder else Color(0xFF3F3D45)
-                        ),
-                        CircleShape
-                    )
-                    .clickable { onToggleMic() },
+                    .testTag("dynamic_island_return_room")
+                    .semantics { contentDescription = "Return to Voice Room" }
+                    .pointerInput(Unit) {
+                        detectTapGestures(onTap = { onShortTap() })
+                    },
                 contentAlignment = Alignment.Center
             ) {
-                if (isMicEnabled) {
-                    SoftMicIcon(
-                        size = 22.dp,
-                        color = Color.White
+                Canvas(modifier = Modifier.size(44.dp)) {
+                    val strokeW = 2.6.dp.toPx()
+                    drawCircle(
+                        color = Color(0xFF27221B),
+                        radius = (size.minDimension - strokeW) / 2f,
+                        style = Stroke(width = strokeW)
                     )
-                } else {
-                    SoftMicOffIcon(
-                        size = 22.dp,
-                        color = Color(0xFF8C7A58)
+                    drawArc(
+                        brush = Brush.sweepGradient(
+                            listOf(
+                                goldBorder.copy(alpha = if (isSpeaking) speakAlpha else 0.9f),
+                                Color(0xFFF59E0B),
+                                goldBorder.copy(alpha = 0.35f),
+                                goldBorder.copy(alpha = if (isSpeaking) speakAlpha else 0.9f)
+                            )
+                        ),
+                        startAngle = -90f,
+                        sweepAngle = if (isSpeaking) 300f else 220f,
+                        useCenter = false,
+                        style = Stroke(width = strokeW)
+                    )
+                }
+
+                AsyncImage(
+                    model = avatarUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF1A1612))
+                )
+
+                // Subtle speaking status dot
+                if (isSpeaking) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .offset(x = (-3).dp, y = 3.dp)
+                            .size(9.dp)
+                            .clip(CircleShape)
+                            .background(goldBorder)
+                            .border(1.5.dp, obsidian, CircleShape)
                     )
                 }
             }
 
-            // Satellite 2: Leave / Close (Red X Circle - Lower Circle)
+            // 2. Mute / Unmute Mic Control
             Box(
                 modifier = Modifier
                     .size(48.dp)
-                    .shadow(12.dp, CircleShape, spotColor = redBorder)
                     .clip(CircleShape)
-                    .background(Color(0xFF261216))
-                    .border(BorderStroke(2.2.dp, redBorder), CircleShape)
-                    .clickable { onLeaveRoom() },
+                    .clickable { onToggleMic() }
+                    .testTag("dynamic_island_toggle_mic")
+                    .semantics {
+                        contentDescription = if (isMicEnabled) "Mute microphone" else "Unmute microphone"
+                    },
                 contentAlignment = Alignment.Center
             ) {
-                SoftCloseIcon(
-                    size = 20.dp,
-                    color = Color.White
-                )
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .shadow(
+                            elevation = if (isMicEnabled) 8.dp else 0.dp,
+                            shape = CircleShape,
+                            spotColor = greenBorder
+                        )
+                        .clip(CircleShape)
+                        .background(if (isMicEnabled) Color(0xFF10241A) else Color(0xFF191715))
+                        .border(
+                            BorderStroke(
+                                width = if (isMicEnabled) 2.dp else 1.3.dp,
+                                color = if (isMicEnabled) greenBorder else Color(0xFF47423B)
+                            ),
+                            CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isMicEnabled) {
+                        SoftMicIcon(size = 18.dp, color = Color.White)
+                    } else {
+                        SoftMicOffIcon(size = 18.dp, color = Color(0xFF9C8E7B))
+                    }
+                }
+            }
+
+            // 3. Leave Room Control
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .clickable { onLeaveRoom() }
+                    .testTag("dynamic_island_leave_room")
+                    .semantics { contentDescription = "Leave voice room" },
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .shadow(8.dp, CircleShape, spotColor = coralRed)
+                        .clip(CircleShape)
+                        .background(Color(0xFF281216))
+                        .border(BorderStroke(2.dp, coralRed), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    SoftCloseIcon(size = 16.dp, color = Color.White)
+                }
             }
         }
     }

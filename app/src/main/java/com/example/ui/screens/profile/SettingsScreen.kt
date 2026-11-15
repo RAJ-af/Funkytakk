@@ -29,11 +29,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.BuildConfig
 import com.example.R
+import com.example.SupportChatManager
+import com.example.TelemetryManager
 import com.example.gifting.CuteCoinIcon
+import com.example.repository.FeedbackRepository
 import com.example.repository.InboxDrainTracker
 import com.example.service.PushNotificationManager
 import com.example.ui.components.Soft3DCloudIcon
 import com.example.ui.components.SoftBlockIcon
+import com.example.ui.components.SoftHeadsetIcon
+import com.example.ui.components.SoftShieldIcon
+import com.example.ui.components.SoftStarIcon
 import com.example.ui.screens.ProfileVerifiedBadge
 import com.example.ui.theme.AppThemeManager
 import com.example.ui.theme.LocalAppDarkTheme
@@ -52,6 +58,8 @@ fun SettingsScreen(
     onEditProfile: () -> Unit,
     onOpenCoinStore: () -> Unit,
     onOpenDecorationStore: () -> Unit,
+    onOpenHelpSupport: () -> Unit = {},
+    onOpenFeedbackHub: () -> Unit = {},
     onOpenSupportChat: () -> Unit,
     onOpenModerationHub: () -> Unit,
     onOpenBlockedUsers: () -> Unit,
@@ -67,6 +75,10 @@ fun SettingsScreen(
     val funkyColors = LocalFunkyColors.current
     val isDark = LocalAppDarkTheme.current
     val pushDebugState by PushNotificationManager.debugState.collectAsState()
+    val usageDataEnabled by TelemetryManager.isUsageDataEnabled.collectAsState()
+    val supportUnread by SupportChatManager.unreadCount.collectAsState()
+    val feedbackUpdates by FeedbackRepository.myUpdatesCount.collectAsState()
+    val helpTotalBadge = supportUnread + feedbackUpdates
 
     BackHandler { onBack() }
 
@@ -333,6 +345,53 @@ fun SettingsScreen(
                         },
                         onClick = onOpenBlockedGroups
                     )
+                    HorizontalDivider(color = funkyColors.line, modifier = Modifier.padding(horizontal = 16.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { TelemetryManager.setUsageDataEnabled(context, !usageDataEnabled) }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFFDCFCE7)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            SoftShieldIcon(size = 20.dp, color = Color(0xFF16A34A))
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Share anonymous usage data",
+                                fontSize = 14.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = funkyColors.ink,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "Helps us fix crashes and improve FunkyTalk",
+                                fontSize = 11.5.sp,
+                                color = funkyColors.mute,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Switch(
+                            checked = usageDataEnabled,
+                            onCheckedChange = { TelemetryManager.setUsageDataEnabled(context, it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = funkyColors.onMango,
+                                checkedTrackColor = funkyColors.mango,
+                                uncheckedThumbColor = funkyColors.mute,
+                                uncheckedTrackColor = funkyColors.soft
+                            ),
+                            modifier = Modifier.testTag("settings_usage_data_switch")
+                        )
+                    }
                 }
 
                 // ---------------------------------------------------------
@@ -354,8 +413,37 @@ fun SettingsScreen(
                         HorizontalDivider(color = funkyColors.line, modifier = Modifier.padding(horizontal = 16.dp))
                     }
                     SettingsRowItem(
+                        title = "Help & Support",
+                        subtitle = "24/7 support chat, bug reports & feature requests",
+                        trailingBadge = if (helpTotalBadge > 0) "$helpTotalBadge" else null,
+                        trailingBadgeBg = Color(0xFFEF4444),
+                        trailingBadgeFg = Color.White,
+                        iconBg = Color(0xFFDBEAFE),
+                        iconContent = {
+                            SoftHeadsetIcon(size = 20.dp, color = Color(0xFF2563EB))
+                        },
+                        onClick = onOpenHelpSupport
+                    )
+                    HorizontalDivider(color = funkyColors.line, modifier = Modifier.padding(horizontal = 16.dp))
+                    SettingsRowItem(
+                        title = "Feedback & Feature Requests",
+                        subtitle = "Vote on upcoming features & track your reports",
+                        trailingBadge = if (feedbackUpdates > 0) "$feedbackUpdates" else null,
+                        trailingBadgeBg = Color(0xFFEF4444),
+                        trailingBadgeFg = Color.White,
+                        iconBg = Color(0xFFFEF3C7),
+                        iconContent = {
+                            SoftStarIcon(size = 20.dp, color = Color(0xFFD97706))
+                        },
+                        onClick = onOpenFeedbackHub
+                    )
+                    HorizontalDivider(color = funkyColors.line, modifier = Modifier.padding(horizontal = 16.dp))
+                    SettingsRowItem(
                         title = "24/7 Official Support Chat",
-                        subtitle = "Get help or appeal moderation reports",
+                        subtitle = "Direct conversation with our support team",
+                        trailingBadge = if (supportUnread > 0) "$supportUnread" else null,
+                        trailingBadgeBg = Color(0xFFEF4444),
+                        trailingBadgeFg = Color.White,
                         iconBg = Color(0xFFE0F2FE),
                         iconContent = {
                             Icon(
@@ -529,6 +617,29 @@ fun SettingsScreen(
                                         color = funkyColors.ink
                                     )
                                 }
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    TelemetryManager.triggerDebugNonFatal()
+                                    Toast.makeText(
+                                        context,
+                                        "Debug non-fatal logged (collection disabled in debug builds)",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, funkyColors.line),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 6.dp)
+                                    .testTag("debug_test_crashlytics_button")
+                            ) {
+                                Text(
+                                    text = "Test Crashlytics non-fatal",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = funkyColors.ink
+                                )
                             }
                         }
                     }

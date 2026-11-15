@@ -755,57 +755,42 @@ object PushNotificationManager : DefaultLifecycleObserver {
         val appCtx = context.applicationContext
         cancelInFlightRegistration()
 
+        // Capture pre-logout tokens synchronously before clearing local session state
+        val preCapturedBearer = SupabaseSessionManager.getAuthenticatedBearerToken(appCtx)
+        val preCapturedPushToken = getSavedToken(appCtx)
+
+        // Immediately sign out and clear session synchronously so a fast subsequent login
+        // NEVER gets wiped out by a delayed background coroutine.
+        try {
+            (firebaseAuth ?: FirebaseAuth.getInstance()).signOut()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error calling firebaseAuth.signOut()", e)
+        }
+        SupabaseSessionManager.clearSession(appCtx)
+        if (effectiveUid.isNotEmpty()) {
+            appCtx.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
+                .edit()
+                .remove("active_session_id_$effectiveUid")
+                .apply()
+        }
+        try {
+            com.example.service.ChatBackupScheduler.cancelBackup(appCtx)
+            com.example.util.ChatBackupPreferencesManager.clearAll(appCtx)
+        } catch (e: Exception) {
+            Log.w(TAG, "Error cancelling backup work or clearing backup prefs on logout", e)
+        }
+
         scope.launch {
             registrationMutex.withLock {
-                // 1. Refresh the Supabase session if expired BEFORE firebaseAuth.signOut() / clearSession
-                var validBearerToken = SupabaseSessionManager.getAuthenticatedBearerToken(appCtx)
-                if (validBearerToken.isNullOrBlank()) {
-                    try {
-                        ensureFirebaseInitialized(appCtx)
-                        if (FirebaseAuth.getInstance().currentUser != null) {
-                            Log.d(TAG, "Logout: Supabase JWT missing/expired; refreshing session BEFORE firebaseAuth.signOut()")
-                            SupabaseSessionManager.forceRefreshSession(appCtx)
-                            validBearerToken = SupabaseSessionManager.getAuthenticatedBearerToken(appCtx)
-                        }
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Logout: Failed refreshing expired session before signOut: ${e.message}")
-                    }
-                }
-
-                // 2. Capture current push token before signing out
-                val tokenToUnregister = getSavedToken(appCtx) ?: try {
+                val tokenToUnregister = preCapturedPushToken ?: try {
                     ensureFirebaseInitialized(appCtx)
                     FirebaseMessaging.getInstance().token.await()?.trim()
                 } catch (_: Exception) {
                     null
                 }
-
-                // 3. Now sign out of Firebase Auth and clear SupabaseSessionManager & local session state
-                try {
-                    (firebaseAuth ?: FirebaseAuth.getInstance()).signOut()
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error calling firebaseAuth.signOut()", e)
-                }
-
-                SupabaseSessionManager.clearSession(appCtx)
-                if (effectiveUid.isNotEmpty()) {
-                    appCtx.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
-                        .edit()
-                        .remove("active_session_id_$effectiveUid")
-                        .apply()
-                }
-                com.example.util.ChatBackupPreferencesManager.clearAll(appCtx)
-                try {
-                    com.example.service.ChatBackupScheduler.cancelBackup(appCtx)
-                    com.example.util.ChatBackupPreferencesManager.clearAll(appCtx)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error cancelling backup work or clearing backup prefs on logout", e)
-                }
-
-                // 4. Unregister push token on server using the valid pre-signOut JWT and delete local FCM token
                 unregisterTokenLocked(
                     appCtx = appCtx,
-                    capturedBearerToken = validBearerToken,
+                    capturedBearerToken = preCapturedBearer,
                     explicitToken = tokenToUnregister
                 )
             }

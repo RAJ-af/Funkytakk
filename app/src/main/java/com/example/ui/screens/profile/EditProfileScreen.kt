@@ -86,8 +86,9 @@ fun EditProfileScreen(
     var editCountryCode by remember { mutableStateOf(currentUserProfile.countryCode ?: "in") }
     var editCity by remember { mutableStateOf(currentUserProfile.city ?: savedCity ?: "") }
 
-    // Formatted Languages List e.g. ["Hindi (Advanced)", "English (Advanced)"]
-    val userLanguages = remember { mutableStateListOf<String>() }
+    // Formatted Languages Lists capped at 3 each matching Supabase backend contract
+    val nativeLanguages = remember { mutableStateListOf<String>() }
+    val learningLanguages = remember { mutableStateListOf<String>() }
 
     // Selected Interests / Hobbies
     val selectedInterests = remember { mutableStateListOf<String>() }
@@ -119,15 +120,40 @@ fun EditProfileScreen(
                     if (!p.city.isNullOrBlank()) editCity = p.city
 
                     if (!p.native_languages.isNullOrEmpty()) {
-                        userLanguages.clear()
-                        userLanguages.addAll(p.native_languages)
+                        nativeLanguages.clear()
+                        nativeLanguages.addAll(
+                            p.native_languages.take(3).map { item ->
+                                val trimmed = item.trim()
+                                if (!trimmed.contains("(")) "$trimmed (Native)" else trimmed
+                            }
+                        )
                     } else if (!currentUserProfile.nativeLanguage.isNullOrBlank()) {
-                        userLanguages.clear()
-                        userLanguages.addAll(
+                        nativeLanguages.clear()
+                        nativeLanguages.addAll(
                             currentUserProfile.nativeLanguage.split(",")
                                 .map { it.trim() }
                                 .filter { it.isNotEmpty() }
-                                .map { if (!it.contains("(")) "$it (Advanced)" else it }
+                                .take(3)
+                                .map { if (!it.contains("(")) "$it (Native)" else it }
+                        )
+                    }
+
+                    if (!p.learning_languages.isNullOrEmpty()) {
+                        learningLanguages.clear()
+                        learningLanguages.addAll(
+                            p.learning_languages.take(3).map { item ->
+                                val trimmed = item.trim()
+                                if (!trimmed.contains("(")) "$trimmed (Intermediate)" else trimmed
+                            }
+                        )
+                    } else if (!currentUserProfile.learningLanguage.isNullOrBlank()) {
+                        learningLanguages.clear()
+                        learningLanguages.addAll(
+                            currentUserProfile.learningLanguage.split(",")
+                                .map { it.trim() }
+                                .filter { it.isNotEmpty() }
+                                .take(3)
+                                .map { if (!it.contains("(")) "$it (Intermediate)" else it }
                         )
                     }
 
@@ -144,9 +170,23 @@ fun EditProfileScreen(
             Log.e("EditProfileScreen", "Failed to load profile data from Supabase", e)
         }
 
-        // Fallback defaults matching mockup if lists are empty
-        if (userLanguages.isEmpty()) {
-            userLanguages.addAll(listOf("Hindi (Advanced)", "English (Advanced)"))
+        if (nativeLanguages.isEmpty() && !currentUserProfile.nativeLanguage.isNullOrBlank()) {
+            nativeLanguages.addAll(
+                currentUserProfile.nativeLanguage.split(",")
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+                    .take(3)
+                    .map { if (!it.contains("(")) "$it (Native)" else it }
+            )
+        }
+        if (learningLanguages.isEmpty() && !currentUserProfile.learningLanguage.isNullOrBlank()) {
+            learningLanguages.addAll(
+                currentUserProfile.learningLanguage.split(",")
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+                    .take(3)
+                    .map { if (!it.contains("(")) "$it (Intermediate)" else it }
+            )
         }
         if (selectedInterests.isEmpty()) {
             selectedInterests.addAll(listOf("Technology", "Writing", "Cooking", "Fitness", "coding"))
@@ -158,7 +198,8 @@ fun EditProfileScreen(
     var showCitySheet by remember { mutableStateOf(false) }
     var showAgeSheet by remember { mutableStateOf(false) }
     var showGenderSheet by remember { mutableStateOf(false) }
-    var showLanguagesSheet by remember { mutableStateOf(false) }
+    var showNativeLanguagesSheet by remember { mutableStateOf(false) }
+    var showLearningLanguagesSheet by remember { mutableStateOf(false) }
     var showAddInterestDialog by remember { mutableStateOf(false) }
 
     var isSaving by remember { mutableStateOf(false) }
@@ -206,11 +247,16 @@ fun EditProfileScreen(
         isSaving = true
         coroutineScope.launch {
             try {
+                val nativeCsv = nativeLanguages.take(3).joinToString(",")
+                val learningCsv = learningLanguages.take(3).joinToString(",")
+
                 // Save to local SharedPreferences for instant UI access
                 prefs.edit()
                     .putString("profile_bio_${currentUserProfile.uid}", editBio.trim())
                     .putString("profile_city_${currentUserProfile.uid}", editCity.trim())
                     .putInt("profile_age_${currentUserProfile.uid}", editAge)
+                    .putString("profile_native_lang_${currentUserProfile.uid}", nativeCsv)
+                    .putString("profile_learning_lang_${currentUserProfile.uid}", learningCsv)
                     .apply()
 
                 if (viewModel != null) {
@@ -222,8 +268,8 @@ fun EditProfileScreen(
                         coverUrl = editCover.trim().ifBlank { null },
                         dob = editBio.trim(),
                         gender = editGender,
-                        nativeLanguage = userLanguages.joinToString(","),
-                        learningLanguage = "",
+                        nativeLanguage = nativeCsv,
+                        learningLanguage = learningCsv,
                         country = editCountry,
                         countryCode = editCountryCode,
                         hobbies = selectedInterests.toList(),
@@ -892,12 +938,12 @@ fun EditProfileScreen(
                 Spacer(modifier = Modifier.height(28.dp))
 
                 // ----------------------------------------------------
-                // 4. LANGUAGES SECTION
+                // 4. LANGUAGES SECTION (Native & Learning, Max 3 each)
                 // ----------------------------------------------------
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 12.dp),
+                        .padding(bottom = 10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -910,8 +956,8 @@ fun EditProfileScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Languages",
-                            fontSize = 16.sp,
+                            text = "Native Languages (${nativeLanguages.size}/3)",
+                            fontSize = 15.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = funkyColors.ink
                         )
@@ -924,62 +970,169 @@ fun EditProfileScreen(
                         color = funkyColors.mango,
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .clickable { showLanguagesSheet = true }
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .clickable { showNativeLanguagesSheet = true }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }
 
-                // Languages Chips FlowRow
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    userLanguages.forEach { langItem ->
-                        val flagCode = getFlagForLanguage(langItem)
-                        val badgeStyle = com.example.ui.components.getLanguageBadgeStyle(langItem)
+                if (nativeLanguages.isEmpty()) {
+                    Text(
+                        text = "Tap Edit to add up to 3 native languages",
+                        fontSize = 12.5.sp,
+                        color = funkyColors.mute,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+                } else {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        nativeLanguages.forEach { langItem ->
+                            val flagCode = getFlagForLanguage(langItem)
+                            val badgeStyle = com.example.ui.components.getLanguageBadgeStyle(langItem)
 
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(badgeStyle.bgColor)
-                                .border(1.dp, badgeStyle.textColor.copy(alpha = 0.25f), RoundedCornerShape(20.dp))
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
+                            Row(
                                 modifier = Modifier
-                                    .size(18.dp)
-                                    .clip(CircleShape)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(badgeStyle.bgColor)
+                                    .border(1.dp, badgeStyle.textColor.copy(alpha = 0.25f), RoundedCornerShape(20.dp))
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                CircleFlag(
-                                    countryCode = flagCode,
-                                    allowProgramming = flagCode.startsWith("prog_"),
-                                    modifier = Modifier.fillMaxSize()
+                                Box(
+                                    modifier = Modifier
+                                        .size(18.dp)
+                                        .clip(CircleShape)
+                                ) {
+                                    CircleFlag(
+                                        countryCode = flagCode,
+                                        allowProgramming = flagCode.startsWith("prog_"),
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(8.dp))
+
+                                Text(
+                                    text = langItem,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = badgeStyle.textColor
+                                )
+
+                                Spacer(modifier = Modifier.width(8.dp))
+
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_close),
+                                    contentDescription = "Remove",
+                                    tint = funkyColors.mute,
+                                    modifier = Modifier
+                                        .size(14.dp)
+                                        .clickable {
+                                            nativeLanguages.remove(langItem)
+                                        }
                                 )
                             }
+                        }
+                    }
+                }
 
-                            Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.height(18.dp))
 
-                            Text(
-                                text = langItem,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = badgeStyle.textColor
-                            )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .width(4.dp)
+                                .height(16.dp)
+                                .background(funkyColors.ok, RoundedCornerShape(2.dp))
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Learning Languages (${learningLanguages.size}/3)",
+                            fontSize = 15.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = funkyColors.ink
+                        )
+                    }
 
-                            Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Edit",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = funkyColors.mango,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { showLearningLanguagesSheet = true }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
 
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_close),
-                                contentDescription = "Remove",
-                                tint = funkyColors.mute,
+                if (learningLanguages.isEmpty()) {
+                    Text(
+                        text = "Tap Edit to add up to 3 learning languages",
+                        fontSize = 12.5.sp,
+                        color = funkyColors.mute
+                    )
+                } else {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        learningLanguages.forEach { langItem ->
+                            val flagCode = getFlagForLanguage(langItem)
+                            val badgeStyle = com.example.ui.components.getLanguageBadgeStyle(langItem)
+
+                            Row(
                                 modifier = Modifier
-                                    .size(14.dp)
-                                    .clickable {
-                                        userLanguages.remove(langItem)
-                                    }
-                            )
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(badgeStyle.bgColor)
+                                    .border(1.dp, badgeStyle.textColor.copy(alpha = 0.25f), RoundedCornerShape(20.dp))
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(18.dp)
+                                        .clip(CircleShape)
+                                ) {
+                                    CircleFlag(
+                                        countryCode = flagCode,
+                                        allowProgramming = flagCode.startsWith("prog_"),
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(8.dp))
+
+                                Text(
+                                    text = langItem,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = badgeStyle.textColor
+                                )
+
+                                Spacer(modifier = Modifier.width(8.dp))
+
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_close),
+                                    contentDescription = "Remove",
+                                    tint = funkyColors.mute,
+                                    modifier = Modifier
+                                        .size(14.dp)
+                                        .clickable {
+                                            learningLanguages.remove(langItem)
+                                        }
+                                )
+                            }
                         }
                     }
                 }
@@ -1172,15 +1325,33 @@ fun EditProfileScreen(
         )
     }
 
-    // Languages Sheet
-    if (showLanguagesSheet) {
+    // Native Languages Sheet (max 3)
+    if (showNativeLanguagesSheet) {
         AddLanguagesSheet(
-            alreadySelectedFormatted = userLanguages.toList(),
+            alreadySelectedFormatted = nativeLanguages.toList(),
+            title = "Native Languages",
+            subtitle = "Choose up to 3 native languages",
+            maxSelection = 3,
             onLanguagesAdded = { updatedList ->
-                userLanguages.clear()
-                userLanguages.addAll(updatedList)
+                nativeLanguages.clear()
+                nativeLanguages.addAll(updatedList.take(3))
             },
-            onDismiss = { showLanguagesSheet = false }
+            onDismiss = { showNativeLanguagesSheet = false }
+        )
+    }
+
+    // Learning Languages Sheet (max 3)
+    if (showLearningLanguagesSheet) {
+        AddLanguagesSheet(
+            alreadySelectedFormatted = learningLanguages.toList(),
+            title = "Learning Languages",
+            subtitle = "Choose up to 3 languages you're learning",
+            maxSelection = 3,
+            onLanguagesAdded = { updatedList ->
+                learningLanguages.clear()
+                learningLanguages.addAll(updatedList.take(3))
+            },
+            onDismiss = { showLearningLanguagesSheet = false }
         )
     }
 

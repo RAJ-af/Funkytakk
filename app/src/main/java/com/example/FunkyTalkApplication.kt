@@ -36,6 +36,7 @@ class FunkyTalkApplication : Application(), ImageLoaderFactory {
         _instance = this
         appContext = applicationContext
         com.example.ui.theme.AppThemeManager.init(this)
+        TelemetryManager.init(this)
         PushNotificationManager.initialize(this)
         PresenceManager.initialize(this)
     }

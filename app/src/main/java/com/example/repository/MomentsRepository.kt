@@ -300,6 +300,7 @@ object MomentsRepository {
                 val errStr = response.errorBody()?.string()
                 val raw = extractRawError(response.code(), errStr)
                 Log.w(TAG, "RPC error code=${response.code()} raw=$raw")
+                TelemetryManager.recordRpcFailure("moments_rpc", response.code(), raw)
                 Result.failure(
                     MomentRpcException(
                         rawCode = raw,
@@ -312,6 +313,7 @@ object MomentsRepository {
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "RPC exception: ${e.message}", e)
+            TelemetryManager.recordRpcFailure("moments_rpc", null, e.message)
             Result.failure(MomentRpcException("network_error", mapMomentError(e.message)))
         }
     }
@@ -347,6 +349,7 @@ object MomentsRepository {
                     Result.success(parser(rawBody))
                 } catch (e: Exception) {
                     Log.e(logTag, "JSON decode failed: ${e.javaClass.simpleName}: ${e.message} raw=$rawBody", e)
+                    TelemetryManager.recordMediaDecodeFailure(logTag, e)
                     Result.failure(
                         MomentRpcException("decode_error", mapMomentError(null))
                     )
@@ -355,6 +358,7 @@ object MomentsRepository {
                 val errStr = response.errorBody()?.string()
                 val raw = extractRawError(response.code(), errStr)
                 Log.w(logTag, "RPC error code=${response.code()} raw=$raw")
+                TelemetryManager.recordRpcFailure(logTag, response.code(), raw)
                 Result.failure(
                     MomentRpcException(
                         rawCode = raw,
@@ -367,6 +371,7 @@ object MomentsRepository {
             throw e
         } catch (e: Exception) {
             Log.e(logTag, "RPC exception: ${e.javaClass.simpleName}: ${e.message}", e)
+            TelemetryManager.recordRpcFailure(logTag, null, e.message)
             Result.failure(MomentRpcException("network_error", mapMomentError(e.message)))
         }
     }
@@ -496,6 +501,7 @@ object MomentsRepository {
             val uploaded = uploadRes.getOrElse { err ->
                 // TODO remove detail before release
                 val msg = err.message ?: "Upload failed (${err.javaClass.simpleName}: unknown error)"
+                TelemetryManager.logMomentPostFailed(if (isVideo) "video_upload_failed" else "photo_upload_failed")
                 return@withContext Result.failure(
                     MomentRpcException(rawCode = "invalid_media", message = msg)
                 )
@@ -504,7 +510,12 @@ object MomentsRepository {
         }
 
         val hasMedia = uploadedMedia.isNotEmpty()
-        executeRawJsonRpc(
+        val kind = when {
+            uploadedMedia.any { it.type == "video" } -> "video"
+            hasMedia -> "photo"
+            else -> "text"
+        }
+        val postResult = executeRawJsonRpc(
             context = context,
             logTag = FEED_TAG,
             call = { authToken ->
@@ -533,6 +544,13 @@ object MomentsRepository {
                 }
             }
         )
+        postResult.onSuccess {
+            TelemetryManager.logMomentPosted(kind)
+        }.onFailure { err ->
+            val reason = (err as? MomentRpcException)?.rawCode ?: "rpc_error"
+            TelemetryManager.logMomentPostFailed(reason.take(60))
+        }
+        postResult
     }
 
     suspend fun deleteMoment(context: Context, momentId: String): Result<Unit> {
@@ -550,6 +568,8 @@ object MomentsRepository {
                 auth = token,
                 body = MomentIdRequest(p_moment_id = momentId)
             )
+        }.onSuccess { resp ->
+            if (resp.liked) TelemetryManager.logMomentLiked()
         }
     }
 
@@ -606,6 +626,8 @@ object MomentsRepository {
                     p_parent_id = parentId
                 )
             )
+        }.onSuccess {
+            TelemetryManager.logMomentCommentAdded()
         }
     }
 
@@ -626,6 +648,8 @@ object MomentsRepository {
                     p_explanation = explanation?.trim()?.takeIf { it.isNotEmpty() }
                 )
             )
+        }.onSuccess {
+            TelemetryManager.logCorrectionAdded()
         }
     }
 

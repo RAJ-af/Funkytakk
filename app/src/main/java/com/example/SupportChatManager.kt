@@ -124,12 +124,14 @@ object SupportChatManager {
                     withContext(Dispatchers.Main) { onComplete?.invoke(sess) }
                 } else {
                     Log.w(TAG, "getMySupportSession failed: ${response.code()}")
+                    TelemetryManager.recordRpcFailure("get_my_support_session", response.code(), response.errorBody()?.string())
                     withContext(Dispatchers.Main) { onComplete?.invoke(_session.value) }
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Error fetching support session", e)
+                TelemetryManager.recordRpcFailure("get_my_support_session", null, e.message)
                 withContext(Dispatchers.Main) { onComplete?.invoke(_session.value) }
             }
         }
@@ -200,14 +202,22 @@ object SupportChatManager {
     fun sendSupportMessage(
         context: Context,
         messageText: String,
+        reportId: String? = null,
         onSuccess: (() -> Unit)? = null,
         onError: ((String) -> Unit)? = null
     ) {
         val trimmed = messageText.trim()
-        if (trimmed.isBlank()) return
+        if (trimmed.isBlank()) {
+            onError?.invoke("Write a message first")
+            return
+        }
+        if (trimmed.length > 1000) {
+            onError?.invoke("Text is too long")
+            return
+        }
 
         val sess = _session.value
-        if (sess == null || !sess.open || isSessionExpired(sess)) {
+        if (sess != null && (!sess.open || isSessionExpired(sess))) {
             onError?.invoke("This chat is closed.")
             return
         }
@@ -218,7 +228,7 @@ object SupportChatManager {
                 val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
                 if (token.isNullOrBlank()) {
                     withContext(Dispatchers.Main) {
-                        onError?.invoke("Authentication required.")
+                        onError?.invoke("Please log in again")
                     }
                     return@launch
                 }
@@ -227,7 +237,7 @@ object SupportChatManager {
                 val tempId = "temp_${System.currentTimeMillis()}"
                 val optimisticMsg = SupabaseSupportMessage(
                     id = tempId,
-                    conversation_id = sess.conversation_id ?: "pending",
+                    conversation_id = sess?.conversation_id ?: "pending",
                     sender_type = "user",
                     body = trimmed,
                     is_read_by_user = true,
@@ -242,12 +252,13 @@ object SupportChatManager {
 
                 val response = SupabaseClient.api.sendSupportMessage(
                     auth = token,
-                    body = SendSupportMessageRequest(p_message = trimmed)
+                    body = SendSupportMessageRequest(p_message = trimmed, p_report_id = reportId)
                 )
 
                 if (response.isSuccessful) {
                     Log.d(TAG, "send_support_message RPC successful")
-                    fetchSupportSession(context) { updatedSess ->
+                    TelemetryManager.logSupportMessageSent()
+                    fetchSupportSession(context) {
                         fetchSupportMessages(context) {
                             onSuccess?.invoke()
                         }
@@ -255,11 +266,18 @@ object SupportChatManager {
                 } else {
                     val errBody = response.errorBody()?.string().orEmpty()
                     Log.e(TAG, "send_support_message RPC failed: $errBody")
-                    val friendlyError = if (errBody.contains("support_chat_closed", ignoreCase = true)) {
-                        _session.value = _session.value?.copy(open = false)
-                        "This chat is closed."
-                    } else {
-                        "Failed to send message. Please try again."
+                    TelemetryManager.recordRpcFailure("send_support_message", response.code(), errBody)
+                    val lower = errBody.lowercase()
+                    val friendlyError = when {
+                        lower.contains("not_authenticated") -> "Please log in again"
+                        lower.contains("rate_limited") -> "You're going too fast. Try again in a few minutes"
+                        lower.contains("empty_message") -> "Write a message first"
+                        lower.contains("message_too_long") -> "Text is too long"
+                        lower.contains("support_chat_closed") -> {
+                            _session.value = _session.value?.copy(open = false)
+                            "This chat is closed."
+                        }
+                        else -> "Something went wrong. Try again"
                     }
                     withContext(Dispatchers.Main) {
                         onError?.invoke(friendlyError)
@@ -269,8 +287,9 @@ object SupportChatManager {
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Exception calling send_support_message", e)
+                TelemetryManager.recordRpcFailure("send_support_message", null, e.message)
                 withContext(Dispatchers.Main) {
-                    onError?.invoke(e.message ?: "Failed to send message")
+                    onError?.invoke("Something went wrong. Try again")
                 }
             } finally {
                 _isSending.value = false
@@ -301,14 +320,14 @@ object SupportChatManager {
     }
 
     fun isSessionExpired(untilIso: String?): Boolean {
-        if (untilIso.isNullOrBlank()) return true
+        if (untilIso.isNullOrBlank()) return false
         val targetMillis = parseIsoToMillis(untilIso)
         return targetMillis > 0 && System.currentTimeMillis() >= targetMillis
     }
 
     fun isSessionExpired(sess: GetMySupportSessionResponse?): Boolean {
         if (sess == null || !sess.open) return true
-        if (sess.reason == "appeal") return false
+        if (sess.reason == "always" || sess.reason == "appeal" || sess.until.isNullOrBlank()) return false
         return isSessionExpired(sess.until)
     }
 

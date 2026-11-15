@@ -3098,16 +3098,6 @@ fun VoiceRoomScreen(
                     onClick = { showReactionsBar = !showReactionsBar }
                 )
 
-                VoiceBottomBarItem(
-                    icon = { CustomGiftBoxIcon(tint = Color(0xFFEC4899), modifier = Modifier.size(24.dp)) },
-                    label = "Gift",
-                    tint = Color(0xFFEC4899),
-                    onClick = {
-                        giftTargetUserId = null
-                        showGiftSheet = true
-                    }
-                )
-
                 var showMoreFeaturesSheet by remember { mutableStateOf(false) }
                 VoiceBottomBarItem(
                     icon = { CustomGridMoreIcon(tint = inactiveIconTint, modifier = Modifier.size(22.dp)) },

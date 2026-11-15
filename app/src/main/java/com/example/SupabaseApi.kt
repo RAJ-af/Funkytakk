@@ -1730,6 +1730,79 @@ interface SupabaseApi {
         @Header("Authorization") auth: String,
         @Body body: MomentIdRequest
     ): Response<ResponseBody>
+
+    // ----------------------------------------------------
+    // FEEDBACK HUB & ADMIN FEEDBACK INBOX
+    // ----------------------------------------------------
+    @POST("rest/v1/rpc/create_feedback")
+    suspend fun createFeedbackRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: CreateFeedbackRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/get_feedback_board")
+    suspend fun getFeedbackBoardRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: GetFeedbackBoardRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/get_my_feedback")
+    suspend fun getMyFeedbackRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: GetMyFeedbackRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/get_feedback")
+    suspend fun getFeedbackRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: FeedbackIdRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/toggle_feedback_vote")
+    suspend fun toggleFeedbackVoteRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: FeedbackIdRequest
+    ): Response<ToggleFeedbackVoteResponse>
+
+    @POST("rest/v1/rpc/add_feedback_reply")
+    suspend fun addFeedbackReplyRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: AddFeedbackReplyRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/mark_feedback_seen")
+    suspend fun markFeedbackSeenRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: FeedbackIdRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/delete_feedback")
+    suspend fun deleteFeedbackRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: FeedbackIdRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/admin_list_feedback")
+    suspend fun adminListFeedbackRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: AdminListFeedbackRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/admin_set_feedback_status")
+    suspend fun adminSetFeedbackStatusRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: AdminSetFeedbackStatusRequest
+    ): Response<ResponseBody>
 }
 
 @JsonClass(generateAdapter = true)
@@ -2732,8 +2805,99 @@ data class AddMomentCorrectionRequest(
     val p_explanation: String? = null
 )
 
+// ----------------------------------------------------
+// FEEDBACK HUB DTOs & REQUESTS
+// ----------------------------------------------------
+@JsonClass(generateAdapter = true)
+data class FeedbackAuthorDto(
+    val id: String = "",
+    val username: String? = null,
+    val name: String? = null,
+    val avatar_url: String? = null
+)
 
+@JsonClass(generateAdapter = true)
+data class FeedbackReplyDto(
+    val id: Long = 0L,
+    val body: String = "",
+    val is_staff: Boolean = false,
+    val created_at: String? = null,
+    val is_mine: Boolean = false,
+    val author: FeedbackAuthorDto? = null
+)
 
+@JsonClass(generateAdapter = true)
+data class FeedbackPostDto(
+    val id: Long = 0L,
+    val kind: String = "feature",
+    val title: String = "",
+    val body: String = "",
+    val status: String = "open",
+    val votes_count: Int = 0,
+    val replies_count: Int = 0,
+    val created_at: String? = null,
+    val updated_at: String? = null,
+    val is_mine: Boolean = false,
+    val has_voted: Boolean = false,
+    val has_update: Boolean = false,
+    val app_version: String? = null,
+    val device_info: String? = null,
+    val author: FeedbackAuthorDto? = null,
+    val replies: List<FeedbackReplyDto> = emptyList()
+)
 
+@JsonClass(generateAdapter = true)
+data class ToggleFeedbackVoteResponse(
+    val voted: Boolean = false,
+    val votes_count: Int = 0
+)
 
+@JsonClass(generateAdapter = true)
+data class CreateFeedbackRequest(
+    val p_kind: String,
+    val p_title: String,
+    val p_body: String = "",
+    val p_app_version: String? = null,
+    val p_device_info: String? = null
+)
 
+@JsonClass(generateAdapter = true)
+data class GetFeedbackBoardRequest(
+    val p_kind: String = "feature",
+    val p_status: String? = null,
+    val p_sort: String = "top",
+    val p_limit: Int = 20,
+    val p_offset: Int = 0
+)
+
+@JsonClass(generateAdapter = true)
+data class GetMyFeedbackRequest(
+    val p_limit: Int = 30,
+    val p_offset: Int = 0
+)
+
+@JsonClass(generateAdapter = true)
+data class FeedbackIdRequest(
+    val p_id: Long
+)
+
+@JsonClass(generateAdapter = true)
+data class AddFeedbackReplyRequest(
+    val p_id: Long,
+    val p_body: String
+)
+
+@JsonClass(generateAdapter = true)
+data class AdminListFeedbackRequest(
+    val p_kind: String? = null,
+    val p_status: String? = null,
+    val p_limit: Int = 30,
+    val p_offset: Int = 0
+)
+
+@JsonClass(generateAdapter = true)
+data class AdminSetFeedbackStatusRequest(
+    val p_id: Long,
+    val p_status: String,
+    val p_note: String? = null
+)

@@ -70,6 +70,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun ChatsTabContent(
     conversationsList: List<DirectChat> = emptyList(),
+    supabaseProfiles: List<com.example.UserProfile> = emptyList(),
     onSelectChat: (DirectChat) -> Unit,
     onOpenSupportChat: (reportId: String?) -> Unit = {},
     onNavigateToDiscover: () -> Unit = {},
@@ -119,18 +120,29 @@ fun ChatsTabContent(
     }
 
     // Merge real encrypted conversations from Room DB, all groups (joined/invited/requested), and active partner chats
-    val mergedConversations = remember(conversationsList, dbConversations, joinedGroups, allMyGroups, customGroups, pinnedChats, mutedChats, blockedUsers, deletedChats, unreadOverrides) {
+    val mergedConversations = remember(conversationsList, dbConversations, joinedGroups, allMyGroups, customGroups, pinnedChats, mutedChats, blockedUsers, deletedChats, unreadOverrides, supabaseProfiles) {
         val dbMapped = dbConversations.map { conv ->
             val isUnreadOverridden = unreadOverrides.contains(conv.otherUserId)
+            val supaProfile = supabaseProfiles.find { it.uid == conv.otherUserId }
+            val resolvedName = supaProfile?.displayName?.takeIf { it.isNotBlank() }
+                ?: supaProfile?.username?.takeIf { it.isNotBlank() }
+                ?: conv.otherUserName.ifBlank { "FunkyTalk User" }
+            val resolvedAvatar = conv.otherUserAvatar?.takeIf { it.isNotBlank() }
+                ?: supaProfile?.avatar?.takeIf { it.isNotBlank() }
+                ?: ""
+            val resolvedLangOrCountry = supaProfile?.nativeLanguage?.takeIf { it.isNotBlank() }
+                ?: supaProfile?.country?.takeIf { it.isNotBlank() }
+                ?: conv.otherUserFlag?.takeIf { it.isNotBlank() && it.length > 2 }
+                ?: "Encrypted Chat"
             DirectChat(
                 id = conv.otherUserId,
-                name = conv.otherUserName,
-                avatar = conv.otherUserAvatar.orEmpty().ifBlank { "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200" },
+                name = resolvedName,
+                avatar = resolvedAvatar,
                 lastMsg = conv.lastMessageText.ifBlank { "🔒 Encrypted conversation" },
                 time = formatTimeAgo(conv.lastMessageTime),
                 unreadCount = if (isUnreadOverridden) 1 else conv.unreadCount,
                 onlineStatus = "online",
-                isNativeLanguage = conv.otherUserFlag ?: "English"
+                isNativeLanguage = resolvedLangOrCountry
             )
         }
 
@@ -161,7 +173,15 @@ fun ChatsTabContent(
         }
 
         val existingIds = (dbMapped.map { it.id } + groupsMapped.map { it.id }).toSet()
-        val rest = conversationsList.filterNot { it.id in existingIds }.distinctBy { it.id }
+        val rest = conversationsList.filterNot { it.id in existingIds }.distinctBy { it.id }.map { c ->
+            val supaProfile = supabaseProfiles.find { it.uid == c.id }
+            if (supaProfile != null) {
+                c.copy(
+                    avatar = c.avatar.ifBlank { supaProfile.avatar.orEmpty() },
+                    name = c.name.ifBlank { supaProfile.displayName ?: supaProfile.username ?: "Chat" }
+                )
+            } else c
+        }
         val combined = (groupsMapped + dbMapped + rest)
             .filterNot { it.id in deletedChats || it.id in blockedUsers }
             .distinctBy { it.id }
@@ -197,10 +217,7 @@ fun ChatsTabContent(
         }
     }
 
-    val showSupportInSearch = remember(searchQuery, selectedFilter, supportUnreadCount, supportSession) {
-        val isSessionOpen = supportSession?.open == true && !SupportChatManager.isSessionExpired(supportSession?.until)
-        if (!isSessionOpen) return@remember false
-
+    val showSupportInSearch = remember(searchQuery, selectedFilter, supportUnreadCount) {
         val matchesSearch = searchQuery.isBlank() ||
                 "FunkyTalk".contains(searchQuery, ignoreCase = true) ||
                 "Support".contains(searchQuery, ignoreCase = true) ||
@@ -1027,18 +1044,18 @@ fun ChatsTabContent(
                     val isGroup = chat.isNativeLanguage.startsWith("Group") || matchedGroupRow != null
                     val hasUnreadMention = matchedGroupRow?.hasUnreadMention == true
 
-                    val flagCode = when (chat.isNativeLanguage.lowercase()) {
-                        "english" -> "us"
-                        "korean" -> "kr"
-                        "japanese" -> "jp"
-                        "chinese" -> "cn"
-                        "spanish" -> "es"
-                        "german" -> "de"
-                        "french" -> "fr"
-                        "hindi" -> "in"
-                        "russian" -> "ru"
-                        "arabic" -> "ae"
-                        else -> "us"
+                    val matchedSupaProfile = supabaseProfiles.find { it.uid == chat.id }
+                    val matchedDbConv = dbConversations.find { it.otherUserId == chat.id }
+                    val rawLangOrCode = chat.isNativeLanguage.trim()
+                    val flagCode = when {
+                        !matchedSupaProfile?.countryCode.isNullOrBlank() -> resolveCountryCode(matchedSupaProfile?.country, matchedSupaProfile?.countryCode)
+                        !matchedDbConv?.otherUserFlag.isNullOrBlank() -> {
+                            val dbFlag = matchedDbConv!!.otherUserFlag!!.trim()
+                            if (dbFlag.length == 2 && dbFlag.all { it.isLetter() }) dbFlag.lowercase()
+                            else com.example.ui.screens.LanguageData.getFlagCodeForLanguage(dbFlag)
+                        }
+                        rawLangOrCode.length == 2 && rawLangOrCode.all { it.isLetter() } -> rawLangOrCode.lowercase()
+                        else -> com.example.ui.screens.LanguageData.getFlagCodeForLanguage(rawLangOrCode)
                     }
 
                     Surface(
@@ -1216,8 +1233,16 @@ fun ChatsTabContent(
 
                                 if (!isMinimalistMode) {
                                     Spacer(modifier = Modifier.height(2.dp))
+                                    val subtitleLabel = remember(chat.isNativeLanguage, matchedSupaProfile) {
+                                        val trimmed = chat.isNativeLanguage.trim()
+                                        if (trimmed.length == 2 && trimmed.all { it.isLetter() }) {
+                                            matchedSupaProfile?.nativeLanguage?.takeIf { it.isNotBlank() }
+                                                ?: matchedSupaProfile?.country?.takeIf { it.isNotBlank() }
+                                                ?: "Encrypted Chat"
+                                        } else trimmed
+                                    }
                                     Text(
-                                        text = chat.isNativeLanguage,
+                                        text = subtitleLabel,
                                         color = funkyColors.mute,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Normal,

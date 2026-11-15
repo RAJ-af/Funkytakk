@@ -28,6 +28,7 @@ import com.example.ui.theme.LocalFunkyColors
 fun HomeBottomBar(
     activeTab: String,
     unreadChatCount: Int = 0,
+    profileBadgeCount: Int = 0,
     onTabSelected: (String) -> Unit
 ) {
     val isMomentsTab = activeTab == "moments"
@@ -128,6 +129,8 @@ fun HomeBottomBar(
                     isSelected = activeTab == "profile",
                     activePillColor = activePillColor,
                     onClick = { onTabSelected("profile") },
+                    badgeCount = profileBadgeCount.coerceAtLeast(0),
+                    badgeBorderColor = barContainerColor,
                     icon = {
                         FunkyProfileIcon(
                             color = if (activeTab == "profile") activeIconColor else inactiveIconColor,

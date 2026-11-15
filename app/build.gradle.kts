@@ -5,6 +5,7 @@ plugins {
   alias(libs.plugins.roborazzi)
   alias(libs.plugins.secrets)
   alias(libs.plugins.google.services)
+  alias(libs.plugins.firebase.crashlytics)
 }
 
 android {
@@ -60,6 +61,7 @@ android {
       isMinifyEnabled = true
       isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+      manifestPlaceholders["firebase_crashlytics_collection_enabled"] = "true"
       if (hasReleaseSigningCredentials) {
         signingConfig = signingConfigs.getByName("release")
       } else {
@@ -69,6 +71,7 @@ android {
     }
     debug {
       signingConfig = signingConfigs.getByName("debug")
+      manifestPlaceholders["firebase_crashlytics_collection_enabled"] = "false"
       // Testing/Debug optimization: support 64-bit and 32-bit ARM physical test devices.
       ndk {
         abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a"))
@@ -126,6 +129,8 @@ dependencies {
   implementation(libs.firebase.firestore)
   implementation(libs.firebase.storage)
   implementation(libs.firebase.messaging)
+  implementation(libs.firebase.crashlytics)
+  implementation(libs.firebase.analytics)
   implementation(libs.play.services.auth)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)

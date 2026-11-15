@@ -295,6 +295,7 @@ class VoiceRoomOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, 
         if (overlayView != null) return
         if (!OverlayPermissionHelper.canDrawOverlays(this)) return
 
+        val islandWidthPx = (62f * resources.displayMetrics.density).toInt()
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -309,7 +310,7 @@ class VoiceRoomOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, 
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.LEFT
-            x = screenWidth - 220
+            x = (screenWidth - islandWidthPx).coerceAtLeast(0)
             y = screenHeight / 3
         }
         layoutParams = params
@@ -364,8 +365,12 @@ class VoiceRoomOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, 
 
     private fun updatePosition(dx: Float, dy: Float) {
         val params = layoutParams ?: return
-        params.x = (params.x + dx.toInt()).coerceIn(0, screenWidth - 140)
-        params.y = (params.y + dy.toInt()).coerceIn(60, screenHeight - 200)
+        val islandWidthPx = overlayView?.width?.takeIf { it > 0 }
+            ?: (62f * resources.displayMetrics.density).toInt()
+        val islandHeightPx = overlayView?.height?.takeIf { it > 0 }
+            ?: (206f * resources.displayMetrics.density).toInt()
+        params.x = (params.x + dx.toInt()).coerceIn(0, (screenWidth - islandWidthPx).coerceAtLeast(0))
+        params.y = (params.y + dy.toInt()).coerceIn(60, (screenHeight - islandHeightPx - 60).coerceAtLeast(60))
         try {
             windowManager?.updateViewLayout(overlayView, params)
         } catch (e: Exception) {
@@ -375,13 +380,15 @@ class VoiceRoomOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, 
 
     private fun snapToNearestEdge() {
         val params = layoutParams ?: return
+        val islandWidthPx = overlayView?.width?.takeIf { it > 0 }
+            ?: (62f * resources.displayMetrics.density).toInt()
         val currentX = params.x
-        val targetX = if (currentX + 100 > screenWidth / 2) {
+        val targetX = if (currentX + islandWidthPx / 2 > screenWidth / 2) {
             isSnappedToRight.value = true
-            screenWidth - 200
+            (screenWidth - islandWidthPx).coerceAtLeast(0)
         } else {
             isSnappedToRight.value = false
-            16
+            0
         }
 
         val animator = ValueAnimator.ofInt(currentX, targetX).apply {

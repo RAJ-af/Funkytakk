@@ -73,20 +73,19 @@ fun SupportChatScreen(
     var inputText by remember { mutableStateOf("") }
     var remainingTimeText by remember { mutableStateOf("") }
 
-    val isOpen = session?.open == true
-    val isAppeal = session?.reason == "appeal" || (!isOpen && session?.can_appeal == true)
+    val isAppeal = session?.reason == "appeal"
 
-    // Live countdown update loop for support_opened session
+    // Live countdown update loop for support_opened session; 24/7 always open otherwise
     LaunchedEffect(session?.until, session?.open, session?.reason) {
         while (isActive) {
             val sess = session
-            if (sess == null || !sess.open || SupportChatManager.isSessionExpired(sess)) {
-                remainingTimeText = "Chat ended"
-            } else if (sess.reason == "appeal") {
-                remainingTimeText = "Appeal open"
-            } else {
-                val formattedUntil = formatUntilTimeString(sess.until)
-                remainingTimeText = if (formattedUntil.isNotBlank()) "Chat open until $formattedUntil" else "Chat open"
+            remainingTimeText = when {
+                sess?.reason == "appeal" -> "Appeal open"
+                sess?.reason == "support_opened" && !sess.until.isNullOrBlank() -> {
+                    val formattedUntil = formatUntilTimeString(sess.until)
+                    if (formattedUntil.isNotBlank()) "Chat open until $formattedUntil" else "Online · 24/7 Support"
+                }
+                else -> "Online · 24/7 Support"
             }
             delay(1000L)
         }
@@ -109,6 +108,7 @@ fun SupportChatScreen(
     }
 
     LaunchedEffect(Unit) {
+        com.example.TelemetryManager.logSupportChatOpened()
         SupportChatManager.init(context)
         SupportChatManager.fetchSupportSession(context) {
             SupportChatManager.markSupportConversationRead(context)
@@ -126,17 +126,15 @@ fun SupportChatScreen(
         onBack()
     }
 
-    val headerTitle = remember(isOpen, isAppeal) {
+    val headerTitle = remember(isAppeal) {
         if (isAppeal) "Appeal" else "Support"
     }
 
-    val headerSubtitle = remember(isOpen, isAppeal, remainingTimeText) {
-        if (!isOpen) {
-            "Chat closed"
-        } else if (isAppeal) {
+    val headerSubtitle = remember(isAppeal, remainingTimeText) {
+        if (isAppeal) {
             "Support Chat"
         } else {
-            remainingTimeText
+            remainingTimeText.ifBlank { "Online · 24/7 Support" }
         }
     }
 
@@ -190,12 +188,12 @@ fun SupportChatScreen(
                             color = funkyColors.ink
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (!isOpen || !isAppeal) {
+                            if (!isAppeal) {
                                 Box(
                                     modifier = Modifier
                                         .size(7.dp)
                                         .clip(CircleShape)
-                                        .background(if (isOpen) funkyColors.ok else funkyColors.mute)
+                                        .background(funkyColors.ok)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                             }
@@ -218,8 +216,7 @@ fun SupportChatScreen(
             }
         },
         bottomBar = {
-            if (isOpen) {
-                Surface(
+            Surface(
                     color = funkyColors.surface,
                     shadowElevation = if (isDark) 0.dp else 4.dp,
                     border = BorderStroke(1.dp, funkyColors.line)
@@ -272,6 +269,7 @@ fun SupportChatScreen(
                                     SupportChatManager.sendSupportMessage(
                                         context = context,
                                         messageText = textToSend,
+                                        reportId = reportId,
                                         onError = { err ->
                                             Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
                                         }
@@ -290,6 +288,7 @@ fun SupportChatScreen(
                                     SupportChatManager.sendSupportMessage(
                                         context = context,
                                         messageText = textToSend,
+                                        reportId = reportId,
                                         onError = { err ->
                                             Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
                                         }
@@ -318,7 +317,6 @@ fun SupportChatScreen(
                         }
                     }
                 }
-            }
         }
     ) { paddingValues ->
         Box(
@@ -326,9 +324,7 @@ fun SupportChatScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            if (!isOpen) {
-                SupportChatEndedState(modifier = Modifier.fillMaxSize())
-            } else if (messages.isEmpty() && !isLoading) {
+            if (messages.isEmpty() && !isLoading) {
                 AppealEmptyChatState(
                     title = if (isAppeal) "Appeal" else "Support",
                     subtitle = if (isAppeal) "Tell us why this decision should be reviewed. Our team will reply here." else "Welcome! Send a message to get in touch with our team.",

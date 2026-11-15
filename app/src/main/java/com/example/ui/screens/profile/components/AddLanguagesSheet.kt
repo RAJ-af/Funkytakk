@@ -29,19 +29,26 @@ import com.example.ui.screens.Language
 import com.example.ui.screens.LanguageData
 import com.example.ui.theme.LocalFunkyColors
 
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddLanguagesSheet(
     alreadySelectedFormatted: List<String>,
+    title: String = "Add languages",
+    subtitle: String = "Choose up to 3 languages",
+    maxSelection: Int = 3,
     onLanguagesAdded: (List<String>) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     val funkyColors = LocalFunkyColors.current
     var searchQuery by remember { mutableStateOf("") }
 
     val pendingSelections = remember {
         mutableStateMapOf<String, String>().apply {
-            alreadySelectedFormatted.forEach { item ->
+            alreadySelectedFormatted.take(maxSelection).forEach { item ->
                 val regex = Regex("^(.*?)\\s*\\((.*?)\\)$")
                 val match = regex.find(item)
                 if (match != null) {
@@ -96,13 +103,13 @@ fun AddLanguagesSheet(
                 .imePadding()
         ) {
             Text(
-                text = "Add languages",
+                text = "$title (${pendingSelections.size}/$maxSelection)",
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
                 color = funkyColors.ink
             )
             Text(
-                text = "Choose languages you know",
+                text = subtitle,
                 fontSize = 13.sp,
                 color = funkyColors.mute,
                 modifier = Modifier.padding(top = 2.dp, bottom = 16.dp)
@@ -182,6 +189,12 @@ fun AddLanguagesSheet(
                             .clickable {
                                 if (isSelected) {
                                     pendingSelections.remove(lang.name)
+                                } else if (pendingSelections.size >= maxSelection) {
+                                    Toast.makeText(
+                                        context,
+                                        "Maximum $maxSelection languages allowed",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
                                 } else {
                                     pendingSelections[lang.name] = "Advanced"
                                 }
@@ -303,7 +316,7 @@ fun AddLanguagesSheet(
 
             Button(
                 onClick = {
-                    val formattedList = pendingSelections.map { (lang, prof) ->
+                    val formattedList = pendingSelections.entries.take(maxSelection).map { (lang, prof) ->
                         "$lang ($prof)"
                     }
                     onLanguagesAdded(formattedList)
@@ -319,7 +332,7 @@ fun AddLanguagesSheet(
                     .height(52.dp)
             ) {
                 Text(
-                    text = "Add selected (${pendingSelections.size})",
+                    text = "Save (${pendingSelections.size}/$maxSelection)",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                     color = funkyColors.onMango

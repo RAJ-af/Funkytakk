@@ -115,11 +115,19 @@ class MainActivity : FragmentActivity() {
                             sessionVerificationState !is SessionVerificationState.Failed &&
                             SupabaseSessionManager.hasValidAuthenticatedSession(applicationContext)
                         ) {
+                            val authedUid = SupabaseSessionManager.getUserId(applicationContext)
+                                ?: (authState as AuthState.Success).user.uid
+                            TelemetryManager.onLogin(authedUid)
                             authViewModel.refreshModerationStatus(applicationContext)
                             authViewModel.checkAccountReview(applicationContext)
                             authViewModel.checkDeletionStatus(applicationContext)
                             com.example.SupportChatManager.init(applicationContext)
+                            com.example.repository.FeedbackRepository.refreshMyUpdatesCount(applicationContext)
                         }
+                    }
+
+                    LaunchedEffect(currentScreen) {
+                        TelemetryManager.setCurrentScreen(currentScreen)
                     }
 
                     // Auto-open support chat when event emitted (open == true and unread > 0)
@@ -170,9 +178,25 @@ class MainActivity : FragmentActivity() {
                     var tempHobbies by remember { mutableStateOf<List<String>>(emptyList()) }
                     var openCreateRoomTrigger by rememberSaveable { mutableStateOf(false) }
                     var activeSupportReportId by rememberSaveable { mutableStateOf<String?>(null) }
+                    var feedbackInitialCreateKind by rememberSaveable { mutableStateOf<String?>(null) }
                     var pendingBackupStatus by remember { mutableStateOf<ChatBackupStatusResponse?>(null) }
                     var endedRoomPeopleCount by rememberSaveable { mutableStateOf(12) }
                     var endedRoomTotalTime by rememberSaveable { mutableStateOf(28) }
+
+                    LaunchedEffect(authState) {
+                        if (authState !is AuthState.Success && authState !is AuthState.Loading) {
+                            tempUsername = ""
+                            tempDisplayName = ""
+                            tempAvatar = ""
+                            tempDob = ""
+                            tempGender = ""
+                            tempCountry = ""
+                            tempCountryCode = ""
+                            tempNativeLanguage = ""
+                            tempLearningLanguage = ""
+                            tempHobbies = emptyList()
+                        }
+                    }
 
                     LaunchedEffect(authState, sessionVerificationState, minSplashElapsed) {
                         if (!minSplashElapsed && currentScreen == "splash") {
@@ -542,9 +566,36 @@ class MainActivity : FragmentActivity() {
                                     activeSupportReportId = reportId
                                     currentScreen = "support_chat"
                                 },
+                                onOpenHelpSupport = {
+                                    currentScreen = "help_support"
+                                },
+                                onOpenFeedbackHub = { initialKind ->
+                                    feedbackInitialCreateKind = initialKind
+                                    currentScreen = "feedback_hub"
+                                },
                                 onDeleteAccountClick = {
                                     currentScreen = "account_deletion"
                                 }
+                            )
+                            "help_support" -> HelpAndSupportScreen(
+                                onBack = { currentScreen = "home" },
+                                onOpenSupportChat = {
+                                    activeSupportReportId = null
+                                    currentScreen = "support_chat"
+                                },
+                                onOpenBugReport = {
+                                    feedbackInitialCreateKind = "bug"
+                                    currentScreen = "feedback_hub"
+                                },
+                                onOpenFeedbackHub = {
+                                    feedbackInitialCreateKind = null
+                                    currentScreen = "feedback_hub"
+                                }
+                            )
+                            "feedback_hub" -> FeedbackHubScreen(
+                                initialCreateKind = feedbackInitialCreateKind,
+                                onConsumeInitialCreateKind = { feedbackInitialCreateKind = null },
+                                onBack = { currentScreen = "home" }
                             )
                             "account_deletion" -> com.example.ui.screens.profile.AccountDeletionScreen(
                                 authViewModel = authViewModel,
@@ -593,13 +644,13 @@ class MainActivity : FragmentActivity() {
                         }
                     }
 
-                    // Floating Bubble Overlay (replacement for Dynamic Island when in active room but navigated elsewhere)
+                    // Floating Bubble Overlay (Side Dynamic Island when in active room but navigated elsewhere)
                     val activeRoomId by authViewModel.activeRoomId.collectAsState()
 
-                    LaunchedEffect(currentScreen) {
-                        if (currentScreen == "voice_room") {
+                    LaunchedEffect(currentScreen, activeRoomId) {
+                        if (currentScreen == "voice_room" || activeRoomId == null) {
                             com.example.service.VoiceRoomOverlayManager.stopService(this@MainActivity)
-                        } else if (activeRoomId != null && com.example.service.OverlayPermissionHelper.canDrawOverlays(this@MainActivity)) {
+                        } else if (com.example.service.OverlayPermissionHelper.canDrawOverlays(this@MainActivity)) {
                             com.example.service.VoiceRoomOverlayManager.startServiceIfPermitted(this@MainActivity)
                         }
                     }

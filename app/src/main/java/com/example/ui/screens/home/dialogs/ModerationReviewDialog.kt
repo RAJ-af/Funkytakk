@@ -50,9 +50,15 @@ import com.example.RoomReportItem
 import com.example.MomentDto
 import com.example.SupabaseClient
 import com.example.SupabaseSessionManager
+import com.example.FeedbackPostDto
+import com.example.FeedbackReplyDto
+import com.example.SupportChatManager
 import com.example.UserProfile
+import com.example.repository.FeedbackRepository
 import com.example.repository.MomentsRepository
 import com.example.ui.components.*
+import com.example.ui.screens.FeedbackKindChip
+import com.example.ui.screens.FeedbackStatusChip
 import com.example.ui.screens.home.models.DarkText
 import com.example.ui.screens.home.models.GraySubtitle
 import com.example.ui.theme.GoldPrimary
@@ -494,10 +500,11 @@ fun ModerationReviewDialog(
                     }
 
                     // Admin Navigation Tabs
-                    PrimaryTabRow(
+                    PrimaryScrollableTabRow(
                         selectedTabIndex = selectedAdminTab,
                         containerColor = funkyColors.surface,
                         contentColor = funkyColors.mango,
+                        edgePadding = 12.dp,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Tab(
@@ -557,6 +564,17 @@ fun ModerationReviewDialog(
                                     SoftStarIcon(size = 16.dp, color = funkyColors.mango)
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text("Badges", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                            }
+                        )
+                        Tab(
+                            selected = selectedAdminTab == 4,
+                            onClick = { selectedAdminTab = 4 },
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    SoftDocumentIcon(size = 16.dp, color = Color(0xFF10B981))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Feedback Inbox", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                 }
                             }
                         )
@@ -776,6 +794,14 @@ fun ModerationReviewDialog(
                                 supabaseProfiles = supabaseProfiles,
                                 onBadgeModified = { fetchAllData() }
                             )
+                        }
+                    } else if (selectedAdminTab == 4) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .weight(1f)
+                        ) {
+                            AdminFeedbackInboxView()
                         }
                     }
                 }
@@ -2961,6 +2987,462 @@ fun AdminBadgesManagementView(
                                         }
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AdminFeedbackInboxView() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val funkyColors = LocalFunkyColors.current
+
+    var kindFilter by remember { mutableStateOf<String?>(null) } // null = All, "bug", "feature"
+    var statusFilter by remember { mutableStateOf<String?>(null) } // null = All, "open", "planned", ...
+    var items by remember { mutableStateOf<List<FeedbackPostDto>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var selectedFeedbackId by remember { mutableStateOf<Long?>(null) }
+
+    fun loadFeedback() {
+        scope.launch {
+            isLoading = true
+            FeedbackRepository.adminListFeedback(
+                context = context,
+                kind = kindFilter,
+                status = statusFilter,
+                limit = 30,
+                offset = 0
+            ).onSuccess { list ->
+                items = list
+            }.onFailure { err ->
+                Toast.makeText(context, err.message ?: "Failed to load feedback", Toast.LENGTH_SHORT).show()
+            }
+            isLoading = false
+        }
+    }
+
+    LaunchedEffect(kindFilter, statusFilter) {
+        loadFeedback()
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Kind filter row (All / Bugs / Features)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            listOf(null to "All", "bug" to "Bugs", "feature" to "Features").forEach { (key, label) ->
+                val active = kindFilter == key
+                Surface(
+                    onClick = { kindFilter = key },
+                    shape = RoundedCornerShape(99.dp),
+                    color = if (active) funkyColors.mango else funkyColors.surface,
+                    border = BorderStroke(1.dp, if (active) funkyColors.mango else funkyColors.line)
+                ) {
+                    Text(
+                        text = label,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (active) funkyColors.onMango else funkyColors.ink,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.weight(1f))
+            IconButton(onClick = { loadFeedback() }) {
+                SoftRefreshIcon(size = 18.dp, color = funkyColors.ink)
+            }
+        }
+
+        // Status filter row
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            val statuses = listOf(
+                null to "All Statuses",
+                "open" to "Open",
+                "planned" to "Planned",
+                "in_progress" to "In Progress",
+                "done" to "Done",
+                "declined" to "Declined",
+                "duplicate" to "Duplicate"
+            )
+            items(statuses) { (key, label) ->
+                val active = statusFilter == key
+                Surface(
+                    onClick = { statusFilter = key },
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (active) funkyColors.soft else funkyColors.surface,
+                    border = BorderStroke(1.dp, if (active) funkyColors.mango else funkyColors.line)
+                ) {
+                    Text(
+                        text = label,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (active) funkyColors.ink else funkyColors.mute,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        if (isLoading && items.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = funkyColors.mango)
+            }
+        } else if (items.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                Text("No feedback items match this filter.", fontSize = 13.sp, color = funkyColors.mute)
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(items, key = { it.id }) { item ->
+                    Card(
+                        onClick = { selectedFeedbackId = item.id },
+                        colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, funkyColors.line),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                FeedbackKindChip(kind = item.kind)
+                                FeedbackStatusChip(status = item.status)
+                                Spacer(modifier = Modifier.weight(1f))
+                                if (item.kind == "feature") {
+                                    Text(
+                                        text = "${item.votes_count} votes",
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = funkyColors.mango
+                                    )
+                                }
+                                Text(
+                                    text = SupportChatManager.formatMessageTime(item.created_at),
+                                    fontSize = 11.sp,
+                                    color = funkyColors.mute
+                                )
+                            }
+
+                            Text(
+                                text = item.title,
+                                fontSize = 14.5.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = funkyColors.ink,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+
+                            if (item.body.isNotBlank()) {
+                                Text(
+                                    text = item.body,
+                                    fontSize = 12.sp,
+                                    color = funkyColors.mute,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            val authorText = item.author?.name?.takeIf { it.isNotBlank() }
+                                ?: item.author?.username?.takeIf { it.isNotBlank() }
+                                ?: item.author?.id?.take(8)
+                                ?: "User"
+                            val diagText = listOfNotNull(
+                                item.app_version?.takeIf { it.isNotBlank() },
+                                item.device_info?.takeIf { it.isNotBlank() }
+                            ).joinToString(" · ")
+
+                            Text(
+                                text = if (diagText.isNotBlank()) "By $authorText · $diagText" else "By $authorText · ${item.replies_count} replies",
+                                fontSize = 11.sp,
+                                color = funkyColors.mute,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    selectedFeedbackId?.let { fId ->
+        AdminFeedbackDetailDialog(
+            feedbackId = fId,
+            onDismiss = {
+                selectedFeedbackId = null
+                loadFeedback()
+            }
+        )
+    }
+}
+
+@Composable
+private fun AdminFeedbackDetailDialog(
+    feedbackId: Long,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val funkyColors = LocalFunkyColors.current
+
+    var post by remember { mutableStateOf<FeedbackPostDto?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
+    var selectedStatus by remember { mutableStateOf("open") }
+    var statusNote by remember { mutableStateOf("") }
+    var isUpdatingStatus by remember { mutableStateOf(false) }
+    var replyBody by remember { mutableStateOf("") }
+    var isSendingReply by remember { mutableStateOf(false) }
+
+    fun loadDetail() {
+        scope.launch {
+            isLoading = true
+            FeedbackRepository.getFeedback(context, feedbackId)
+                .onSuccess { dto ->
+                    post = dto
+                    selectedStatus = dto.status
+                }
+                .onFailure { err ->
+                    Toast.makeText(context, err.message ?: "Could not load item", Toast.LENGTH_SHORT).show()
+                }
+            isLoading = false
+        }
+    }
+
+    LaunchedEffect(feedbackId) {
+        loadDetail()
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(14.dp),
+            shape = RoundedCornerShape(24.dp),
+            color = funkyColors.bg,
+            border = BorderStroke(1.dp, funkyColors.line)
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(funkyColors.surface)
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Feedback #$feedbackId",
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = funkyColors.ink
+                    )
+                    IconButton(onClick = onDismiss) {
+                        SoftCloseIcon(size = 18.dp, color = funkyColors.ink)
+                    }
+                }
+                HorizontalDivider(color = funkyColors.line)
+
+                if (isLoading && post == null) {
+                    Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = funkyColors.mango)
+                    }
+                } else if (post != null) {
+                    val item = post!!
+                    LazyColumn(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        item {
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
+                                shape = RoundedCornerShape(16.dp),
+                                border = BorderStroke(1.dp, funkyColors.line),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        FeedbackKindChip(kind = item.kind)
+                                        FeedbackStatusChip(status = item.status)
+                                    }
+                                    Text(item.title, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = funkyColors.ink)
+                                    if (item.body.isNotBlank()) {
+                                        Text(item.body, fontSize = 13.5.sp, color = funkyColors.ink, lineHeight = 19.sp)
+                                    }
+                                    val reporter = item.author?.name ?: item.author?.username ?: item.author?.id ?: "Unknown"
+                                    Text("Reporter: $reporter", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = funkyColors.mute)
+                                    if (!item.app_version.isNullOrBlank() || !item.device_info.isNullOrBlank()) {
+                                        Text(
+                                            text = "Device: ${item.app_version ?: "-"} · ${item.device_info ?: "-"}",
+                                            fontSize = 11.sp,
+                                            color = funkyColors.mute
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Status Update Card
+                        item {
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
+                                shape = RoundedCornerShape(16.dp),
+                                border = BorderStroke(1.dp, funkyColors.line),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Text("Set Status & Team Note", fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold, color = funkyColors.ink)
+                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        val statuses = listOf("open", "planned", "in_progress", "done", "declined", "duplicate")
+                                        items(statuses) { st ->
+                                            val active = selectedStatus == st
+                                            Surface(
+                                                onClick = { selectedStatus = st },
+                                                shape = RoundedCornerShape(10.dp),
+                                                color = if (active) funkyColors.mango else funkyColors.soft,
+                                                border = BorderStroke(1.dp, if (active) funkyColors.mango else funkyColors.line)
+                                            ) {
+                                                Text(
+                                                    text = st.replace('_', ' '),
+                                                    fontSize = 11.5.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (active) funkyColors.onMango else funkyColors.ink,
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                    OutlinedTextField(
+                                        value = statusNote,
+                                        onValueChange = { if (it.length <= 500) statusNote = it },
+                                        placeholder = { Text("Optional team note (posted as reply to user)...", fontSize = 12.5.sp) },
+                                        maxLines = 3,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(12.dp)
+                                    )
+                                    Button(
+                                        onClick = {
+                                            isUpdatingStatus = true
+                                            scope.launch {
+                                                FeedbackRepository.adminSetFeedbackStatus(
+                                                    context = context,
+                                                    id = feedbackId,
+                                                    status = selectedStatus,
+                                                    note = statusNote.trim().takeIf { it.isNotEmpty() }
+                                                ).onSuccess {
+                                                    statusNote = ""
+                                                    Toast.makeText(context, "Status updated to $selectedStatus", Toast.LENGTH_SHORT).show()
+                                                    loadDetail()
+                                                }.onFailure { err ->
+                                                    Toast.makeText(context, err.message ?: "Update failed", Toast.LENGTH_SHORT).show()
+                                                }
+                                                isUpdatingStatus = false
+                                            }
+                                        },
+                                        enabled = !isUpdatingStatus,
+                                        colors = ButtonDefaults.buttonColors(containerColor = funkyColors.mango, contentColor = funkyColors.onMango),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = if (isUpdatingStatus) "Updating..." else "Update Status",
+                                            fontWeight = FontWeight.ExtraBold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        item {
+                            Text("Thread (${item.replies.size})", fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold, color = funkyColors.ink)
+                        }
+
+                        items(item.replies, key = { it.id }) { rep: FeedbackReplyDto ->
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (rep.is_staff) funkyColors.soft else funkyColors.surface,
+                                border = BorderStroke(1.dp, if (rep.is_staff) funkyColors.mango.copy(alpha = 0.5f) else funkyColors.line),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text(
+                                            text = if (rep.is_staff) "Funkytalk Team" else (rep.author?.name ?: rep.author?.username ?: "User"),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = if (rep.is_staff) funkyColors.mango else funkyColors.ink
+                                        )
+                                        Text(SupportChatManager.formatMessageTime(rep.created_at), fontSize = 10.5.sp, color = funkyColors.mute)
+                                    }
+                                    Text(rep.body, fontSize = 13.sp, color = funkyColors.ink)
+                                }
+                            }
+                        }
+                    }
+
+                    Surface(color = funkyColors.surface, border = BorderStroke(1.dp, funkyColors.line)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = replyBody,
+                                onValueChange = { if (it.length <= 1000) replyBody = it },
+                                placeholder = { Text("Reply as FunkyTalk Team...", fontSize = 13.sp) },
+                                maxLines = 3,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(16.dp)
+                            )
+                            Button(
+                                onClick = {
+                                    val txt = replyBody.trim()
+                                    if (txt.isEmpty()) return@Button
+                                    isSendingReply = true
+                                    scope.launch {
+                                        FeedbackRepository.addFeedbackReply(context, feedbackId, txt)
+                                            .onSuccess {
+                                                replyBody = ""
+                                                loadDetail()
+                                            }
+                                            .onFailure { err ->
+                                                Toast.makeText(context, err.message ?: "Reply failed", Toast.LENGTH_SHORT).show()
+                                            }
+                                        isSendingReply = false
+                                    }
+                                },
+                                enabled = replyBody.isNotBlank() && !isSendingReply,
+                                colors = ButtonDefaults.buttonColors(containerColor = funkyColors.mango, contentColor = funkyColors.onMango),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Text(if (isSendingReply) "..." else "Send", fontWeight = FontWeight.Bold)
                             }
                         }
                     }

@@ -121,6 +121,7 @@ fun AuthScreen(
                 viewModel.loginWithGoogle(
                     context = context,
                     idToken = idToken,
+                    isFromSignUpMode = isSignUpMode,
                     onSuccess = onAuthSuccess
                 )
             } else {
