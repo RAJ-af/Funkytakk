@@ -65,8 +65,6 @@ object BackupCrypto {
     private const val NONCE_SIZE_BYTES = 12
     private const val CIPHER_TRANSFORMATION = "AES/GCM/NoPadding"
 
-    private const val KEYSTORE_ALIAS_BK = "funkytalk_bk_keystore_alias"
-    private const val KEYSTORE_PREFS_NAME = "funkytalk_bk_keystore_prefs"
     private const val PREF_WRAPPED_BK = "wrapped_bk_keystore"
 
     fun generateMasterKey(): ByteArray {
@@ -182,9 +180,10 @@ object BackupCrypto {
     // Android Keystore persistence for Master Key BK (Unattended Auto Backup)
     // ------------------------------------------------------------------
 
-    fun saveMasterKeyToKeystore(context: Context, masterKey: ByteArray) {
+    fun saveMasterKeyToKeystore(context: Context, masterKey: ByteArray, uid: String? = null) {
+        val resolvedUid = uid?.takeIf { it.isNotBlank() } ?: com.example.ActiveUserManager.getActiveUid(context) ?: return
         try {
-            val wrapperKey = getOrCreateKeystoreWrapperKey()
+            val wrapperKey = getOrCreateKeystoreWrapperKey(resolvedUid)
             val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
             cipher.init(Cipher.ENCRYPT_MODE, wrapperKey)
             val iv = cipher.iv
@@ -195,7 +194,7 @@ object BackupCrypto {
             buffer.put(encryptedBytes)
 
             val base64 = Base64.getEncoder().encodeToString(buffer.array())
-            context.getSharedPreferences(KEYSTORE_PREFS_NAME, Context.MODE_PRIVATE)
+            context.getSharedPreferences(com.example.ActiveUserManager.backupKeystorePrefsName(resolvedUid), Context.MODE_PRIVATE)
                 .edit()
                 .putString(PREF_WRAPPED_BK, base64)
                 .apply()
@@ -204,8 +203,9 @@ object BackupCrypto {
         }
     }
 
-    fun loadMasterKeyFromKeystore(context: Context): ByteArray? {
-        val base64 = context.getSharedPreferences(KEYSTORE_PREFS_NAME, Context.MODE_PRIVATE)
+    fun loadMasterKeyFromKeystore(context: Context, uid: String? = null): ByteArray? {
+        val resolvedUid = uid?.takeIf { it.isNotBlank() } ?: com.example.ActiveUserManager.getActiveUid(context) ?: return null
+        val base64 = context.getSharedPreferences(com.example.ActiveUserManager.backupKeystorePrefsName(resolvedUid), Context.MODE_PRIVATE)
             .getString(PREF_WRAPPED_BK, null) ?: return null
         return try {
             val payloadBytes = Base64.getDecoder().decode(base64)
@@ -218,7 +218,7 @@ object BackupCrypto {
             val ciphertext = ByteArray(buffer.remaining())
             buffer.get(ciphertext)
 
-            val wrapperKey = getOrCreateKeystoreWrapperKey()
+            val wrapperKey = getOrCreateKeystoreWrapperKey(resolvedUid)
             val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
             cipher.init(Cipher.DECRYPT_MODE, wrapperKey, GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv))
 
@@ -231,9 +231,10 @@ object BackupCrypto {
 
     private const val PREF_WRAPPED_VAULT_KEY = "wrapped_vault_key_keystore"
 
-    fun saveVaultKeyToKeystore(context: Context, vaultKey: ByteArray) {
+    fun saveVaultKeyToKeystore(context: Context, vaultKey: ByteArray, uid: String? = null) {
+        val resolvedUid = uid?.takeIf { it.isNotBlank() } ?: com.example.ActiveUserManager.getActiveUid(context) ?: return
         try {
-            val wrapperKey = getOrCreateKeystoreWrapperKey()
+            val wrapperKey = getOrCreateKeystoreWrapperKey(resolvedUid)
             val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
             cipher.init(Cipher.ENCRYPT_MODE, wrapperKey)
             val iv = cipher.iv
@@ -244,7 +245,7 @@ object BackupCrypto {
             buffer.put(encryptedBytes)
 
             val base64 = Base64.getEncoder().encodeToString(buffer.array())
-            context.getSharedPreferences(KEYSTORE_PREFS_NAME, Context.MODE_PRIVATE)
+            context.getSharedPreferences(com.example.ActiveUserManager.backupKeystorePrefsName(resolvedUid), Context.MODE_PRIVATE)
                 .edit()
                 .putString(PREF_WRAPPED_VAULT_KEY, base64)
                 .apply()
@@ -253,8 +254,9 @@ object BackupCrypto {
         }
     }
 
-    fun loadVaultKeyFromKeystore(context: Context): ByteArray? {
-        val base64 = context.getSharedPreferences(KEYSTORE_PREFS_NAME, Context.MODE_PRIVATE)
+    fun loadVaultKeyFromKeystore(context: Context, uid: String? = null): ByteArray? {
+        val resolvedUid = uid?.takeIf { it.isNotBlank() } ?: com.example.ActiveUserManager.getActiveUid(context) ?: return null
+        val base64 = context.getSharedPreferences(com.example.ActiveUserManager.backupKeystorePrefsName(resolvedUid), Context.MODE_PRIVATE)
             .getString(PREF_WRAPPED_VAULT_KEY, null) ?: return null
         return try {
             val payloadBytes = Base64.getDecoder().decode(base64)
@@ -267,7 +269,7 @@ object BackupCrypto {
             val ciphertext = ByteArray(buffer.remaining())
             buffer.get(ciphertext)
 
-            val wrapperKey = getOrCreateKeystoreWrapperKey()
+            val wrapperKey = getOrCreateKeystoreWrapperKey(resolvedUid)
             val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
             cipher.init(Cipher.DECRYPT_MODE, wrapperKey, GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv))
 
@@ -278,24 +280,41 @@ object BackupCrypto {
         }
     }
 
-    fun clearMasterKeyFromKeystore(context: Context) {
-        context.getSharedPreferences(KEYSTORE_PREFS_NAME, Context.MODE_PRIVATE)
+    fun clearMasterKeyFromKeystore(context: Context, uid: String? = null) {
+        val resolvedUid = uid?.takeIf { it.isNotBlank() } ?: com.example.ActiveUserManager.getActiveUid(context) ?: return
+        context.getSharedPreferences(com.example.ActiveUserManager.backupKeystorePrefsName(resolvedUid), Context.MODE_PRIVATE)
             .edit()
             .remove(PREF_WRAPPED_BK)
             .remove(PREF_WRAPPED_VAULT_KEY)
             .apply()
     }
 
-    private fun getOrCreateKeystoreWrapperKey(): SecretKey {
+    fun wipeForUid(context: Context, uid: String) {
+        if (uid.isBlank()) return
+        com.example.LegacySecurityMigration.deleteSharedPrefsCompat(
+            context,
+            com.example.ActiveUserManager.backupKeystorePrefsName(uid)
+        )
+        try {
+            val alias = com.example.ActiveUserManager.backupKeystoreAlias(uid)
+            val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            if (ks.containsAlias(alias)) ks.deleteEntry(alias)
+        } catch (e: Exception) {
+            Log.w(TAG, "Error deleting BackupCrypto KeyStore alias for $uid", e)
+        }
+    }
+
+    private fun getOrCreateKeystoreWrapperKey(uid: String): SecretKey {
+        val alias = com.example.ActiveUserManager.backupKeystoreAlias(uid)
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        if (keyStore.containsAlias(KEYSTORE_ALIAS_BK)) {
-            val entry = keyStore.getEntry(KEYSTORE_ALIAS_BK, null) as? KeyStore.SecretKeyEntry
+        if (keyStore.containsAlias(alias)) {
+            val entry = keyStore.getEntry(alias, null) as? KeyStore.SecretKeyEntry
             if (entry != null) return entry.secretKey
         }
 
         val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
         val builder = KeyGenParameterSpec.Builder(
-            KEYSTORE_ALIAS_BK,
+            alias,
             KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
         )
             .setBlockModes(KeyProperties.BLOCK_MODE_GCM)

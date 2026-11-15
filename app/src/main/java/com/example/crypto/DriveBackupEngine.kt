@@ -745,7 +745,8 @@ object DriveBackupEngine {
             // Process media in background: missing media shows placeholder, never crashes
             val totalMediaChunks = mediaChunks.size
             var processedMedia = 0
-            val mediaDir = File(context.filesDir, "media").apply { mkdirs() }
+            val activeUid = com.example.ActiveUserManager.requireActiveUid(context)
+            val mediaDir = com.example.ActiveUserManager.restoredMediaDir(context, activeUid).apply { mkdirs() }
 
             for (chunkMeta in mediaChunks) {
                 processedMedia++

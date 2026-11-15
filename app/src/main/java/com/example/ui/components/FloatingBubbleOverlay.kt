@@ -263,11 +263,10 @@ fun FloatingBubbleLayout(
             Box(
                 modifier = Modifier
                     .size(48.dp)
+                    .clip(CircleShape)
+                    .clickable { onShortTap() }
                     .testTag("dynamic_island_return_room")
-                    .semantics { contentDescription = "Return to Voice Room" }
-                    .pointerInput(Unit) {
-                        detectTapGestures(onTap = { onShortTap() })
-                    },
+                    .semantics { contentDescription = "Return to Voice Room" },
                 contentAlignment = Alignment.Center
             ) {
                 Canvas(modifier = Modifier.size(44.dp)) {

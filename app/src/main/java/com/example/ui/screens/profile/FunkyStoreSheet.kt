@@ -60,7 +60,13 @@ fun FunkyStoreSheet(
             CosmeticsManager.getOrCreateWallet(context)
             val type = tabTypes[selectedTabIndex]
             val res = CosmeticsManager.getStoreItems(context, type = type)
-            storeItems = res.getOrDefault(emptyList())
+            val items = res.getOrDefault(emptyList())
+            items.filter { it.item_type == "avatar_frame" }.forEach { item ->
+                CosmeticsManager.preloadFrameAsset(context, item.preview_url)
+                val parsed = runCatching { CosmeticsConfigParser.parseAvatarFrame(item.config) }.getOrNull()
+                CosmeticsManager.preloadFrameAsset(context, parsed?.asset?.url)
+            }
+            storeItems = items
             isLoading = false
         }
     }
@@ -376,15 +382,39 @@ private fun StoreItemCard(
                         }
                     }
                     "avatar_frame" -> {
-                        val config = remember(item.config) {
-                            CosmeticsConfigParser.parseAvatarFrame(item.config)
-                        }
-                        AvatarFrame(config = config, sizeDp = 56.dp) {
+                        val context = LocalContext.current
+                        var previewFailed by remember(item.preview_url) { mutableStateOf(false) }
+                        if (!item.preview_url.isNullOrBlank() && !previewFailed) {
+                            val req = remember(context, item.preview_url) {
+                                coil.request.ImageRequest.Builder(context)
+                                    .data(item.preview_url)
+                                    .diskCachePolicy(coil.request.CachePolicy.ENABLED)
+                                    .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+                                    .apply {
+                                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                                            decoderFactory(coil.decode.ImageDecoderDecoder.Factory())
+                                        }
+                                    }
+                                    .listener(onError = { _, _ -> previewFailed = true })
+                                    .build()
+                            }
                             AsyncImage(
-                                model = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200",
-                                contentDescription = "Avatar",
-                                modifier = Modifier.fillMaxSize().clip(CircleShape)
+                                model = req,
+                                contentDescription = item.name,
+                                modifier = Modifier.fillMaxSize().padding(4.dp),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Fit
                             )
+                        } else {
+                            val config = remember(item.config) {
+                                CosmeticsConfigParser.parseAvatarFrame(item.config)
+                            }
+                            AvatarFrame(config = config, sizeDp = 52.dp, enableFrameAnimation = true) {
+                                AsyncImage(
+                                    model = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200",
+                                    contentDescription = "Avatar",
+                                    modifier = Modifier.fillMaxSize().clip(CircleShape)
+                                )
+                            }
                         }
                     }
                     "name_effect" -> {
@@ -394,7 +424,9 @@ private fun StoreItemCard(
                         StyledName(
                             text = item.name,
                             config = config,
-                            fontSize = 16.sp
+                            fontSize = 16.sp,
+                            defaultColor = funkyColors.ink,
+                            animate = true
                         )
                     }
                     "sticker_pack" -> {

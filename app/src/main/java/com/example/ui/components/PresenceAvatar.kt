@@ -133,13 +133,20 @@ fun PresenceAvatar(
             }
 
             // Outer Frame Rendering (if user has equipped a frame)
+            var isAssetLoadFailed by remember(effectiveFrame?.asset?.url) { mutableStateOf(false) }
+            val asset = effectiveFrame?.asset
+            val isAssetFrame = effectiveFrame != null &&
+                effectiveFrame.kind.equals("asset", ignoreCase = true) &&
+                asset != null &&
+                asset.url.isNotBlank() &&
+                !isAssetLoadFailed
+
             if (effectiveFrame != null) {
                 val context = LocalContext.current
-                val asset = effectiveFrame.asset
-                var isAssetLoadFailed by remember(asset?.url) { mutableStateOf(false) }
 
-                if (asset != null && asset.url.isNotBlank() && !isAssetLoadFailed) {
-                    val frameSize = size * asset.scale
+                if (isAssetFrame && asset != null) {
+                    val ratio = asset.avatarRatio.coerceIn(0.25f, 1.0f)
+                    val frameSize = size / ratio
                     val imageRequest = remember(context, asset.url, enableFrameAnimation) {
                         ImageRequest.Builder(context)
                             .data(asset.url)
@@ -147,8 +154,10 @@ fun PresenceAvatar(
                             .memoryCachePolicy(CachePolicy.ENABLED)
                             .crossfade(true)
                             .apply {
-                                if (enableFrameAnimation && (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P)) {
+                                if (enableFrameAnimation && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
                                     decoderFactory(coil.decode.ImageDecoderDecoder.Factory())
+                                } else {
+                                    decoderFactory(coil.decode.BitmapFactoryDecoder.Factory())
                                 }
                             }
                             .listener(
@@ -157,14 +166,14 @@ fun PresenceAvatar(
                             .build()
                     }
 
-                    // Transparent Frame Image Asset Overlaid ON TOP of Avatar
+                    // Transparent Frame Image Asset Overlaid ON TOP of Avatar (zIndex 2f)
                     AsyncImage(
                         model = imageRequest,
                         contentDescription = "Avatar Frame Asset",
                         modifier = Modifier
                             .size(frameSize)
                             .offset(x = asset.offset.xDp.dp, y = asset.offset.yDp.dp)
-                            .zIndex(5f),
+                            .zIndex(2f),
                         contentScale = ContentScale.Fit
                     )
                 } else {
@@ -203,10 +212,11 @@ fun PresenceAvatar(
                         pScale
                     } else 1f
 
-                    // Frame Canvas: Ring & Shapes
+                    // Frame Canvas: Ring & Shapes (zIndex 2f)
                     Canvas(
                         modifier = Modifier
                             .fillMaxSize()
+                            .zIndex(2f)
                             .scale(pulseScale)
                             .rotate(rotationAngle)
                     ) {
@@ -268,7 +278,7 @@ fun PresenceAvatar(
                         }
                     }
 
-                    // Ornament Emoji
+                    // Ornament Emoji (zIndex 6f)
                     effectiveFrame.ornament?.let { orn ->
                         val align = when (orn.position) {
                             "top" -> Alignment.TopCenter
@@ -288,7 +298,7 @@ fun PresenceAvatar(
                 }
             }
 
-            // Avatar Core Container with Ring
+            // Avatar Core Container with Ring (zIndex 1f)
             val ringModifier = when {
                 effectiveFrame != null -> Modifier // Frame takes precedence
                 isSpeaking -> Modifier.border(2.5.dp, Color(0xFF10B981), CircleShape)
@@ -297,6 +307,7 @@ fun PresenceAvatar(
             }
 
             val paddingInsideRing = when {
+                isAssetFrame -> 0.dp // Asset frame sits around unpadded avatar
                 effectiveFrame != null -> (effectiveFrame.ring.widthDp * (size.value / 48f).coerceIn(0.6f, 1.8f) + 1f).dp
                 isSpeaking || isOnline -> 3.dp
                 else -> 0.dp
@@ -305,6 +316,7 @@ fun PresenceAvatar(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .zIndex(1f)
                     .then(ringModifier)
                     .padding(paddingInsideRing)
                     .clip(CircleShape)
@@ -317,7 +329,7 @@ fun PresenceAvatar(
                 )
             }
 
-            // Country Flag Badge Overlay only if explicitly requested (Bottom-Right corner)
+            // Country Flag Badge Overlay only if explicitly requested (Bottom-Right corner, zIndex 6f)
             if (showFlagBadge && !finalCountryCode.isNullOrBlank()) {
                 val flagBadgeSize = (size.value * 0.32f).dp.coerceAtLeast(15.dp)
                 val surfaceColor = com.example.ui.theme.LocalFunkyColors.current.surface
@@ -325,7 +337,7 @@ fun PresenceAvatar(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .offset(x = 2.dp, y = 2.dp)
-                        .zIndex(5f)
+                        .zIndex(6f)
                         .size(flagBadgeSize)
                         .background(surfaceColor, CircleShape)
                         .border(2.dp, surfaceColor, CircleShape),

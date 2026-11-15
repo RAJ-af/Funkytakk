@@ -600,67 +600,23 @@ fun MomentV2Slide(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Box(modifier = Modifier.size(40.dp)) {
-                    val avatarModel = resolveAvatarModel(moment.author.avatar_url)
-                    if (avatarModel != null) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(context)
-                                .data(avatarModel)
-                                .crossfade(true)
-                                .build(),
-                            contentDescription = authorName,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .border(1.5.dp, overlayInk, CircleShape)
-                        )
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(funkyColors.mango)
-                                .border(1.5.dp, overlayInk, CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = authorName.firstOrNull()?.uppercase() ?: "U",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = funkyColors.onMango
-                            )
-                        }
-                    }
-
-                    if (flagCode.isNotBlank()) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .size(16.dp)
-                                .clip(CircleShape)
-                                .background(funkyColors.surface)
-                                .border(1.5.dp, overlayInk, CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircleFlag(
-                                countryCode = flagCode,
-                                allowProgramming = false,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .clip(CircleShape)
-                            )
-                        }
-                    }
-                }
+                com.example.ui.components.PresenceAvatar(
+                    avatarUrl = moment.author.avatar_url,
+                    size = 40.dp,
+                    userId = moment.author.id,
+                    countryCode = flagCode.takeIf { it.isNotBlank() },
+                    showFlagBadge = flagCode.isNotBlank(),
+                    enableFrameAnimation = true
+                )
 
                 Column(modifier = Modifier.weight(1f, fill = false)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = authorName,
+                        com.example.store.DecoratedUserName(
+                            userId = moment.author.id,
+                            name = authorName,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
-                            color = overlayInk,
+                            defaultColor = overlayInk,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -854,6 +810,12 @@ fun MomentCommentsBottomSheet(
             limit = 30,
             offset = offset
         ).onSuccess { list ->
+            val commentAuthorIds = list.map { it.author.id }.filter { it.isNotBlank() }.distinct()
+            if (commentAuthorIds.isNotEmpty()) {
+                coroutineScope.launch {
+                    com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, commentAuthorIds)
+                }
+            }
             if (reset) {
                 commentsList.clear()
                 commentsList.addAll(list)
@@ -1066,7 +1028,9 @@ fun MomentCommentsBottomSheet(
                         }
                     }
                     else -> {
+                        val commentsListState = androidx.compose.foundation.lazy.rememberLazyListState()
                         LazyColumn(
+                            state = commentsListState,
                             modifier = Modifier
                                 .fillMaxSize()
                                 .padding(vertical = 4.dp),
@@ -1082,6 +1046,7 @@ fun MomentCommentsBottomSheet(
                                     translatedText = translatedMap[comment.id],
                                     replies = replies,
                                     isLoadingReplies = isLoadingReplies,
+                                    animateNameEffects = !commentsListState.isScrollInProgress,
                                     onToggleLike = { targetComment ->
                                         val isReply = targetComment.parent_id != null
                                         val prevLiked = targetComment.liked_by_me
@@ -1155,6 +1120,12 @@ fun MomentCommentsBottomSheet(
                                                     offset = 0
                                                 ).onSuccess { loaded ->
                                                     expandedRepliesMap[rootComment.id] = loaded
+                                                    val replyAuthorIds = loaded.map { it.author.id }.filter { it.isNotBlank() }.distinct()
+                                                    if (replyAuthorIds.isNotEmpty()) {
+                                                        coroutineScope.launch {
+                                                            com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, replyAuthorIds)
+                                                        }
+                                                    }
                                                 }.onFailure { err ->
                                                     Toast.makeText(
                                                         context,
@@ -1762,7 +1733,8 @@ fun CommentItemRow(
     onReply: (MomentCommentDto) -> Unit,
     onDelete: (MomentCommentDto) -> Unit,
     onTranslate: (MomentCommentDto) -> Unit,
-    isNestedReply: Boolean = false
+    isNestedReply: Boolean = false,
+    animateNameEffects: Boolean = true
 ) {
     val context = LocalContext.current
     val funkyColors = com.example.ui.theme.LocalFunkyColors.current
@@ -1822,11 +1794,13 @@ fun CommentItemRow(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(7.dp)
             ) {
-                Text(
-                    text = authorName,
+                com.example.store.DecoratedUserName(
+                    userId = comment.author.id,
+                    name = authorName,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
-                    color = inkColor
+                    defaultColor = inkColor,
+                    animate = animateNameEffects
                 )
                 Text(
                     text = timeText,
@@ -2063,6 +2037,7 @@ fun CommentItemRow(
                             onToggleLike = onToggleLike,
                             onAcceptCorrection = onAcceptCorrection,
                             onLoadReplies = onLoadReplies,
+                            animateNameEffects = animateNameEffects,
                             onReply = onReply,
                             onDelete = onDelete,
                             onTranslate = onTranslate,

@@ -54,24 +54,31 @@ object EncryptedChatRepository {
 
     private var conversationCollectJob: Job? = null
     private var realtimeListenerJob: Job? = null
+    private var vaultObserverJob: Job? = null
 
     @Volatile
     private var isInitialized = false
 
     fun init(context: Context) {
-        if (isInitialized) return
+        val appContext = context.applicationContext
+        VaultSecurityManager.init(appContext)
+        if (isInitialized) {
+            if (VaultSecurityManager.vaultStatus.value == VaultStatus.UNLOCKED && database == null) {
+                VaultSecurityManager.getActiveVaultKey(appContext)?.let { openDatabase(appContext, it) }
+            }
+            return
+        }
         isInitialized = true
 
-        VaultSecurityManager.init(context)
-
         // Observe vault status
-        scope.launch {
+        vaultObserverJob?.cancel()
+        vaultObserverJob = scope.launch {
             VaultSecurityManager.vaultStatus.collect { status ->
                 when (status) {
                     VaultStatus.UNLOCKED -> {
-                        val key = VaultSecurityManager.getActiveVaultKey()
+                        val key = VaultSecurityManager.getActiveVaultKey(appContext)
                         if (key != null) {
-                            openDatabase(context, key)
+                            openDatabase(appContext, key)
                         }
                     }
                     VaultStatus.LOCKED, VaultStatus.NOT_CONFIGURED -> {
@@ -82,13 +89,14 @@ object EncryptedChatRepository {
         }
 
         // Start listening to realtime events
-        startRealtimeListener(context)
+        startRealtimeListener(appContext)
     }
 
     private fun openDatabase(context: Context, vaultKey: ByteArray) {
         try {
-            database = EncryptedChatDatabase.getInstance(context, vaultKey)
-            Log.d(TAG, "SQLCipher EncryptedChatDatabase opened successfully.")
+            val uid = com.example.ActiveUserManager.getActiveUid(context) ?: return
+            database = EncryptedChatDatabase.getInstance(context, vaultKey, uid)
+            Log.d(TAG, "SQLCipher EncryptedChatDatabase opened successfully for UID $uid.")
 
             conversationCollectJob?.cancel()
             conversationCollectJob = scope.launch {
@@ -119,6 +127,11 @@ object EncryptedChatRepository {
         _conversations.value = emptyList()
         _totalUnreadCount.value = 0
         EncryptedChatDatabase.closeInstance()
+    }
+
+    fun resetForLogout() {
+        closeDatabase()
+        processedMessageIds.clear()
     }
 
     private fun startRealtimeListener(context: Context) {
@@ -708,7 +721,8 @@ object EncryptedChatRepository {
     }
 
     private fun saveLocalMediaFile(context: Context, messageId: String, bytes: ByteArray, mimeType: String): File {
-        val dir = File(context.filesDir, "encrypted_vault_media").apply { mkdirs() }
+        val uid = com.example.ActiveUserManager.requireActiveUid(context)
+        val dir = com.example.ActiveUserManager.mediaDir(context, uid).apply { mkdirs() }
         val ext = when {
             mimeType.contains("png") -> "png"
             mimeType.contains("jpg") || mimeType.contains("jpeg") -> "jpg"

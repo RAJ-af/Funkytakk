@@ -103,6 +103,7 @@ object SupabaseSessionManager {
         cachedAccessToken = realAccessToken
         cachedRefreshToken = refreshToken
         cachedUserId = resolvedUuid
+        ActiveUserManager.setActiveUid(resolvedUuid)
 
         getPrefs(context).edit().apply {
             if (realAccessToken != null) {
@@ -163,11 +164,15 @@ object SupabaseSessionManager {
     }
 
     fun getUserId(context: Context): String? {
-        if (cachedUserId != null && isValidUuid(cachedUserId)) return cachedUserId
+        if (cachedUserId != null && isValidUuid(cachedUserId)) {
+            ActiveUserManager.setActiveUid(cachedUserId)
+            return cachedUserId
+        }
 
         val stored = getPrefs(context).getString(KEY_USER_ID, null)
         if (isValidUuid(stored)) {
             cachedUserId = stored
+            ActiveUserManager.setActiveUid(stored)
             return stored
         }
 
@@ -176,6 +181,7 @@ object SupabaseSessionManager {
         val extractedUuid = extractUserIdFromJwt(token)
         if (extractedUuid != null) {
             cachedUserId = extractedUuid
+            ActiveUserManager.setActiveUid(extractedUuid)
             getPrefs(context).edit().putString(KEY_USER_ID, extractedUuid).apply()
             return extractedUuid
         }
@@ -289,7 +295,8 @@ object SupabaseSessionManager {
         cachedAccessToken = null
         cachedRefreshToken = null
         cachedUserId = null
-        getPrefs(context).edit().clear().apply()
+        ActiveUserManager.clear()
+        getPrefs(context).edit().clear().commit()
         try {
             NotificationsManager.clear()
         } catch (_: Exception) {}

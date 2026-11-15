@@ -143,6 +143,7 @@ object GroupChatRepository {
     private var allGroupsCollectJob: Job? = null
     private var realtimeListenerJob: Job? = null
     private var expiryCleanupJob: Job? = null
+    private var vaultObserverJob: Job? = null
 
     @Volatile
     private var isInitialized = false
@@ -191,15 +192,21 @@ object GroupChatRepository {
     }
 
     fun init(context: Context) {
-        if (isInitialized) return
+        val appContext = context.applicationContext
+        if (isInitialized) {
+            if (VaultSecurityManager.vaultStatus.value == VaultStatus.UNLOCKED && database == null) {
+                VaultSecurityManager.getActiveVaultKey(appContext)?.let { openDatabase(appContext, it) }
+            }
+            return
+        }
         isInitialized = true
 
-        val appContext = context.applicationContext
-        scope.launch {
+        vaultObserverJob?.cancel()
+        vaultObserverJob = scope.launch {
             VaultSecurityManager.vaultStatus.collect { status ->
                 when (status) {
                     VaultStatus.UNLOCKED -> {
-                        val key = VaultSecurityManager.getActiveVaultKey()
+                        val key = VaultSecurityManager.getActiveVaultKey(appContext)
                         if (key != null) {
                             openDatabase(appContext, key)
                         }
@@ -229,7 +236,8 @@ object GroupChatRepository {
 
     private fun openDatabase(context: Context, vaultKey: ByteArray) {
         try {
-            val db = EncryptedChatDatabase.getInstance(context, vaultKey)
+            val uid = ActiveUserManager.getActiveUid(context) ?: return
+            val db = EncryptedChatDatabase.getInstance(context, vaultKey, uid)
             database = db
             _databaseState.value = db
 
@@ -285,6 +293,15 @@ object GroupChatRepository {
         _joinedGroups.value = emptyList()
         _pendingInvites.value = emptyList()
         _allMyGroups.value = emptyList()
+    }
+
+    fun resetForLogout() {
+        closeDatabase()
+        activeOpenGroupId = null
+        _pendingInviteCode.value = null
+        processedRecipientIds.clear()
+        processedEventIds.clear()
+        userProfileCache.clear()
     }
 
     private fun startRealtimeListener(context: Context) {
@@ -1976,7 +1993,8 @@ object GroupChatRepository {
 
             // Save local decrypted copy immediately
             val ext = if (messageType == "voice") "m4a" else "jpg"
-            val localDir = File(context.filesDir, "encrypted_vault_media").apply { mkdirs() }
+            val localMediaUid = ActiveUserManager.requireActiveUid(context)
+            val localDir = ActiveUserManager.mediaDir(context, localMediaUid).apply { mkdirs() }
             val localFile = File(localDir, "group_$messageId.$ext")
             localFile.writeBytes(rawBytes)
 
@@ -2478,7 +2496,8 @@ object GroupChatRepository {
             if (encBytes != null && encBytes.isNotEmpty()) {
                 val rawBytes = E2EEMediaManager.decryptMediaPayload(encBytes, keyBytes, nonceBytes)
                 val ext = if (isVoice) "m4a" else "jpg"
-                val localDir = File(context.filesDir, "encrypted_vault_media").apply { mkdirs() }
+                val activeUid = ActiveUserManager.requireActiveUid(context)
+                val localDir = ActiveUserManager.mediaDir(context, activeUid).apply { mkdirs() }
                 val localFile = File(localDir, "group_${messageId}.$ext")
                 localFile.writeBytes(rawBytes)
                 localFile.absolutePath

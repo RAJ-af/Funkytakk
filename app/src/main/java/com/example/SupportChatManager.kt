@@ -16,7 +16,6 @@ import java.util.*
 
 object SupportChatManager {
     private const val TAG = "SupportChatManager"
-    private const val PREFS_NAME = "funkytalk_support_prefs"
     private const val KEY_LAST_AUTO_OPEN_ADMIN_MSG_ID = "last_auto_open_admin_msg_id"
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -51,11 +50,25 @@ object SupportChatManager {
 
     private var subscribedConversationId: String? = null
     private var isListening = false
+    @Volatile
+    private var initializedUid: String? = null
     private var lastAutoOpenMsgId: String = ""
 
     fun init(context: Context) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        lastAutoOpenMsgId = prefs.getString(KEY_LAST_AUTO_OPEN_ADMIN_MSG_ID, "").orEmpty()
+        val uid = ActiveUserManager.getActiveUid(context)
+        if (uid == null) {
+            resetForLogout()
+            return
+        }
+        if (initializedUid != uid) {
+            resetStateFlows()
+            initializedUid = uid
+            val prefs = context.applicationContext.getSharedPreferences(
+                ActiveUserManager.supportPrefsName(uid),
+                Context.MODE_PRIVATE
+            )
+            lastAutoOpenMsgId = prefs.getString(KEY_LAST_AUTO_OPEN_ADMIN_MSG_ID, "").orEmpty()
+        }
 
         if (!isListening) {
             isListening = true
@@ -179,10 +192,16 @@ object SupportChatManager {
 
                         if (isSessionOpen && hasUnread && latestAdminMsg != null && latestAdminMsg.id != lastAutoOpenMsgId) {
                             lastAutoOpenMsgId = latestAdminMsg.id
-                            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                                .edit()
-                                .putString(KEY_LAST_AUTO_OPEN_ADMIN_MSG_ID, lastAutoOpenMsgId)
-                                .apply()
+                            val activeUid = ActiveUserManager.getActiveUid(context)
+                            if (activeUid != null) {
+                                context.applicationContext.getSharedPreferences(
+                                    ActiveUserManager.supportPrefsName(activeUid),
+                                    Context.MODE_PRIVATE
+                                )
+                                    .edit()
+                                    .putString(KEY_LAST_AUTO_OPEN_ADMIN_MSG_ID, lastAutoOpenMsgId)
+                                    .apply()
+                            }
                             Log.d(TAG, "Triggering auto-open support chat for admin message ${latestAdminMsg.id}")
                             _autoOpenChatEvent.tryEmit(Unit)
                         }
@@ -357,6 +376,35 @@ object SupportChatManager {
         } catch (_: Exception) {
             0L
         }
+    }
+
+    private fun resetStateFlows() {
+        subscribedConversationId = null
+        lastAutoOpenMsgId = ""
+        _session.value = null
+        _conversation.value = null
+        _messages.value = emptyList()
+        _unreadCount.value = 0
+        _latestMessagePreview.value = "Chat with FunkyTalk support"
+        _latestMessageTime.value = ""
+        _isLoading.value = false
+        _isSending.value = false
+    }
+
+    fun resetForLogout() {
+        initializedUid = null
+        resetStateFlows()
+    }
+
+    fun wipeForUid(context: Context, uid: String) {
+        if (uid.isBlank()) return
+        if (initializedUid == uid) {
+            resetForLogout()
+        }
+        LegacySecurityMigration.deleteSharedPrefsCompat(
+            context.applicationContext,
+            ActiveUserManager.supportPrefsName(uid)
+        )
     }
 
     fun formatMessageTime(isoString: String?): String {

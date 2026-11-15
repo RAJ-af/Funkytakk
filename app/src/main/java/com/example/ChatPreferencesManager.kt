@@ -30,7 +30,6 @@ data class LocalGroupChat(
 )
 
 object ChatPreferencesManager {
-    private const val PREFS_NAME = "funkytalk_chat_prefs"
     private const val KEY_MUTED_CHATS = "muted_chat_ids"
     private const val KEY_PINNED_CHATS = "pinned_chat_ids"
     private const val KEY_BLOCKED_USERS = "blocked_user_ids"
@@ -81,100 +80,160 @@ object ChatPreferencesManager {
     val groups: StateFlow<List<LocalGroupChat>> = _groups.asStateFlow()
 
     @Volatile
-    private var isInitialized = false
+    private var initializedUid: String? = null
+
+    private fun getPrefsForActiveUser(context: Context): SharedPreferences? {
+        val uid = ActiveUserManager.getActiveUid(context) ?: return null
+        return context.applicationContext.getSharedPreferences(
+            ActiveUserManager.chatPrefsName(uid),
+            Context.MODE_PRIVATE
+        )
+    }
 
     fun init(context: Context) {
-        if (isInitialized) return
-        isInitialized = true
-
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        _mutedChats.value = prefs.getStringSet(KEY_MUTED_CHATS, emptySet()) ?: emptySet()
-        _pinnedChats.value = prefs.getStringSet(KEY_PINNED_CHATS, emptySet()) ?: emptySet()
-        _blockedUsers.value = prefs.getStringSet(KEY_BLOCKED_USERS, emptySet()) ?: emptySet()
-        _deletedChats.value = prefs.getStringSet(KEY_DELETED_CHATS, emptySet()) ?: emptySet()
-        _unreadOverrideChats.value = prefs.getStringSet(KEY_UNREAD_OVERRIDE_CHATS, emptySet()) ?: emptySet()
-        _isMinimalistMode.value = prefs.getBoolean(KEY_MINIMALIST_MODE, false)
-
-        val presetName = prefs.getString(KEY_CHAT_PRESET, ChatPreset.Butter.name) ?: ChatPreset.Butter.name
-        _chatPreset.value = runCatching { ChatPreset.valueOf(presetName) }.getOrDefault(ChatPreset.Butter)
-        _chatTextScale.value = prefs.getFloat(KEY_CHAT_TEXT_SCALE, 1f).coerceIn(0.85f, 1.4f)
-        val darkPref = prefs.getInt(KEY_CHAT_DARK_THEME, -1)
-        _chatDarkThemeOverride.value = when (darkPref) {
-            0 -> false
-            1 -> true
-            else -> null
+        val uid = ActiveUserManager.getActiveUid(context)
+        if (uid == null) {
+            resetForLogout()
+            return
         }
+        if (initializedUid == uid) return
+        synchronized(this) {
+            if (initializedUid == uid) return
+            initializedUid = uid
 
-        val vocabJson = prefs.getString(KEY_VOCAB_JSON, null)
-        if (!vocabJson.isNullOrBlank()) {
-            try {
-                val arr = JSONArray(vocabJson)
-                val list = mutableListOf<SavedVocabWord>()
-                for (i in 0 until arr.length()) {
-                    val obj = arr.getJSONObject(i)
-                    list.add(
-                        SavedVocabWord(
-                            word = obj.getString("word"),
-                            translation = obj.getString("translation"),
-                            language = obj.optString("language", "English"),
-                            timestamp = obj.optLong("timestamp", System.currentTimeMillis())
+            val prefs = context.applicationContext.getSharedPreferences(
+                ActiveUserManager.chatPrefsName(uid),
+                Context.MODE_PRIVATE
+            )
+            _mutedChats.value = prefs.getStringSet(KEY_MUTED_CHATS, emptySet())?.toSet() ?: emptySet()
+            _pinnedChats.value = prefs.getStringSet(KEY_PINNED_CHATS, emptySet())?.toSet() ?: emptySet()
+            _blockedUsers.value = prefs.getStringSet(KEY_BLOCKED_USERS, emptySet())?.toSet() ?: emptySet()
+            _deletedChats.value = prefs.getStringSet(KEY_DELETED_CHATS, emptySet())?.toSet() ?: emptySet()
+            _unreadOverrideChats.value = prefs.getStringSet(KEY_UNREAD_OVERRIDE_CHATS, emptySet())?.toSet() ?: emptySet()
+            _isMinimalistMode.value = prefs.getBoolean(KEY_MINIMALIST_MODE, false)
+
+            val presetName = prefs.getString(KEY_CHAT_PRESET, ChatPreset.Butter.name) ?: ChatPreset.Butter.name
+            _chatPreset.value = runCatching { ChatPreset.valueOf(presetName) }.getOrDefault(ChatPreset.Butter)
+            _chatTextScale.value = prefs.getFloat(KEY_CHAT_TEXT_SCALE, 1f).coerceIn(0.85f, 1.4f)
+            val darkPref = prefs.getInt(KEY_CHAT_DARK_THEME, -1)
+            _chatDarkThemeOverride.value = when (darkPref) {
+                0 -> false
+                1 -> true
+                else -> null
+            }
+
+            val vocabJson = prefs.getString(KEY_VOCAB_JSON, null)
+            _savedVocab.value = if (!vocabJson.isNullOrBlank()) {
+                try {
+                    val arr = JSONArray(vocabJson)
+                    val list = mutableListOf<SavedVocabWord>()
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.getJSONObject(i)
+                        list.add(
+                            SavedVocabWord(
+                                word = obj.getString("word"),
+                                translation = obj.getString("translation"),
+                                language = obj.optString("language", "English"),
+                                timestamp = obj.optLong("timestamp", System.currentTimeMillis())
+                            )
                         )
-                    )
-                }
-                _savedVocab.value = list
-            } catch (_: Exception) {}
-        }
-
-        val pinnedJson = prefs.getString(KEY_PINNED_MESSAGES_JSON, null)
-        if (!pinnedJson.isNullOrBlank()) {
-            try {
-                val obj = JSONObject(pinnedJson)
-                val map = mutableMapOf<String, String>()
-                obj.keys().forEach { k ->
-                    map[k] = obj.getString(k)
-                }
-                _pinnedMessages.value = map
-            } catch (_: Exception) {}
-        }
-
-        val groupsJson = prefs.getString(KEY_GROUPS_JSON, null)
-        if (!groupsJson.isNullOrBlank()) {
-            try {
-                val array = JSONArray(groupsJson)
-                val list = mutableListOf<LocalGroupChat>()
-                for (i in 0 until array.length()) {
-                    val obj = array.getJSONObject(i)
-                    val memberNamesList = mutableListOf<String>()
-                    val membersArr = obj.optJSONArray("members")
-                    if (membersArr != null) {
-                        for (j in 0 until membersArr.length()) {
-                            memberNamesList.add(membersArr.getString(j))
-                        }
                     }
-                    list.add(
-                        LocalGroupChat(
-                            id = obj.getString("id"),
-                            name = obj.getString("name"),
-                            description = obj.optString("desc", ""),
-                            avatarUrl = obj.optString("avatar", ""),
-                            memberCount = obj.optInt("count", memberNamesList.size.coerceAtLeast(1)),
-                            memberNames = memberNamesList,
-                            createdAt = obj.optLong("created", System.currentTimeMillis()),
-                            lastMessageText = obj.optString("lastMsg", "Group created"),
-                            lastMessageTime = obj.optLong("lastTime", System.currentTimeMillis())
-                        )
-                    )
+                    list
+                } catch (_: Exception) {
+                    emptyList()
                 }
-                _groups.value = list
-            } catch (e: Exception) {
-                android.util.Log.e("ChatPreferencesManager", "Error parsing groups json", e)
+            } else {
+                emptyList()
+            }
+
+            val pinnedJson = prefs.getString(KEY_PINNED_MESSAGES_JSON, null)
+            _pinnedMessages.value = if (!pinnedJson.isNullOrBlank()) {
+                try {
+                    val obj = JSONObject(pinnedJson)
+                    val map = mutableMapOf<String, String>()
+                    obj.keys().forEach { k ->
+                        map[k] = obj.getString(k)
+                    }
+                    map
+                } catch (_: Exception) {
+                    emptyMap()
+                }
+            } else {
+                emptyMap()
+            }
+
+            val groupsJson = prefs.getString(KEY_GROUPS_JSON, null)
+            _groups.value = if (!groupsJson.isNullOrBlank()) {
+                try {
+                    val array = JSONArray(groupsJson)
+                    val list = mutableListOf<LocalGroupChat>()
+                    for (i in 0 until array.length()) {
+                        val obj = array.getJSONObject(i)
+                        val memberNamesList = mutableListOf<String>()
+                        val membersArr = obj.optJSONArray("members")
+                        if (membersArr != null) {
+                            for (j in 0 until membersArr.length()) {
+                                memberNamesList.add(membersArr.getString(j))
+                            }
+                        }
+                        list.add(
+                            LocalGroupChat(
+                                id = obj.getString("id"),
+                                name = obj.getString("name"),
+                                description = obj.optString("desc", ""),
+                                avatarUrl = obj.optString("avatar", ""),
+                                memberCount = obj.optInt("count", memberNamesList.size.coerceAtLeast(1)),
+                                memberNames = memberNamesList,
+                                createdAt = obj.optLong("created", System.currentTimeMillis()),
+                                lastMessageText = obj.optString("lastMsg", "Group created"),
+                                lastMessageTime = obj.optLong("lastTime", System.currentTimeMillis())
+                            )
+                        )
+                    }
+                    list
+                } catch (e: Exception) {
+                    android.util.Log.e("ChatPreferencesManager", "Error parsing groups json", e)
+                    emptyList()
+                }
+            } else {
+                emptyList()
             }
         }
+    }
+
+    fun resetForLogout() {
+        synchronized(this) {
+            initializedUid = null
+            _mutedChats.value = emptySet()
+            _pinnedChats.value = emptySet()
+            _blockedUsers.value = emptySet()
+            _deletedChats.value = emptySet()
+            _unreadOverrideChats.value = emptySet()
+            _isMinimalistMode.value = false
+            _chatPreset.value = ChatPreset.Butter
+            _chatTextScale.value = 1f
+            _chatDarkThemeOverride.value = null
+            _savedVocab.value = emptyList()
+            _pinnedMessages.value = emptyMap()
+            _groups.value = emptyList()
+        }
+    }
+
+    fun wipeForUid(context: Context, uid: String) {
+        if (uid.isBlank()) return
+        if (initializedUid == uid) {
+            resetForLogout()
+        }
+        LegacySecurityMigration.deleteSharedPrefsCompat(
+            context.applicationContext,
+            ActiveUserManager.chatPrefsName(uid)
+        )
     }
 
     fun isChatMuted(chatId: String): Boolean = _mutedChats.value.contains(chatId)
 
     fun toggleMuteChat(context: Context, chatId: String): Boolean {
+        init(context)
         val current = _mutedChats.value.toMutableSet()
         val newStatus = if (current.contains(chatId)) {
             current.remove(chatId)
@@ -191,6 +250,7 @@ object ChatPreferencesManager {
     fun isChatPinned(chatId: String): Boolean = _pinnedChats.value.contains(chatId)
 
     fun togglePinChat(context: Context, chatId: String): Boolean {
+        init(context)
         val current = _pinnedChats.value.toMutableSet()
         val newStatus = if (current.contains(chatId)) {
             current.remove(chatId)
@@ -207,6 +267,7 @@ object ChatPreferencesManager {
     fun isUserBlocked(userId: String): Boolean = _blockedUsers.value.contains(userId)
 
     fun blockUser(context: Context, userId: String) {
+        init(context)
         val current = _blockedUsers.value.toMutableSet()
         current.add(userId)
         _blockedUsers.value = current
@@ -214,6 +275,7 @@ object ChatPreferencesManager {
     }
 
     fun unblockUser(context: Context, userId: String) {
+        init(context)
         val current = _blockedUsers.value.toMutableSet()
         current.remove(userId)
         _blockedUsers.value = current
@@ -224,6 +286,7 @@ object ChatPreferencesManager {
     fun isChatDeleted(chatId: String): Boolean = _deletedChats.value.contains(chatId)
 
     fun markChatDeleted(context: Context, chatId: String) {
+        init(context)
         val current = _deletedChats.value.toMutableSet()
         current.add(chatId)
         _deletedChats.value = current
@@ -231,6 +294,7 @@ object ChatPreferencesManager {
     }
 
     fun unmarkChatDeleted(context: Context, chatId: String) {
+        init(context)
         val current = _deletedChats.value.toMutableSet()
         if (current.remove(chatId)) {
             _deletedChats.value = current
@@ -239,6 +303,7 @@ object ChatPreferencesManager {
     }
 
     fun toggleUnreadOverride(context: Context, chatId: String): Boolean {
+        init(context)
         val current = _unreadOverrideChats.value.toMutableSet()
         val isNowUnread = if (current.contains(chatId)) {
             current.remove(chatId)
@@ -253,6 +318,7 @@ object ChatPreferencesManager {
     }
 
     fun clearUnreadOverride(context: Context, chatId: String) {
+        init(context)
         val current = _unreadOverrideChats.value.toMutableSet()
         if (current.remove(chatId)) {
             _unreadOverrideChats.value = current
@@ -261,17 +327,17 @@ object ChatPreferencesManager {
     }
 
     fun toggleMinimalistMode(context: Context): Boolean {
+        init(context)
         val newState = !_isMinimalistMode.value
         _isMinimalistMode.value = newState
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putBoolean(KEY_MINIMALIST_MODE, newState).apply()
+        getPrefsForActiveUser(context)?.edit()?.putBoolean(KEY_MINIMALIST_MODE, newState)?.apply()
         return newState
     }
 
     fun setMinimalistMode(context: Context, enabled: Boolean) {
+        init(context)
         _isMinimalistMode.value = enabled
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putBoolean(KEY_MINIMALIST_MODE, enabled).apply()
+        getPrefsForActiveUser(context)?.edit()?.putBoolean(KEY_MINIMALIST_MODE, enabled)?.apply()
     }
 
     fun createGroup(
@@ -282,6 +348,7 @@ object ChatPreferencesManager {
         avatarUrl: String = "",
         groupId: String? = null
     ): LocalGroupChat {
+        init(context)
         val newGroup = LocalGroupChat(
             id = groupId?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString(),
             name = name,
@@ -299,6 +366,7 @@ object ChatPreferencesManager {
     }
 
     fun deleteGroup(context: Context, groupId: String) {
+        init(context)
         val updated = _groups.value.filterNot { it.id == groupId }
         _groups.value = updated
         saveGroups(context, updated)
@@ -322,35 +390,33 @@ object ChatPreferencesManager {
                 obj.put("members", mArr)
                 array.put(obj)
             }
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            prefs.edit().putString(KEY_GROUPS_JSON, array.toString()).apply()
+            getPrefsForActiveUser(context)?.edit()?.putString(KEY_GROUPS_JSON, array.toString())?.apply()
         } catch (e: Exception) {
             android.util.Log.e("ChatPreferencesManager", "Error saving groups", e)
         }
     }
 
     private fun saveStringSet(context: Context, key: String, set: Set<String>) {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putStringSet(key, set).apply()
+        getPrefsForActiveUser(context)?.edit()?.putStringSet(key, set)?.apply()
     }
 
     fun setChatPreset(context: Context, preset: ChatPreset) {
         init(context)
         _chatPreset.value = preset
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_CHAT_PRESET, preset.name)
-            .apply()
+        getPrefsForActiveUser(context)
+            ?.edit()
+            ?.putString(KEY_CHAT_PRESET, preset.name)
+            ?.apply()
     }
 
     fun setChatTextScale(context: Context, scale: Float) {
         init(context)
         val clamped = scale.coerceIn(0.85f, 1.4f)
         _chatTextScale.value = clamped
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putFloat(KEY_CHAT_TEXT_SCALE, clamped)
-            .apply()
+        getPrefsForActiveUser(context)
+            ?.edit()
+            ?.putFloat(KEY_CHAT_TEXT_SCALE, clamped)
+            ?.apply()
     }
 
     fun setChatDarkThemeOverride(context: Context, dark: Boolean?) {
@@ -361,10 +427,10 @@ object ChatPreferencesManager {
             true -> 1
             null -> -1
         }
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putInt(KEY_CHAT_DARK_THEME, code)
-            .apply()
+        getPrefsForActiveUser(context)
+            ?.edit()
+            ?.putInt(KEY_CHAT_DARK_THEME, code)
+            ?.apply()
     }
 
     fun saveVocabWord(context: Context, word: String, translation: String, language: String) {
@@ -395,10 +461,10 @@ object ChatPreferencesManager {
                 obj.put("timestamp", item.timestamp)
                 arr.put(obj)
             }
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .edit()
-                .putString(KEY_VOCAB_JSON, arr.toString())
-                .apply()
+            getPrefsForActiveUser(context)
+                ?.edit()
+                ?.putString(KEY_VOCAB_JSON, arr.toString())
+                ?.apply()
         } catch (_: Exception) {}
     }
 
@@ -416,10 +482,10 @@ object ChatPreferencesManager {
         try {
             val obj = JSONObject()
             current.forEach { (k, v) -> obj.put(k, v) }
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .edit()
-                .putString(KEY_PINNED_MESSAGES_JSON, obj.toString())
-                .apply()
+            getPrefsForActiveUser(context)
+                ?.edit()
+                ?.putString(KEY_PINNED_MESSAGES_JSON, obj.toString())
+                ?.apply()
         } catch (_: Exception) {}
         return isNowPinned
     }

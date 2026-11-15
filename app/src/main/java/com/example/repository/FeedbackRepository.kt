@@ -43,6 +43,11 @@ object FeedbackRepository {
     private val _myFeedback = MutableStateFlow<List<FeedbackPostDto>>(emptyList())
     val myFeedback: StateFlow<List<FeedbackPostDto>> = _myFeedback.asStateFlow()
 
+    fun resetForLogout() {
+        _myUpdatesCount.value = 0
+        _myFeedback.value = emptyList()
+    }
+
     fun getAppVersionString(): String {
         return "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})".take(40)
     }

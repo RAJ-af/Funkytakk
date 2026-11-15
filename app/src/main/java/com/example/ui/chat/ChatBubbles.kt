@@ -155,9 +155,10 @@ fun MessageBubble(
 @Composable
 fun SenderName(name: String, userId: String, modifier: Modifier = Modifier) {
     val c = LocalChatColors.current
-    Text(
-        text = name,
-        color = c.senderColor(userId),
+    com.example.store.DecoratedUserName(
+        userId = userId,
+        name = name,
+        defaultColor = c.senderColor(userId),
         fontSize = 13f.chatSp(),
         fontWeight = FontWeight.SemiBold,
         maxLines = 1,

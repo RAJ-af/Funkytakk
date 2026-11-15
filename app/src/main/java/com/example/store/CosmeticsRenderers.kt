@@ -22,10 +22,12 @@ import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
@@ -198,9 +200,14 @@ fun AvatarFrame(
     val context = LocalContext.current
     val asset = config.asset
     var isAssetLoadFailed by remember(asset?.url) { mutableStateOf(false) }
+    val isAssetFrame = config.kind.equals("asset", ignoreCase = true) &&
+        asset != null &&
+        asset.url.isNotBlank() &&
+        !isAssetLoadFailed
 
-    if (asset != null && asset.url.isNotBlank() && !isAssetLoadFailed) {
-        val frameSize = sizeDp * asset.scale
+    if (isAssetFrame && asset != null) {
+        val ratio = asset.avatarRatio.coerceIn(0.25f, 1.0f)
+        val frameSize = sizeDp / ratio
         val imageRequest = remember(context, asset.url, enableFrameAnimation) {
             ImageRequest.Builder(context)
                 .data(asset.url)
@@ -208,8 +215,10 @@ fun AvatarFrame(
                 .memoryCachePolicy(CachePolicy.ENABLED)
                 .crossfade(true)
                 .apply {
-                    if (enableFrameAnimation && (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P)) {
+                    if (enableFrameAnimation && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
                         decoderFactory(coil.decode.ImageDecoderDecoder.Factory())
+                    } else {
+                        decoderFactory(coil.decode.BitmapFactoryDecoder.Factory())
                     }
                 }
                 .listener(
@@ -222,23 +231,25 @@ fun AvatarFrame(
             modifier = modifier.size(sizeDp),
             contentAlignment = Alignment.Center
         ) {
-            // Core Avatar Container
+            // Core Avatar Container (zIndex 1f, no ring padding)
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .zIndex(1f)
                     .clip(CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 content()
             }
 
-            // Transparent Frame Image Asset Overlaid ON TOP of Avatar
+            // Transparent Frame Image Asset Overlaid ON TOP of Avatar (zIndex 2f, unclipped overhang)
             AsyncImage(
                 model = imageRequest,
                 contentDescription = "Avatar Frame Asset",
                 modifier = Modifier
                     .size(frameSize)
-                    .offset(x = asset.offset.xDp.dp, y = asset.offset.yDp.dp),
+                    .offset(x = asset.offset.xDp.dp, y = asset.offset.yDp.dp)
+                    .zIndex(2f),
                 contentScale = ContentScale.Fit
             )
         }
@@ -402,67 +413,179 @@ fun StyledName(
     config: NameEffectConfig?,
     modifier: Modifier = Modifier,
     fontSize: TextUnit = 14.sp,
-    fontWeight: FontWeight? = null
+    fontWeight: FontWeight? = null,
+    defaultColor: Color = Color.Unspecified,
+    animate: Boolean = true,
+    maxLines: Int = Int.MAX_VALUE,
+    overflow: TextOverflow = TextOverflow.Clip
 ) {
     if (config == null) {
         Text(
             text = text,
             fontSize = fontSize,
             fontWeight = fontWeight ?: FontWeight.Bold,
+            color = defaultColor,
+            maxLines = maxLines,
+            overflow = overflow,
             modifier = modifier
         )
         return
     }
 
-    val colors = remember(config.colorsHex) {
-        config.colorsHex.map { parseHexColor(it, Color.Black) }
+    val fallbackColor = if (defaultColor != Color.Unspecified) defaultColor else Color(0xFFFFFFFF)
+    val colors = remember(config.colorsHex, fallbackColor) {
+        val parsed = config.colorsHex.map { parseHexColor(it, fallbackColor) }
+        if (parsed.isEmpty()) listOf(fallbackColor) else parsed
     }
-
-    val infiniteTransition = rememberInfiniteTransition(label = "nameAnim")
-
-    val shimmerOffset by if (config.animation.equals("shimmer", ignoreCase = true) || config.animation.equals("gradient_flow", ignoreCase = true)) {
-        infiniteTransition.animateFloat(
-            initialValue = 0f,
-            targetValue = 500f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(config.speedMs.toInt().coerceAtLeast(1000), easing = LinearEasing),
-                repeatMode = RepeatMode.Restart
-            ),
-            label = "shimmer"
-        )
-    } else remember { mutableStateOf(0f) }
-
-    val brush = remember(colors, shimmerOffset) {
-        if (colors.size > 1) {
-            Brush.linearGradient(
-                colors = colors,
-                start = Offset(shimmerOffset, 0f),
-                end = Offset(shimmerOffset + 200f, 200f)
-            )
-        } else SolidColor(colors.firstOrNull() ?: Color.Black)
-    }
-
     val glowColor = remember(config.glowHex) {
-        config.glowHex?.let { parseHexColor(it, Color.Transparent) }
+        config.glowHex?.let { parseHexColor(it, Color.Transparent) }?.takeIf { it != Color.Transparent }
     }
+    val resolvedWeight = if (config.bold) FontWeight.ExtraBold else (fontWeight ?: FontWeight.Bold)
+    val animType = config.animation.trim().lowercase()
+    val speedMs = config.speedMs.toInt().coerceIn(600, 12000)
 
-    var textStyle = TextStyle(
-        brush = brush,
-        fontSize = fontSize,
-        fontWeight = if (config.bold) FontWeight.ExtraBold else (fontWeight ?: FontWeight.Normal)
-    )
+    when (animType) {
+        "glow_pulse" -> {
+            val baseColor = colors.first()
+            val pulseGlow = glowColor ?: baseColor
+            val pulse = if (animate) {
+                val infiniteTransition = rememberInfiniteTransition(label = "nameGlowPulse")
+                val p by infiniteTransition.animateFloat(
+                    initialValue = 0f,
+                    targetValue = 1f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween((speedMs / 2).coerceAtLeast(350), easing = FastOutSlowInEasing),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "glowPulse"
+                )
+                p
+            } else 0.5f
 
-    if (glowColor != null && glowColor != Color.Transparent) {
-        textStyle = textStyle.copy(
-            shadow = Shadow(color = glowColor, blurRadius = 8f)
-        )
+            val shadow = Shadow(
+                color = pulseGlow.copy(alpha = 0.42f + 0.55f * pulse),
+                blurRadius = 6f + 14f * pulse
+            )
+            Text(
+                text = text,
+                style = TextStyle(
+                    color = baseColor,
+                    fontSize = fontSize,
+                    fontWeight = resolvedWeight,
+                    shadow = shadow
+                ),
+                maxLines = maxLines,
+                overflow = overflow,
+                modifier = modifier
+            )
+        }
+        "shimmer" -> {
+            val c0 = colors.first()
+            val c1 = colors.getOrElse(1) { c0 }
+            val sweepProgress = if (animate) {
+                val infiniteTransition = rememberInfiniteTransition(label = "nameShimmer")
+                val p by infiniteTransition.animateFloat(
+                    initialValue = -0.35f,
+                    targetValue = 1.35f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(speedMs, easing = LinearEasing),
+                        repeatMode = RepeatMode.Restart
+                    ),
+                    label = "shimmer"
+                )
+                p
+            } else 0.5f
+
+            val shimmerColors = if (animate) {
+                listOf(c0, c1, Color.White, c1, c0)
+            } else if (colors.size > 1) {
+                colors
+            } else {
+                listOf(c0, c0)
+            }
+            val spanPx = 420f
+            val centerPx = sweepProgress * spanPx
+            val brush = if (animate) {
+                Brush.linearGradient(
+                    colors = shimmerColors,
+                    start = Offset(centerPx - 140f, 0f),
+                    end = Offset(centerPx + 140f, 90f),
+                    tileMode = TileMode.Clamp
+                )
+            } else {
+                Brush.linearGradient(
+                    colors = shimmerColors,
+                    start = Offset.Zero,
+                    end = Offset(240f, 0f)
+                )
+            }
+            Text(
+                text = text,
+                style = TextStyle(
+                    brush = brush,
+                    fontSize = fontSize,
+                    fontWeight = resolvedWeight,
+                    shadow = glowColor?.let { Shadow(color = it.copy(alpha = 0.7f), blurRadius = 8f) }
+                ),
+                maxLines = maxLines,
+                overflow = overflow,
+                modifier = modifier
+            )
+        }
+        "gradient_flow" -> {
+            val spanPx = 360f
+            val flowColors = remember(colors) {
+                if (colors.size > 1) colors + colors.first() else listOf(colors.first(), colors.first())
+            }
+            val flowOffset = if (animate) {
+                val infiniteTransition = rememberInfiniteTransition(label = "nameGradientFlow")
+                val off by infiniteTransition.animateFloat(
+                    initialValue = 0f,
+                    targetValue = spanPx,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(speedMs, easing = LinearEasing),
+                        repeatMode = RepeatMode.Restart
+                    ),
+                    label = "gradientFlow"
+                )
+                off
+            } else 0f
+
+            val brush = Brush.linearGradient(
+                colors = flowColors,
+                start = Offset(flowOffset, 0f),
+                end = Offset(flowOffset + spanPx, 0f),
+                tileMode = TileMode.Repeated
+            )
+            Text(
+                text = text,
+                style = TextStyle(
+                    brush = brush,
+                    fontSize = fontSize,
+                    fontWeight = resolvedWeight,
+                    shadow = glowColor?.let { Shadow(color = it.copy(alpha = 0.65f), blurRadius = 10f) }
+                ),
+                maxLines = maxLines,
+                overflow = overflow,
+                modifier = modifier
+            )
+        }
+        else -> {
+            // "none" or unknown animation -> static text in colors[0]
+            Text(
+                text = text,
+                style = TextStyle(
+                    color = colors.first(),
+                    fontSize = fontSize,
+                    fontWeight = resolvedWeight,
+                    shadow = glowColor?.let { Shadow(color = it.copy(alpha = 0.7f), blurRadius = 8f) }
+                ),
+                maxLines = maxLines,
+                overflow = overflow,
+                modifier = modifier
+            )
+        }
     }
-
-    Text(
-        text = text,
-        style = textStyle,
-        modifier = modifier
-    )
 }
 
 // ====================================================
@@ -475,7 +598,10 @@ fun DecoratedUserName(
     modifier: Modifier = Modifier,
     fontSize: TextUnit = 14.sp,
     fontWeight: FontWeight? = null,
-    defaultColor: Color = Color.Unspecified
+    defaultColor: Color = Color.Unspecified,
+    animate: Boolean = true,
+    maxLines: Int = Int.MAX_VALUE,
+    overflow: TextOverflow = TextOverflow.Clip
 ) {
     val userCosmeticsMap by CosmeticsManager.userCosmeticsMap.collectAsState()
     val nameEffectConfig = remember(userId, userCosmeticsMap) {
@@ -494,7 +620,11 @@ fun DecoratedUserName(
             config = nameEffectConfig,
             modifier = modifier,
             fontSize = fontSize,
-            fontWeight = fontWeight
+            fontWeight = fontWeight,
+            defaultColor = defaultColor,
+            animate = animate,
+            maxLines = maxLines,
+            overflow = overflow
         )
     } else {
         Text(
@@ -502,6 +632,8 @@ fun DecoratedUserName(
             fontSize = fontSize,
             fontWeight = fontWeight ?: FontWeight.Bold,
             color = defaultColor,
+            maxLines = maxLines,
+            overflow = overflow,
             modifier = modifier
         )
     }

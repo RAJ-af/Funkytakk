@@ -194,6 +194,13 @@ fun GroupChatScreen(
         }
     }
 
+    LaunchedEffect(rawMessages) {
+        val senderIds = rawMessages.map { it.senderId }.filter { it.isNotBlank() }.distinct()
+        if (senderIds.isNotEmpty()) {
+            com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, senderIds)
+        }
+    }
+
     ProvideChatTheme(
         preset = chatPreset,
         darkTheme = false,

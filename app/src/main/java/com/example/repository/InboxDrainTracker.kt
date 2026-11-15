@@ -39,4 +39,9 @@ object InboxDrainTracker {
             lastFailureReason = failureReason ?: current.lastFailureReason
         )
     }
+
+    @Synchronized
+    fun reset() {
+        _stats.value = InboxDrainStats()
+    }
 }

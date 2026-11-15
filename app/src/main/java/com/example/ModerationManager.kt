@@ -20,6 +20,11 @@ object ModerationManager {
     var pendingReportIdToOpen: String? by mutableStateOf<String?>(null)
     var showModerationHubDialog: Boolean by mutableStateOf(false)
 
+    fun resetForLogout() {
+        pendingReportIdToOpen = null
+        showModerationHubDialog = false
+    }
+
     suspend fun fetchMyModerationStatus(context: Context): MyModerationStatus? = withContext(Dispatchers.IO) {
         try {
             // Ensure session is fresh

@@ -78,11 +78,16 @@ data class FrameAssetOffset(
 data class FrameAssetConfig(
     val url: String = "",
     val format: String = "webp", // "webp" | "png"
-    val scale: Float = 1.25f,
+    val sizePx: Int = 320,
+    val fps: Int = 24,
+    val avatarRatio: Float = 0.6f,
+    val scale: Float = 1.6667f,
+    val hasAvatarRatio: Boolean = false,
     val offset: FrameAssetOffset = FrameAssetOffset()
 )
 
 data class AvatarFrameConfig(
+    val kind: String = "ring", // "ring" | "asset"
     val ring: FrameRingConfig = FrameRingConfig(),
     val ornament: FrameOrnamentConfig? = null,
     val particles: FrameParticlesConfig? = null,
@@ -267,12 +272,26 @@ object CosmeticsConfigParser {
             } else null
 
             val assetObj = json.optJSONObject("asset")
-            val asset = if (assetObj != null && !assetObj.optString("url").isNullOrBlank()) {
+            val assetUrl = assetObj?.optString("url", "")?.takeIf { it.isNotBlank() && it != "null" }
+            val asset = if (assetObj != null && assetUrl != null) {
                 val offsetObj = assetObj.optJSONObject("offset")
+                val hasRatio = assetObj.has("avatar_ratio") && !assetObj.isNull("avatar_ratio")
+                val avatarRatio = if (hasRatio) {
+                    assetObj.optDouble("avatar_ratio", 0.6).toFloat().coerceIn(0.25f, 1.0f)
+                } else if (assetObj.has("scale") && !assetObj.isNull("scale")) {
+                    val sc = assetObj.optDouble("scale", 1.6667).toFloat().coerceAtLeast(0.5f)
+                    (1f / sc).coerceIn(0.25f, 1.0f)
+                } else {
+                    0.6f
+                }
                 FrameAssetConfig(
-                    url = assetObj.optString("url", ""),
+                    url = assetUrl,
                     format = assetObj.optString("format", "webp"),
-                    scale = assetObj.optDouble("scale", 1.25).toFloat(),
+                    sizePx = assetObj.optInt("size_px", 320),
+                    fps = assetObj.optInt("fps", 24),
+                    avatarRatio = avatarRatio,
+                    scale = 1f / avatarRatio,
+                    hasAvatarRatio = hasRatio,
                     offset = FrameAssetOffset(
                         xDp = offsetObj?.optDouble("x", 0.0)?.toFloat() ?: 0f,
                         yDp = offsetObj?.optDouble("y", 0.0)?.toFloat() ?: 0f
@@ -280,7 +299,15 @@ object CosmeticsConfigParser {
                 )
             } else null
 
+            val rawKind = json.optString("kind", "").trim().lowercase()
+            val resolvedKind = when {
+                rawKind == "asset" || rawKind == "ring" -> rawKind
+                asset != null -> "asset"
+                else -> "ring"
+            }
+
             AvatarFrameConfig(
+                kind = resolvedKind,
                 ring = ring,
                 ornament = ornament,
                 particles = particles,

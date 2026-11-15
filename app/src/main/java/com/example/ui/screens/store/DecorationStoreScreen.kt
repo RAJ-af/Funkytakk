@@ -86,6 +86,7 @@ private val ColorErrorContainer: Color
 enum class StoreTab(val displayName: String, val categoryType: String?) {
     ALL("All", null),
     AVATAR("Avatar", "avatar_frame"),
+    NAME("Name", "name_effect"),
     ENTRY("Entry", "entry_animation"),
     BUBBLE("Bubble", "bubble_theme"),
     THEME("Theme", "chat_bg")
@@ -93,6 +94,7 @@ enum class StoreTab(val displayName: String, val categoryType: String?) {
 
 private fun getCategoryDisplayName(type: String): String = when (type) {
     "avatar_frame" -> "Avatar Frames"
+    "name_effect" -> "Name Effects"
     "entry_animation" -> "Entry Animations"
     "bubble_theme" -> "Message Bubbles"
     "chat_bg" -> "Chat Themes"
@@ -101,6 +103,7 @@ private fun getCategoryDisplayName(type: String): String = when (type) {
 
 private fun getCategoryIcon(type: String): String = when (type) {
     "avatar_frame" -> "👑"
+    "name_effect" -> "✨"
     "entry_animation" -> "🚀"
     "bubble_theme" -> "💬"
     "chat_bg" -> "🎨"
@@ -139,7 +142,9 @@ fun DecorationStoreScreen(
     var isPurchasing by remember { mutableStateOf(false) }
     var activeMiniPreviewItem by remember { mutableStateOf<StoreItemRow?>(null) }
 
-    val validCategories = remember { listOf("avatar_frame", "entry_animation", "bubble_theme", "chat_bg") }
+    val validCategories = remember {
+        listOf("avatar_frame", "name_effect", "entry_animation", "bubble_theme", "chat_bg")
+    }
 
     fun loadStoreData() {
         scope.launch {
@@ -148,8 +153,13 @@ fun DecorationStoreScreen(
             CosmeticsManager.getOrCreateWallet(context)
             val res = CosmeticsManager.getStoreItems(context, type = null)
             res.onSuccess { items ->
-                // Filter out name_effect and sticker_pack as requested
-                allItems = items.filter { it.item_type in validCategories }
+                val filtered = items.filter { it.item_type in validCategories }
+                filtered.filter { it.item_type == "avatar_frame" }.forEach { item ->
+                    CosmeticsManager.preloadFrameAsset(context, item.preview_url)
+                    val parsed = runCatching { CosmeticsConfigParser.parseAvatarFrame(item.config) }.getOrNull()
+                    CosmeticsManager.preloadFrameAsset(context, parsed?.asset?.url)
+                }
+                allItems = filtered
                 isLoading = false
             }.onFailure { err ->
                 errorMessage = err.message ?: "Failed to load store items"
@@ -277,6 +287,7 @@ fun DecorationStoreScreen(
                         // "All" Tab: Each category has 4 items row & "View All"
                         StoreAllTabContent(
                             allItems = allItems,
+                            currentUserName = currentUserName,
                             selectedItemIds = selectedItems.values.map { it.id }.toSet(),
                             onSelectItem = { item ->
                                 selectedItems = if (selectedItems[item.item_type]?.id == item.id) {
@@ -289,6 +300,7 @@ fun DecorationStoreScreen(
                             onViewAllCategory = { categoryType ->
                                 selectedTab = when (categoryType) {
                                     "avatar_frame" -> StoreTab.AVATAR
+                                    "name_effect" -> StoreTab.NAME
                                     "entry_animation" -> StoreTab.ENTRY
                                     "bubble_theme" -> StoreTab.BUBBLE
                                     "chat_bg" -> StoreTab.THEME
@@ -304,6 +316,7 @@ fun DecorationStoreScreen(
                         val filteredItems = allItems.filter { it.item_type == categoryType }
                         StoreCategoryTabContent(
                             items = filteredItems,
+                            currentUserName = currentUserName,
                             categoryType = categoryType,
                             selectedItemIds = selectedItems.values.map { it.id }.toSet(),
                             onSelectItem = { item ->
@@ -548,6 +561,7 @@ private fun StoreTabsRow(
 @Composable
 private fun StoreAllTabContent(
     allItems: List<StoreItemRow>,
+    currentUserName: String,
     selectedItemIds: Set<Long>,
     onSelectItem: (StoreItemRow) -> Unit,
     onUnequipItem: (StoreItemRow) -> Unit,
@@ -555,7 +569,7 @@ private fun StoreAllTabContent(
     onPlayMiniPreview: (StoreItemRow) -> Unit
 ) {
     val categories = remember {
-        listOf("avatar_frame", "entry_animation", "bubble_theme", "chat_bg")
+        listOf("avatar_frame", "name_effect", "entry_animation", "bubble_theme", "chat_bg")
     }
 
     LazyColumn(
@@ -592,9 +606,10 @@ private fun StoreAllTabContent(
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFFB45309),
                             modifier = Modifier
+                                .testTag("store_view_all_$catType")
                                 .clip(RoundedCornerShape(6.dp))
                                 .clickable { onViewAllCategory(catType) }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
                         )
                     }
                 }
@@ -610,6 +625,7 @@ private fun StoreAllTabContent(
                         items(previewItems, key = { it.id }) { item ->
                             StoreItemCard(
                                 item = item,
+                                currentUserName = currentUserName,
                                 isSelected = selectedItemIds.contains(item.id),
                                 onSelect = { onSelectItem(item) },
                                 onUnequip = { onUnequipItem(item) },
@@ -630,6 +646,7 @@ private fun StoreAllTabContent(
 @Composable
 private fun StoreCategoryTabContent(
     items: List<StoreItemRow>,
+    currentUserName: String,
     categoryType: String,
     selectedItemIds: Set<Long>,
     onSelectItem: (StoreItemRow) -> Unit,
@@ -660,6 +677,7 @@ private fun StoreCategoryTabContent(
         items(items, key = { it.id }) { item ->
             StoreItemCard(
                 item = item,
+                currentUserName = currentUserName,
                 isSelected = selectedItemIds.contains(item.id),
                 onSelect = { onSelectItem(item) },
                 onUnequip = { onUnequipItem(item) },
@@ -675,6 +693,7 @@ private fun StoreCategoryTabContent(
 @Composable
 private fun StoreItemCard(
     item: StoreItemRow,
+    currentUserName: String,
     isSelected: Boolean,
     onSelect: () -> Unit,
     onUnequip: () -> Unit,
@@ -691,6 +710,7 @@ private fun StoreItemCard(
     Surface(
         modifier = modifier
             .fillMaxWidth()
+            .testTag("store_item_card_${item.id}")
             .clip(RoundedCornerShape(20.dp))
             .clickable { onSelect() },
         shape = RoundedCornerShape(20.dp),
@@ -714,6 +734,7 @@ private fun StoreItemCard(
                 // Item Preview Renderer
                 ItemThumbnailRenderer(
                     item = item,
+                    currentUserName = currentUserName,
                     onPlayClick = onPlayMiniPreview
                 )
 
@@ -804,12 +825,29 @@ private fun StoreItemCard(
 @Composable
 private fun ItemThumbnailRenderer(
     item: StoreItemRow,
+    currentUserName: String,
     onPlayClick: () -> Unit
 ) {
-    if (!item.preview_url.isNullOrBlank()) {
+    val context = LocalContext.current
+    var previewUrlFailed by remember(item.preview_url) { mutableStateOf(false) }
+
+    if (!item.preview_url.isNullOrBlank() && !previewUrlFailed && item.item_type != "name_effect") {
+        val req = remember(context, item.preview_url) {
+            coil.request.ImageRequest.Builder(context)
+                .data(item.preview_url)
+                .diskCachePolicy(coil.request.CachePolicy.ENABLED)
+                .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+                .apply {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                        decoderFactory(coil.decode.ImageDecoderDecoder.Factory())
+                    }
+                }
+                .listener(onError = { _, _ -> previewUrlFailed = true })
+                .build()
+        }
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             AsyncImage(
-                model = item.preview_url,
+                model = req,
                 contentDescription = item.name,
                 modifier = Modifier
                     .fillMaxSize()
@@ -823,7 +861,7 @@ private fun ItemThumbnailRenderer(
         return
     }
 
-    // Code-based miniature previews when preview_url is empty
+    // Code-based miniature previews when preview_url is empty or failed
     when (item.item_type) {
         "avatar_frame" -> {
             val frameConfig = remember(item.config) {
@@ -831,7 +869,8 @@ private fun ItemThumbnailRenderer(
             }
             AvatarFrame(
                 config = frameConfig,
-                sizeDp = 64.dp
+                sizeDp = 56.dp,
+                enableFrameAnimation = true
             ) {
                 AsyncImage(
                     model = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200",
@@ -840,6 +879,27 @@ private fun ItemThumbnailRenderer(
                         .fillMaxSize()
                         .clip(CircleShape),
                     contentScale = ContentScale.Crop
+                )
+            }
+        }
+        "name_effect" -> {
+            val nameConfig = remember(item.config) {
+                CosmeticsConfigParser.parseNameEffect(item.config)
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                StyledName(
+                    text = currentUserName.ifBlank { item.name },
+                    config = nameConfig,
+                    fontSize = 17.sp,
+                    defaultColor = ColorTextPrimary,
+                    animate = true,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
@@ -1132,8 +1192,8 @@ private fun DecorationPreviewDialog(
     onBuyOnly: () -> Unit,
     onApplyAll: () -> Unit
 ) {
-    val pagerState = rememberPagerState(pageCount = { 4 })
-    val previewTabs = remember { listOf("Avatar", "Entry", "Bubble", "Theme") }
+    val pagerState = rememberPagerState(pageCount = { 5 })
+    val previewTabs = remember { listOf("Avatar", "Name", "Entry", "Bubble", "Theme") }
     val scope = rememberCoroutineScope()
 
     Dialog(
@@ -1162,10 +1222,11 @@ private fun DecorationPreviewDialog(
                     IconButton(
                         onClick = onDismiss,
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(48.dp)
                             .clip(CircleShape)
                             .background(ColorSurface)
                             .border(1.dp, ColorOutline, CircleShape)
+                            .testTag("preview_close_button")
                     ) {
                         Icon(
                             painter = painterResource(id = R.drawable.ic_close),
@@ -1182,25 +1243,30 @@ private fun DecorationPreviewDialog(
                         color = ColorTextPrimary
                     )
 
-                    Spacer(modifier = Modifier.size(36.dp))
+                    Spacer(modifier = Modifier.size(48.dp))
                 }
 
-                // Top Hero Section: User avatar with selected frame
+                // Top Hero Section: User avatar with selected frame & name effect
                 val selectedFrame = selectedItems.find { it.item_type == "avatar_frame" }
                 val frameConfig = remember(selectedFrame) {
                     selectedFrame?.config?.let { CosmeticsConfigParser.parseAvatarFrame(it) }
+                }
+                val selectedNameEffect = selectedItems.find { it.item_type == "name_effect" }
+                val nameEffectConfig = remember(selectedNameEffect) {
+                    selectedNameEffect?.config?.let { CosmeticsConfigParser.parseNameEffect(it) }
                 }
 
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 12.dp),
+                        .padding(vertical = 18.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         AvatarFrame(
                             config = frameConfig,
-                            sizeDp = 92.dp
+                            sizeDp = 76.dp,
+                            enableFrameAnimation = true
                         ) {
                             AsyncImage(
                                 model = currentUserAvatar ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300",
@@ -1212,15 +1278,22 @@ private fun DecorationPreviewDialog(
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
+                        Spacer(modifier = Modifier.height(14.dp))
+                        StyledName(
                             text = currentUserName,
-                            fontSize = 16.sp,
+                            config = nameEffectConfig,
+                            fontSize = 17.sp,
                             fontWeight = FontWeight.Bold,
-                            color = ColorTextPrimary
+                            defaultColor = ColorTextPrimary,
+                            animate = true
                         )
                         Text(
-                            text = if (selectedFrame != null) "Equipped: ${selectedFrame.name}" else "Default Frame",
+                            text = buildString {
+                                append(if (selectedFrame != null) selectedFrame.name else "Default Frame")
+                                if (selectedNameEffect != null) {
+                                    append(" • ${selectedNameEffect.name}")
+                                }
+                            },
                             fontSize = 12.sp,
                             color = ColorTextSecondary
                         )
@@ -1228,10 +1301,11 @@ private fun DecorationPreviewDialog(
                 }
 
                 // Category Tabs for Preview
-                TabRow(
+                ScrollableTabRow(
                     selectedTabIndex = pagerState.currentPage,
                     containerColor = ColorSurface,
                     contentColor = ColorTextPrimary,
+                    edgePadding = 12.dp,
                     divider = {},
                     indicator = { tabPositions ->
                         TabRowDefaults.SecondaryIndicator(
@@ -1266,12 +1340,13 @@ private fun DecorationPreviewDialog(
                 ) { page ->
                     when (page) {
                         0 -> PreviewAvatarPage(selectedFrame = selectedFrame)
-                        1 -> PreviewEntryPage(
+                        1 -> PreviewNamePage(selectedName = selectedNameEffect, userName = currentUserName)
+                        2 -> PreviewEntryPage(
                             selectedEntry = selectedItems.find { it.item_type == "entry_animation" },
                             userName = currentUserName
                         )
-                        2 -> PreviewBubblePage(selectedBubble = selectedItems.find { it.item_type == "bubble_theme" })
-                        3 -> PreviewThemePage(selectedTheme = selectedItems.find { it.item_type == "chat_bg" })
+                        3 -> PreviewBubblePage(selectedBubble = selectedItems.find { it.item_type == "bubble_theme" })
+                        4 -> PreviewThemePage(selectedTheme = selectedItems.find { it.item_type == "chat_bg" })
                     }
                 }
 
@@ -1293,7 +1368,8 @@ private fun DecorationPreviewDialog(
                             enabled = !isPurchasing,
                             modifier = Modifier
                                 .weight(1f)
-                                .height(48.dp),
+                                .height(48.dp)
+                                .testTag("preview_buy_only_button"),
                             shape = RoundedCornerShape(100.dp),
                             border = BorderStroke(1.dp, ColorTextSecondary)
                         ) {
@@ -1310,7 +1386,8 @@ private fun DecorationPreviewDialog(
                             enabled = !isPurchasing,
                             modifier = Modifier
                                 .weight(1.3f)
-                                .height(48.dp),
+                                .height(48.dp)
+                                .testTag("preview_apply_all_button"),
                             shape = RoundedCornerShape(100.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = ColorPrimary,
@@ -1358,7 +1435,7 @@ private fun PreviewAvatarPage(selectedFrame: StoreItemRow?) {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                AvatarFrame(config = frameConfig, sizeDp = 100.dp) {
+                AvatarFrame(config = frameConfig, sizeDp = 88.dp, enableFrameAnimation = true) {
                     AsyncImage(
                         model = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300",
                         contentDescription = null,
@@ -1368,7 +1445,7 @@ private fun PreviewAvatarPage(selectedFrame: StoreItemRow?) {
                         contentScale = ContentScale.Crop
                     )
                 }
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(22.dp))
                 Text(
                     text = selectedFrame.name,
                     fontSize = 17.sp,
@@ -1376,7 +1453,7 @@ private fun PreviewAvatarPage(selectedFrame: StoreItemRow?) {
                     color = ColorTextPrimary
                 )
                 Text(
-                    text = selectedFrame.description ?: "Customized animated ring & effects",
+                    text = selectedFrame.description ?: "Customized animated avatar frame",
                     fontSize = 12.5.sp,
                     color = ColorTextSecondary,
                     textAlign = TextAlign.Center
@@ -1384,6 +1461,64 @@ private fun PreviewAvatarPage(selectedFrame: StoreItemRow?) {
             }
         } else {
             Text("No avatar frame selected", color = ColorTextSecondary)
+        }
+    }
+}
+
+// Preview Page 1: Name Effect
+@Composable
+private fun PreviewNamePage(selectedName: StoreItemRow?, userName: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(20.dp))
+            .background(ColorSurface)
+            .border(1.dp, ColorOutline, RoundedCornerShape(20.dp))
+            .padding(20.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        if (selectedName != null) {
+            val nameConfig = remember(selectedName) {
+                CosmeticsConfigParser.parseNameEffect(selectedName.config)
+            }
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = ColorBg,
+                    border = BorderStroke(1.dp, ColorOutline)
+                ) {
+                    Box(
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 18.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        StyledName(
+                            text = userName.ifBlank { selectedName.name },
+                            config = nameConfig,
+                            fontSize = 24.sp,
+                            defaultColor = ColorTextPrimary,
+                            animate = true
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = selectedName.name,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = ColorTextPrimary
+                )
+                Text(
+                    text = selectedName.description ?: "Animated display name style",
+                    fontSize = 12.5.sp,
+                    color = ColorTextSecondary,
+                    textAlign = TextAlign.Center
+                )
+            }
+        } else {
+            Text("No name effect selected", color = ColorTextSecondary)
         }
     }
 }

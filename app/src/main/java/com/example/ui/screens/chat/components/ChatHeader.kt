@@ -24,6 +24,7 @@ fun ChatHeader(
     partnerAvatarUrl: String = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200",
     partnerCountry: String = "Japan",
     partnerCountryCode: String = "jp",
+    partnerUserId: String? = null,
     isOnline: Boolean = true,
     isSpeaking: Boolean = false,
     onBackClick: () -> Unit,
@@ -60,6 +61,8 @@ fun ChatHeader(
             avatarUrl = partnerAvatarUrl,
             isOnline = isOnline,
             isSpeaking = isSpeaking,
+            userId = partnerUserId,
+            enableFrameAnimation = true,
             size = 40.dp
         )
 
@@ -67,12 +70,12 @@ fun ChatHeader(
 
         // Partner Details
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = partnerName,
+            com.example.store.DecoratedUserName(
+                userId = partnerUserId,
+                name = partnerName,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFF111827),
-                letterSpacing = (-0.2).sp,
+                defaultColor = Color(0xFF111827),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )

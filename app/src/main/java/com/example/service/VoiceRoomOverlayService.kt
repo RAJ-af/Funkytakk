@@ -415,10 +415,15 @@ class VoiceRoomOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, 
     }
 
     private fun handleToggleMic() {
+        val action = VoiceRoomOverlayManager.onToggleMicAction
+        if (action != null) {
+            action.invoke()
+            return
+        }
+
         val current = VoiceRoomOverlayManager.isMicEnabled.value
         val newStatus = !current
         VoiceRoomOverlayManager.setMicEnabled(newStatus)
-        VoiceRoomOverlayManager.onToggleMicAction?.invoke()
 
         val roomId = VoiceRoomOverlayManager.roomId.value
         if (roomId != null) {
@@ -444,7 +449,13 @@ class VoiceRoomOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, 
     }
 
     private fun handleLeaveRoom() {
-        VoiceRoomOverlayManager.onLeaveRoomAction?.invoke()
+        val leaveAction = VoiceRoomOverlayManager.onLeaveRoomAction
+        if (leaveAction != null) {
+            leaveAction.invoke()
+            stopSelf()
+            return
+        }
+
         val roomId = VoiceRoomOverlayManager.roomId.value
         val context = applicationContext
         if (roomId != null) {

@@ -82,6 +82,22 @@ data class DeletionReceiptData(
     val eraseLocalChats: Boolean
 )
 
+data class EditProfileSnapshot(
+    val username: String = "",
+    val displayName: String = "",
+    val avatar: String = "",
+    val coverUrl: String = "",
+    val bio: String = "",
+    val age: Int? = null,
+    val gender: String = "",
+    val country: String = "",
+    val countryCode: String = "",
+    val city: String = "",
+    val nativeLanguages: List<String> = emptyList(),
+    val learningLanguages: List<String> = emptyList(),
+    val hobbies: List<String> = emptyList()
+)
+
 class AuthViewModel : ViewModel() {
 
     // Onboarding persistent state across configuration changes and navigation flow backstacks
@@ -154,6 +170,165 @@ class AuthViewModel : ViewModel() {
 
     private val _accountUnderReview = MutableStateFlow<Boolean>(false)
     val accountUnderReview: StateFlow<Boolean> = _accountUnderReview.asStateFlow()
+
+    private val _profileEditLimits = MutableStateFlow<Map<String, ProfileFieldLimitDto>>(emptyMap())
+    val profileEditLimits: StateFlow<Map<String, ProfileFieldLimitDto>> = _profileEditLimits.asStateFlow()
+
+    fun formatIsoToLocalDate(iso: String?): String {
+        val instant = parseSupabaseTimestamp(iso) ?: return iso?.trim().orEmpty().take(10)
+        return try {
+            val zoneDate = instant.atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+            java.time.format.DateTimeFormatter
+                .ofLocalizedDate(java.time.format.FormatStyle.MEDIUM)
+                .withLocale(java.util.Locale.getDefault())
+                .format(zoneDate)
+        } catch (_: Exception) {
+            iso?.trim().orEmpty().take(10)
+        }
+    }
+
+    fun formatIsoToLocalDateTime(iso: String?): String {
+        val instant = parseSupabaseTimestamp(iso) ?: return iso?.trim().orEmpty()
+        return try {
+            val zdt = instant.atZone(java.time.ZoneId.systemDefault())
+            java.time.format.DateTimeFormatter
+                .ofLocalizedDateTime(java.time.format.FormatStyle.MEDIUM, java.time.format.FormatStyle.SHORT)
+                .withLocale(java.util.Locale.getDefault())
+                .format(zdt)
+        } catch (_: Exception) {
+            iso?.trim().orEmpty()
+        }
+    }
+
+    private fun parseSupabaseTimestamp(raw: String?): java.time.Instant? {
+        val trimmed = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        try {
+            return java.time.Instant.parse(trimmed)
+        } catch (_: Exception) {}
+        try {
+            return java.time.OffsetDateTime.parse(trimmed).toInstant()
+        } catch (_: Exception) {}
+
+        // Handle PostgreSQL timestamptz::text like "2026-12-14 08:43:22.123456+00"
+        var normalized = trimmed.replaceFirst(' ', 'T')
+        val shortTzRegex = Regex("([+-]\\d{2})$")
+        val compactTzRegex = Regex("([+-]\\d{2})(\\d{2})$")
+        normalized = when {
+            shortTzRegex.containsMatchIn(normalized) -> normalized.replace(shortTzRegex, "$1:00")
+            compactTzRegex.containsMatchIn(normalized) -> normalized.replace(compactTzRegex, "$1:$2")
+            else -> normalized
+        }
+        return try {
+            java.time.OffsetDateTime.parse(normalized).toInstant()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun profileLimitFieldLabel(field: String): String = when (field) {
+        "username" -> "username"
+        "profile_name" -> "display name"
+        "age" -> "age"
+        "gender" -> "gender"
+        "avatar_url" -> "profile photo"
+        "cover_url" -> "cover photo"
+        "bio" -> "bio"
+        "country_code" -> "country"
+        "city" -> "city"
+        else -> field.replace("_", " ")
+    }
+
+    fun parseProfileErrorMessage(rawErrorBody: String): String {
+        var msgText = ""
+        var hintText = ""
+        try {
+            val json = org.json.JSONObject(rawErrorBody)
+            msgText = json.optString("message", "").trim()
+            hintText = json.optString("hint", "").trim()
+        } catch (_: Exception) {
+            msgText = rawErrorBody.trim()
+        }
+
+        if (msgText.startsWith("profile_limit_")) {
+            val field = msgText.removePrefix("profile_limit_").trim()
+            val label = profileLimitFieldLabel(field)
+            val whenText = formatIsoToLocalDateTime(hintText).ifBlank { "later" }
+            return "You've reached the limit for $label. You can change it again on $whenText."
+        }
+
+        val limitRegex = Regex("profile_limit_([a-z_]+)")
+        val limitMatch = limitRegex.find(rawErrorBody)
+        if (limitMatch != null) {
+            val field = limitMatch.groupValues[1]
+            val label = profileLimitFieldLabel(field)
+            val whenText = formatIsoToLocalDateTime(hintText).ifBlank { "later" }
+            return "You've reached the limit for $label. You can change it again on $whenText."
+        }
+
+        val combined = "$msgText $rawErrorBody"
+        return when {
+            msgText == "invalid_username" || combined.contains("invalid_username") ->
+                "Use 3-20 letters, numbers, dots or underscores"
+            msgText == "username_reserved" || combined.contains("username_reserved") ->
+                "This name is not allowed"
+            msgText == "username_recently_used" || combined.contains("username_recently_used") ->
+                "This name was used recently by someone else"
+            msgText == "username_taken" || combined.contains("username_taken") || combined.contains("23505") ->
+                "Already taken"
+            msgText == "not_authenticated" || combined.contains("not_authenticated") ->
+                "Please log in again"
+            else -> "Something went wrong. Try again"
+        }
+    }
+
+    suspend fun fetchProfileEditLimits(context: Context): Map<String, ProfileFieldLimitDto> {
+        return withContext(Dispatchers.IO) {
+            try {
+                SupabaseSessionManager.ensureActiveSession(context)
+                val bearerAuth = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                    ?: SupabaseSessionManager.getBearerToken(context)
+                val res = SupabaseClient.api.getProfileEditLimits(auth = bearerAuth)
+                if (res.isSuccessful) {
+                    val map = res.body().orEmpty()
+                        .filter { it.field.isNotBlank() }
+                        .associateBy { it.field }
+                    _profileEditLimits.value = map
+                    return@withContext map
+                } else {
+                    Log.w("AuthViewModel", "get_profile_edit_limits failed (${res.code()})")
+                }
+            } catch (e: Exception) {
+                Log.w("AuthViewModel", "get_profile_edit_limits error: ${e.message}")
+            }
+            _profileEditLimits.value
+        }
+    }
+
+    suspend fun checkUsernameAvailability(
+        context: Context,
+        username: String
+    ): Result<UsernameAvailabilityResponse> {
+        return withContext(Dispatchers.IO) {
+            try {
+                SupabaseSessionManager.ensureActiveSession(context)
+                val bearerAuth = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                    ?: SupabaseSessionManager.getBearerToken(context)
+                val clean = username.trim().lowercase()
+                val res = SupabaseClient.api.checkUsernameAvailable(
+                    auth = bearerAuth,
+                    body = CheckUsernameRequest(p_username = clean)
+                )
+                if (res.isSuccessful && res.body() != null) {
+                    Result.success(res.body()!!)
+                } else {
+                    val err = res.errorBody()?.string().orEmpty()
+                    Result.failure(Exception(parseProfileErrorMessage(err)))
+                }
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+    }
 
     fun checkAccountReview(context: Context, onReviewEnded: (() -> Unit)? = null) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -1148,7 +1323,14 @@ class AuthViewModel : ViewModel() {
 
         // CRITICAL: For Host, leave_voice_room must ONLY be invoked if user explicitly taps Leave/End button!
         // Never allow from background, screen lock, rotation, navigation, or disposal.
-        val isExplicitUserLeave = trigger in listOf("user_leave_button", "user_end_button", "host_leave_only_dialog", "notification_leave_action", "floating_bubble_leave_button")
+        val isExplicitUserLeave = trigger in listOf(
+            "user_leave_button",
+            "user_end_button",
+            "host_leave_only_dialog",
+            "notification_leave_action",
+            "floating_bubble_leave_button",
+            "dynamic_island_leave_button"
+        )
         if (isHost && !isExplicitUserLeave) {
             Log.w("VoiceRoomLifecycle", "Suppressed non-user leave_voice_room for host on roomId=$roomId with trigger='$trigger'")
             return
@@ -2607,10 +2789,27 @@ class AuthViewModel : ViewModel() {
 
         TelemetryManager.onLogout()
         roomJoinedAtMs = 0L
+        _activeRoomId.value = null
+        _activeRoomTitle.value = null
+        _activeRoomHostId.value = null
+        _activeRoomSpeakers.value = emptyList()
+        _pendingSpeakerRequests.value = emptyList()
+        _pendingSpeakerRequest.value = null
+        _mySpeakerRequestStatus.value = null
+        _supabaseProfiles.value = emptyList()
+        _myModerationStatus.value = null
+        _accountUnderReview.value = false
+        _profileEditLimits.value = emptyMap()
+        _deletionStatus.value = DeletionStatusState.Idle
+        _deletionReceipt.value = null
+        com.example.realtime.RoomMicController.reset()
+        endVoiceSession()
         _authState.value = AuthState.Idle
         _sessionVerificationState.value = SessionVerificationState.Idle
 
         if (context != null) {
+            try { com.example.service.VoiceRoomOverlayManager.stopService(context) } catch (_: Exception) {}
+            try { com.example.service.VoiceRoomOverlayManager.clear() } catch (_: Exception) {}
             com.example.service.PushNotificationManager.launchApplicationLogoutCleanup(
                 context = context.applicationContext,
                 effectiveUid = effectiveUid,
@@ -2619,7 +2818,22 @@ class AuthViewModel : ViewModel() {
         } else {
             com.example.service.PushNotificationManager.cancelInFlightRegistration()
             firebaseAuth?.signOut()
-            com.example.crypto.VaultSecurityManager.lock()
+            ActiveUserManager.clear()
+            com.example.crypto.VaultSecurityManager.resetForLogout()
+            com.example.crypto.E2EEManager.resetForLogout()
+            com.example.repository.EncryptedChatRepository.resetForLogout()
+            com.example.repository.GroupChatRepository.resetForLogout()
+            com.example.ChatPreferencesManager.resetForLogout()
+            com.example.SupportChatManager.resetForLogout()
+            com.example.CloudAiManager.resetForLogout()
+            com.example.NotificationsManager.clear()
+            com.example.repository.TombstoneManager.resetForLogout()
+            com.example.repository.InboxDrainTracker.reset()
+            com.example.repository.FeedbackRepository.resetForLogout()
+            com.example.store.CosmeticsManager.clearForLogout()
+            com.example.gifting.GiftManager.resetForLogout()
+            com.example.ModerationManager.resetForLogout()
+            com.example.realtime.VoiceRoomRealtimeManager.resetForLogout()
         }
     }
 
@@ -2834,6 +3048,8 @@ class AuthViewModel : ViewModel() {
         bio: String? = null,
         city: String? = null,
         coverUrl: String? = null,
+        loadedSnapshot: EditProfileSnapshot? = null,
+        onUsernameNextChange: ((String?) -> Unit)? = null,
         onError: ((String) -> Unit)? = null,
         onSuccess: () -> Unit
     ) {
@@ -2841,6 +3057,9 @@ class AuthViewModel : ViewModel() {
         if (currentState is AuthState.Success) {
             viewModelScope.launch {
                 val cleanUsername = username.trim().lowercase()
+                val cleanDisplayName = displayName.trim()
+                val cleanBio = (bio ?: dob).trim()
+                val cleanCity = city?.trim().orEmpty()
                 var finalAvatar = avatar
                 var finalCover = coverUrl?.trim()?.ifBlank { null }
 
@@ -2849,13 +3068,42 @@ class AuthViewModel : ViewModel() {
                 val bearerAuth = SupabaseSessionManager.getAuthenticatedBearerToken(context)
                     ?: SupabaseSessionManager.getBearerToken(context)
 
-                val baseUrl = BuildConfig.SUPABASE_URL.let {
-                    if (!it.startsWith("http")) "https://$it" else it
-                }.trimEnd('/')
+                val userId = currentState.user.uid
+                val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
+                var nextUsernameChangeAt: String? = null
+                var effectiveUsername = loadedSnapshot?.username?.trim()?.lowercase()?.ifBlank { cleanUsername } ?: cleanUsername
+                var avatarOrCoverChanged = false
 
                 try {
+                    val limits = _profileEditLimits.value.ifEmpty { fetchProfileEditLimits(context) }
+
+                    val avatarIsLocal = avatar.startsWith("content://") || avatar.startsWith("file://") || avatar.startsWith("/")
+                    val avatarChanged = loadedSnapshot == null || avatar != loadedSnapshot.avatar
+                    if (avatarIsLocal && avatarChanged) {
+                        val avatarLimit = limits["avatar_url"]
+                        if (avatarLimit != null && avatarLimit.remaining <= 0) {
+                            val refreshed = fetchProfileEditLimits(context)
+                            val whenText = formatIsoToLocalDateTime(refreshed["avatar_url"]?.next_allowed_at).ifBlank { "later" }
+                            onError?.invoke("You've reached the limit for profile photo. You can change it again on $whenText.")
+                            return@launch
+                        }
+                    }
+
+                    val coverIsLocal = !finalCover.isNullOrBlank() &&
+                        (finalCover.startsWith("content://") || finalCover.startsWith("file://") || finalCover.startsWith("/"))
+                    val coverChanged = loadedSnapshot == null || (finalCover ?: "") != loadedSnapshot.coverUrl
+                    if (coverIsLocal && coverChanged) {
+                        val coverLimit = limits["cover_url"]
+                        if (coverLimit != null && coverLimit.remaining <= 0) {
+                            val refreshed = fetchProfileEditLimits(context)
+                            val whenText = formatIsoToLocalDateTime(refreshed["cover_url"]?.next_allowed_at).ifBlank { "later" }
+                            onError?.invoke("You've reached the limit for cover photo. You can change it again on $whenText.")
+                            return@launch
+                        }
+                    }
+
                     // 1. Upload avatar to Appwrite Storage proxy if local URI selected
-                    if (avatar.startsWith("content://") || avatar.startsWith("file://") || avatar.startsWith("/")) {
+                    if (avatarIsLocal) {
                         var avatarBytes: ByteArray? = null
                         try {
                             if (avatar.startsWith("content://")) {
@@ -2894,6 +3142,7 @@ class AuthViewModel : ViewModel() {
                         when (uploadResult) {
                             is AppwriteUploader.UploadResult.Success -> {
                                 finalAvatar = uploadResult.url
+                                avatarOrCoverChanged = true
                                 Log.d("AuthViewModel", "Avatar uploaded via Appwrite proxy: $finalAvatar")
                             }
                             is AppwriteUploader.UploadResult.Error -> {
@@ -2902,10 +3151,12 @@ class AuthViewModel : ViewModel() {
                                 return@launch
                             }
                         }
+                    } else if (avatarChanged) {
+                        avatarOrCoverChanged = true
                     }
 
                     // 2. Upload cover photo to Appwrite Storage proxy if local URI selected
-                    if (!finalCover.isNullOrBlank() && (finalCover.startsWith("content://") || finalCover.startsWith("file://") || finalCover.startsWith("/"))) {
+                    if (coverIsLocal && !finalCover.isNullOrBlank()) {
                         var coverBytes: ByteArray? = null
                         try {
                             if (finalCover.startsWith("content://")) {
@@ -2944,6 +3195,7 @@ class AuthViewModel : ViewModel() {
                         when (uploadResult) {
                             is AppwriteUploader.UploadResult.Success -> {
                                 finalCover = uploadResult.url
+                                avatarOrCoverChanged = true
                                 Log.d("AuthViewModel", "Cover uploaded via Appwrite proxy: $finalCover")
                             }
                             is AppwriteUploader.UploadResult.Error -> {
@@ -2952,11 +3204,13 @@ class AuthViewModel : ViewModel() {
                                 return@launch
                             }
                         }
+                    } else if (coverChanged) {
+                        avatarOrCoverChanged = true
                     }
 
                     // STRICT SAFEGUARD: Only save HTTP / HTTPS public URLs to database (or preset avatars)!
                     val isPreset = com.example.ui.components.PresetAvatarList.any { it.second == finalAvatar }
-                    if (!finalAvatar.startsWith("http://") && !finalAvatar.startsWith("https://") && !isPreset) {
+                    if (finalAvatar.isNotBlank() && !finalAvatar.startsWith("http://") && !finalAvatar.startsWith("https://") && !isPreset) {
                         Log.e("AuthViewModel", "Prevented saving invalid avatar_url: $finalAvatar")
                         onError?.invoke("Invalid avatar URL.")
                         return@launch
@@ -2967,70 +3221,118 @@ class AuthViewModel : ViewModel() {
                         return@launch
                     }
 
+                    // 3. Username changes MUST go through change_username RPC, never direct PATCH
+                    val usernameChanged = loadedSnapshot == null || cleanUsername != loadedSnapshot.username.trim().lowercase()
+                    if (usernameChanged && cleanUsername.isNotBlank()) {
+                        val rpcRes = SupabaseClient.api.changeUsername(
+                            auth = bearerAuth,
+                            body = ChangeUsernameRequest(p_username = cleanUsername)
+                        )
+                        if (!rpcRes.isSuccessful) {
+                            val errBody = rpcRes.errorBody()?.string().orEmpty()
+                            Log.e("AuthViewModel", "change_username failed (${rpcRes.code()}): $errBody")
+                            fetchProfileEditLimits(context)
+                            onError?.invoke(parseProfileErrorMessage(errBody))
+                            return@launch
+                        }
+                        val rpcBody = rpcRes.body()
+                        effectiveUsername = rpcBody?.username?.trim()?.lowercase()?.ifBlank { cleanUsername } ?: cleanUsername
+                        nextUsernameChangeAt = rpcBody?.next_change_at
+
+                        prefs.edit().apply {
+                            putString("profile_username_${userId}", effectiveUsername)
+                            if (supaUid != userId) putString("profile_username_${supaUid}", effectiveUsername)
+                            apply()
+                        }
+                        (_authState.value as? AuthState.Success)?.let { latestSuccess ->
+                            _authState.value = AuthState.Success(latestSuccess.user.copy(username = effectiveUsername))
+                        }
+                    }
+
                     val nativeList = nativeLanguage.split(",").map { it.trim() }.filter { it.isNotEmpty() }
                     val learningList = learningLanguage.split(",").map { it.trim() }.filter { it.isNotEmpty() }
 
-                    val updates = mutableMapOf<String, Any?>(
-                        "username" to cleanUsername,
-                        "profile_name" to displayName,
-                        "avatar_url" to finalAvatar,
-                        "gender" to gender,
-                        "country" to country,
-                        "country_code" to countryCode,
-                        "native_languages" to nativeList,
-                        "learning_languages" to learningList,
-                        "hobbies" to hobbies,
-                        "bio" to (bio ?: dob),
-                        "onboarding_complete" to true
-                    )
-                    if (age != null && age > 0) {
-                        updates["age"] = age
-                    }
-                    if (!city.isNullOrBlank()) {
-                        updates["city"] = city.trim()
-                    }
-                    if (!finalCover.isNullOrBlank()) {
-                        updates["cover_url"] = finalCover
+                    // 4. Build diff-only updates map (NEVER send username, id, auth_user_id, created_at, deletion_scheduled_at)
+                    val updates = mutableMapOf<String, Any?>()
+                    if (loadedSnapshot == null) {
+                        updates["profile_name"] = cleanDisplayName
+                        updates["avatar_url"] = finalAvatar
+                        updates["gender"] = gender
+                        updates["country"] = country
+                        updates["country_code"] = countryCode
+                        updates["native_languages"] = nativeList
+                        updates["learning_languages"] = learningList
+                        updates["hobbies"] = hobbies
+                        updates["bio"] = cleanBio
+                        if (age != null && age > 0) updates["age"] = age
+                        if (cleanCity.isNotBlank()) updates["city"] = cleanCity
+                        if (!finalCover.isNullOrBlank()) updates["cover_url"] = finalCover
+                    } else {
+                        if (cleanDisplayName != loadedSnapshot.displayName.trim()) {
+                            updates["profile_name"] = cleanDisplayName
+                        }
+                        if (finalAvatar != loadedSnapshot.avatar) {
+                            updates["avatar_url"] = finalAvatar
+                        }
+                        if ((finalCover ?: "") != loadedSnapshot.coverUrl && !finalCover.isNullOrBlank()) {
+                            updates["cover_url"] = finalCover
+                        }
+                        if (cleanBio != loadedSnapshot.bio.trim()) {
+                            updates["bio"] = cleanBio
+                        }
+                        if (age != null && age > 0 && age != loadedSnapshot.age) {
+                            updates["age"] = age
+                        }
+                        if (gender != loadedSnapshot.gender) {
+                            updates["gender"] = gender
+                        }
+                        if (countryCode != loadedSnapshot.countryCode || country != loadedSnapshot.country) {
+                            updates["country"] = country
+                            updates["country_code"] = countryCode
+                        }
+                        if (cleanCity != loadedSnapshot.city.trim()) {
+                            updates["city"] = cleanCity
+                        }
+                        if (nativeList != loadedSnapshot.nativeLanguages) {
+                            updates["native_languages"] = nativeList
+                        }
+                        if (learningList != loadedSnapshot.learningLanguages) {
+                            updates["learning_languages"] = learningList
+                        }
+                        if (hobbies != loadedSnapshot.hobbies) {
+                            updates["hobbies"] = hobbies
+                        }
                     }
 
-                    val patchRes = SupabaseClient.api.patchProfile(
-                        auth = bearerAuth,
-                        authUserIdEq = "eq.$supaUid",
-                        updates = updates
-                    )
+                    if (updates.isNotEmpty()) {
+                        val patchRes = SupabaseClient.api.patchProfile(
+                            auth = bearerAuth,
+                            authUserIdEq = "eq.$supaUid",
+                            updates = updates
+                        )
 
-                    if (!patchRes.isSuccessful) {
-                        val errBody = patchRes.errorBody()?.string() ?: ""
-                        Log.e("AuthViewModel", "Supabase patchProfile failed (${patchRes.code()}): $errBody")
-                        if (errBody.contains("username", ignoreCase = true) || 
-                            errBody.contains("duplicate", ignoreCase = true) || 
-                            errBody.contains("unique", ignoreCase = true) || 
-                            errBody.contains("23505")) {
-                            onError?.invoke("Username '@$cleanUsername' is already taken. Please choose another username.")
-                            return@launch
-                        } else {
-                            onError?.invoke("Failed to update profile: ${patchRes.message()}")
+                        if (!patchRes.isSuccessful) {
+                            val errBody = patchRes.errorBody()?.string().orEmpty()
+                            Log.e("AuthViewModel", "Supabase patchProfile failed (${patchRes.code()}): $errBody")
+                            fetchProfileEditLimits(context)
+                            onError?.invoke(parseProfileErrorMessage(errBody))
                             return@launch
                         }
                     }
                 } catch (e: Exception) {
                     Log.e("AuthViewModel", "Supabase update error: ${e.message}", e)
-                    val msg = e.message ?: ""
-                    if (msg.contains("username", ignoreCase = true) || msg.contains("duplicate", ignoreCase = true) || msg.contains("unique", ignoreCase = true)) {
-                        onError?.invoke("Username is already taken. Please choose another username.")
-                        return@launch
-                    }
+                    fetchProfileEditLimits(context)
+                    onError?.invoke(parseProfileErrorMessage(e.message.orEmpty()))
+                    return@launch
                 }
 
-                val userId = currentState.user.uid
-                val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
                 prefs.edit().apply {
-                    putString("profile_username_${userId}", cleanUsername)
-                    putString("profile_displayName_${userId}", displayName)
+                    putString("profile_username_${userId}", effectiveUsername)
+                    putString("profile_displayName_${userId}", cleanDisplayName)
                     putString("profile_avatar_${userId}", finalAvatar)
                     if (supaUid != userId) {
-                        putString("profile_username_${supaUid}", cleanUsername)
-                        putString("profile_displayName_${supaUid}", displayName)
+                        putString("profile_username_${supaUid}", effectiveUsername)
+                        putString("profile_displayName_${supaUid}", cleanDisplayName)
                         putString("profile_avatar_${supaUid}", finalAvatar)
                     }
                     if (!finalCover.isNullOrBlank()) {
@@ -3040,10 +3342,10 @@ class AuthViewModel : ViewModel() {
                         remove("profile_cover_${userId}")
                         if (supaUid != userId) remove("profile_cover_${supaUid}")
                     }
-                    putString("profile_dob_${userId}", dob)
-                    putString("profile_bio_${userId}", bio ?: dob)
+                    putString("profile_dob_${userId}", cleanBio)
+                    putString("profile_bio_${userId}", cleanBio)
                     if (age != null && age > 0) putInt("profile_age_${userId}", age)
-                    if (!city.isNullOrBlank()) putString("profile_city_${userId}", city)
+                    if (cleanCity.isNotBlank()) putString("profile_city_${userId}", cleanCity)
                     putString("profile_gender_${userId}", gender)
                     putString("profile_nativeLanguage_${userId}", nativeLanguage)
                     putString("profile_learningLanguage_${userId}", learningLanguage)
@@ -3054,22 +3356,25 @@ class AuthViewModel : ViewModel() {
                     apply()
                 }
 
-                // Invalidate Coil cache so fresh avatar is loaded
-                try {
-                    val loader = coil.Coil.imageLoader(context)
-                    loader.memoryCache?.clear()
-                    loader.diskCache?.clear()
-                } catch (_: Exception) {}
+                // Invalidate Coil cache only when avatar or cover changed
+                if (avatarOrCoverChanged) {
+                    try {
+                        val loader = coil.Coil.imageLoader(context)
+                        loader.memoryCache?.clear()
+                        loader.diskCache?.clear()
+                    } catch (_: Exception) {}
+                }
 
-                val updatedUser = currentState.user.copy(
-                    username = cleanUsername,
-                    displayName = displayName,
+                val latestUser = (_authState.value as? AuthState.Success)?.user ?: currentState.user
+                val updatedUser = latestUser.copy(
+                    username = effectiveUsername,
+                    displayName = cleanDisplayName,
                     avatar = finalAvatar,
-                    coverUrl = finalCover ?: currentState.user.coverUrl,
-                    dob = dob,
-                    bio = bio ?: dob,
-                    age = age ?: currentState.user.age,
-                    city = city ?: currentState.user.city,
+                    coverUrl = finalCover ?: latestUser.coverUrl,
+                    dob = cleanBio,
+                    bio = cleanBio,
+                    age = age ?: latestUser.age,
+                    city = cleanCity.ifBlank { latestUser.city },
                     gender = gender,
                     nativeLanguage = nativeLanguage,
                     learningLanguage = learningLanguage,
@@ -3079,6 +3384,8 @@ class AuthViewModel : ViewModel() {
                     onboardingComplete = true
                 )
                 _authState.value = AuthState.Success(updatedUser)
+                fetchProfileEditLimits(context)
+                onUsernameNextChange?.invoke(nextUsernameChangeAt)
                 onSuccess()
             }
         }
@@ -3564,11 +3871,15 @@ class AuthViewModel : ViewModel() {
                 val deviceId = com.example.util.DeviceInfoProvider.getDeviceId(context)
                 val deviceName = com.example.util.DeviceInfoProvider.getDeviceName()
 
-                // Persist eraseLocalChats choice immediately
+                // Persist eraseLocalChats choice & UID immediately
+                val targetUid = ActiveUserManager.getActiveUid(context)
+                    ?: SupabaseSessionManager.getUserId(context)
+                    ?: fbUser.uid
                 context.getSharedPreferences("account_deletion_prefs", Context.MODE_PRIVATE)
                     .edit()
                     .putBoolean("pending_erase_local_chats", eraseLocalChats)
-                    .apply()
+                    .putString("pending_erase_uid", targetUid)
+                    .commit()
 
                 val req = RequestAccountDeletionRequest(
                     firebase_token = freshToken,
@@ -3639,6 +3950,9 @@ class AuthViewModel : ViewModel() {
         viewModelScope.launch(Dispatchers.IO) {
             val prefs = context.getSharedPreferences("account_deletion_prefs", Context.MODE_PRIVATE)
             val shouldErase = prefs.getBoolean("pending_erase_local_chats", false)
+            val targetUid = prefs.getString("pending_erase_uid", null)
+                ?: ActiveUserManager.getActiveUid(context)
+                ?: SupabaseSessionManager.getUserId(context)
 
             // 1. Delete FCM token
             try {
@@ -3648,42 +3962,26 @@ class AuthViewModel : ViewModel() {
                 Log.w("AuthViewModel", "FCM token delete failed", e)
             }
 
-            // 2. Clear Coil/Image Cache
-            try {
-                coil.Coil.imageLoader(context).memoryCache?.clear()
-                coil.Coil.imageLoader(context).diskCache?.clear()
-            } catch (_: Exception) {}
-
-            // 3. Conditional Chat Vault / Tink Wipe
-            if (shouldErase) {
-                try {
-                    com.example.crypto.VaultSecurityManager.resetVault(context)
-                } catch (e: Exception) {
-                    Log.w("AuthViewModel", "Vault reset error", e)
-                }
-                try {
-                    context.getSharedPreferences("e2ee_tink_prefs", Context.MODE_PRIVATE).edit().clear().apply()
-                    val ks = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-                    if (ks.containsAlias("e2ee_hpke_master_key")) {
-                        ks.deleteEntry("e2ee_hpke_master_key")
-                    }
-                } catch (e: Exception) {
-                    Log.w("AuthViewModel", "Tink keyset wipe error", e)
-                }
+            // 2. Conditional Per-UID Local Data & Key Wipe
+            if (shouldErase && !targetUid.isNullOrBlank()) {
+                wipeAllLocalDataForUid(context, targetUid)
             }
 
-            // 4. Clear auth/session data (tokens, cached profile)
-            // Note: DeviceInfoProvider uses 'device_identity_prefs' so deviceId is untouched!
-            SupabaseSessionManager.clearSession(context)
-            try {
-                FirebaseAuth.getInstance().signOut()
-            } catch (_: Exception) {}
+            // 3. Complete logout isolation (Note: DeviceInfoProvider uses 'device_identity_prefs' so deviceId is untouched!)
+            com.example.service.PushNotificationManager.launchApplicationLogoutCleanup(
+                context = context.applicationContext,
+                effectiveUid = targetUid.orEmpty(),
+                firebaseAuth = firebaseAuth
+            )
 
-            prefs.edit().clear().apply()
+            prefs.edit().clear().commit()
 
             withContext(Dispatchers.Main) {
                 _deletionReceipt.value = null
                 _deletionStatus.value = DeletionStatusState.Idle
+                _supabaseProfiles.value = emptyList()
+                _myModerationStatus.value = null
+                _accountUnderReview.value = false
                 _authState.value = AuthState.Idle
                 onComplete()
             }
@@ -3694,17 +3992,38 @@ class AuthViewModel : ViewModel() {
         val prefs = context.getSharedPreferences("account_deletion_prefs", Context.MODE_PRIVATE)
         if (prefs.getBoolean("pending_erase_local_chats", false)) {
             try {
-                com.example.crypto.VaultSecurityManager.resetVault(context)
-                context.getSharedPreferences("e2ee_tink_prefs", Context.MODE_PRIVATE).edit().clear().apply()
-                val ks = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-                if (ks.containsAlias("e2ee_hpke_master_key")) {
-                    ks.deleteEntry("e2ee_hpke_master_key")
+                val targetUid = prefs.getString("pending_erase_uid", null)
+                    ?: ActiveUserManager.getActiveUid(context)
+                    ?: SupabaseSessionManager.getUserId(context)
+                if (!targetUid.isNullOrBlank()) {
+                    wipeAllLocalDataForUid(context, targetUid)
                 }
             } catch (e: Exception) {
                 Log.w("AuthViewModel", "Error executing pending local erase", e)
             } finally {
-                prefs.edit().clear().apply()
+                prefs.edit().clear().commit()
             }
+        }
+    }
+
+    private fun wipeAllLocalDataForUid(context: Context, uid: String) {
+        try { com.example.crypto.VaultSecurityManager.wipeForUid(context, uid) } catch (e: Exception) {
+            Log.w("AuthViewModel", "Vault wipe error for $uid", e)
+        }
+        try { com.example.crypto.E2EEManager.wipeForUid(context, uid) } catch (e: Exception) {
+            Log.w("AuthViewModel", "E2EE wipe error for $uid", e)
+        }
+        try { com.example.ChatPreferencesManager.wipeForUid(context, uid) } catch (e: Exception) {
+            Log.w("AuthViewModel", "Chat prefs wipe error for $uid", e)
+        }
+        try { com.example.util.ChatBackupPreferencesManager.wipeForUid(context, uid) } catch (e: Exception) {
+            Log.w("AuthViewModel", "Backup prefs wipe error for $uid", e)
+        }
+        try { com.example.SupportChatManager.wipeForUid(context, uid) } catch (e: Exception) {
+            Log.w("AuthViewModel", "Support prefs wipe error for $uid", e)
+        }
+        try { com.example.CloudAiManager.wipeForUid(context, uid) } catch (e: Exception) {
+            Log.w("AuthViewModel", "Cloud AI prefs wipe error for $uid", e)
         }
     }
 

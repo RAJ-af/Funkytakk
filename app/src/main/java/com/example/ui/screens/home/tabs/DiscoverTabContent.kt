@@ -265,6 +265,10 @@ fun DiscoverTabContent(
                         country = p.country ?: ""
                     )
                 }
+                val partnerIds = partnersList.map { it.id }.filter { it.isNotBlank() }.distinct()
+                if (partnerIds.isNotEmpty()) {
+                    com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, partnerIds)
+                }
             } else {
                 val errBody = response.errorBody()?.string()
                 Log.e("DiscoverTab", "Failed to fetch discoverable profiles: $errBody")
@@ -788,17 +792,19 @@ fun DiscoverTabContent(
                     isOnline = user.isOnline,
                     countryCode = user.countryCode,
                     userId = user.id,
+                    enableFrameAnimation = true,
                     showFlagBadge = true
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = user.name,
+                    com.example.store.DecoratedUserName(
+                        userId = user.id,
+                        name = user.name,
                         fontSize = 22.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = funkyColors.ink
+                        defaultColor = funkyColors.ink
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
@@ -1590,11 +1596,12 @@ fun DiscoverUserCard(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text(
-                            text = partner.name,
+                        com.example.store.DecoratedUserName(
+                            userId = partner.id,
+                            name = partner.name,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = funkyColors.ink,
+                            defaultColor = funkyColors.ink,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false)

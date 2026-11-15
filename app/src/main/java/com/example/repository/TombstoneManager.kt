@@ -121,4 +121,11 @@ object TombstoneManager {
             }
         }
     }
+
+    fun resetForLogout() {
+        synchronized(pendingAlertsQueue) {
+            pendingAlertsQueue.clear()
+        }
+        _currentAlert.value = null
+    }
 }

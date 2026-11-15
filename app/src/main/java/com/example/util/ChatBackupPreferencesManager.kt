@@ -6,9 +6,10 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.util.Log
+import com.example.ActiveUserManager
+import com.example.LegacySecurityMigration
 import java.nio.ByteBuffer
 import java.security.KeyStore
-import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -16,7 +17,6 @@ import javax.crypto.spec.GCMParameterSpec
 
 object ChatBackupPreferencesManager {
     private const val TAG = "ChatBackupPrefs"
-    private const val PREFS_NAME = "chat_backup_prefs"
 
     private const val KEY_DRIVE_ACCOUNT_NAME = "drive_account_name"
     private const val KEY_DRIVE_ACCESS_TOKEN = "drive_access_token"
@@ -28,25 +28,33 @@ object ChatBackupPreferencesManager {
     private const val KEY_WRAPPED_VAULT_PASSWORD = "wrapped_vault_password"
     private const val KEY_HAS_SKIPPED_RESTORE = "has_skipped_restore"
 
-    private const val WRAPPER_KEY_ALIAS = "vault_password_wrapper_key"
     private const val CIPHER_TRANSFORMATION = "AES/GCM/NoPadding"
     private const val GCM_TAG_LENGTH = 128
     private const val IV_SIZE_BYTES = 12
 
-    private fun getPrefs(context: Context): SharedPreferences {
-        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private fun resolveUid(context: Context, explicitUid: String? = null): String? {
+        return explicitUid?.takeIf { it.isNotBlank() } ?: ActiveUserManager.getActiveUid(context)
     }
 
-    private fun getOrCreateWrapperKey(): SecretKey {
+    private fun getPrefs(context: Context, uid: String? = null): SharedPreferences? {
+        val resolvedUid = resolveUid(context, uid) ?: return null
+        return context.applicationContext.getSharedPreferences(
+            ActiveUserManager.backupPrefsName(resolvedUid),
+            Context.MODE_PRIVATE
+        )
+    }
+
+    private fun getOrCreateWrapperKey(uid: String): SecretKey {
+        val alias = ActiveUserManager.backupWrapperKeyAlias(uid)
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        if (keyStore.containsAlias(WRAPPER_KEY_ALIAS)) {
-            val entry = keyStore.getEntry(WRAPPER_KEY_ALIAS, null) as? KeyStore.SecretKeyEntry
+        if (keyStore.containsAlias(alias)) {
+            val entry = keyStore.getEntry(alias, null) as? KeyStore.SecretKeyEntry
             if (entry != null) return entry.secretKey
         }
 
         val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
         val builder = KeyGenParameterSpec.Builder(
-            WRAPPER_KEY_ALIAS,
+            alias,
             KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
         )
             .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
@@ -59,73 +67,74 @@ object ChatBackupPreferencesManager {
     }
 
     fun getDriveAccountName(context: Context): String? {
-        return getPrefs(context).getString(KEY_DRIVE_ACCOUNT_NAME, null)
+        return getPrefs(context)?.getString(KEY_DRIVE_ACCOUNT_NAME, null)
     }
 
     fun setDriveAccountName(context: Context, name: String?) {
-        getPrefs(context).edit().putString(KEY_DRIVE_ACCOUNT_NAME, name).apply()
+        getPrefs(context)?.edit()?.putString(KEY_DRIVE_ACCOUNT_NAME, name)?.apply()
     }
 
     fun getDriveAccessToken(context: Context): String? {
-        return getPrefs(context).getString(KEY_DRIVE_ACCESS_TOKEN, null)
+        return getPrefs(context)?.getString(KEY_DRIVE_ACCESS_TOKEN, null)
     }
 
     fun setDriveAccessToken(context: Context, token: String?) {
-        getPrefs(context).edit().putString(KEY_DRIVE_ACCESS_TOKEN, token).apply()
+        getPrefs(context)?.edit()?.putString(KEY_DRIVE_ACCESS_TOKEN, token)?.apply()
     }
 
     fun getLastBackupTimestamp(context: Context): Long {
-        return getPrefs(context).getLong(KEY_LAST_BACKUP_TIMESTAMP, 0L)
+        return getPrefs(context)?.getLong(KEY_LAST_BACKUP_TIMESTAMP, 0L) ?: 0L
     }
 
     fun setLastBackupTimestamp(context: Context, timestamp: Long) {
-        getPrefs(context).edit().putLong(KEY_LAST_BACKUP_TIMESTAMP, timestamp).apply()
+        getPrefs(context)?.edit()?.putLong(KEY_LAST_BACKUP_TIMESTAMP, timestamp)?.apply()
     }
 
     fun getLastBackupSizeBytes(context: Context): Long {
-        return getPrefs(context).getLong(KEY_LAST_BACKUP_SIZE, 0L)
+        return getPrefs(context)?.getLong(KEY_LAST_BACKUP_SIZE, 0L) ?: 0L
     }
 
     fun setLastBackupSizeBytes(context: Context, size: Long) {
-        getPrefs(context).edit().putLong(KEY_LAST_BACKUP_SIZE, size).apply()
+        getPrefs(context)?.edit()?.putLong(KEY_LAST_BACKUP_SIZE, size)?.apply()
     }
 
     fun getAutoBackupFrequency(context: Context): String {
-        return getPrefs(context).getString(KEY_AUTO_BACKUP_FREQ, "OFF") ?: "OFF"
+        return getPrefs(context)?.getString(KEY_AUTO_BACKUP_FREQ, "OFF") ?: "OFF"
     }
 
     fun setAutoBackupFrequency(context: Context, freq: String) {
-        getPrefs(context).edit().putString(KEY_AUTO_BACKUP_FREQ, freq).apply()
+        getPrefs(context)?.edit()?.putString(KEY_AUTO_BACKUP_FREQ, freq)?.apply()
     }
 
     fun getIncludeMedia(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_INCLUDE_MEDIA, false)
+        return getPrefs(context)?.getBoolean(KEY_INCLUDE_MEDIA, false) ?: false
     }
 
     fun setIncludeMedia(context: Context, include: Boolean) {
-        getPrefs(context).edit().putBoolean(KEY_INCLUDE_MEDIA, include).apply()
+        getPrefs(context)?.edit()?.putBoolean(KEY_INCLUDE_MEDIA, include)?.apply()
     }
 
     fun getWifiOnly(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_WIFI_ONLY, true)
+        return getPrefs(context)?.getBoolean(KEY_WIFI_ONLY, true) ?: true
     }
 
     fun setWifiOnly(context: Context, wifiOnly: Boolean) {
-        getPrefs(context).edit().putBoolean(KEY_WIFI_ONLY, wifiOnly).apply()
+        getPrefs(context)?.edit()?.putBoolean(KEY_WIFI_ONLY, wifiOnly)?.apply()
     }
 
     /**
-     * Stores the vault password encrypted with Android Keystore AES-256-GCM wrapper key.
-     * Never stores plaintext passwords in SharedPreferences.
+     * Stores the vault password encrypted with Android Keystore AES-256-GCM wrapper key scoped to active UID.
      */
     fun setCachedVaultPassword(context: Context, password: String?) {
+        val uid = resolveUid(context) ?: return
+        val prefs = getPrefs(context, uid) ?: return
         if (password.isNullOrBlank()) {
-            getPrefs(context).edit().remove(KEY_WRAPPED_VAULT_PASSWORD).apply()
+            prefs.edit().remove(KEY_WRAPPED_VAULT_PASSWORD).apply()
             return
         }
 
         try {
-            val secretKey = getOrCreateWrapperKey()
+            val secretKey = getOrCreateWrapperKey(uid)
             val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
             cipher.init(Cipher.ENCRYPT_MODE, secretKey)
             val iv = cipher.iv
@@ -136,17 +145,18 @@ object ChatBackupPreferencesManager {
             buffer.put(encryptedBytes)
 
             val base64Payload = Base64.encodeToString(buffer.array(), Base64.NO_WRAP)
-            getPrefs(context).edit().putString(KEY_WRAPPED_VAULT_PASSWORD, base64Payload).apply()
+            prefs.edit().putString(KEY_WRAPPED_VAULT_PASSWORD, base64Payload).apply()
         } catch (e: Exception) {
             Log.e(TAG, "Error wrapping vault password for storage", e)
         }
     }
 
     /**
-     * Unwraps the vault password using Android Keystore AES-256-GCM wrapper key.
+     * Unwraps the vault password using Android Keystore AES-256-GCM wrapper key scoped to active UID.
      */
     fun getCachedVaultPassword(context: Context): String? {
-        val base64Payload = getPrefs(context).getString(KEY_WRAPPED_VAULT_PASSWORD, null) ?: return null
+        val uid = resolveUid(context) ?: return null
+        val base64Payload = getPrefs(context, uid)?.getString(KEY_WRAPPED_VAULT_PASSWORD, null) ?: return null
         return try {
             val payloadBytes = Base64.decode(base64Payload, Base64.NO_WRAP)
             if (payloadBytes.size <= IV_SIZE_BYTES) return null
@@ -158,7 +168,7 @@ object ChatBackupPreferencesManager {
             val ciphertext = ByteArray(buffer.remaining())
             buffer.get(ciphertext)
 
-            val secretKey = getOrCreateWrapperKey()
+            val secretKey = getOrCreateWrapperKey(uid)
             val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
             cipher.init(Cipher.DECRYPT_MODE, secretKey, GCMParameterSpec(GCM_TAG_LENGTH, iv))
 
@@ -171,14 +181,32 @@ object ChatBackupPreferencesManager {
     }
 
     fun hasSkippedRestore(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_HAS_SKIPPED_RESTORE, false)
+        return getPrefs(context)?.getBoolean(KEY_HAS_SKIPPED_RESTORE, false) ?: false
     }
 
     fun setHasSkippedRestore(context: Context, skipped: Boolean) {
-        getPrefs(context).edit().putBoolean(KEY_HAS_SKIPPED_RESTORE, skipped).apply()
+        getPrefs(context)?.edit()?.putBoolean(KEY_HAS_SKIPPED_RESTORE, skipped)?.apply()
     }
 
-    fun clearAll(context: Context) {
-        getPrefs(context).edit().clear().apply()
+    fun clearAll(context: Context, uid: String? = null) {
+        val resolvedUid = resolveUid(context, uid) ?: return
+        wipeForUid(context, resolvedUid)
+    }
+
+    fun wipeForUid(context: Context, uid: String) {
+        if (uid.isBlank()) return
+        LegacySecurityMigration.deleteSharedPrefsCompat(
+            context.applicationContext,
+            ActiveUserManager.backupPrefsName(uid)
+        )
+        try {
+            val alias = ActiveUserManager.backupWrapperKeyAlias(uid)
+            val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            if (ks.containsAlias(alias)) {
+                ks.deleteEntry(alias)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error deleting backup wrapper KeyStore entry for $uid", e)
+        }
     }
 }

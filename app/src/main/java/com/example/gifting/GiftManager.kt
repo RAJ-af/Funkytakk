@@ -36,6 +36,12 @@ object GiftManager {
     private val _isLoadingCatalog = MutableStateFlow(false)
     val isLoadingCatalog: StateFlow<Boolean> = _isLoadingCatalog.asStateFlow()
 
+    fun resetForLogout() {
+        _walletBalance.value = 100
+        _catalog.value = emptyList()
+        _isLoadingCatalog.value = false
+    }
+
     /**
      * Fetches active gifts from Supabase gift_catalog table.
      */

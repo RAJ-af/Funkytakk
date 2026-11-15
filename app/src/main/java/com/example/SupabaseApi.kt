@@ -1334,6 +1334,30 @@ interface SupabaseApi {
     ): Response<List<VerifiedOwnedItemRow>>
 
     // ----------------------------------------------------
+    // PROFILE EDIT LIMITS & USERNAME CHANGE RPCs
+    // ----------------------------------------------------
+    @POST("rest/v1/rpc/get_profile_edit_limits")
+    suspend fun getProfileEditLimits(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> = emptyMap()
+    ): Response<List<ProfileFieldLimitDto>>
+
+    @POST("rest/v1/rpc/check_username_available")
+    suspend fun checkUsernameAvailable(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: CheckUsernameRequest
+    ): Response<UsernameAvailabilityResponse>
+
+    @POST("rest/v1/rpc/change_username")
+    suspend fun changeUsername(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: ChangeUsernameRequest
+    ): Response<ChangeUsernameResponse>
+
+    // ----------------------------------------------------
     // GROUP CHAT (E2EE FAN-OUT & RPCs)
     // ----------------------------------------------------
     @POST("rest/v1/rpc/get_my_groups")
@@ -2900,4 +2924,39 @@ data class AdminSetFeedbackStatusRequest(
     val p_id: Long,
     val p_status: String,
     val p_note: String? = null
+)
+
+// ----------------------------------------------------
+// PROFILE EDIT LIMITS & USERNAME CHANGE DTOs
+// ----------------------------------------------------
+@JsonClass(generateAdapter = true)
+data class ProfileFieldLimitDto(
+    val field: String = "",
+    val max_changes: Int = 0,
+    val window_hours: Int = 0,
+    val used: Int = 0,
+    val remaining: Int = 0,
+    val next_allowed_at: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class CheckUsernameRequest(
+    val p_username: String
+)
+
+@JsonClass(generateAdapter = true)
+data class UsernameAvailabilityResponse(
+    val available: Boolean = false,
+    val reason: String = ""
+)
+
+@JsonClass(generateAdapter = true)
+data class ChangeUsernameRequest(
+    val p_username: String
+)
+
+@JsonClass(generateAdapter = true)
+data class ChangeUsernameResponse(
+    val username: String = "",
+    val next_change_at: String? = null
 )

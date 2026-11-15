@@ -1,11 +1,14 @@
 package com.example.crypto
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.util.Log
 import androidx.biometric.BiometricPrompt
+import com.example.ActiveUserManager
+import com.example.LegacySecurityMigration
 import com.example.db.EncryptedChatDatabase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,7 +33,6 @@ enum class VaultStatus {
 
 object VaultSecurityManager {
     private const val TAG = "VaultSecurityManager"
-    private const val PREFS_FILE = "vault_envelope_prefs"
 
     private const val PREF_IS_CONFIGURED = "vault_is_configured"
     private const val PREF_BIOMETRIC_ENABLED = "vault_biometric_enabled"
@@ -40,7 +42,6 @@ object VaultSecurityManager {
     private const val PREF_BIOMETRIC_WRAPPED_KEY = "vault_biometric_wrapped_key"
     private const val PREF_BIOMETRIC_IV = "vault_biometric_iv"
 
-    private const val BIOMETRIC_KEY_ALIAS = "vault_biometric_master_key"
     private const val PBKDF2_ALGORITHM = "PBKDF2WithHmacSHA256"
     private const val PBKDF2_ITERATIONS = 310_000
     private const val KEK_KEY_LENGTH = 256
@@ -53,18 +54,34 @@ object VaultSecurityManager {
     @Volatile
     private var activeVaultKey: ByteArray? = null
 
+    @Volatile
+    private var activeKeyUid: String? = null
+
+    private fun getPrefsForUid(context: Context, uid: String): SharedPreferences {
+        return context.getSharedPreferences(ActiveUserManager.vaultPrefsName(uid), Context.MODE_PRIVATE)
+    }
+
+    private fun resolveUid(context: Context? = null): String? {
+        return ActiveUserManager.getActiveUid(context)
+    }
+
     fun isVaultConfigured(context: Context): Boolean {
-        val prefs = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
-        return prefs.getBoolean(PREF_IS_CONFIGURED, false)
+        val uid = resolveUid(context) ?: return false
+        return getPrefsForUid(context, uid).getBoolean(PREF_IS_CONFIGURED, false)
     }
 
     fun isBiometricEnabled(context: Context): Boolean {
-        val prefs = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
+        val uid = resolveUid(context) ?: return false
+        val prefs = getPrefsForUid(context, uid)
         return prefs.getBoolean(PREF_BIOMETRIC_ENABLED, false) &&
                 !prefs.getString(PREF_BIOMETRIC_WRAPPED_KEY, null).isNullOrBlank()
     }
 
     fun isUnlocked(): Boolean {
+        val currentUid = ActiveUserManager.getActiveUid()
+        if (activeKeyUid != null && currentUid != null && activeKeyUid != currentUid) {
+            return false
+        }
         return activeVaultKey != null && _vaultStatus.value == VaultStatus.UNLOCKED
     }
 
@@ -73,11 +90,19 @@ object VaultSecurityManager {
     }
 
     fun getActiveVaultKey(context: Context? = null): ByteArray? {
-        if (activeVaultKey != null) return activeVaultKey
-        if (context != null) {
-            val restored = BackupCrypto.loadVaultKeyFromKeystore(context)
+        val currentUid = resolveUid(context)
+        if (activeVaultKey != null) {
+            if (currentUid == null || activeKeyUid == currentUid) {
+                return activeVaultKey
+            }
+            // Mismatched UID: immediately wipe stale key in memory
+            lock()
+        }
+        if (context != null && currentUid != null) {
+            val restored = BackupCrypto.loadVaultKeyFromKeystore(context, currentUid)
             if (restored != null) {
                 activeVaultKey = restored
+                activeKeyUid = currentUid
                 _vaultStatus.value = VaultStatus.UNLOCKED
                 return activeVaultKey
             }
@@ -86,9 +111,20 @@ object VaultSecurityManager {
     }
 
     fun init(context: Context) {
+        val uid = resolveUid(context)
+        if (uid == null) {
+            lock()
+            return
+        }
+        if (activeKeyUid != null && activeKeyUid != uid) {
+            lock()
+        }
         if (!isVaultConfigured(context)) {
+            activeVaultKey?.fill(0)
+            activeVaultKey = null
+            activeKeyUid = null
             _vaultStatus.value = VaultStatus.NOT_CONFIGURED
-        } else if (activeVaultKey != null) {
+        } else if (activeVaultKey != null && activeKeyUid == uid) {
             _vaultStatus.value = VaultStatus.UNLOCKED
         } else {
             _vaultStatus.value = VaultStatus.LOCKED
@@ -96,33 +132,25 @@ object VaultSecurityManager {
     }
 
     /**
-     * Initializes the chat vault with a user chosen password.
-     * Generates a random 256-bit vault key and wraps it with PBKDF2-derived KEK.
+     * Initializes the chat vault with a user chosen password, scoped to active UID.
      */
     suspend fun setupVaultWithPassword(context: Context, password: String): Result<ByteArray> = withContext(Dispatchers.Default) {
         try {
+            val uid = ActiveUserManager.requireActiveUid(context)
             if (password.length < 4) {
                 return@withContext Result.failure(IllegalArgumentException("Password must be at least 4 characters"))
             }
 
-            // 1. Generate random 256-bit (32 bytes) vault key
             val vaultKey = ByteArray(32).also { SecureRandom().nextBytes(it) }
-
-            // 2. Generate random 16-byte salt for PBKDF2
             val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
-
-            // 3. Derive KEK with PBKDF2WithHmacSHA256 (>= 310,000 iterations)
             val kek = deriveKek(password.toCharArray(), salt)
 
-            // 4. Wrap vault key using AES-256-GCM
             val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
             cipher.init(Cipher.ENCRYPT_MODE, kek)
             val iv = cipher.iv
             val wrappedVaultKey = cipher.doFinal(vaultKey)
 
-            // 5. Store wrapped password copy in SharedPreferences
-            val prefs = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
-            prefs.edit()
+            getPrefsForUid(context, uid).edit()
                 .putBoolean(PREF_IS_CONFIGURED, true)
                 .putString(PREF_PASSWORD_SALT, Base64.encodeToString(salt, Base64.NO_WRAP))
                 .putString(PREF_PASSWORD_WRAPPED_KEY, Base64.encodeToString(wrappedVaultKey, Base64.NO_WRAP))
@@ -130,9 +158,10 @@ object VaultSecurityManager {
                 .apply()
 
             activeVaultKey = vaultKey
+            activeKeyUid = uid
             _vaultStatus.value = VaultStatus.UNLOCKED
-            BackupCrypto.saveVaultKeyToKeystore(context, vaultKey)
-            Log.d(TAG, "Vault configured and unlocked successfully with password.")
+            BackupCrypto.saveVaultKeyToKeystore(context, vaultKey, uid)
+            Log.d(TAG, "Vault configured and unlocked for UID $uid.")
             Result.success(vaultKey)
         } catch (e: Exception) {
             Log.e(TAG, "Error setting up vault", e)
@@ -141,11 +170,12 @@ object VaultSecurityManager {
     }
 
     /**
-     * Unwraps the vault key using the user's password.
+     * Unwraps the vault key using the user's password for the active UID.
      */
     suspend fun unlockWithPassword(context: Context, password: String): Result<ByteArray> = withContext(Dispatchers.Default) {
         try {
-            val prefs = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
+            val uid = ActiveUserManager.requireActiveUid(context)
+            val prefs = getPrefsForUid(context, uid)
             val saltBase64 = prefs.getString(PREF_PASSWORD_SALT, null)
                 ?: return@withContext Result.failure(IllegalStateException("Vault not configured"))
             val wrappedBase64 = prefs.getString(PREF_PASSWORD_WRAPPED_KEY, null)
@@ -163,9 +193,10 @@ object VaultSecurityManager {
 
             val unwrappedKey = cipher.doFinal(wrappedVaultKey)
             activeVaultKey = unwrappedKey
+            activeKeyUid = uid
             _vaultStatus.value = VaultStatus.UNLOCKED
-            BackupCrypto.saveVaultKeyToKeystore(context, unwrappedKey)
-            Log.d(TAG, "Vault unlocked successfully with password.")
+            BackupCrypto.saveVaultKeyToKeystore(context, unwrappedKey, uid)
+            Log.d(TAG, "Vault unlocked successfully with password for UID $uid.")
             Result.success(unwrappedKey)
         } catch (e: javax.crypto.AEADBadTagException) {
             Log.w(TAG, "Password authentication failed (AEADBadTagException)")
@@ -176,12 +207,10 @@ object VaultSecurityManager {
         }
     }
 
-    /**
-     * Prepares Biometric Cipher for wrapping the vault key during biometric setup.
-     */
-    fun createBiometricEncryptCryptoObject(): Result<BiometricPrompt.CryptoObject> {
+    fun createBiometricEncryptCryptoObject(context: Context? = null): Result<BiometricPrompt.CryptoObject> {
         return try {
-            val secretKey = getOrCreateBiometricKeyStoreKey()
+            val uid = ActiveUserManager.requireActiveUid(context)
+            val secretKey = getOrCreateBiometricKeyStoreKey(uid)
             val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
             cipher.init(Cipher.ENCRYPT_MODE, secretKey)
             Result.success(BiometricPrompt.CryptoObject(cipher))
@@ -191,21 +220,20 @@ object VaultSecurityManager {
         }
     }
 
-    /**
-     * Wraps the active vault key with the authenticated Biometric Cipher.
-     */
     fun saveBiometricWrappedVaultKey(context: Context, authenticatedCipher: Cipher): Result<Unit> {
-        val vaultKey = activeVaultKey ?: return Result.failure(IllegalStateException("Vault must be unlocked first"))
+        val uid = ActiveUserManager.getActiveUid(context)
+            ?: return Result.failure(IllegalStateException("No active account"))
+        val vaultKey = getActiveVaultKey(context)
+            ?: return Result.failure(IllegalStateException("Vault must be unlocked first"))
         return try {
             val wrapped = authenticatedCipher.doFinal(vaultKey)
             val iv = authenticatedCipher.iv
-            val prefs = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
-            prefs.edit()
+            getPrefsForUid(context, uid).edit()
                 .putBoolean(PREF_BIOMETRIC_ENABLED, true)
                 .putString(PREF_BIOMETRIC_WRAPPED_KEY, Base64.encodeToString(wrapped, Base64.NO_WRAP))
                 .putString(PREF_BIOMETRIC_IV, Base64.encodeToString(iv, Base64.NO_WRAP))
                 .apply()
-            Log.d(TAG, "Biometric copy of vault key saved successfully.")
+            Log.d(TAG, "Biometric copy of vault key saved for UID $uid.")
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e(TAG, "Error saving biometric wrapped key", e)
@@ -213,17 +241,15 @@ object VaultSecurityManager {
         }
     }
 
-    /**
-     * Prepares Biometric Cipher for unwrapping the vault key during biometric unlock.
-     */
     fun createBiometricDecryptCryptoObject(context: Context): Result<BiometricPrompt.CryptoObject> {
         return try {
-            val prefs = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
+            val uid = ActiveUserManager.requireActiveUid(context)
+            val prefs = getPrefsForUid(context, uid)
             val ivBase64 = prefs.getString(PREF_BIOMETRIC_IV, null)
                 ?: return Result.failure(IllegalStateException("Biometric unlock not configured"))
             val iv = Base64.decode(ivBase64, Base64.DEFAULT)
 
-            val secretKey = getBiometricKeyStoreKey()
+            val secretKey = getBiometricKeyStoreKey(uid)
                 ?: return Result.failure(IllegalStateException("Keystore biometric key not found"))
 
             val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
@@ -235,20 +261,19 @@ object VaultSecurityManager {
         }
     }
 
-    /**
-     * Unwraps the vault key using the authenticated Biometric Cipher.
-     */
     fun unlockWithBiometricCipher(context: Context, authenticatedCipher: Cipher): Result<ByteArray> {
         return try {
-            val prefs = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
+            val uid = ActiveUserManager.requireActiveUid(context)
+            val prefs = getPrefsForUid(context, uid)
             val wrappedBase64 = prefs.getString(PREF_BIOMETRIC_WRAPPED_KEY, null)
                 ?: return Result.failure(IllegalStateException("No biometric vault copy found"))
             val wrapped = Base64.decode(wrappedBase64, Base64.DEFAULT)
 
             val unwrapped = authenticatedCipher.doFinal(wrapped)
             activeVaultKey = unwrapped
+            activeKeyUid = uid
             _vaultStatus.value = VaultStatus.UNLOCKED
-            Log.d(TAG, "Vault unlocked successfully with biometric prompt.")
+            Log.d(TAG, "Vault unlocked with biometric prompt for UID $uid.")
             Result.success(unwrapped)
         } catch (e: Exception) {
             Log.e(TAG, "Error unlocking with biometric cipher", e)
@@ -259,29 +284,53 @@ object VaultSecurityManager {
     fun lock() {
         activeVaultKey?.fill(0)
         activeVaultKey = null
+        activeKeyUid = null
         _vaultStatus.value = VaultStatus.LOCKED
         Log.d(TAG, "Vault locked.")
     }
 
     /**
-     * Resets the vault if unrecoverable, clearing keys and database.
+     * Clears only in-memory vault keys and marks Vault LOCKED on logout without deleting on-disk
+     * scoped encrypted chats for that user.
      */
-    fun resetVault(context: Context) {
+    fun resetForLogout() {
         lock()
-        val prefs = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
-        prefs.edit().clear().apply()
+    }
+
+    /**
+     * Resets the vault if unrecoverable or erased for the current/specified UID.
+     */
+    fun resetVault(context: Context, uid: String? = null) {
+        val targetUid = uid?.takeIf { it.isNotBlank() } ?: resolveUid(context)
+        lock()
+        if (targetUid != null) {
+            wipeForUid(context, targetUid)
+        }
+        _vaultStatus.value = VaultStatus.NOT_CONFIGURED
+        Log.d(TAG, "Vault reset complete for UID=$targetUid.")
+    }
+
+    fun wipeForUid(context: Context, uid: String) {
+        if (uid.isBlank()) return
+        if (activeKeyUid == uid) {
+            lock()
+        }
+        LegacySecurityMigration.deleteSharedPrefsCompat(context, ActiveUserManager.vaultPrefsName(uid))
         try {
+            val alias = ActiveUserManager.vaultBiometricAlias(uid)
             val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-            if (keyStore.containsAlias(BIOMETRIC_KEY_ALIAS)) {
-                keyStore.deleteEntry(BIOMETRIC_KEY_ALIAS)
+            if (keyStore.containsAlias(alias)) {
+                keyStore.deleteEntry(alias)
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Error deleting KeyStore entry", e)
+            Log.w(TAG, "Error deleting biometric KeyStore entry for $uid", e)
         }
-        EncryptedChatDatabase.deleteDatabase(context)
-        BackupCrypto.clearMasterKeyFromKeystore(context)
-        _vaultStatus.value = VaultStatus.NOT_CONFIGURED
-        Log.d(TAG, "Vault reset complete.")
+        EncryptedChatDatabase.deleteDatabaseForUid(context, uid)
+        BackupCrypto.wipeForUid(context, uid)
+        try {
+            ActiveUserManager.mediaDir(context, uid).deleteRecursively()
+            ActiveUserManager.restoredMediaDir(context, uid).deleteRecursively()
+        } catch (_: Exception) {}
     }
 
     private fun deriveKek(password: CharArray, salt: ByteArray): SecretKey {
@@ -291,16 +340,17 @@ object VaultSecurityManager {
         return SecretKeySpec(keyBytes, "AES")
     }
 
-    private fun getOrCreateBiometricKeyStoreKey(): SecretKey {
+    private fun getOrCreateBiometricKeyStoreKey(uid: String): SecretKey {
+        val alias = ActiveUserManager.vaultBiometricAlias(uid)
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        if (keyStore.containsAlias(BIOMETRIC_KEY_ALIAS)) {
-            val entry = keyStore.getEntry(BIOMETRIC_KEY_ALIAS, null) as? KeyStore.SecretKeyEntry
+        if (keyStore.containsAlias(alias)) {
+            val entry = keyStore.getEntry(alias, null) as? KeyStore.SecretKeyEntry
             if (entry != null) return entry.secretKey
         }
 
         val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
         val builder = KeyGenParameterSpec.Builder(
-            BIOMETRIC_KEY_ALIAS,
+            alias,
             KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
         )
             .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
@@ -312,10 +362,11 @@ object VaultSecurityManager {
         return keyGenerator.generateKey()
     }
 
-    private fun getBiometricKeyStoreKey(): SecretKey? {
+    private fun getBiometricKeyStoreKey(uid: String): SecretKey? {
+        val alias = ActiveUserManager.vaultBiometricAlias(uid)
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        if (keyStore.containsAlias(BIOMETRIC_KEY_ALIAS)) {
-            val entry = keyStore.getEntry(BIOMETRIC_KEY_ALIAS, null) as? KeyStore.SecretKeyEntry
+        if (keyStore.containsAlias(alias)) {
+            val entry = keyStore.getEntry(alias, null) as? KeyStore.SecretKeyEntry
             return entry?.secretKey
         }
         return null

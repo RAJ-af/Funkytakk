@@ -9,6 +9,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import com.example.ActiveUserManager
 import com.example.util.ChatBackupPreferencesManager
 import java.util.concurrent.TimeUnit
 
@@ -17,6 +18,7 @@ object ChatBackupScheduler {
     private const val ONE_TIME_WORK_NAME = "funkytalk_one_time_chat_backup"
 
     fun updateBackupSchedule(context: Context) {
+        if (ActiveUserManager.getActiveUid(context) == null) return
         val freq = ChatBackupPreferencesManager.getAutoBackupFrequency(context)
         val wifiOnly = ChatBackupPreferencesManager.getWifiOnly(context)
 
@@ -50,6 +52,7 @@ object ChatBackupScheduler {
     }
 
     fun triggerOneTimeBackup(context: Context) {
+        if (ActiveUserManager.getActiveUid(context) == null) return
         val wifiOnly = ChatBackupPreferencesManager.getWifiOnly(context)
 
         val constraints = Constraints.Builder()
@@ -71,5 +74,10 @@ object ChatBackupScheduler {
     fun cancelBackup(context: Context) {
         val workManager = WorkManager.getInstance(context)
         workManager.cancelUniqueWork(ONE_TIME_WORK_NAME)
+        workManager.cancelUniqueWork(PERIODIC_WORK_NAME)
+    }
+
+    fun cancelAllWork(context: Context) {
+        WorkManager.getInstance(context).cancelAllWork()
     }
 }

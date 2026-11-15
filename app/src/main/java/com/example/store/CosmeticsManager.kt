@@ -36,8 +36,8 @@ data class PurchaseItemsResult(
 object CosmeticsManager {
     private const val TAG = "CosmeticsManager"
 
-    // 10 minute TTL for cosmetics cache
-    private const val CACHE_TTL_MS = 10 * 60 * 1000L
+    // 5 minute TTL for cosmetics cache
+    private const val CACHE_TTL_MS = 5 * 60 * 1000L
 
     private data class CachedCosmetic(
         val timestamp: Long,
@@ -60,6 +60,14 @@ object CosmeticsManager {
     fun getCachedCosmetics(userId: String?): UserCosmeticsRow? {
         if (userId.isNullOrBlank()) return null
         return cosmeticsCache.get(userId)?.cosmetics ?: _userCosmeticsMap.value[userId]
+    }
+
+    fun clearForLogout() {
+        cosmeticsCache.evictAll()
+        verifiedOwnedCache.evictAll()
+        _userWalletBalance.value = 0
+        _myCosmetics.value = null
+        _userCosmeticsMap.value = emptyMap()
     }
 
     suspend fun getOrCreateWallet(context: Context): Int = withContext(Dispatchers.IO) {
@@ -359,6 +367,14 @@ object CosmeticsManager {
                         resp.body().orEmpty().forEach { row ->
                             cosmeticsCache.put(row.user_id, CachedCosmetic(now, row))
                             result[row.user_id] = row
+                            val frameRaw = row.avatar_frame?.config
+                            if (frameRaw != null) {
+                                val parsed = runCatching { CosmeticsConfigParser.parseAvatarFrame(frameRaw) }.getOrNull()
+                                val assetUrl = parsed?.asset?.url
+                                if (!assetUrl.isNullOrBlank()) {
+                                    preloadFrameAsset(context, assetUrl)
+                                }
+                            }
                         }
                     }
                 }
@@ -371,6 +387,22 @@ object CosmeticsManager {
         }
 
         return@withContext result
+    }
+
+    fun preloadFrameAsset(context: Context, url: String?) {
+        if (url.isNullOrBlank() || url == "null") return
+        val appCtx = context.applicationContext
+        val request = coil.request.ImageRequest.Builder(appCtx)
+            .data(url)
+            .diskCachePolicy(coil.request.CachePolicy.ENABLED)
+            .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+            .apply {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    decoderFactory(coil.decode.ImageDecoderDecoder.Factory())
+                }
+            }
+            .build()
+        coil.Coil.imageLoader(appCtx).enqueue(request)
     }
 
     suspend fun refreshMyCosmetics(context: Context, myUserId: String) {

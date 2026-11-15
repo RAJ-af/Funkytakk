@@ -171,6 +171,12 @@ fun MomentsTabContent(
         )
 
         result.onSuccess { page ->
+            val authorIds = page.map { it.author.id }.filter { it.isNotBlank() }.distinct()
+            if (authorIds.isNotEmpty()) {
+                coroutineScope.launch {
+                    com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, authorIds)
+                }
+            }
             if (reset) {
                 feed.items.clear()
                 feed.items.addAll(page)

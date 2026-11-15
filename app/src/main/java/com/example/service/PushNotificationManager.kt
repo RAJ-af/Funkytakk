@@ -767,6 +767,7 @@ object PushNotificationManager : DefaultLifecycleObserver {
             Log.w(TAG, "Error calling firebaseAuth.signOut()", e)
         }
         SupabaseSessionManager.clearSession(appCtx)
+        com.example.ActiveUserManager.clear()
         if (effectiveUid.isNotEmpty()) {
             appCtx.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
                 .edit()
@@ -774,13 +775,31 @@ object PushNotificationManager : DefaultLifecycleObserver {
                 .apply()
         }
         try {
-            com.example.service.ChatBackupScheduler.cancelBackup(appCtx)
-            com.example.util.ChatBackupPreferencesManager.clearAll(appCtx)
+            com.example.service.ChatBackupScheduler.cancelAllWork(appCtx)
         } catch (e: Exception) {
-            Log.w(TAG, "Error cancelling backup work or clearing backup prefs on logout", e)
+            Log.w(TAG, "Error cancelling backup work on logout", e)
         }
 
+        // Complete in-memory isolation of all user singletons and caches
+        try { com.example.crypto.VaultSecurityManager.resetForLogout() } catch (_: Exception) {}
+        try { com.example.crypto.E2EEManager.resetForLogout() } catch (_: Exception) {}
+        try { com.example.repository.EncryptedChatRepository.resetForLogout() } catch (_: Exception) {}
+        try { com.example.repository.GroupChatRepository.resetForLogout() } catch (_: Exception) {}
+        try { com.example.ChatPreferencesManager.resetForLogout() } catch (_: Exception) {}
+        try { com.example.SupportChatManager.resetForLogout() } catch (_: Exception) {}
+        try { com.example.CloudAiManager.resetForLogout() } catch (_: Exception) {}
+        try { com.example.NotificationsManager.clear() } catch (_: Exception) {}
+        try { com.example.repository.TombstoneManager.resetForLogout() } catch (_: Exception) {}
+        try { com.example.repository.InboxDrainTracker.reset() } catch (_: Exception) {}
+        try { com.example.repository.FeedbackRepository.resetForLogout() } catch (_: Exception) {}
+        try { com.example.store.CosmeticsManager.clearForLogout() } catch (_: Exception) {}
+        try { com.example.gifting.GiftManager.resetForLogout() } catch (_: Exception) {}
+        try { com.example.ModerationManager.resetForLogout() } catch (_: Exception) {}
+        try { com.example.realtime.VoiceRoomRealtimeManager.resetForLogout() } catch (_: Exception) {}
+        try { coil.Coil.imageLoader(appCtx).memoryCache?.clear() } catch (_: Exception) {}
+
         scope.launch {
+            try { coil.Coil.imageLoader(appCtx).diskCache?.clear() } catch (_: Exception) {}
             registrationMutex.withLock {
                 val tokenToUnregister = preCapturedPushToken ?: try {
                     ensureFirebaseInitialized(appCtx)

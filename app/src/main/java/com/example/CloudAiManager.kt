@@ -28,7 +28,6 @@ sealed class AiError(message: String) : Exception(message) {
 
 object CloudAiManager {
     const val APP_AI_CONSENT_VERSION = 1
-    private const val PREFS_NAME = "funkytalk_cloud_ai_prefs"
     private const val KEY_AI_CONSENT_ACCEPTED = "ai_consent_accepted"
     private const val KEY_AI_CONSENT_VERSION = "ai_consent_version"
     private const val KEY_MY_LANGUAGE = "ai_my_language"
@@ -40,29 +39,63 @@ object CloudAiManager {
     val myLanguage: StateFlow<String> = _myLanguage.asStateFlow()
 
     @Volatile
-    private var isInitialized = false
+    private var initializedUid: String? = null
+
+    private fun getPrefsForActiveUser(context: Context): SharedPreferences? {
+        val uid = ActiveUserManager.getActiveUid(context) ?: return null
+        return context.applicationContext.getSharedPreferences(
+            ActiveUserManager.cloudAiPrefsName(uid),
+            Context.MODE_PRIVATE
+        )
+    }
 
     fun init(context: Context) {
-        if (isInitialized) return
-        isInitialized = true
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val uid = ActiveUserManager.getActiveUid(context)
+        if (uid == null) {
+            resetForLogout()
+            return
+        }
+        if (initializedUid == uid) return
+        initializedUid = uid
+        val prefs = context.applicationContext.getSharedPreferences(
+            ActiveUserManager.cloudAiPrefsName(uid),
+            Context.MODE_PRIVATE
+        )
         val accepted = prefs.getBoolean(KEY_AI_CONSENT_ACCEPTED, false)
         val version = prefs.getInt(KEY_AI_CONSENT_VERSION, 0)
         _isCloudAiEnabled.value = accepted && version >= APP_AI_CONSENT_VERSION
         _myLanguage.value = prefs.getString(KEY_MY_LANGUAGE, "English") ?: "English"
     }
 
+    fun resetForLogout() {
+        initializedUid = null
+        _isCloudAiEnabled.value = false
+        _myLanguage.value = "English"
+    }
+
+    fun wipeForUid(context: Context, uid: String) {
+        if (uid.isBlank()) return
+        if (initializedUid == uid) {
+            resetForLogout()
+        }
+        LegacySecurityMigration.deleteSharedPrefsCompat(
+            context.applicationContext,
+            ActiveUserManager.cloudAiPrefsName(uid)
+        )
+    }
+
     fun setMyLanguage(context: Context, language: String) {
+        init(context)
         _myLanguage.value = language
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_MY_LANGUAGE, language)
-            .apply()
+        getPrefsForActiveUser(context)
+            ?.edit()
+            ?.putString(KEY_MY_LANGUAGE, language)
+            ?.apply()
     }
 
     fun isConsentAcceptedLocally(context: Context): Boolean {
         init(context)
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val prefs = getPrefsForActiveUser(context) ?: return false
         val accepted = prefs.getBoolean(KEY_AI_CONSENT_ACCEPTED, false)
         val version = prefs.getInt(KEY_AI_CONSENT_VERSION, 0)
         return accepted && version >= APP_AI_CONSENT_VERSION
@@ -91,11 +124,11 @@ object CloudAiManager {
                 val version = body?.consent_version ?: 0
                 val valid = accepted && version >= APP_AI_CONSENT_VERSION
 
-                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                    .edit()
-                    .putBoolean(KEY_AI_CONSENT_ACCEPTED, valid)
-                    .putInt(KEY_AI_CONSENT_VERSION, version)
-                    .apply()
+                getPrefsForActiveUser(context)
+                    ?.edit()
+                    ?.putBoolean(KEY_AI_CONSENT_ACCEPTED, valid)
+                    ?.putInt(KEY_AI_CONSENT_VERSION, version)
+                    ?.apply()
                 _isCloudAiEnabled.value = valid
                 valid
             } else {
@@ -122,11 +155,11 @@ object CloudAiManager {
             )
 
             if (resp.isSuccessful) {
-                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                    .edit()
-                    .putBoolean(KEY_AI_CONSENT_ACCEPTED, true)
-                    .putInt(KEY_AI_CONSENT_VERSION, APP_AI_CONSENT_VERSION)
-                    .apply()
+                getPrefsForActiveUser(context)
+                    ?.edit()
+                    ?.putBoolean(KEY_AI_CONSENT_ACCEPTED, true)
+                    ?.putInt(KEY_AI_CONSENT_VERSION, APP_AI_CONSENT_VERSION)
+                    ?.apply()
                 _isCloudAiEnabled.value = true
                 Result.success(Unit)
             } else {
@@ -155,11 +188,11 @@ object CloudAiManager {
                 } catch (_: Exception) {}
             }
 
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .edit()
-                .putBoolean(KEY_AI_CONSENT_ACCEPTED, false)
-                .putInt(KEY_AI_CONSENT_VERSION, 0)
-                .apply()
+            getPrefsForActiveUser(context)
+                ?.edit()
+                ?.putBoolean(KEY_AI_CONSENT_ACCEPTED, false)
+                ?.putInt(KEY_AI_CONSENT_VERSION, 0)
+                ?.apply()
             _isCloudAiEnabled.value = false
             Result.success(Unit)
         } catch (e: Exception) {
@@ -292,10 +325,10 @@ object CloudAiManager {
                     }
                 }
                 403 -> {
-                    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                        .edit()
-                        .putBoolean(KEY_AI_CONSENT_ACCEPTED, false)
-                        .apply()
+                    getPrefsForActiveUser(context)
+                        ?.edit()
+                        ?.putBoolean(KEY_AI_CONSENT_ACCEPTED, false)
+                        ?.apply()
                     _isCloudAiEnabled.value = false
                     Result.failure(AiError.ConsentRequired)
                 }

@@ -438,7 +438,7 @@ fun DirectChatScreen(
                                 avatarUrl = resolvedAvatarUrl.ifBlank { null },
                                 size = 42.dp,
                                 userId = partnerUserId,
-                                enableFrameAnimation = false,
+                                enableFrameAnimation = true,
                                 countryCode = resolvedCountryCode.takeIf { it.isNotBlank() },
                                 isOnline = resolvedIsOnline
                             )

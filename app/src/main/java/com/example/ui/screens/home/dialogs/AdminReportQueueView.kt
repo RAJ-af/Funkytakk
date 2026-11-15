@@ -75,8 +75,15 @@ fun AdminReportQueueView(
             withContext(Dispatchers.Main) {
                 isLoading = false
                 if (res.isSuccess) {
-                    queueItems = res.getOrNull() ?: emptyList()
+                    val loaded = res.getOrNull() ?: emptyList()
+                    queueItems = loaded
                     errorMessage = null
+                    val ids = loaded.mapNotNull { it.reported_user_id }.filter { it.isNotBlank() }.distinct()
+                    if (ids.isNotEmpty()) {
+                        scope.launch {
+                            com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, ids)
+                        }
+                    }
                 } else {
                     errorMessage = res.exceptionOrNull()?.message ?: "Failed to fetch reports."
                 }
@@ -404,11 +411,12 @@ fun AdminReportQueueRow(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = reportedName,
+                    com.example.store.DecoratedUserName(
+                        userId = item.reported_user_id,
+                        name = reportedName,
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp,
-                        color = funkyColors.ink,
+                        defaultColor = funkyColors.ink,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )

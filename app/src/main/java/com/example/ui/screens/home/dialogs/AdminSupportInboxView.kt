@@ -71,6 +71,13 @@ fun AdminSupportInboxView(
         AdminSupportManager.fetchConversations(context)
     }
 
+    LaunchedEffect(conversations) {
+        val ids = conversations.mapNotNull { it.user_id }.filter { it.isNotBlank() }.distinct()
+        if (ids.isNotEmpty()) {
+            com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, ids)
+        }
+    }
+
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
@@ -629,11 +636,12 @@ fun AdminSupportInboxView(
                                         verticalAlignment = Alignment.CenterVertically,
                                         modifier = Modifier.weight(1f)
                                     ) {
-                                        Text(
-                                            text = name,
+                                        com.example.store.DecoratedUserName(
+                                            userId = uid,
+                                            name = name,
                                             fontWeight = if (hasUnread) FontWeight.Black else FontWeight.Bold,
                                             fontSize = 15.sp,
-                                            color = funkyColors.ink,
+                                            defaultColor = funkyColors.ink,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )

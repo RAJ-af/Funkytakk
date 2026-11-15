@@ -15,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import com.example.ui.screens.*
 import com.example.ui.screens.chat.RestoreChatBackupScreen
 import com.example.ui.components.FloatingBubbleOverlay
@@ -100,6 +101,9 @@ class MainActivity : FragmentActivity() {
                     val isUnderReview by authViewModel.accountUnderReview.collectAsState()
                     val deletionStatus by authViewModel.deletionStatus.collectAsState()
                     val deletionReceipt by authViewModel.deletionReceipt.collectAsState()
+                    var showSecurityResetDialog by remember {
+                        mutableStateOf(LegacySecurityMigration.shouldShowSecurityResetDialog(applicationContext))
+                    }
 
                     LaunchedEffect(Unit) {
                         com.example.ui.components.AppNetworkManager.startMonitoring(applicationContext)
@@ -117,6 +121,12 @@ class MainActivity : FragmentActivity() {
                         ) {
                             val authedUid = SupabaseSessionManager.getUserId(applicationContext)
                                 ?: (authState as AuthState.Success).user.uid
+                            ActiveUserManager.setActiveUid(authedUid)
+                            ChatPreferencesManager.init(applicationContext)
+                            CloudAiManager.init(applicationContext)
+                            com.example.crypto.VaultSecurityManager.init(applicationContext)
+                            com.example.repository.EncryptedChatRepository.init(applicationContext)
+                            com.example.repository.GroupChatRepository.init(applicationContext)
                             TelemetryManager.onLogin(authedUid)
                             authViewModel.refreshModerationStatus(applicationContext)
                             authViewModel.checkAccountReview(applicationContext)
@@ -142,6 +152,8 @@ class MainActivity : FragmentActivity() {
                     DisposableEffect(lifecycleOwner) {
                         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
                             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                                // Keep Side Dynamic Island strictly in-app while foregrounded
+                                com.example.service.VoiceRoomOverlayManager.stopService(this@MainActivity)
                                 if (SupabaseSessionManager.hasValidAuthenticatedSession(applicationContext) && authState is AuthState.Success) {
                                     authViewModel.refreshModerationStatus(applicationContext)
                                     authViewModel.checkAccountReview(applicationContext)
@@ -261,10 +273,11 @@ class MainActivity : FragmentActivity() {
                                 }
                             }
 
-                            // Initialize E2EE identity keys, encrypted repository, and register push token right after login / startup
+                            // Initialize E2EE identity keys, encrypted repository, cosmetics, and register push token right after login / startup
                             com.example.crypto.E2EEManager.ensureIdentityKeyInitialized(applicationContext)
                             com.example.repository.EncryptedChatRepository.init(applicationContext)
                             com.example.service.PushNotificationManager.registerCurrentToken(applicationContext, force = true)
+                            com.example.store.CosmeticsManager.refreshMyCosmetics(applicationContext, user.uid)
                         } else if (minSplashElapsed && currentScreen == "splash" && authState !is AuthState.Loading) {
                             currentScreen = "welcome"
                         }
@@ -644,15 +657,12 @@ class MainActivity : FragmentActivity() {
                         }
                     }
 
-                    // Floating Bubble Overlay (Side Dynamic Island when in active room but navigated elsewhere)
+                    // Floating Bubble Overlay (Strictly in-app Side Dynamic Island when in active room outside VoiceRoomScreen)
                     val activeRoomId by authViewModel.activeRoomId.collectAsState()
 
                     LaunchedEffect(currentScreen, activeRoomId) {
-                        if (currentScreen == "voice_room" || activeRoomId == null) {
-                            com.example.service.VoiceRoomOverlayManager.stopService(this@MainActivity)
-                        } else if (com.example.service.OverlayPermissionHelper.canDrawOverlays(this@MainActivity)) {
-                            com.example.service.VoiceRoomOverlayManager.startServiceIfPermitted(this@MainActivity)
-                        }
+                        // Keep the Side Dynamic Island strictly in-app while the Activity is active
+                        com.example.service.VoiceRoomOverlayManager.stopService(this@MainActivity)
                     }
 
                     if (activeRoomId != null && currentScreen != "voice_room" && currentScreen != "splash") {
@@ -693,6 +703,42 @@ class MainActivity : FragmentActivity() {
                                 com.example.ModerationManager.pendingReportIdToOpen = null
                             },
                             initialReportId = com.example.ModerationManager.pendingReportIdToOpen
+                        )
+                    }
+
+                    if (showSecurityResetDialog) {
+                        val colors = com.example.ui.theme.LocalFunkyColors.current
+                        androidx.compose.material3.AlertDialog(
+                            onDismissRequest = {
+                                LegacySecurityMigration.dismissSecurityResetDialog(applicationContext)
+                                showSecurityResetDialog = false
+                            },
+                            containerColor = colors.surface,
+                            titleContentColor = colors.ink,
+                            textContentColor = colors.ink,
+                            title = {
+                                androidx.compose.material3.Text(
+                                    text = "Chat Security Upgraded",
+                                    style = androidx.compose.material3.MaterialTheme.typography.titleMedium
+                                )
+                            },
+                            text = {
+                                androidx.compose.material3.Text(
+                                    text = "We upgraded chat security. Your chats on this device were reset."
+                                )
+                            },
+                            confirmButton = {
+                                androidx.compose.material3.TextButton(
+                                    onClick = {
+                                        LegacySecurityMigration.dismissSecurityResetDialog(applicationContext)
+                                        showSecurityResetDialog = false
+                                    },
+                                    modifier = Modifier.testTag("security_reset_ok_button")
+                                ) {
+                                    androidx.compose.material3.Text("OK", color = colors.mango)
+                                }
+                            },
+                            modifier = Modifier.testTag("security_reset_dialog")
                         )
                     }
 

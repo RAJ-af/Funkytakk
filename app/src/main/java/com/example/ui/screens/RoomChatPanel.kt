@@ -293,22 +293,22 @@ fun RoomChatPanel(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.Top
                     ) {
-                        AsyncImage(
-                            model = msg.senderImageUrl,
-                            contentDescription = msg.senderName,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(CircleShape)
+                        com.example.ui.components.PresenceAvatar(
+                            avatarUrl = msg.senderImageUrl,
+                            size = 34.dp,
+                            userId = msg.userId,
+                            enableFrameAnimation = false
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = msg.senderName,
+                                com.example.store.DecoratedUserName(
+                                    userId = msg.userId,
+                                    name = msg.senderName,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = msg.badgeColor
+                                    defaultColor = msg.badgeColor,
+                                    animate = !chatListState.isScrollInProgress
                                 )
                                 if (msg.badge != null) {
                                     Spacer(modifier = Modifier.width(6.dp))

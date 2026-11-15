@@ -1533,4 +1533,23 @@ object VoiceRoomRealtimeManager {
         reconnectJob?.cancel()
         reconnectJob = null
     }
+
+    fun resetForLogout() {
+        isConnected = false
+        reconnectJob?.cancel()
+        reconnectJob = null
+        heartbeatJob?.cancel()
+        heartbeatJob = null
+        val ws = webSocket
+        webSocket = null
+        try {
+            ws?.close(1000, "logout")
+        } catch (_: Exception) {}
+        currentAuthToken = null
+        subscribedRoomChannels.clear()
+        subscribedGroupIds.clear()
+        subscribedGroupRecipientId = null
+        userSnippets.clear()
+        _roomLiveParticipants.value = emptyMap()
+    }
 }

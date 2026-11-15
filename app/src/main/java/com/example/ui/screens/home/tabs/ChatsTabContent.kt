@@ -254,7 +254,9 @@ fun ChatsTabContent(
             .background(funkyColors.bg)
     ) {
         // --- 1. Main Chat Content (BLURRED when password has not been entered) ---
+        val chatListState = androidx.compose.foundation.lazy.rememberLazyListState()
         LazyColumn(
+            state = chatListState,
             modifier = Modifier
                 .fillMaxSize()
                 .blur(if (isVaultUnlocked) 0.dp else 22.dp),
@@ -1162,7 +1164,8 @@ fun ChatsTabContent(
                                             name = chat.name,
                                             fontSize = if (isMinimalistMode) 14.5.sp else 16.sp,
                                             fontWeight = FontWeight.Bold,
-                                            defaultColor = funkyColors.ink
+                                            defaultColor = funkyColors.ink,
+                                            animate = !chatListState.isScrollInProgress
                                         )
 
                                         if (isPinned) {

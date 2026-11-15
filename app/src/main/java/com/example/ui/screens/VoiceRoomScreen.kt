@@ -1545,6 +1545,17 @@ fun VoiceRoomScreen(
         }
     }
 
+    LaunchedEffect(participantsData, roomHostId, messages.size) {
+        val ids = (participantsData.map { it.user_id } +
+            listOfNotNull(roomHostId) +
+            messages.mapNotNull { it.userId })
+            .filter { it.isNotBlank() }
+            .distinct()
+        if (ids.isNotEmpty()) {
+            com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, ids)
+        }
+    }
+
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, activeRoomId, roomHostId) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->

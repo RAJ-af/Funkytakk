@@ -35,6 +35,7 @@ class FunkyTalkApplication : Application(), ImageLoaderFactory {
         super.onCreate()
         _instance = this
         appContext = applicationContext
+        LegacySecurityMigration.runIfNeeded(this)
         com.example.ui.theme.AppThemeManager.init(this)
         TelemetryManager.init(this)
         PushNotificationManager.initialize(this)
