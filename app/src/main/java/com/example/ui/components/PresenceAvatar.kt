@@ -182,6 +182,8 @@ fun PresenceAvatar(
                     val ringColors = remember(ring.colorsHex) {
                         ring.colorsHex.map { com.example.store.parseHexColor(it, Color(0xFFFFD700)) }
                     }
+                    val ringScale = (size.value / 48f).coerceIn(0.6f, 1.8f)
+                    val scaledStrokeDp = (ring.widthDp * ringScale).coerceAtLeast(1.5f)
 
                     // Animation strictly controlled: only animate when enableFrameAnimation == true
                     val rotationAngle = if (enableFrameAnimation && ring.animation.equals("rotate", ignoreCase = true)) {
@@ -212,7 +214,7 @@ fun PresenceAvatar(
                         pScale
                     } else 1f
 
-                    // Frame Canvas: Ring & Shapes (zIndex 2f)
+                    // Frame Canvas: Ring & Shapes (zIndex 2f) sitting flush on DP outline
                     Canvas(
                         modifier = Modifier
                             .fillMaxSize()
@@ -220,43 +222,58 @@ fun PresenceAvatar(
                             .scale(pulseScale)
                             .rotate(rotationAngle)
                     ) {
-                        val strokeW = (ring.widthDp * (size.value / 48f).coerceIn(0.6f, 1.8f)).dp.toPx()
+                        val strokeW = scaledStrokeDp.dp.toPx()
                         val stroke = Stroke(width = strokeW)
                         val brush = if (ringColors.size > 1) {
                             Brush.sweepGradient(ringColors)
                         } else androidx.compose.ui.graphics.SolidColor(ringColors.firstOrNull() ?: Color(0xFFFFD700))
 
                         val center = androidx.compose.ui.geometry.Offset(this.size.width / 2f, this.size.height / 2f)
-                        val radius = (this.size.width - strokeW) / 2f
+                        val half = this.size.width / 2f
+                        // Inner edge of stroke meets DP perimeter cleanly with slight subpixel overlap (zero gap)
+                        val radius = half - strokeW * 0.5f
 
                         when (ring.shape.lowercase()) {
                             "hexagon" -> {
+                                val apothem = half - strokeW * 0.45f
+                                val hexRadius = apothem / 0.8660254f
                                 val p = androidx.compose.ui.graphics.Path()
                                 for (i in 0 until 6) {
                                     val aRad = Math.toRadians((i * 60 - 30).toDouble())
-                                    val x = center.x + (radius * cos(aRad)).toFloat()
-                                    val y = center.y + (radius * sin(aRad)).toFloat()
+                                    val x = center.x + (hexRadius * cos(aRad)).toFloat()
+                                    val y = center.y + (hexRadius * sin(aRad)).toFloat()
                                     if (i == 0) p.moveTo(x, y) else p.lineTo(x, y)
                                 }
                                 p.close()
-                                drawPath(p, brush, style = stroke)
+                                drawPath(p, brush, style = Stroke(width = strokeW, join = androidx.compose.ui.graphics.StrokeJoin.Round))
                             }
                             "scalloped" -> {
+                                val valleyR = half - strokeW * 0.35f
+                                val crestR = valleyR * 1.13f
                                 val p = androidx.compose.ui.graphics.Path()
-                                val scallops = 12
-                                for (i in 0 until scallops) {
-                                    val a1 = Math.toRadians((i * (360.0 / scallops)).toDouble())
-                                    val r = if (i % 2 == 0) radius else radius * 0.88f
-                                    val x = center.x + (r * cos(a1)).toFloat()
-                                    val y = center.y + (r * sin(a1)).toFloat()
-                                    if (i == 0) p.moveTo(x, y) else p.lineTo(x, y)
+                                val lobes = 12
+                                for (i in 0 until lobes) {
+                                    val aMid = Math.toRadians(((i + 0.5) * (360.0 / lobes)).toDouble())
+                                    val aEnd = Math.toRadians(((i + 1) * (360.0 / lobes)).toDouble())
+                                    val startX = center.x + (valleyR * cos(Math.toRadians((i * (360.0 / lobes))))).toFloat()
+                                    val startY = center.y + (valleyR * sin(Math.toRadians((i * (360.0 / lobes))))).toFloat()
+                                    val ctrlX = center.x + (crestR * cos(aMid)).toFloat()
+                                    val ctrlY = center.y + (crestR * sin(aMid)).toFloat()
+                                    val endX = center.x + (valleyR * cos(aEnd)).toFloat()
+                                    val endY = center.y + (valleyR * sin(aEnd)).toFloat()
+                                    if (i == 0) p.moveTo(startX, startY)
+                                    p.quadraticTo(ctrlX, ctrlY, endX, endY)
                                 }
                                 p.close()
-                                drawPath(p, brush, style = stroke)
+                                drawPath(p, brush, style = Stroke(width = strokeW * 0.85f, join = androidx.compose.ui.graphics.StrokeJoin.Round))
                             }
                             "double" -> {
-                                drawCircle(brush, radius = radius, center = center, style = Stroke(width = strokeW * 0.6f))
-                                drawCircle(brush, radius = radius * 0.82f, center = center, style = Stroke(width = strokeW * 0.4f))
+                                val innerStrokeW = (strokeW * 0.55f).coerceAtLeast(1.5f)
+                                val outerStrokeW = (strokeW * 0.42f).coerceAtLeast(1.2f)
+                                val innerRadius = half - strokeW * 0.65f
+                                val outerRadius = half - outerStrokeW * 0.4f
+                                drawCircle(brush, radius = outerRadius, center = center, style = Stroke(width = outerStrokeW))
+                                drawCircle(brush, radius = innerRadius, center = center, style = Stroke(width = innerStrokeW))
                             }
                             else -> {
                                 drawCircle(brush, radius = radius, center = center, style = stroke)
@@ -270,8 +287,8 @@ fun PresenceAvatar(
                             val count = parts.count.coerceIn(1, 8)
                             for (i in 0 until count) {
                                 val angle = Math.toRadians((i * (360.0 / count) + rotationAngle).toDouble())
-                                val px = center.x + ((radius + strokeW) * cos(angle)).toFloat()
-                                val py = center.y + ((radius + strokeW) * sin(angle)).toFloat()
+                                val px = center.x + ((radius + strokeW * 0.75f) * cos(angle)).toFloat()
+                                val py = center.y + ((radius + strokeW * 0.75f) * sin(angle)).toFloat()
                                 val pColor = pColors[i % pColors.size]
                                 drawCircle(pColor, radius = 2.dp.toPx(), center = androidx.compose.ui.geometry.Offset(px, py))
                             }
@@ -307,9 +324,14 @@ fun PresenceAvatar(
             }
 
             val paddingInsideRing = when {
-                isAssetFrame -> 0.dp // Asset frame sits around unpadded avatar
-                effectiveFrame != null -> (effectiveFrame.ring.widthDp * (size.value / 48f).coerceIn(0.6f, 1.8f) + 1f).dp
-                isSpeaking || isOnline -> 3.dp
+                isAssetFrame -> 0.dp // Asset frame sits flush around unpadded avatar
+                effectiveFrame != null -> {
+                    val ringScale = (size.value / 48f).coerceIn(0.6f, 1.8f)
+                    val scaledStrokeDp = (effectiveFrame.ring.widthDp * ringScale).coerceAtLeast(1.5f)
+                    // 0.8f * strokeWidth aligns DP edge flush under the inner stroke boundary with zero visible gap
+                    (scaledStrokeDp * 0.8f).dp
+                }
+                isSpeaking || isOnline -> 2.dp
                 else -> 0.dp
             }
 

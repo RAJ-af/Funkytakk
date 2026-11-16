@@ -21,9 +21,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
@@ -31,6 +33,7 @@ import com.example.ui.components.CircleFlag
 import com.example.ui.components.LocationConsentDialog
 import com.example.ui.theme.LocalFunkyColors
 import com.example.util.LocationDetector
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -52,6 +55,54 @@ fun ChooseCitySheet(
     var detectedCitySubtext by remember { mutableStateOf("Tap to detect device location") }
     var isDetectingLocation by remember { mutableStateOf(false) }
     var showConsentDialog by remember { mutableStateOf(false) }
+
+    // Async API-driven city lists (CountriesNow + Open-Meteo Geocoding)
+    var isLoadingCountryCities by remember { mutableStateOf(false) }
+    var isSearchingOnline by remember { mutableStateOf(false) }
+    var apiCountryCities by remember {
+        mutableStateOf(PlaceDbService.getCitiesForCountry(currentCountryCode))
+    }
+    var apiPopularCities by remember {
+        mutableStateOf(PlaceDbService.getPopularCities(currentCountryCode))
+    }
+    var apiSearchResults by remember { mutableStateOf<List<PlaceSettlement>>(emptyList()) }
+
+    // Fetch all cities for the active country whenever country changes
+    LaunchedEffect(currentCountryCode, currentCountryName) {
+        apiCountryCities = PlaceDbService.getCitiesForCountry(currentCountryCode)
+        apiPopularCities = PlaceDbService.getPopularCities(currentCountryCode)
+        isLoadingCountryCities = true
+        val fetchedAll = PlaceDbService.fetchCitiesForCountry(currentCountryCode, currentCountryName)
+        val fetchedPopular = PlaceDbService.fetchPopularCities(currentCountryCode, currentCountryName)
+        apiCountryCities = fetchedAll
+        apiPopularCities = fetchedPopular
+        isLoadingCountryCities = false
+    }
+
+    // Debounced online fuzzy search when typing in search bar
+    LaunchedEffect(searchQuery, currentCountryCode, currentCountryName) {
+        val trimmed = searchQuery.trim()
+        if (trimmed.isBlank()) {
+            apiSearchResults = emptyList()
+            isSearchingOnline = false
+            return@LaunchedEffect
+        }
+        // Instant local/cached filter first so UI feels responsive
+        apiSearchResults = PlaceDbService.searchSettlements(trimmed, currentCountryCode)
+        isSearchingOnline = true
+        delay(280L)
+        val online = PlaceDbService.searchCitiesOnline(
+            query = trimmed,
+            countryCode = currentCountryCode,
+            countryName = currentCountryName
+        )
+        apiSearchResults = online
+        isSearchingOnline = false
+    }
+
+    val displayedSettlements = remember(searchQuery, apiCountryCities, apiSearchResults) {
+        if (searchQuery.isBlank()) apiCountryCities else apiSearchResults
+    }
 
     // Dialog state for manual city input
     var showManualInputDialog by remember { mutableStateOf(false) }
@@ -123,16 +174,6 @@ fun ChooseCitySheet(
         }
     }
 
-    // Popular cities filtered strictly for active country
-    val popularCities = remember(currentCountryCode) {
-        PlaceDbService.getPopularCities(currentCountryCode)
-    }
-
-    // Filtered/search settlements
-    val settlementsList = remember(searchQuery, currentCountryCode) {
-        PlaceDbService.searchSettlements(searchQuery, currentCountryCode)
-    }
-
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
@@ -148,7 +189,7 @@ fun ChooseCitySheet(
                     .background(funkyColors.line, RoundedCornerShape(2.dp))
             )
         },
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
     ) {
         Column(
             modifier = Modifier
@@ -157,20 +198,31 @@ fun ChooseCitySheet(
                 .navigationBarsPadding()
                 .imePadding()
         ) {
-            // Header: Title, Country dropdown pill, Done button
+            // Header: Title + subtitle, Country dropdown pill, Done CTA
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 16.dp),
+                    .padding(bottom = 14.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Choose your city",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = funkyColors.ink
-                )
+                Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
+                    Text(
+                        text = "Choose your city",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = funkyColors.ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "Live cities in $currentCountryName",
+                        fontSize = 12.sp,
+                        color = funkyColors.mute,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -179,16 +231,18 @@ fun ChooseCitySheet(
                     // Country Pill (Clickable to switch country)
                     Row(
                         modifier = Modifier
+                            .defaultMinSize(minHeight = 40.dp)
                             .clip(RoundedCornerShape(20.dp))
                             .background(funkyColors.soft)
                             .border(1.dp, funkyColors.line, RoundedCornerShape(20.dp))
+                            .testTag("city_country_picker_pill")
                             .clickable { onCountryClick() }
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(16.dp)
+                                .size(18.dp)
                                 .clip(CircleShape)
                         ) {
                             CircleFlag(
@@ -201,8 +255,11 @@ fun ChooseCitySheet(
                         Text(
                             text = currentCountryName,
                             fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = funkyColors.ink
+                            fontWeight = FontWeight.SemiBold,
+                            color = funkyColors.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 92.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Icon(
@@ -226,9 +283,11 @@ fun ChooseCitySheet(
                             contentColor = funkyColors.onMango
                         ),
                         shape = RoundedCornerShape(20.dp),
-                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 6.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                         elevation = null,
-                        modifier = Modifier.height(36.dp)
+                        modifier = Modifier
+                            .height(40.dp)
+                            .testTag("city_done_button")
                     ) {
                         Text(
                             text = "Done",
@@ -240,24 +299,28 @@ fun ChooseCitySheet(
                 }
             }
 
-            // Search Bar: Search cities in <Country>...
-            Box(
+            // Polished Search Bar with clear button & inline progress spinner
+            Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp)
-                    .background(funkyColors.bg, RoundedCornerShape(14.dp))
-                    .border(1.dp, funkyColors.line, RoundedCornerShape(14.dp))
-                    .padding(horizontal = 14.dp),
-                contentAlignment = Alignment.CenterStart
+                    .height(50.dp),
+                shape = RoundedCornerShape(16.dp),
+                color = funkyColors.bg,
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (searchQuery.isNotEmpty()) funkyColors.mango else funkyColors.line
+                )
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(start = 14.dp, end = 6.dp)
                 ) {
                     Icon(
                         painter = painterResource(id = R.drawable.ic_search),
                         contentDescription = "Search",
-                        tint = funkyColors.mute,
+                        tint = if (searchQuery.isNotEmpty()) funkyColors.mango else funkyColors.mute,
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(10.dp))
@@ -268,23 +331,53 @@ fun ChooseCitySheet(
                         textStyle = TextStyle(
                             fontSize = 15.sp,
                             color = funkyColors.ink,
-                            fontWeight = FontWeight.Normal
+                            fontWeight = FontWeight.Medium
                         ),
                         cursorBrush = SolidColor(funkyColors.mango),
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("city_search_input"),
                         decorationBox = { innerTextField ->
                             if (searchQuery.isEmpty()) {
                                 Text(
-                                    text = "Search cities in $currentCountryName...",
+                                    text = "Search any city in $currentCountryName...",
                                     style = TextStyle(
                                         fontSize = 14.sp,
                                         color = funkyColors.mute
-                                    )
+                                    ),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                             innerTextField()
                         }
                     )
+
+                    if (isSearchingOnline || isLoadingCountryCities) {
+                        CircularProgressIndicator(
+                            modifier = Modifier
+                                .padding(horizontal = 8.dp)
+                                .size(16.dp),
+                            color = funkyColors.mango,
+                            strokeWidth = 2.dp
+                        )
+                    }
+
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(
+                            onClick = { searchQuery = "" },
+                            modifier = Modifier
+                                .size(40.dp)
+                                .testTag("city_search_clear_button")
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_close),
+                                contentDescription = "Clear search",
+                                tint = funkyColors.mute,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                    }
                 }
             }
 
@@ -293,21 +386,21 @@ fun ChooseCitySheet(
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 440.dp),
+                    .heightIn(min = 240.dp, max = 460.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // 1. Use My Current Location Row
+                // 1. Use My Current Location Card
                 item {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(funkyColors.mango.copy(alpha = if (funkyColors.isDark) 0.14f else 0.18f))
-                            .border(1.dp, funkyColors.mango.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
-                            .clickable {
-                                triggerLocationDetection()
-                            }
-                            .padding(14.dp),
+                            .defaultMinSize(minHeight = 60.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(funkyColors.mango.copy(alpha = if (funkyColors.isDark) 0.14f else 0.16f))
+                            .border(1.dp, funkyColors.mango.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
+                            .testTag("city_use_current_location_card")
+                            .clickable { triggerLocationDetection() }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
@@ -317,23 +410,31 @@ fun ChooseCitySheet(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(36.dp)
+                                    .size(38.dp)
                                     .background(funkyColors.mango.copy(alpha = 0.25f), CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    painter = painterResource(id = R.drawable.ic_pin),
-                                    contentDescription = "Location",
-                                    tint = funkyColors.mango,
-                                    modifier = Modifier.size(18.dp)
-                                )
+                                if (isDetectingLocation) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        color = funkyColors.mango,
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ic_target),
+                                        contentDescription = "Detect location",
+                                        tint = funkyColors.mango,
+                                        modifier = Modifier.size(19.dp)
+                                    )
+                                }
                             }
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text(
                                     text = if (isDetectingLocation) "Detecting location..." else "Use my current location",
                                     fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold,
+                                    fontWeight = FontWeight.Bold,
                                     color = funkyColors.ink
                                 )
                                 Text(
@@ -346,24 +447,24 @@ fun ChooseCitySheet(
 
                         Icon(
                             painter = painterResource(id = R.drawable.ic_chevron_right),
-                            contentDescription = "Go",
+                            contentDescription = "Detect",
                             tint = funkyColors.mute,
                             modifier = Modifier.size(18.dp)
                         )
                     }
                 }
 
-                // 2. Popular Cities Section
-                if (searchQuery.isBlank() && popularCities.isNotEmpty()) {
+                // 2. Popular Cities Section (when not searching)
+                if (searchQuery.isBlank() && apiPopularCities.isNotEmpty()) {
                     item {
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = "POPULAR CITIES",
-                            fontSize = 12.sp,
+                            fontSize = 11.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = funkyColors.mute,
                             letterSpacing = 0.8.sp,
-                            modifier = Modifier.padding(vertical = 4.dp)
+                            modifier = Modifier.padding(vertical = 2.dp)
                         )
                     }
 
@@ -372,19 +473,20 @@ fun ChooseCitySheet(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            items(popularCities) { city ->
+                            items(apiPopularCities, key = { "pop_${it.countryCode}_${it.name}" }) { city ->
                                 val isSelected = selectedCityName.equals(city.name, ignoreCase = true)
                                 Row(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(12.dp))
+                                        .defaultMinSize(minHeight = 42.dp)
+                                        .clip(RoundedCornerShape(14.dp))
                                         .background(
-                                            if (isSelected) funkyColors.mango.copy(alpha = 0.18f)
+                                            if (isSelected) funkyColors.mango.copy(alpha = 0.2f)
                                             else funkyColors.soft
                                         )
                                         .border(
                                             width = 1.dp,
                                             color = if (isSelected) funkyColors.mango else funkyColors.line,
-                                            shape = RoundedCornerShape(12.dp)
+                                            shape = RoundedCornerShape(14.dp)
                                         )
                                         .clickable {
                                             selectedCityName = city.name
@@ -411,35 +513,126 @@ fun ChooseCitySheet(
                     }
                 }
 
-                // 3. All Cities Header
+                // 3. All Cities / Search Results Header
                 item {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text(
-                        text = if (searchQuery.isBlank()) "ALL CITIES" else "SEARCH RESULTS",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = funkyColors.mute,
-                        letterSpacing = 0.8.sp,
-                        modifier = Modifier.padding(vertical = 4.dp)
-                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (searchQuery.isBlank()) "ALL CITIES" else "SEARCH RESULTS",
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = funkyColors.mute,
+                            letterSpacing = 0.8.sp
+                        )
+                        if (displayedSettlements.isNotEmpty()) {
+                            Text(
+                                text = "${displayedSettlements.size} found",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = funkyColors.mute
+                            )
+                        }
+                    }
+                }
+
+                // Loading indicator when country cities are fetching cleanly
+                if (searchQuery.isBlank() && isLoadingCountryCities && displayedSettlements.isEmpty()) {
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(funkyColors.bg)
+                                .padding(horizontal = 16.dp, vertical = 20.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                color = funkyColors.mango,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = "Loading cities for $currentCountryName...",
+                                fontSize = 13.sp,
+                                color = funkyColors.mute
+                            )
+                        }
+                    }
+                }
+
+                // Helpful empty state + one-tap custom selection when search has no API matches
+                if (searchQuery.isNotBlank() && !isSearchingOnline && displayedSettlements.isEmpty()) {
+                    val trimmed = searchQuery.trim()
+                    item {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(funkyColors.bg)
+                                .border(1.dp, funkyColors.line, RoundedCornerShape(14.dp))
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "No matching city found for \"$trimmed\" in $currentCountryName.",
+                                fontSize = 13.sp,
+                                color = funkyColors.mute
+                            )
+                            Surface(
+                                onClick = {
+                                    selectedCityName = trimmed
+                                    onCitySelected(trimmed)
+                                    onDismiss()
+                                },
+                                color = funkyColors.mango.copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(12.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, funkyColors.mango)
+                            ) {
+                                Text(
+                                    text = "Use \"$trimmed\"",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = funkyColors.ink,
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)
+                                )
+                            }
+                        }
+                    }
                 }
 
                 // 4. Cities List
-                items(settlementsList) { settlement ->
+                items(
+                    items = displayedSettlements,
+                    key = { "${it.countryCode}_${it.name}_${it.adminRegion}" }
+                ) { settlement ->
                     val isSelected = selectedCityName.equals(settlement.name, ignoreCase = true)
 
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
+                            .defaultMinSize(minHeight = 56.dp)
+                            .clip(RoundedCornerShape(14.dp))
                             .background(
                                 if (isSelected) funkyColors.mango.copy(alpha = 0.16f)
-                                else Color.Transparent
+                                else funkyColors.bg.copy(alpha = 0.55f)
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = if (isSelected) funkyColors.mango.copy(alpha = 0.55f) else Color.Transparent,
+                                shape = RoundedCornerShape(14.dp)
                             )
                             .clickable {
                                 selectedCityName = settlement.name
                             }
-                            .padding(horizontal = 10.dp, vertical = 10.dp),
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
@@ -449,8 +642,11 @@ fun ChooseCitySheet(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(32.dp)
-                                    .background(funkyColors.soft, CircleShape),
+                                    .size(34.dp)
+                                    .background(
+                                        if (isSelected) funkyColors.mango.copy(alpha = 0.22f) else funkyColors.soft,
+                                        CircleShape
+                                    ),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
@@ -465,18 +661,27 @@ fun ChooseCitySheet(
                                 Text(
                                     text = settlement.name,
                                     fontSize = 15.sp,
-                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                     color = funkyColors.ink
                                 )
-                                Text(
-                                    text = if (settlement.countryName != currentCountryName) {
-                                        "${settlement.adminRegion}, ${settlement.countryName}"
-                                    } else {
-                                        settlement.adminRegion
-                                    },
-                                    fontSize = 12.sp,
-                                    color = funkyColors.mute
-                                )
+                                val subRegion = buildString {
+                                    if (settlement.adminRegion.isNotBlank() &&
+                                        !settlement.adminRegion.equals(settlement.countryName, ignoreCase = true)
+                                    ) {
+                                        append(settlement.adminRegion)
+                                    }
+                                    if (settlement.countryName.isNotBlank()) {
+                                        if (isNotEmpty()) append(", ")
+                                        append(settlement.countryName)
+                                    }
+                                }
+                                if (subRegion.isNotBlank()) {
+                                    Text(
+                                        text = subRegion,
+                                        fontSize = 12.sp,
+                                        color = funkyColors.mute
+                                    )
+                                }
                             }
                         }
 
@@ -507,13 +712,15 @@ fun ChooseCitySheet(
 
                 // 5. City Not Listed? Enter It Manually Row
                 item {
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .defaultMinSize(minHeight = 56.dp)
                             .clip(RoundedCornerShape(14.dp))
                             .background(funkyColors.bg)
                             .border(1.dp, funkyColors.line, RoundedCornerShape(14.dp))
+                            .testTag("city_manual_entry_card")
                             .clickable {
                                 manualCityInput = ""
                                 showManualInputDialog = true
@@ -593,7 +800,7 @@ fun ChooseCitySheet(
                     OutlinedTextField(
                         value = manualCityInput,
                         onValueChange = { manualCityInput = it },
-                        placeholder = { Text("e.g. Noida, Gurgaon", color = funkyColors.mute) },
+                        placeholder = { Text("e.g. Lahore, Rawalpindi", color = funkyColors.mute) },
                         singleLine = true,
                         textStyle = TextStyle(fontSize = 15.sp, color = funkyColors.ink),
                         shape = RoundedCornerShape(12.dp),

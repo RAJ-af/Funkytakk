@@ -1701,10 +1701,18 @@ fun EditProfileScreen(
                 editCountry = name
                 editCountryCode = code
                 if (canChangeCity) {
-                    // Update city defaults for selected country only when city is editable
+                    // Update city defaults for selected country using cache first, then free API
                     val popular = PlaceDbService.getPopularCities(code)
                     if (popular.isNotEmpty()) {
                         editCity = popular.first().name
+                    } else {
+                        editCity = ""
+                        coroutineScope.launch {
+                            val fetchedPopular = PlaceDbService.fetchPopularCities(code, name)
+                            if (fetchedPopular.isNotEmpty() && editCountryCode.equals(code, ignoreCase = true) && editCity.isBlank()) {
+                                editCity = fetchedPopular.first().name
+                            }
+                        }
                     }
                 }
             },

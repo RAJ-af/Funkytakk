@@ -572,12 +572,17 @@ fun HomeScreen(
                 }
             }
         ) { innerPadding ->
+            val contentModifier = if (shouldHideBottomBar) {
+                Modifier
+            } else if (activeTab == "moments") {
+                Modifier.padding(bottom = innerPadding.calculateBottomPadding())
+            } else {
+                Modifier.padding(innerPadding)
+            }
             Crossfade(
                 targetState = activeTab,
                 label = "HomeSubNavigation",
-                modifier = Modifier.padding(
-                    if (shouldHideBottomBar) PaddingValues(bottom = 0.dp) else innerPadding
-                )
+                modifier = contentModifier
             ) { currentTab ->
                 when (currentTab) {
                     "home" -> {
@@ -661,6 +666,10 @@ fun HomeScreen(
                     "moments" -> {
                         MomentsTabContent(
                             currentUserNativeLanguage = currentUserProfile.nativeLanguage.orEmpty(),
+                            currentUserId = currentUserId,
+                            currentUserName = currentUserProfile.displayName ?: currentUserProfile.username.orEmpty(),
+                            currentUserAvatarUrl = currentUserProfile.avatar.orEmpty(),
+                            currentUserCountryCode = currentUserProfile.countryCode.orEmpty(),
                             onCreatePostVisibilityChange = { hideBottomBarForMomentsOverlay = it }
                         )
                     }

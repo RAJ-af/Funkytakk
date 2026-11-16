@@ -54,6 +54,10 @@ private class MomentTabFeedState(val tabKey: String) {
 @Composable
 fun MomentsTabContent(
     currentUserNativeLanguage: String = "",
+    currentUserId: String = "",
+    currentUserName: String = "",
+    currentUserAvatarUrl: String = "",
+    currentUserCountryCode: String = "",
     onCreatePostVisibilityChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -345,6 +349,7 @@ fun MomentsTabContent(
                         MomentV2Slide(
                             moment = moment,
                             isBookmarked = isBookmarked,
+                            contentBottomPadding = 16.dp,
                             onOpenComments = {
                                 activeMomentIdForComments = moment.id
                                 commentsInitialTab = 0
@@ -793,12 +798,24 @@ fun MomentsTabContent(
             defaultLanguage = currentUserNativeLanguage,
             onDismiss = { showCreatePostSheet = false },
             onPostCreated = { newMoment ->
-                trendingFeed.items.removeAll { it.id == newMoment.id }
-                trendingFeed.items.add(0, newMoment)
-                if (selectedTab == 1) {
-                    myLangFeed.items.removeAll { it.id == newMoment.id }
-                    myLangFeed.items.add(0, newMoment)
+                val enrichedAuthor = newMoment.author.copy(
+                    id = newMoment.author.id.ifBlank { currentUserId },
+                    name = newMoment.author.name?.takeIf { it.isNotBlank() }
+                        ?: currentUserName.takeIf { it.isNotBlank() },
+                    avatar_url = newMoment.author.avatar_url?.takeIf { it.isNotBlank() }
+                        ?: currentUserAvatarUrl.takeIf { it.isNotBlank() },
+                    country_code = newMoment.author.country_code?.takeIf { it.isNotBlank() }
+                        ?: currentUserCountryCode.takeIf { it.isNotBlank() },
+                    is_me = true
+                )
+                val normalizedMoment = newMoment.copy(author = enrichedAuthor)
+                trendingFeed.items.removeAll { it.id == normalizedMoment.id }
+                trendingFeed.items.add(0, normalizedMoment)
+                if (myLangFeed.hasLoadedOnce) {
+                    myLangFeed.items.removeAll { it.id == normalizedMoment.id }
+                    myLangFeed.items.add(0, normalizedMoment)
                 }
+                selectedTab = 0
                 showCreatePostSheet = false
                 coroutineScope.launch {
                     verticalPagerState.scrollToPage(0)

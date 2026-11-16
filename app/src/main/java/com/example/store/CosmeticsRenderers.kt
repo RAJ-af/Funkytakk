@@ -308,49 +308,67 @@ fun AvatarFrame(
             )
         }
 
-        // Ring Canvas
+        // Ring Canvas (zIndex 2f so ring sits crisply on DP perimeter)
+        val ringScale = (sizeDp.value / 48f).coerceIn(0.6f, 1.8f)
+        val scaledStrokeDp = (ring.widthDp * ringScale).coerceAtLeast(1.5f)
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
+                .zIndex(2f)
                 .rotate(rotationAngle)
         ) {
-            val strokeW = ring.widthDp.dp.toPx()
+            val strokeW = scaledStrokeDp.dp.toPx()
             val stroke = Stroke(width = strokeW)
             val brush = if (ringColors.size > 1) {
                 Brush.sweepGradient(ringColors)
             } else SolidColor(ringColors.firstOrNull() ?: Color(0xFFFFD700))
 
             val center = Offset(size.width / 2f, size.height / 2f)
-            val radius = (size.width - strokeW) / 2f
+            val half = size.width / 2f
+            val radius = half - strokeW * 0.5f
 
             when (ring.shape.lowercase()) {
                 "hexagon" -> {
+                    val apothem = half - strokeW * 0.45f
+                    val hexRadius = apothem / 0.8660254f
                     val p = Path()
                     for (i in 0 until 6) {
                         val angleRad = Math.toRadians((i * 60 - 30).toDouble())
-                        val x = center.x + radius * cos(angleRad).toFloat()
-                        val y = center.y + radius * sin(angleRad).toFloat()
+                        val x = center.x + hexRadius * cos(angleRad).toFloat()
+                        val y = center.y + hexRadius * sin(angleRad).toFloat()
                         if (i == 0) p.moveTo(x, y) else p.lineTo(x, y)
                     }
                     p.close()
-                    drawPath(p, brush, style = stroke)
+                    drawPath(p, brush, style = Stroke(width = strokeW, join = StrokeJoin.Round))
                 }
                 "scalloped" -> {
+                    val valleyR = half - strokeW * 0.35f
+                    val crestR = valleyR * 1.13f
                     val p = Path()
-                    val scallops = 12
-                    for (i in 0 until scallops) {
-                        val a1 = Math.toRadians((i * (360.0 / scallops)).toDouble())
-                        val r = if (i % 2 == 0) radius else radius * 0.88f
-                        val x = center.x + r * cos(a1).toFloat()
-                        val y = center.y + r * sin(a1).toFloat()
-                        if (i == 0) p.moveTo(x, y) else p.lineTo(x, y)
+                    val lobes = 12
+                    for (i in 0 until lobes) {
+                        val aStart = Math.toRadians((i * (360.0 / lobes)).toDouble())
+                        val aMid = Math.toRadians(((i + 0.5) * (360.0 / lobes)).toDouble())
+                        val aEnd = Math.toRadians(((i + 1) * (360.0 / lobes)).toDouble())
+                        val startX = center.x + valleyR * cos(aStart).toFloat()
+                        val startY = center.y + valleyR * sin(aStart).toFloat()
+                        val ctrlX = center.x + crestR * cos(aMid).toFloat()
+                        val ctrlY = center.y + crestR * sin(aMid).toFloat()
+                        val endX = center.x + valleyR * cos(aEnd).toFloat()
+                        val endY = center.y + valleyR * sin(aEnd).toFloat()
+                        if (i == 0) p.moveTo(startX, startY)
+                        p.quadraticTo(ctrlX, ctrlY, endX, endY)
                     }
                     p.close()
-                    drawPath(p, brush, style = stroke)
+                    drawPath(p, brush, style = Stroke(width = strokeW * 0.85f, join = StrokeJoin.Round))
                 }
                 "double" -> {
-                    drawCircle(brush, radius = radius, center = center, style = Stroke(width = strokeW * 0.6f))
-                    drawCircle(brush, radius = radius * 0.82f, center = center, style = Stroke(width = strokeW * 0.4f))
+                    val innerStrokeW = (strokeW * 0.55f).coerceAtLeast(1.5f)
+                    val outerStrokeW = (strokeW * 0.42f).coerceAtLeast(1.2f)
+                    val innerRadius = half - strokeW * 0.65f
+                    val outerRadius = half - outerStrokeW * 0.4f
+                    drawCircle(brush, radius = outerRadius, center = center, style = Stroke(width = outerStrokeW))
+                    drawCircle(brush, radius = innerRadius, center = center, style = Stroke(width = innerStrokeW))
                 }
                 else -> {
                     // Default circle
@@ -364,19 +382,20 @@ fun AvatarFrame(
                 val count = parts.count.coerceIn(1, 12)
                 for (i in 0 until count) {
                     val angle = Math.toRadians((i * (360.0 / count) + rotationAngle).toDouble())
-                    val px = center.x + (radius + strokeW) * cos(angle).toFloat()
-                    val py = center.y + (radius + strokeW) * sin(angle).toFloat()
+                    val px = center.x + (radius + strokeW * 0.75f) * cos(angle).toFloat()
+                    val py = center.y + (radius + strokeW * 0.75f) * sin(angle).toFloat()
                     val pColor = pColors[i % pColors.size]
                     drawCircle(pColor, radius = 2.dp.toPx(), center = Offset(px, py))
                 }
             }
         }
 
-        // Inner Avatar
+        // Inner Avatar (flush against inner stroke boundary)
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding((ring.widthDp + 1f).dp)
+                .zIndex(1f)
+                .padding((scaledStrokeDp * 0.8f).dp)
                 .clip(CircleShape),
             contentAlignment = Alignment.Center
         ) {
@@ -396,6 +415,7 @@ fun AvatarFrame(
                 modifier = Modifier
                     .align(align)
                     .offset(x = 2.dp, y = (-2).dp)
+                    .zIndex(3f)
             )
         }
     }

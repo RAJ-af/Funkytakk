@@ -23,9 +23,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -249,24 +251,83 @@ fun MomentV2Slide(
     ) {
         // 1. Background Content: Multi-photo/video pager or Color Gradient
         if (mediaList.isEmpty()) {
+            val textCardInk = if (useLightUiContrast) Color(0xFF1B1608) else Color.White
+            val textCardSubInk = if (useLightUiContrast) Color(0xFF3F3323) else Color.White.copy(alpha = 0.90f)
+            val hasBodyText = !moment.content.isNullOrBlank()
+            val hasTitleText = !moment.title.isNullOrBlank()
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Brush.linearGradient(preset.colors)),
+                    .background(Brush.linearGradient(preset.colors))
+                    .statusBarsPadding()
+                    .padding(
+                        top = 104.dp,
+                        bottom = contentBottomPadding + 108.dp,
+                        start = 20.dp,
+                        end = 84.dp
+                    ),
                 contentAlignment = Alignment.Center
             ) {
-                val centerText = moment.title?.takeIf { it.isNotBlank() }
-                    ?: moment.content?.takeIf { it.isNotBlank() }
-                    ?: ""
-                Text(
-                    text = centerText,
-                    fontSize = 28.sp,
-                    fontWeight = FontWeight.Black,
-                    color = if (isLightCanvas) Color(0xFF1B1608) else Color.White,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(32.dp),
-                    lineHeight = 36.sp
-                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    horizontalAlignment = if (hasBodyText) Alignment.Start else Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    if (hasTitleText) {
+                        Text(
+                            text = moment.title!!,
+                            fontSize = if (hasBodyText) 24.sp else 28.sp,
+                            fontWeight = FontWeight.Black,
+                            color = textCardInk,
+                            textAlign = if (hasBodyText) TextAlign.Start else TextAlign.Center,
+                            lineHeight = if (hasBodyText) 30.sp else 36.sp,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    if (hasBodyText) {
+                        Text(
+                            text = moment.content!!,
+                            fontSize = if (hasTitleText) 16.sp else 21.sp,
+                            fontWeight = if (hasTitleText) FontWeight.Medium else FontWeight.Bold,
+                            color = textCardSubInk,
+                            textAlign = TextAlign.Start,
+                            lineHeight = if (hasTitleText) 24.sp else 29.sp,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    if (!moment.translation.isNullOrBlank()) {
+                        Surface(
+                            onClick = { showTranslation = !showTranslation },
+                            shape = RoundedCornerShape(14.dp),
+                            color = if (useLightUiContrast) funkyColors.surface.copy(alpha = 0.78f) else Color.White.copy(alpha = 0.16f),
+                            border = if (useLightUiContrast) BorderStroke(1.dp, funkyColors.line) else null
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_globe),
+                                    contentDescription = null,
+                                    tint = funkyColors.mango,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = if (showTranslation) "Translation: ${moment.translation}" else "View author translation",
+                                    fontSize = 12.5.sp,
+                                    color = textCardInk,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                }
             }
         } else {
             HorizontalPager(
@@ -337,7 +398,7 @@ fun MomentV2Slide(
                                 modifier = Modifier
                                     .align(Alignment.TopStart)
                                     .statusBarsPadding()
-                                    .padding(top = 80.dp, start = 16.dp)
+                                    .padding(top = 104.dp, start = 16.dp)
                             ) {
                                 Row(
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
@@ -400,7 +461,7 @@ fun MomentV2Slide(
                 modifier = Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
-                    .padding(top = 80.dp, start = 16.dp, end = 16.dp),
+                    .padding(top = 104.dp, start = 16.dp, end = 16.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -525,58 +586,60 @@ fun MomentV2Slide(
             )
         }
 
-        // Bottom Left Content Overlay: Title, Content, Translation, User info, Badges, Tags
+        // Bottom Left Content Overlay: User info, Badges, Tags (plus Title/Caption/Translation on media posts only)
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .fillMaxWidth(0.80f)
-                .padding(start = 16.dp, bottom = contentBottomPadding),
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 84.dp, bottom = contentBottomPadding),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            if (!moment.title.isNullOrBlank()) {
-                Text(
-                    text = moment.title,
-                    fontSize = 21.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = overlayInk,
-                    lineHeight = 25.sp
-                )
-            }
+            if (mediaList.isNotEmpty()) {
+                if (!moment.title.isNullOrBlank()) {
+                    Text(
+                        text = moment.title,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = overlayInk,
+                        lineHeight = 24.sp
+                    )
+                }
 
-            if (!moment.content.isNullOrBlank()) {
-                Text(
-                    text = moment.content,
-                    fontSize = 13.5.sp,
-                    color = if (useLightUiContrast) funkyColors.ink.copy(alpha = 0.85f) else Color(0xFFF1F5F9),
-                    lineHeight = 19.sp,
-                    maxLines = 4,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
+                if (!moment.content.isNullOrBlank()) {
+                    Text(
+                        text = moment.content,
+                        fontSize = 13.5.sp,
+                        color = if (useLightUiContrast) funkyColors.ink.copy(alpha = 0.85f) else Color(0xFFF1F5F9),
+                        lineHeight = 19.sp,
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
 
-            if (!moment.translation.isNullOrBlank()) {
-                Surface(
-                    onClick = { showTranslation = !showTranslation },
-                    shape = RoundedCornerShape(14.dp),
-                    color = if (useLightUiContrast) funkyColors.soft else Color.White.copy(alpha = 0.16f)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                if (!moment.translation.isNullOrBlank()) {
+                    Surface(
+                        onClick = { showTranslation = !showTranslation },
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (useLightUiContrast) funkyColors.soft else Color.White.copy(alpha = 0.16f)
                     ) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.ic_globe),
-                            contentDescription = null,
-                            tint = funkyColors.mango,
-                            modifier = Modifier.size(13.dp)
-                        )
-                        Text(
-                            text = if (showTranslation) "Translation: ${moment.translation}" else "View author translation",
-                            fontSize = 12.sp,
-                            color = if (useLightUiContrast) funkyColors.ink else Color(0xFFE2E8F0),
-                            fontWeight = FontWeight.Medium
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_globe),
+                                contentDescription = null,
+                                tint = funkyColors.mango,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = if (showTranslation) "Translation: ${moment.translation}" else "View author translation",
+                                fontSize = 12.sp,
+                                color = if (useLightUiContrast) funkyColors.ink else Color(0xFFE2E8F0),
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
                 }
             }
@@ -2230,6 +2293,7 @@ fun MomentsV2FeedViewerDialog(
             modifier = Modifier
                 .fillMaxSize()
                 .background(funkyColors.bg)
+                .navigationBarsPadding()
                 .testTag("profile_moments_v2_viewer")
         ) {
             VerticalPager(
@@ -2243,6 +2307,7 @@ fun MomentsV2FeedViewerDialog(
                 MomentV2Slide(
                     moment = moment,
                     isBookmarked = isBookmarked,
+                    contentBottomPadding = 24.dp,
                     onOpenComments = {
                         activeMomentIdForComments = moment.id
                         commentsInitialTab = 0
@@ -2351,8 +2416,7 @@ fun MomentsV2FeedViewerDialog(
                     },
                     onMediaImageClick = { urls, index ->
                         previewImagesState = urls to index
-                    },
-                    contentBottomPadding = 34.dp
+                    }
                 )
             }
 

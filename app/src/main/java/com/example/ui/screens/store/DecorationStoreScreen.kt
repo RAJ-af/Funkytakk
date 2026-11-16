@@ -1198,24 +1198,21 @@ private fun DecorationPreviewDialog(
 
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
     ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(ColorBg),
-            color = ColorBg
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .navigationBarsPadding()
-            ) {
-                // Top Bar
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = ColorBg,
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            topBar = {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                        .statusBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
@@ -1245,7 +1242,76 @@ private fun DecorationPreviewDialog(
 
                     Spacer(modifier = Modifier.size(48.dp))
                 }
+            },
+            bottomBar = {
+                // Bottom Buttons: "Buy Only" and "Apply All (n)" anchored cleanly above nav bar
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = ColorSurface,
+                    border = BorderStroke(1.dp, ColorOutline),
+                    shadowElevation = 6.dp
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onBuyOnly,
+                            enabled = !isPurchasing,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .testTag("preview_buy_only_button"),
+                            shape = RoundedCornerShape(100.dp),
+                            border = BorderStroke(1.dp, ColorTextSecondary)
+                        ) {
+                            Text(
+                                text = "Buy Only",
+                                fontSize = 14.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = ColorTextPrimary
+                            )
+                        }
 
+                        Button(
+                            onClick = onApplyAll,
+                            enabled = !isPurchasing,
+                            modifier = Modifier
+                                .weight(1.3f)
+                                .height(48.dp)
+                                .testTag("preview_apply_all_button"),
+                            shape = RoundedCornerShape(100.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = ColorPrimary,
+                                contentColor = ColorOnPrimary
+                            )
+                        ) {
+                            if (isPurchasing) {
+                                CircularProgressIndicator(
+                                    color = ColorOnPrimary,
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Text(
+                                    text = "Apply All (${selectedItems.size})",
+                                    fontSize = 14.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        ) { innerPadding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) {
                 // Top Hero Section: User avatar with selected frame & name effect
                 val selectedFrame = selectedItems.find { it.item_type == "avatar_frame" }
                 val frameConfig = remember(selectedFrame) {
@@ -1259,7 +1325,7 @@ private fun DecorationPreviewDialog(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 18.dp),
+                        .padding(top = 6.dp, bottom = 12.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1278,7 +1344,7 @@ private fun DecorationPreviewDialog(
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(14.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
                         StyledName(
                             text = currentUserName,
                             config = nameEffectConfig,
@@ -1336,7 +1402,7 @@ private fun DecorationPreviewDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .padding(16.dp)
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
                 ) { page ->
                     when (page) {
                         0 -> PreviewAvatarPage(selectedFrame = selectedFrame)
@@ -1347,67 +1413,6 @@ private fun DecorationPreviewDialog(
                         )
                         3 -> PreviewBubblePage(selectedBubble = selectedItems.find { it.item_type == "bubble_theme" })
                         4 -> PreviewThemePage(selectedTheme = selectedItems.find { it.item_type == "chat_bg" })
-                    }
-                }
-
-                // Bottom Buttons: "Buy Only" and "Apply All (n)"
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = ColorSurface,
-                    border = BorderStroke(1.dp, ColorOutline),
-                    shadowElevation = 6.dp
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = onBuyOnly,
-                            enabled = !isPurchasing,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp)
-                                .testTag("preview_buy_only_button"),
-                            shape = RoundedCornerShape(100.dp),
-                            border = BorderStroke(1.dp, ColorTextSecondary)
-                        ) {
-                            Text(
-                                text = "Buy Only",
-                                fontSize = 14.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = ColorTextPrimary
-                            )
-                        }
-
-                        Button(
-                            onClick = onApplyAll,
-                            enabled = !isPurchasing,
-                            modifier = Modifier
-                                .weight(1.3f)
-                                .height(48.dp)
-                                .testTag("preview_apply_all_button"),
-                            shape = RoundedCornerShape(100.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = ColorPrimary,
-                                contentColor = ColorOnPrimary
-                            )
-                        ) {
-                            if (isPurchasing) {
-                                CircularProgressIndicator(
-                                    color = ColorOnPrimary,
-                                    modifier = Modifier.size(20.dp),
-                                    strokeWidth = 2.dp
-                                )
-                            } else {
-                                Text(
-                                    text = "Apply All (${selectedItems.size})",
-                                    fontSize = 14.5.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
                     }
                 }
             }

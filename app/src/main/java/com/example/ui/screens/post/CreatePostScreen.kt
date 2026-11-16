@@ -1,6 +1,7 @@
 package com.example.ui.screens.post
 
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -39,8 +40,10 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -48,15 +51,21 @@ import coil.compose.AsyncImage
 import com.example.MomentDto
 import com.example.MomentLimitsDto
 import com.example.MomentTopicDto
+import com.example.R
 import com.example.SupabaseSessionManager
 import com.example.repository.MomentsRepository
 import com.example.ui.components.AppLoadingManager
 import com.example.ui.components.CircleFlag
+import com.example.ui.components.LocationConsentDialog
 import com.example.ui.screens.LanguageData
+import com.example.ui.screens.profile.components.PlaceDbService
+import com.example.ui.screens.profile.components.PlaceSettlement
+import com.example.util.LocationDetector
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -102,8 +111,16 @@ fun CreatePostScreen(
     var selectedLanguage by remember { mutableStateOf(initialLanguage) }
     var languageSearchQuery by remember { mutableStateOf("") }
     val selectedTopicSlugs = remember { mutableStateListOf<String>() }
+    var customTopicInput by remember { mutableStateOf("") }
+    val customTopics = remember { mutableStateListOf<MomentTopicDto>() }
+
     var selectedLocation by remember { mutableStateOf("") }
     var locationInputSearch by remember { mutableStateOf("") }
+    var showLocationConsentDialog by remember { mutableStateOf(false) }
+    var isDetectingLocation by remember { mutableStateOf(false) }
+    var isSearchingLocation by remember { mutableStateOf(false) }
+    var suggestedLocations by remember { mutableStateOf<List<PlaceSettlement>>(emptyList()) }
+    var searchedLocations by remember { mutableStateOf<List<PlaceSettlement>>(emptyList()) }
 
     val selectedMediaUris = remember { mutableStateListOf<Uri>() }
     var isVideoMedia by remember { mutableStateOf(false) }
@@ -121,6 +138,126 @@ fun CreatePostScreen(
             publishJob?.cancel()
             AppLoadingManager.hide()
         }
+    }
+
+    val userCountryCode = remember(selfUserId) {
+        prefs.getString("profile_countryCode_${selfUserId}", null)
+            ?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
+            ?: Locale.getDefault().country.lowercase().ifBlank { "in" }
+    }
+    val userCountryName = remember(selfUserId, userCountryCode) {
+        prefs.getString("profile_country_${selfUserId}", null)
+            ?.trim()?.takeIf { it.isNotBlank() }
+            ?: Locale("", userCountryCode.uppercase()).getDisplayCountry(Locale.ENGLISH)
+    }
+
+    LaunchedEffect(activeDockPanel) {
+        if (activeDockPanel == "loc" && suggestedLocations.isEmpty()) {
+            val popular = PlaceDbService.fetchPopularCities(userCountryCode, userCountryName)
+            suggestedLocations = popular.ifEmpty { PlaceDbService.searchCitiesOnline("") }
+        }
+    }
+
+    LaunchedEffect(activeDockPanel, locationInputSearch) {
+        if (activeDockPanel != "loc") return@LaunchedEffect
+        val q = locationInputSearch.trim()
+        if (q.isBlank()) {
+            searchedLocations = emptyList()
+            isSearchingLocation = false
+            return@LaunchedEffect
+        }
+        isSearchingLocation = true
+        delay(280L)
+        searchedLocations = PlaceDbService.searchCitiesOnline(query = q)
+        isSearchingLocation = false
+    }
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val fineGranted = permissions[android.Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val coarseGranted = permissions[android.Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (fineGranted || coarseGranted) {
+            if (!LocationDetector.isGpsEnabled(context)) {
+                Toast.makeText(context, "Location services (GPS) disabled on device", Toast.LENGTH_SHORT).show()
+                return@rememberLauncherForActivityResult
+            }
+            coroutineScope.launch {
+                isDetectingLocation = true
+                val detected = LocationDetector.detectCurrentLocation(context)
+                isDetectingLocation = false
+                if (detected != null && detected.city.isNotBlank()) {
+                    val locLabel = detected.city.take(limits.location)
+                    selectedLocation = locLabel
+                    locationInputSearch = locLabel
+                    Toast.makeText(context, "Detected: ${detected.city}, ${detected.country}", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, "Could not detect location. Search your city below.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        } else {
+            Toast.makeText(context, "Location permission denied", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun triggerPostLocationDetection() {
+        if (!LocationDetector.hasLocationPermission(context)) {
+            showLocationConsentDialog = true
+        } else {
+            if (!LocationDetector.isGpsEnabled(context)) {
+                Toast.makeText(context, "Location services (GPS) disabled on device", Toast.LENGTH_SHORT).show()
+                return
+            }
+            coroutineScope.launch {
+                isDetectingLocation = true
+                val detected = LocationDetector.detectCurrentLocation(context)
+                isDetectingLocation = false
+                if (detected != null && detected.city.isNotBlank()) {
+                    val locLabel = detected.city.take(limits.location)
+                    selectedLocation = locLabel
+                    locationInputSearch = locLabel
+                    Toast.makeText(context, "Detected: ${detected.city}, ${detected.country}", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, "Could not detect location. Search your city below.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    fun handleAddCustomTopic() {
+        val raw = customTopicInput.trim().removePrefix("#").trim()
+        if (raw.isBlank()) return
+
+        val slug = raw
+            .lowercase(Locale.ROOT)
+            .replace(Regex("[^\\p{L}\\p{N}\\s_]"), "")
+            .trim()
+            .replace(Regex("[\\s_]+"), "_")
+            .take(32)
+        if (slug.isBlank()) {
+            topicLimitWarning = "Enter letters or numbers for a topic"
+            return
+        }
+
+        val allAvailable = optionsTopics + customTopics
+        val existing = allAvailable.firstOrNull {
+            it.slug.equals(slug, ignoreCase = true) || it.label.equals(raw, ignoreCase = true)
+        }
+        val targetSlug = existing?.slug ?: run {
+            val created = MomentTopicDto(slug = slug, label = raw.take(32))
+            customTopics.add(created)
+            created.slug
+        }
+
+        if (selectedTopicSlugs.contains(targetSlug)) {
+            topicLimitWarning = null
+        } else if (selectedTopicSlugs.size < limits.topics) {
+            selectedTopicSlugs.add(targetSlug)
+            topicLimitWarning = null
+        } else {
+            topicLimitWarning = "Choose up to ${limits.topics} topics"
+        }
+        customTopicInput = ""
     }
 
     val multiplePhotosLauncher = rememberLauncherForActivityResult(
@@ -157,7 +294,6 @@ fun CreatePostScreen(
         else availableLangs.filter { it.contains(q, ignoreCase = true) }.take(30)
     }
 
-    val availableCities = listOf("Kuala Lumpur", "Seoul", "New Delhi", "Taipei")
     val hasMedia = selectedMediaUris.isNotEmpty()
     val canPost = titleText.trim().isNotEmpty() || bodyText.trim().isNotEmpty() || hasMedia
 
@@ -978,17 +1114,75 @@ fun CreatePostScreen(
 
                             "topics" -> {
                                 Text(
-                                    text = topicLimitWarning ?: "Pick up to ${limits.topics} so the right people find it.",
+                                    text = topicLimitWarning
+                                        ?: "Pick up to ${limits.topics} topics or add your own custom #tag.",
                                     fontSize = 14.sp,
                                     color = if (topicLimitWarning != null) Color(0xFFDC2626) else Color(0xFF7A7260),
                                     fontWeight = if (topicLimitWarning != null) FontWeight.SemiBold else FontWeight.Normal,
                                     modifier = Modifier.padding(bottom = 12.dp)
                                 )
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(bottom = 14.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    OutlinedTextField(
+                                        value = customTopicInput,
+                                        onValueChange = { if (it.length <= 28) customTopicInput = it },
+                                        placeholder = { Text("Add custom #topic...", fontSize = 14.sp) },
+                                        prefix = {
+                                            Text(
+                                                text = "#",
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF7A7260)
+                                            )
+                                        },
+                                        singleLine = true,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("custom_topic_input"),
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = Color(0xFFFFC21A),
+                                            unfocusedBorderColor = Color(0xFFE5DFC9),
+                                            focusedContainerColor = Color.White.copy(alpha = 0.75f),
+                                            unfocusedContainerColor = Color.White.copy(alpha = 0.75f)
+                                        )
+                                    )
+
+                                    Button(
+                                        onClick = { handleAddCustomTopic() },
+                                        enabled = customTopicInput.trim().removePrefix("#").isNotBlank(),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color(0xFFFFC21A),
+                                            contentColor = Color(0xFF2A1E00)
+                                        ),
+                                        shape = RoundedCornerShape(16.dp),
+                                        contentPadding = PaddingValues(horizontal = 16.dp),
+                                        modifier = Modifier
+                                            .height(52.dp)
+                                            .testTag("add_custom_topic_button")
+                                    ) {
+                                        Text(
+                                            text = "+ Add",
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+
+                                val allTopics = remember(optionsTopics, customTopics.toList()) {
+                                    (optionsTopics + customTopics).distinctBy { it.slug.lowercase() }
+                                }
+
                                 FlowRow(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    optionsTopics.forEach { topic: MomentTopicDto ->
+                                    allTopics.forEach { topic: MomentTopicDto ->
                                         val isSelected = selectedTopicSlugs.contains(topic.slug)
                                         Surface(
                                             onClick = {
@@ -1004,70 +1198,304 @@ fun CreatePostScreen(
                                             },
                                             color = if (isSelected) Color(0xFFFFC21A).copy(alpha = 0.35f) else Color(0xFFF6EBCB),
                                             shape = RoundedCornerShape(20.dp),
-                                            modifier = Modifier.border(
-                                                width = if (isSelected) 2.dp else 0.dp,
-                                                color = if (isSelected) Color(0xFFFFC21A) else Color.Transparent,
-                                                shape = RoundedCornerShape(20.dp)
-                                            )
+                                            modifier = Modifier
+                                                .defaultMinSize(minHeight = 44.dp)
+                                                .border(
+                                                    width = if (isSelected) 2.dp else 0.dp,
+                                                    color = if (isSelected) Color(0xFFFFC21A) else Color.Transparent,
+                                                    shape = RoundedCornerShape(20.dp)
+                                                )
                                         ) {
-                                            Text(
-                                                text = MomentsRepository.formatTopicLabelToHashtag(topic.label),
-                                                fontSize = 15.sp,
-                                                fontWeight = FontWeight.SemiBold,
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
                                                 modifier = Modifier.padding(horizontal = 15.dp, vertical = 10.dp)
-                                            )
+                                            ) {
+                                                Text(
+                                                    text = MomentsRepository.formatTopicLabelToHashtag(topic.label),
+                                                    fontSize = 15.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = Color(0xFF1B1608)
+                                                )
+                                                if (isSelected) {
+                                                    Icon(
+                                                        painter = painterResource(id = R.drawable.ic_check),
+                                                        contentDescription = "Selected topic",
+                                                        tint = Color(0xFF2A1E00),
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
 
                             "loc" -> {
+                                // Search field backed by free Open-Meteo + CountriesNow city APIs
                                 OutlinedTextField(
                                     value = locationInputSearch,
                                     onValueChange = {
                                         if (it.length <= limits.location) {
                                             locationInputSearch = it
-                                            selectedLocation = it
                                         }
                                     },
-                                    placeholder = { Text("Search a city", fontSize = 16.sp) },
+                                    placeholder = { Text("Search any city worldwide...", fontSize = 15.sp) },
+                                    leadingIcon = {
+                                        Icon(
+                                            painter = painterResource(id = R.drawable.ic_search),
+                                            contentDescription = "Search city",
+                                            tint = Color(0xFF7A7260),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    },
+                                    trailingIcon = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (isSearchingLocation) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier
+                                                        .padding(end = 6.dp)
+                                                        .size(16.dp),
+                                                    color = Color(0xFFFFC21A),
+                                                    strokeWidth = 2.dp
+                                                )
+                                            }
+                                            if (locationInputSearch.isNotEmpty()) {
+                                                IconButton(
+                                                    onClick = { locationInputSearch = "" },
+                                                    modifier = Modifier.size(40.dp)
+                                                ) {
+                                                    Icon(
+                                                        painter = painterResource(id = R.drawable.ic_close),
+                                                        contentDescription = "Clear city search",
+                                                        tint = Color(0xFF7A7260),
+                                                        modifier = Modifier.size(15.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    },
                                     singleLine = true,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(bottom = 12.dp),
+                                        .padding(bottom = 12.dp)
+                                        .testTag("post_location_search_input"),
                                     shape = RoundedCornerShape(16.dp),
                                     colors = OutlinedTextFieldDefaults.colors(
                                         focusedBorderColor = Color(0xFFFFC21A),
                                         unfocusedBorderColor = Color(0xFFE5DFC9),
-                                        focusedContainerColor = Color(0xFFFFFBF0),
-                                        unfocusedContainerColor = Color(0xFFFFFBF0)
+                                        focusedContainerColor = Color.White.copy(alpha = 0.75f),
+                                        unfocusedContainerColor = Color.White.copy(alpha = 0.75f)
                                     )
                                 )
+
+                                // GPS Auto-detect card
+                                Surface(
+                                    onClick = { triggerPostLocationDetection() },
+                                    color = Color(0xFFFFC21A).copy(alpha = 0.2f),
+                                    shape = RoundedCornerShape(16.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(bottom = 12.dp)
+                                        .border(1.dp, Color(0xFFFFC21A), RoundedCornerShape(16.dp))
+                                        .testTag("post_location_gps_card")
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(34.dp)
+                                                    .background(Color(0xFFFFC21A).copy(alpha = 0.35f), CircleShape),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (isDetectingLocation) {
+                                                    CircularProgressIndicator(
+                                                        modifier = Modifier.size(16.dp),
+                                                        color = Color(0xFF2A1E00),
+                                                        strokeWidth = 2.dp
+                                                    )
+                                                } else {
+                                                    Icon(
+                                                        painter = painterResource(id = R.drawable.ic_target),
+                                                        contentDescription = "Detect GPS",
+                                                        tint = Color(0xFF2A1E00),
+                                                        modifier = Modifier.size(17.dp)
+                                                    )
+                                                }
+                                            }
+                                            Column {
+                                                Text(
+                                                    text = if (isDetectingLocation) "Detecting your city..." else "Use current location",
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color(0xFF1B1608)
+                                                )
+                                                Text(
+                                                    text = "Auto-detect via device GPS",
+                                                    fontSize = 12.sp,
+                                                    color = Color(0xFF7A7260)
+                                                )
+                                            }
+                                        }
+                                        Icon(
+                                            painter = painterResource(id = R.drawable.ic_chevron_right),
+                                            contentDescription = null,
+                                            tint = Color(0xFF7A7260),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+
+                                // Hide location / Selected chip quick actions
                                 FlowRow(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.padding(bottom = 12.dp)
                                 ) {
-                                    (availableCities + listOf("Hide location")).forEach { city ->
-                                        val isSelected = if (city == "Hide location") selectedLocation.isBlank() else selectedLocation == city
+                                    val isHidden = selectedLocation.isBlank()
+                                    Surface(
+                                        onClick = {
+                                            selectedLocation = ""
+                                            locationInputSearch = ""
+                                        },
+                                        color = if (isHidden) Color(0xFFFFC21A).copy(alpha = 0.35f) else Color(0xFFF6EBCB),
+                                        shape = RoundedCornerShape(20.dp),
+                                        modifier = Modifier.border(
+                                            width = if (isHidden) 2.dp else 0.dp,
+                                            color = if (isHidden) Color(0xFFFFC21A) else Color.Transparent,
+                                            shape = RoundedCornerShape(20.dp)
+                                        )
+                                    ) {
+                                        Text(
+                                            text = "Hide location",
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Color(0xFF1B1608),
+                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)
+                                        )
+                                    }
+
+                                    val typedCustom = locationInputSearch.trim()
+                                    if (typedCustom.isNotBlank() &&
+                                        searchedLocations.none { it.name.equals(typedCustom, ignoreCase = true) }
+                                    ) {
+                                        val isCustomSelected = selectedLocation.equals(typedCustom, ignoreCase = true)
                                         Surface(
                                             onClick = {
-                                                selectedLocation = if (city == "Hide location") "" else city
-                                                locationInputSearch = selectedLocation
+                                                selectedLocation = typedCustom.take(limits.location)
                                             },
-                                            color = if (isSelected) Color(0xFFFFC21A).copy(alpha = 0.35f) else Color(0xFFF6EBCB),
+                                            color = if (isCustomSelected) Color(0xFFFFC21A).copy(alpha = 0.35f) else Color(0xFFF6EBCB),
                                             shape = RoundedCornerShape(20.dp),
                                             modifier = Modifier.border(
-                                                width = if (isSelected) 2.dp else 0.dp,
-                                                color = if (isSelected) Color(0xFFFFC21A) else Color.Transparent,
+                                                width = if (isCustomSelected) 2.dp else 1.dp,
+                                                color = if (isCustomSelected) Color(0xFFFFC21A) else Color(0xFFE5DFC9),
                                                 shape = RoundedCornerShape(20.dp)
                                             )
                                         ) {
                                             Text(
-                                                text = city,
-                                                fontSize = 15.sp,
+                                                text = "Use \"$typedCustom\"",
+                                                fontSize = 13.5.sp,
                                                 fontWeight = FontWeight.SemiBold,
-                                                modifier = Modifier.padding(horizontal = 15.dp, vertical = 10.dp)
+                                                color = Color(0xFF1B1608),
+                                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)
                                             )
+                                        }
+                                    }
+                                }
+
+                                val cityItems = if (locationInputSearch.isNotBlank()) {
+                                    searchedLocations
+                                } else {
+                                    suggestedLocations
+                                }
+
+                                Text(
+                                    text = if (locationInputSearch.isNotBlank()) "MATCHING CITIES" else "SUGGESTED CITIES",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF7A7260),
+                                    letterSpacing = 0.8.sp,
+                                    modifier = Modifier.padding(bottom = 8.dp)
+                                )
+
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    cityItems.take(15).forEach { city ->
+                                        val isSelected = selectedLocation.equals(city.name, ignoreCase = true)
+                                        Surface(
+                                            onClick = {
+                                                selectedLocation = city.name.take(limits.location)
+                                            },
+                                            color = if (isSelected) Color(0xFFFFC21A).copy(alpha = 0.25f) else Color(0xFFF6EBCB).copy(alpha = 0.55f),
+                                            shape = RoundedCornerShape(14.dp),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .border(
+                                                    width = if (isSelected) 1.5.dp else 0.dp,
+                                                    color = if (isSelected) Color(0xFFFFC21A) else Color.Transparent,
+                                                    shape = RoundedCornerShape(14.dp)
+                                                )
+                                        ) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    modifier = Modifier.weight(1f)
+                                                ) {
+                                                    Icon(
+                                                        painter = painterResource(id = R.drawable.ic_pin),
+                                                        contentDescription = null,
+                                                        tint = if (isSelected) Color(0xFF2A1E00) else Color(0xFF7A7260),
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(10.dp))
+                                                    Column {
+                                                        Text(
+                                                            text = city.name,
+                                                            fontSize = 14.5.sp,
+                                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                                            color = Color(0xFF1B1608),
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                        val subtitle = listOf(city.adminRegion, city.countryName)
+                                                            .filter { it.isNotBlank() }
+                                                            .distinct()
+                                                            .joinToString(", ")
+                                                        if (subtitle.isNotBlank()) {
+                                                            Text(
+                                                                text = subtitle,
+                                                                fontSize = 12.sp,
+                                                                color = Color(0xFF7A7260),
+                                                                maxLines = 1,
+                                                                overflow = TextOverflow.Ellipsis
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                                if (isSelected) {
+                                                    Icon(
+                                                        painter = painterResource(id = R.drawable.ic_check),
+                                                        contentDescription = "Selected",
+                                                        tint = Color(0xFF2A1E00),
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1077,6 +1505,21 @@ fun CreatePostScreen(
                         Spacer(modifier = Modifier.height(20.dp))
                     }
                 }
+            }
+
+            if (showLocationConsentDialog) {
+                LocationConsentDialog(
+                    onDismiss = { showLocationConsentDialog = false },
+                    onConfirmConsent = {
+                        showLocationConsentDialog = false
+                        locationPermissionLauncher.launch(
+                            arrayOf(
+                                android.Manifest.permission.ACCESS_FINE_LOCATION,
+                                android.Manifest.permission.ACCESS_COARSE_LOCATION
+                            )
+                        )
+                    }
+                )
             }
         }
     }
