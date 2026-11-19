@@ -651,10 +651,12 @@ fun ManageMembersScreen(
                                             DropdownMenu(
                                                 expanded = showMenu,
                                                 onDismissRequest = { showMenu = false },
+                                                shape = RoundedCornerShape(20.dp),
+                                                containerColor = Color.White,
+                                                shadowElevation = 10.dp,
                                                 modifier = Modifier
-                                                    .width(220.dp)
-                                                    .clip(RoundedCornerShape(18.dp))
-                                                    .background(Color.White)
+                                                    .width(228.dp)
+                                                    .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(20.dp))
                                             ) {
                                                 if (isAdmin && !isSelf && statusLower == "joined") {
                                                     DropdownMenuItem(
@@ -666,7 +668,17 @@ fun ManageMembersScreen(
                                                                 color = Color(0xFF0F172A)
                                                             )
                                                         },
-                                                        leadingIcon = { GroupCrownIcon(size = 18.dp, color = Color(0xFFD97706)) },
+                                                        leadingIcon = {
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .size(32.dp)
+                                                                    .clip(RoundedCornerShape(10.dp))
+                                                                    .background(Color(0xFFD97706).copy(alpha = 0.14f)),
+                                                                contentAlignment = Alignment.Center
+                                                            ) {
+                                                                GroupCrownIcon(size = 17.dp, color = Color(0xFFD97706))
+                                                            }
+                                                        },
                                                         onClick = {
                                                             showMenu = false
                                                             val targetRole = if (isMemberAdmin) "member" else "admin"
@@ -690,6 +702,11 @@ fun ManageMembersScreen(
                                                             }
                                                         }
                                                     )
+                                                    HorizontalDivider(
+                                                        modifier = Modifier.padding(horizontal = 14.dp),
+                                                        thickness = 0.6.dp,
+                                                        color = Color(0xFFE2E8F0)
+                                                    )
                                                 }
 
                                                 if (isAdmin && !isSelf) {
@@ -702,7 +719,17 @@ fun ManageMembersScreen(
                                                                 color = Color(0xFFEF4444)
                                                             )
                                                         },
-                                                        leadingIcon = { GroupLeaveDoorIcon(size = 18.dp, color = Color(0xFFEF4444)) },
+                                                        leadingIcon = {
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .size(32.dp)
+                                                                    .clip(RoundedCornerShape(10.dp))
+                                                                    .background(Color(0xFFEF4444).copy(alpha = 0.12f)),
+                                                                contentAlignment = Alignment.Center
+                                                            ) {
+                                                                GroupLeaveDoorIcon(size = 17.dp, color = Color(0xFFEF4444))
+                                                            }
+                                                        },
                                                         onClick = {
                                                             showMenu = false
                                                             scope.launch {
@@ -724,6 +751,11 @@ fun ManageMembersScreen(
                                                             }
                                                         }
                                                     )
+                                                    HorizontalDivider(
+                                                        modifier = Modifier.padding(horizontal = 14.dp),
+                                                        thickness = 0.6.dp,
+                                                        color = Color(0xFFE2E8F0)
+                                                    )
                                                 }
 
                                                 DropdownMenuItem(
@@ -735,7 +767,17 @@ fun ManageMembersScreen(
                                                             color = Color(0xFF0F172A)
                                                         )
                                                     },
-                                                    leadingIcon = { GroupEyeIcon(size = 18.dp, color = Color(0xFF0F172A)) },
+                                                    leadingIcon = {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(32.dp)
+                                                                .clip(RoundedCornerShape(10.dp))
+                                                                .background(Color(0xFF0F172A).copy(alpha = 0.08f)),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            GroupEyeIcon(size = 17.dp, color = Color(0xFF0F172A))
+                                                        }
+                                                    },
                                                     onClick = {
                                                         showMenu = false
                                                         activeProfileUserId = member.user_id

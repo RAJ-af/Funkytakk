@@ -206,13 +206,6 @@ fun SupportChatScreen(
                             )
                         }
                     }
-
-                    IconButton(onClick = { /* Menu options */ }) {
-                        FunkyVerticalMoreIcon(
-                            color = funkyColors.mute,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
                 }
             }
         },
@@ -230,13 +223,6 @@ fun SupportChatScreen(
                             .padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        IconButton(onClick = { /* Optional attachment */ }) {
-                            FunkyPlusIcon(
-                                color = funkyColors.mute,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-
                         OutlinedTextField(
                             value = inputText,
                             onValueChange = { inputText = it },

@@ -13,6 +13,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -596,19 +597,63 @@ fun TelephotoMediaViewerDialog(
                             DropdownMenu(
                                 expanded = showMoreMenu,
                                 onDismissRequest = { showMoreMenu = false },
-                                containerColor = Color(0xFF1E2128)
+                                shape = RoundedCornerShape(18.dp),
+                                containerColor = Color(0xFF1E2128),
+                                shadowElevation = 12.dp,
+                                modifier = Modifier
+                                    .widthIn(min = 190.dp)
+                                    .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(18.dp))
                             ) {
                                 DropdownMenuItem(
-                                    text = { Text("Forward", color = Color.White) },
-                                    leadingIcon = { ChatIconForward(tint = Color.White, modifier = Modifier.size(18.dp)) },
+                                    text = {
+                                        Text(
+                                            "Forward",
+                                            color = Color.White,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(32.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(Color.White.copy(alpha = 0.12f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            ChatIconForward(tint = Color.White, modifier = Modifier.size(17.dp))
+                                        }
+                                    },
                                     onClick = {
                                         showMoreMenu = false
                                         onForward(currentItem)
                                     }
                                 )
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = 12.dp),
+                                    thickness = 0.6.dp,
+                                    color = Color.White.copy(alpha = 0.12f)
+                                )
                                 DropdownMenuItem(
-                                    text = { Text("Delete", color = Color(0xFFFF7066)) },
-                                    leadingIcon = { ChatIconTrash(tint = Color(0xFFFF7066), modifier = Modifier.size(18.dp)) },
+                                    text = {
+                                        Text(
+                                            "Delete",
+                                            color = Color(0xFFFF7066),
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(32.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(Color(0xFFFF7066).copy(alpha = 0.16f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            ChatIconTrash(tint = Color(0xFFFF7066), modifier = Modifier.size(17.dp))
+                                        }
+                                    },
                                     onClick = {
                                         showMoreMenu = false
                                         onDelete(currentItem)

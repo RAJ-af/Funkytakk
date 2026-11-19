@@ -24,6 +24,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
@@ -39,6 +40,7 @@ import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -46,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.example.R
 import com.example.GiftTransactionItem
 import com.example.gifting.AnimatedGiftMedia
 import com.example.gifting.GiftManager
@@ -62,8 +65,10 @@ import com.example.repository.MomentsRepository
 import com.example.repository.USER_BLOCKED_ERROR_MESSAGE
 import com.example.repository.UserBlockedException
 import com.example.ui.components.BlockUserConfirmDialog
+import com.example.ui.components.BlockedProfileRibbonOverlay
 import com.example.ui.components.CircleFlag
 import com.example.ui.components.ProfileBadgesRow
+import com.example.ui.components.SoftBlockIcon
 import com.example.ui.components.DynamicHobbyChip
 import com.example.ui.components.LanguageItem
 import com.example.ui.components.LanguageResolver
@@ -254,6 +259,7 @@ fun UserProfileFeedScreen(
     val isBlockedLocally = !isSelfProfile && userId.isNotBlank() && blockedUserIds.contains(userId)
     var isBlockedWithPair by remember(userId) { mutableStateOf(false) }
     val isBlockedEffective = !isSelfProfile && (isBlockedLocally || isBlockedWithPair)
+    val isBlockedByTarget = !isSelfProfile && isBlockedWithPair && !isBlockedLocally
     val giftsReceived = remember { mutableStateListOf<GiftTransactionItem>() }
     val userBadges = remember { mutableStateListOf<com.example.ProfileBadge>() }
     var isGiftsLoading by remember { mutableStateOf(false) }
@@ -619,7 +625,9 @@ fun UserProfileFeedScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
-                .background(funkyColors.bg),
+                .background(funkyColors.bg)
+                .then(if (isBlockedByTarget) Modifier.blur(20.dp) else Modifier),
+            userScrollEnabled = !isBlockedByTarget,
             contentPadding = PaddingValues(bottom = 36.dp)
         ) {
             // -----------------------------------------------------------------
@@ -702,27 +710,70 @@ fun UserProfileFeedScreen(
                                 DropdownMenu(
                                     expanded = showMoreOptionsMenu,
                                     onDismissRequest = { showMoreOptionsMenu = false },
+                                    shape = RoundedCornerShape(20.dp),
+                                    containerColor = funkyColors.surface,
+                                    shadowElevation = 10.dp,
                                     modifier = Modifier
-                                        .background(funkyColors.surface, RoundedCornerShape(14.dp))
-                                        .border(1.dp, funkyColors.line, RoundedCornerShape(14.dp))
+                                        .widthIn(min = 210.dp)
+                                        .border(1.dp, funkyColors.line, RoundedCornerShape(20.dp))
                                 ) {
                                     if (!isSelfProfile) {
                                         if (!isBlockedEffective) {
                                             DropdownMenuItem(
-                                                text = { Text("Send Gift", fontWeight = FontWeight.Bold, color = funkyColors.mango) },
+                                                text = {
+                                                    Text(
+                                                        "Send Gift",
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 14.sp,
+                                                        color = funkyColors.mango
+                                                    )
+                                                },
+                                                leadingIcon = {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(32.dp)
+                                                            .clip(RoundedCornerShape(10.dp))
+                                                            .background(funkyColors.mango.copy(alpha = 0.14f)),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Icon(
+                                                            painter = painterResource(id = R.drawable.ic_gift),
+                                                            contentDescription = null,
+                                                            tint = funkyColors.mango,
+                                                            modifier = Modifier.size(17.dp)
+                                                        )
+                                                    }
+                                                },
                                                 onClick = {
                                                     showMoreOptionsMenu = false
                                                     showSendGiftSheet = true
                                                 }
+                                            )
+                                            HorizontalDivider(
+                                                modifier = Modifier.padding(horizontal = 14.dp),
+                                                thickness = 0.6.dp,
+                                                color = funkyColors.line
                                             )
                                         }
                                         DropdownMenuItem(
                                             text = {
                                                 Text(
                                                     text = if (isBlockedLocally) "Unblock" else "Block user",
-                                                    fontWeight = FontWeight.Medium,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontSize = 14.sp,
                                                     color = funkyColors.danger
                                                 )
+                                            },
+                                            leadingIcon = {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(32.dp)
+                                                        .clip(RoundedCornerShape(10.dp))
+                                                        .background(funkyColors.danger.copy(alpha = 0.12f)),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    SoftBlockIcon(size = 17.dp, color = funkyColors.danger)
+                                                }
                                             },
                                             onClick = {
                                                 showMoreOptionsMenu = false
@@ -741,8 +792,36 @@ fun UserProfileFeedScreen(
                                                 }
                                             }
                                         )
+                                        HorizontalDivider(
+                                            modifier = Modifier.padding(horizontal = 14.dp),
+                                            thickness = 0.6.dp,
+                                            color = funkyColors.line
+                                        )
                                         DropdownMenuItem(
-                                            text = { Text("Report Profile", fontWeight = FontWeight.Medium, color = funkyColors.danger) },
+                                            text = {
+                                                Text(
+                                                    "Report Profile",
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontSize = 14.sp,
+                                                    color = funkyColors.danger
+                                                )
+                                            },
+                                            leadingIcon = {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(32.dp)
+                                                        .clip(RoundedCornerShape(10.dp))
+                                                        .background(funkyColors.danger.copy(alpha = 0.12f)),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        painter = painterResource(id = R.drawable.ic_flag),
+                                                        contentDescription = null,
+                                                        tint = funkyColors.danger,
+                                                        modifier = Modifier.size(17.dp)
+                                                    )
+                                                }
+                                            },
                                             onClick = {
                                                 showMoreOptionsMenu = false
                                                 showReportDialog = true
@@ -750,7 +829,30 @@ fun UserProfileFeedScreen(
                                         )
                                     } else {
                                         DropdownMenuItem(
-                                            text = { Text("Share Profile", fontWeight = FontWeight.Medium, color = funkyColors.ink) },
+                                            text = {
+                                                Text(
+                                                    "Share Profile",
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontSize = 14.sp,
+                                                    color = funkyColors.ink
+                                                )
+                                            },
+                                            leadingIcon = {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(32.dp)
+                                                        .clip(RoundedCornerShape(10.dp))
+                                                        .background(funkyColors.soft),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        painter = painterResource(id = R.drawable.ic_share),
+                                                        contentDescription = null,
+                                                        tint = funkyColors.ink,
+                                                        modifier = Modifier.size(17.dp)
+                                                    )
+                                                }
+                                            },
                                             onClick = {
                                                 showMoreOptionsMenu = false
                                                 Toast.makeText(context, "Profile link copied", Toast.LENGTH_SHORT).show()
@@ -1939,6 +2041,13 @@ fun UserProfileFeedScreen(
                         }
                     }
                 }
+            )
+        }
+
+        if (isBlockedByTarget) {
+            BlockedProfileRibbonOverlay(
+                onBack = onBack,
+                modifier = Modifier.fillMaxSize()
             )
         }
     }

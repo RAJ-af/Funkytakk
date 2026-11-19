@@ -84,6 +84,17 @@ sealed interface DmTimelineItem {
     ) : DmTimelineItem {
         override val id: String = message.id
     }
+
+    data class MediaAlbumItem(
+        val messages: List<LocalDmMessage>,
+        val photos: List<ChatPhotoNode>,
+        val position: GroupPosition,
+        val reactions: List<ReactionUi>,
+        val isFirstInGroup: Boolean,
+        val isLastInGroup: Boolean
+    ) : DmTimelineItem {
+        override val id: String = "album_${messages.first().id}"
+    }
 }
 
 data class WordLookupState(
@@ -133,6 +144,7 @@ fun DirectChatScreen(
     var activeWordLookup by remember { mutableStateOf<WordLookupState?>(null) }
     var showAiAssistSheet by remember { mutableStateOf(false) }
     var activeMediaViewerIndex by remember { mutableStateOf<Int?>(null) }
+    var pendingPhotoUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var showReportUserDialog by remember { mutableStateOf(false) }
     var showTopMenu by remember { mutableStateOf(false) }
     var showBlockConfirmDialog by remember { mutableStateOf(false) }
@@ -205,36 +217,13 @@ fun DirectChatScreen(
         }
     }
 
-    // Photo picker launcher (Direct - no docs/file popup)
+    // Photo picker launcher -> opens Telegram-style review & caption sheet before sending
     val photoPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia(10)
     ) { uris ->
         if (uris.isNotEmpty()) {
-            coroutineScope.launch {
-                uris.forEach { uri ->
-                    try {
-                        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                        if (bytes != null && bytes.isNotEmpty()) {
-                            val sendRes = EncryptedChatRepository.sendMediaMessage(
-                                context = context,
-                                recipientUserId = partnerUserId,
-                                recipientName = partnerName,
-                                recipientAvatar = partnerAvatarUrl,
-                                rawBytes = bytes,
-                                messageType = "image",
-                                mimeType = "image/jpeg"
-                            )
-                            if (sendRes.isFailure) {
-                                val err = sendRes.exceptionOrNull()
-                                if (err is UserBlockedException) isChatBlocked = true
-                                Toast.makeText(context, err?.message ?: "Could not send photo.", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Toast.makeText(context, "Error sending photo: ${e.message}", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
+            val merged = (pendingPhotoUris + uris).distinct().take(10)
+            pendingPhotoUris = merged
         }
     }
 
@@ -353,7 +342,8 @@ fun DirectChatScreen(
             items.add(DmTimelineItem.SecurityHeader("Messages and calls are end-to-end encrypted. No one outside of this chat can read or listen to them."))
 
             var prevDateLabel = ""
-            for (i in sorted.indices) {
+            var i = 0
+            while (i < sorted.size) {
                 val msg = sorted[i]
                 val dateLabel = formatChatDateChip(msg.timestamp)
                 if (dateLabel != prevDateLabel) {
@@ -361,18 +351,78 @@ fun DirectChatScreen(
                     prevDateLabel = dateLabel
                 }
 
-                val isOlderSameSender = i > 0 &&
+                // Group consecutive same-sender images (within 60s, max 10) into a Telegram album collage
+                if (isDmImageText(msg.text)) {
+                    val albumMsgs = mutableListOf(msg)
+                    var j = i + 1
+                    while (j < sorted.size && albumMsgs.size < 10) {
+                        val next = sorted[j]
+                        if (isDmImageText(next.text) &&
+                            next.isOutgoing == msg.isOutgoing &&
+                            formatChatDateChip(next.timestamp) == dateLabel &&
+                            (next.timestamp - albumMsgs.last().timestamp) <= 60_000L
+                        ) {
+                            albumMsgs.add(next)
+                            j++
+                        } else {
+                            break
+                        }
+                    }
+
+                    val lastInAlbum = albumMsgs.last()
+                    val isOlderSameSender = i > 0 &&
                         sorted[i - 1].isOutgoing == msg.isOutgoing &&
-                        (msg.timestamp - sorted[i - 1].timestamp) <= 2 * 60 * 1000L
+                        (msg.timestamp - sorted[i - 1].timestamp) <= 2 * 60 * 1000L &&
+                        formatChatDateChip(sorted[i - 1].timestamp) == dateLabel
+
+                    val isNewerSameSender = j < sorted.size &&
+                        sorted[j].isOutgoing == lastInAlbum.isOutgoing &&
+                        (sorted[j].timestamp - lastInAlbum.timestamp) <= 2 * 60 * 1000L &&
+                        formatChatDateChip(sorted[j].timestamp) == dateLabel
+
+                    val position = computeGroupPosition(isOlderSameSender, isNewerSameSender)
+                    val firstReactions = rawReactions.filter { it.targetMessageId == msg.id }
+                        .groupBy { it.emoji }
+                        .map { (emoji, list) ->
+                            ReactionUi(
+                                emoji = emoji,
+                                count = list.size,
+                                mine = list.any { it.senderId == currentUserId }
+                            )
+                        }
+                    val photoNodes = albumMsgs.map { m ->
+                        parseDmPhotoNode(
+                            id = m.id,
+                            rawText = m.text,
+                            timestamp = m.timestamp,
+                            isOutgoing = m.isOutgoing
+                        )
+                    }
+                    items.add(
+                        DmTimelineItem.MediaAlbumItem(
+                            messages = albumMsgs,
+                            photos = photoNodes,
+                            position = position,
+                            reactions = firstReactions,
+                            isFirstInGroup = !isOlderSameSender,
+                            isLastInGroup = !isNewerSameSender
+                        )
+                    )
+                    i = j
+                    continue
+                }
+
+                val isOlderSameSender = i > 0 &&
+                    sorted[i - 1].isOutgoing == msg.isOutgoing &&
+                    (msg.timestamp - sorted[i - 1].timestamp) <= 2 * 60 * 1000L &&
+                    formatChatDateChip(sorted[i - 1].timestamp) == dateLabel
 
                 val isNewerSameSender = i < sorted.size - 1 &&
-                        sorted[i + 1].isOutgoing == msg.isOutgoing &&
-                        (sorted[i + 1].timestamp - msg.timestamp) <= 2 * 60 * 1000L
+                    sorted[i + 1].isOutgoing == msg.isOutgoing &&
+                    (sorted[i + 1].timestamp - msg.timestamp) <= 2 * 60 * 1000L &&
+                    formatChatDateChip(sorted[i + 1].timestamp) == dateLabel
 
                 val position = computeGroupPosition(isOlderSameSender, isNewerSameSender)
-                val isFirst = !isOlderSameSender
-                val isLast = !isNewerSameSender
-
                 val msgReactions = rawReactions.filter { it.targetMessageId == msg.id }
                 val reactionUis = msgReactions.groupBy { it.emoji }.map { (emoji, list) ->
                     ReactionUi(
@@ -387,10 +437,11 @@ fun DirectChatScreen(
                         message = msg,
                         position = position,
                         reactions = reactionUis,
-                        isFirstInGroup = isFirst,
-                        isLastInGroup = isLast
+                        isFirstInGroup = !isOlderSameSender,
+                        isLastInGroup = !isNewerSameSender
                     )
                 )
+                i++
             }
             items
         }
@@ -401,16 +452,17 @@ fun DirectChatScreen(
             }
         }
 
-        val allMediaItems = remember(rawMessages) {
-            rawMessages.filter { it.text.startsWith("[img]") || it.text.startsWith("[imgs]") }
+        val allMediaItems = remember(rawMessages, partnerName) {
+            rawMessages.sortedBy { it.timestamp }
+                .filter { isDmImageText(it.text) }
                 .map { msg ->
-                    val url = msg.text.removePrefix("[img]").removePrefix("[imgs]").substringBefore("|")
+                    val node = parseDmPhotoNode(msg.id, msg.text, msg.timestamp, msg.isOutgoing)
                     ChatViewerMediaItem(
                         id = msg.id,
-                        url = url,
+                        url = node.source,
                         senderName = if (msg.isOutgoing) "You" else partnerName,
-                        dateText = formatChatTime(msg.timestamp),
-                        caption = null,
+                        dateText = node.timeText,
+                        caption = node.caption,
                         isVideo = false
                     )
                 }
@@ -535,19 +587,32 @@ fun DirectChatScreen(
                                 DropdownMenu(
                                     expanded = showTopMenu,
                                     onDismissRequest = { showTopMenu = false },
-                                    modifier = Modifier.background(colors.surface)
+                                    shape = RoundedCornerShape(20.dp),
+                                    containerColor = colors.surface,
+                                    shadowElevation = 10.dp,
+                                    modifier = Modifier
+                                        .widthIn(min = 200.dp)
+                                        .border(1.dp, colors.hairline, RoundedCornerShape(20.dp))
                                 ) {
                                     if (partnerUserId.isNotBlank()) {
                                         DropdownMenuItem(
                                             text = {
-                                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                                    com.example.ui.components.SoftBlockIcon(size = 16.dp, color = Color(0xFFEF4444))
-                                                    Spacer(modifier = Modifier.width(8.dp))
-                                                    Text(
-                                                        text = if (isPartnerBlockedLocally) "Unblock user" else "Block user",
-                                                        color = Color(0xFFEF4444),
-                                                        fontWeight = FontWeight.Medium
-                                                    )
+                                                Text(
+                                                    text = if (isPartnerBlockedLocally) "Unblock user" else "Block user",
+                                                    color = Color(0xFFEF4444),
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                            },
+                                            leadingIcon = {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(32.dp)
+                                                        .clip(RoundedCornerShape(10.dp))
+                                                        .background(Color(0xFFEF4444).copy(alpha = 0.12f)),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    com.example.ui.components.SoftBlockIcon(size = 17.dp, color = Color(0xFFEF4444))
                                                 }
                                             },
                                             onClick = {
@@ -567,13 +632,30 @@ fun DirectChatScreen(
                                                 }
                                             }
                                         )
+                                        HorizontalDivider(
+                                            modifier = Modifier.padding(horizontal = 14.dp),
+                                            thickness = 0.6.dp,
+                                            color = colors.hairline
+                                        )
                                     }
                                     DropdownMenuItem(
                                         text = {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                com.example.ui.components.SoftShieldIcon(size = 16.dp, color = Color(0xFFEF4444))
-                                                Spacer(modifier = Modifier.width(8.dp))
-                                                Text("Report", color = Color(0xFFEF4444), fontWeight = FontWeight.Medium)
+                                            Text(
+                                                "Report",
+                                                color = Color(0xFFEF4444),
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        },
+                                        leadingIcon = {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(32.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(Color(0xFFEF4444).copy(alpha = 0.12f)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                com.example.ui.components.SoftShieldIcon(size = 17.dp, color = Color(0xFFEF4444))
                                             }
                                         },
                                         onClick = {
@@ -804,6 +886,145 @@ fun DirectChatScreen(
                             is DmTimelineItem.SecurityHeader -> {
                                 SecurityNotice(text = item.text)
                             }
+                            is DmTimelineItem.MediaAlbumItem -> {
+                                val firstMsg = item.messages.first()
+                                val isOutgoing = firstMsg.isOutgoing
+                                val flashAlpha = flashAnimatables[firstMsg.id]?.value ?: 0f
+                                val isSelected = item.messages.any { selectedMessageIds.contains(it.id) }
+                                val status = if (isOutgoing) MessageStatus.Read else null
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(
+                                            start = if (isOutgoing) 48.dp else 12.dp,
+                                            end = if (isOutgoing) 12.dp else 48.dp,
+                                            top = if (item.position == GroupPosition.First || item.position == GroupPosition.Single) 6.dp else 2.dp,
+                                            bottom = 2.dp
+                                        ),
+                                    horizontalArrangement = if (isOutgoing) Arrangement.End else Arrangement.Start,
+                                    verticalAlignment = Alignment.Bottom
+                                ) {
+                                    if (!isOutgoing) {
+                                        if (item.isLastInGroup) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(28.dp)
+                                                    .clip(CircleShape)
+                                                    .background(colors.accentIn.copy(alpha = 0.2f)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (!partnerAvatarUrl.isNullOrBlank()) {
+                                                    AsyncImage(
+                                                        model = partnerAvatarUrl,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.fillMaxSize(),
+                                                        contentScale = ContentScale.Crop
+                                                    )
+                                                } else {
+                                                    Text(
+                                                        text = partnerName.take(1).uppercase(),
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = colors.accentIn
+                                                    )
+                                                }
+                                            }
+                                        } else {
+                                            Spacer(modifier = Modifier.size(28.dp))
+                                        }
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                    }
+
+                                    Column(
+                                        horizontalAlignment = if (isOutgoing) Alignment.End else Alignment.Start
+                                    ) {
+                                        if (!isOutgoing && (item.position == GroupPosition.Single || item.position == GroupPosition.First)) {
+                                            SenderName(
+                                                name = partnerName,
+                                                userId = partnerUserId,
+                                                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
+                                            )
+                                        }
+
+                                        MessageBubble(
+                                            outgoing = isOutgoing,
+                                            position = item.position,
+                                            highlighted = flashAlpha > 0f,
+                                            selected = isSelected,
+                                            contentPadding = PaddingValues(2.dp)
+                                        ) {
+                                            TelegramMediaAlbumContent(
+                                                photos = item.photos,
+                                                outgoing = isOutgoing,
+                                                position = item.position,
+                                                status = status,
+                                                replyQuote = if (!firstMsg.replyToText.isNullOrBlank()) {
+                                                    {
+                                                        ReplyQuote(
+                                                            sender = firstMsg.replyToSender ?: "Reply",
+                                                            preview = firstMsg.replyToText,
+                                                            outgoing = isOutgoing,
+                                                            onClick = {
+                                                                val replyKey = firstMsg.replyToText.orEmpty()
+                                                                val targetIdx = timelineItems.indexOfFirst { tl ->
+                                                                    when (tl) {
+                                                                        is DmTimelineItem.MessageItem -> tl.message.text == replyKey
+                                                                        is DmTimelineItem.MediaAlbumItem -> tl.messages.any { m ->
+                                                                            m.text == replyKey ||
+                                                                                (replyKey == "📷 Photo" && isDmImageText(m.text)) ||
+                                                                                (replyKey.startsWith("📷 ") && parseDmPhotoNode(m.id, m.text, m.timestamp, isOutgoing).caption == replyKey.removePrefix("📷 ").trim())
+                                                                        }
+                                                                        else -> false
+                                                                    }
+                                                                }
+                                                                if (targetIdx != -1) {
+                                                                    val flashTargetId = when (val found = timelineItems[targetIdx]) {
+                                                                        is DmTimelineItem.MessageItem -> found.message.id
+                                                                        is DmTimelineItem.MediaAlbumItem -> found.messages.first().id
+                                                                        else -> null
+                                                                    }
+                                                                    coroutineScope.launch {
+                                                                        listState.animateScrollToItem(targetIdx)
+                                                                        if (flashTargetId != null) flashMessage(flashTargetId)
+                                                                    }
+                                                                }
+                                                            }
+                                                        )
+                                                    }
+                                                } else null,
+                                                onPhotoClick = { _, photo ->
+                                                    if (isSelectionMode) {
+                                                        val clickedId = photo.id
+                                                        if (selectedMessageIds.contains(clickedId)) selectedMessageIds.remove(clickedId)
+                                                        else selectedMessageIds.add(clickedId)
+                                                    } else {
+                                                        val idx = allMediaItems.indexOfFirst { it.id == photo.id }
+                                                        if (idx >= 0) activeMediaViewerIndex = idx
+                                                    }
+                                                },
+                                                onPhotoLongPress = { photo ->
+                                                    if (!isSelectionMode) {
+                                                        selectedMessageForMenu = item.messages.find { it.id == photo.id } ?: firstMsg
+                                                    }
+                                                }
+                                            )
+                                        }
+
+                                        if (item.reactions.isNotEmpty()) {
+                                            ReactionRow(
+                                                reactions = item.reactions,
+                                                onClick = { emoji ->
+                                                    coroutineScope.launch {
+                                                        EncryptedChatRepository.sendDmReaction(context, conversationId, partnerUserId, firstMsg.id, emoji)
+                                                    }
+                                                },
+                                                modifier = Modifier.padding(top = 2.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                             is DmTimelineItem.MessageItem -> {
                                 val msg = item.message
                                 val isOutgoing = msg.isOutgoing
@@ -914,14 +1135,27 @@ fun DirectChatScreen(
                                                         preview = msg.replyToText,
                                                         outgoing = isOutgoing,
                                                         onClick = {
-                                                            val targetIdx = timelineItems.indexOfFirst {
-                                                                it is DmTimelineItem.MessageItem && it.message.text == msg.replyToText
+                                                            val replyKey = msg.replyToText.orEmpty()
+                                                            val targetIdx = timelineItems.indexOfFirst { tl ->
+                                                                when (tl) {
+                                                                    is DmTimelineItem.MessageItem -> tl.message.text == replyKey
+                                                                    is DmTimelineItem.MediaAlbumItem -> tl.messages.any { m ->
+                                                                        m.text == replyKey ||
+                                                                            (replyKey == "📷 Photo" && isDmImageText(m.text)) ||
+                                                                            (replyKey.startsWith("📷 ") && parseDmPhotoNode(m.id, m.text, m.timestamp, isOutgoing).caption == replyKey.removePrefix("📷 ").trim())
+                                                                    }
+                                                                    else -> false
+                                                                }
                                                             }
                                                             if (targetIdx != -1) {
-                                                                val found = timelineItems[targetIdx] as DmTimelineItem.MessageItem
+                                                                val flashTargetId = when (val found = timelineItems[targetIdx]) {
+                                                                    is DmTimelineItem.MessageItem -> found.message.id
+                                                                    is DmTimelineItem.MediaAlbumItem -> found.messages.first().id
+                                                                    else -> null
+                                                                }
                                                                 coroutineScope.launch {
                                                                     listState.animateScrollToItem(targetIdx)
-                                                                    flashMessage(found.message.id)
+                                                                    if (flashTargetId != null) flashMessage(flashTargetId)
                                                                 }
                                                             }
                                                         }
@@ -1139,6 +1373,66 @@ fun DirectChatScreen(
                     selectedMessageForMenu = null
                 },
                 onDismiss = { selectedMessageForMenu = null }
+            )
+        }
+
+        // Telegram Pre-Send Photo Review & Caption Sheet
+        if (pendingPhotoUris.isNotEmpty()) {
+            TelegramPendingMediaDialog(
+                uris = pendingPhotoUris,
+                recipientLabel = partnerName,
+                onDismiss = { pendingPhotoUris = emptyList() },
+                onRemoveAt = { removeIdx ->
+                    if (removeIdx in pendingPhotoUris.indices) {
+                        pendingPhotoUris = pendingPhotoUris.toMutableList().apply { removeAt(removeIdx) }
+                    }
+                },
+                onAddMore = {
+                    photoPickerLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                },
+                onSend = { urisToSend, captionText ->
+                    val replySnapshot = replyingToMessage
+                    pendingPhotoUris = emptyList()
+                    replyingToMessage = null
+                    ensureVaultUnlocked {
+                        coroutineScope.launch {
+                            urisToSend.forEachIndexed { idx, uri ->
+                                try {
+                                    val bytes = readChatImageBytes(context, uri)
+                                    if (bytes != null && bytes.isNotEmpty()) {
+                                        val sendRes = EncryptedChatRepository.sendMediaMessage(
+                                            context = context,
+                                            recipientUserId = partnerUserId,
+                                            recipientName = partnerName,
+                                            recipientAvatar = partnerAvatarUrl,
+                                            rawBytes = bytes,
+                                            messageType = "image",
+                                            mimeType = "image/jpeg",
+                                            replyToText = if (idx == 0) replySnapshot?.text else null,
+                                            replyToSender = if (idx == 0 && replySnapshot != null) {
+                                                if (replySnapshot.isOutgoing) "You" else partnerName
+                                            } else null,
+                                            caption = if (idx == 0) captionText.takeIf { it.isNotBlank() } else null
+                                        )
+                                        if (sendRes.isFailure) {
+                                            val err = sendRes.exceptionOrNull()
+                                            if (err is UserBlockedException) isChatBlocked = true
+                                            Toast.makeText(context, err?.message ?: "Could not send photo.", Toast.LENGTH_SHORT).show()
+                                            return@launch
+                                        }
+                                    }
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Error sending photo: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            if (timelineItems.isNotEmpty()) {
+                                listState.animateScrollToItem(timelineItems.size - 1)
+                            }
+                        }
+                    }
+                }
             )
         }
 

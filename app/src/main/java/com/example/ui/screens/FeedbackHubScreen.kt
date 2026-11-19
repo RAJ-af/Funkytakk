@@ -1229,16 +1229,31 @@ private fun FeedbackDetailDialog(
                             DropdownMenu(
                                 expanded = showMoreMenu,
                                 onDismissRequest = { showMoreMenu = false },
-                                containerColor = funkyColors.surface
+                                shape = RoundedCornerShape(20.dp),
+                                containerColor = funkyColors.surface,
+                                shadowElevation = 10.dp,
+                                modifier = Modifier
+                                    .widthIn(min = 180.dp)
+                                    .border(1.dp, funkyColors.line, RoundedCornerShape(20.dp))
                             ) {
                                 DropdownMenuItem(
                                     text = {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        Text(
+                                            "Delete",
+                                            color = funkyColors.danger,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(32.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(funkyColors.danger.copy(alpha = 0.12f)),
+                                            contentAlignment = Alignment.Center
                                         ) {
-                                            FunkyDeleteIcon(color = funkyColors.danger, modifier = Modifier.size(18.dp))
-                                            Text("Delete", color = funkyColors.danger, fontWeight = FontWeight.Bold)
+                                            FunkyDeleteIcon(color = funkyColors.danger, modifier = Modifier.size(17.dp))
                                         }
                                     },
                                     onClick = {

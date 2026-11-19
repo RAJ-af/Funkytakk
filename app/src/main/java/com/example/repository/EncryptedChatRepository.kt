@@ -597,8 +597,17 @@ object EncryptedChatRepository {
         val nonceBase64 = descriptorJson.optString("media_nonce")
         val mimeType = descriptorJson.optString("mime_type", if (messageType == "image") "image/jpeg" else "audio/aac")
         val durationSecs = descriptorJson.optInt("duration_seconds", 0)
+        val captionSuffix = descriptorJson.optString("caption", "")
+            .replace("\n", " ")
+            .replace("|", " ")
+            .trim()
+            .takeIf { it.isNotBlank() }
 
-        val initialPlaceholder = if (messageType == "image") "[img]downloading..." else "[voice]downloading...|$durationSecs"
+        val initialPlaceholder = if (messageType == "image") {
+            if (captionSuffix != null) "[img]downloading...|$captionSuffix" else "[img]downloading..."
+        } else {
+            "[voice]downloading...|$durationSecs"
+        }
 
         // 1. Save local message record in Room FIRST (Strict Order of Operations)
         saveDecryptedMessageLocally(
@@ -638,8 +647,13 @@ object EncryptedChatRepository {
                 if (encryptedBlobBytes != null) {
                     val rawBytes = E2EEMediaManager.decryptMediaPayload(encryptedBlobBytes, keyBytes, nonceBytes)
                     val localFile = saveLocalMediaFile(context, msgId, rawBytes, mimeType)
+                    val captionSuffix = descriptorJson.optString("caption", "")
+                        .replace("\n", " ")
+                        .replace("|", " ")
+                        .trim()
+                        .takeIf { it.isNotBlank() }
                     val localText = if (messageType == "image") {
-                        "[img]file://${localFile.absolutePath}"
+                        if (captionSuffix != null) "[img]file://${localFile.absolutePath}|$captionSuffix" else "[img]file://${localFile.absolutePath}"
                     } else {
                         "[voice]file://${localFile.absolutePath}|$durationSecs"
                     }
@@ -822,7 +836,10 @@ object EncryptedChatRepository {
             val conv = db.conversationDao().getConversation(conversationId)
             val senderTitle = conv?.otherUserName?.ifBlank { "FunkyTalk Chat" } ?: "New Message"
             val displayPreview = when {
-                plaintext.startsWith("[img]") -> "Sent a photo"
+                plaintext.startsWith("[img]") || plaintext.startsWith("[imgs]") -> {
+                    val cap = plaintext.substringAfter("|", "").trim()
+                    if (cap.isNotBlank()) "📷 $cap" else "Sent a photo"
+                }
                 plaintext.startsWith("[voice]") -> "Sent a voice note"
                 else -> plaintext
             }
@@ -1030,7 +1047,8 @@ object EncryptedChatRepository {
         mimeType: String, // "image/jpeg", "audio/aac"
         durationSeconds: Int? = null,
         replyToText: String? = null,
-        replyToSender: String? = null
+        replyToSender: String? = null,
+        caption: String? = null
     ): Result<LocalDmMessage> = withContext(Dispatchers.IO) {
         try {
             val db = database ?: return@withContext Result.failure(IllegalStateException("Chat vault is locked"))
@@ -1118,6 +1136,7 @@ object EncryptedChatRepository {
             // Step 6: Build JSON descriptor & encrypt it with Tink HPKE (recipient's identity public key)
             val keyBase64 = Base64.encodeToString(keyBytes, Base64.NO_WRAP)
             val nonceBase64 = Base64.encodeToString(nonceBytes, Base64.NO_WRAP)
+            val cleanCaption = caption?.replace("\n", " ")?.replace("|", " ")?.trim()?.takeIf { it.isNotBlank() }
             val descriptorJson = JSONObject().apply {
                 put("storage_path", finalResolvedPath)
                 put("media_key", keyBase64)
@@ -1125,6 +1144,9 @@ object EncryptedChatRepository {
                 put("mime_type", mimeType)
                 if (durationSeconds != null) {
                     put("duration_seconds", durationSeconds)
+                }
+                if (cleanCaption != null) {
+                    put("caption", cleanCaption)
                 }
             }.toString()
 
@@ -1160,7 +1182,7 @@ object EncryptedChatRepository {
             // Step 8: Save raw file locally in vault and record in local Room DB
             val localFile = saveLocalMediaFile(context, messageId, rawBytes, mimeType)
             val localText = if (messageType == "image") {
-                "[img]file://${localFile.absolutePath}"
+                if (cleanCaption != null) "[img]file://${localFile.absolutePath}|$cleanCaption" else "[img]file://${localFile.absolutePath}"
             } else {
                 "[voice]file://${localFile.absolutePath}|${durationSeconds ?: 0}"
             }
@@ -1180,7 +1202,11 @@ object EncryptedChatRepository {
             db.messageDao().insertMessage(localMessage)
 
             val existingConv = db.conversationDao().getConversation(conversationId)
-            val lastMsgPreview = if (messageType == "image") "📷 Photo" else "🎙️ Voice message"
+            val lastMsgPreview = if (messageType == "image") {
+                if (cleanCaption != null) "📷 $cleanCaption" else "📷 Photo"
+            } else {
+                "🎙️ Voice message"
+            }
             val partnerFlag = existingConv?.otherUserFlag?.takeIf { it.isNotBlank() }
                 ?: fetchSenderProfileInfo(context, resolvedUserId).third
             val partnerAvatar = recipientAvatar?.takeIf { it.isNotBlank() }

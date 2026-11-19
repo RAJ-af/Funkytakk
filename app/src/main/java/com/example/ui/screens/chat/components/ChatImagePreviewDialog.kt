@@ -244,21 +244,31 @@ fun ChatImagePreviewDialog(
                             DropdownMenu(
                                 expanded = showOptionsMenu,
                                 onDismissRequest = { showOptionsMenu = false },
-                                shape = RoundedCornerShape(16.dp),
+                                shape = RoundedCornerShape(18.dp),
                                 containerColor = Color(0xFF18181B),
                                 shadowElevation = 12.dp,
                                 modifier = Modifier
-                                    .width(200.dp)
-                                    .background(Color(0xFF18181B), RoundedCornerShape(16.dp))
-                                    .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
+                                    .width(206.dp)
+                                    .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(18.dp))
                             ) {
-                                // Action: Share
                                 DropdownMenuItem(
                                     text = {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            "Share",
+                                            color = Color.White,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(32.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(Color.White.copy(alpha = 0.12f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
                                             ChatIconForward(tint = Color.White, modifier = Modifier.size(17.dp))
-                                            Spacer(modifier = Modifier.width(10.dp))
-                                            Text("Share", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
                                         }
                                     },
                                     onClick = {
@@ -268,13 +278,29 @@ fun ChatImagePreviewDialog(
                                 )
 
                                 if (isMyImage) {
-                                    // Action: Delete
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 12.dp),
+                                        thickness = 0.6.dp,
+                                        color = Color.White.copy(alpha = 0.12f)
+                                    )
                                     DropdownMenuItem(
                                         text = {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                "Delete",
+                                                color = Color(0xFFEF4444),
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        },
+                                        leadingIcon = {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(32.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(Color(0xFFEF4444).copy(alpha = 0.16f)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
                                                 ChatIconTrash(tint = Color(0xFFEF4444), modifier = Modifier.size(17.dp))
-                                                Spacer(modifier = Modifier.width(10.dp))
-                                                Text("Delete", color = Color(0xFFEF4444), fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
                                             }
                                         },
                                         onClick = {

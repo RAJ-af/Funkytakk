@@ -72,6 +72,17 @@ sealed class GroupTimelineItem {
     ) : GroupTimelineItem() {
         override val id: String = message.id
     }
+
+    data class MediaAlbumItem(
+        val messages: List<LocalGroupMessage>,
+        val photos: List<ChatPhotoNode>,
+        val position: GroupPosition,
+        val reactions: List<ReactionUi>,
+        val isFirstInGroup: Boolean,
+        val isLastInGroup: Boolean
+    ) : GroupTimelineItem() {
+        override val id: String = "album_${messages.first().id}"
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -113,6 +124,7 @@ fun GroupChatScreen(
     var activeWordLookup by remember { mutableStateOf<WordLookupState?>(null) }
     var showAiAssistSheet by remember { mutableStateOf(false) }
     var activeMediaViewerIndex by remember { mutableStateOf<Int?>(null) }
+    var pendingPhotoUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
 
     val voicePlayer = rememberVoicePlaybackController()
     val voiceRecorder = rememberLiveVoiceRecorder()
@@ -153,29 +165,13 @@ fun GroupChatScreen(
         }
     }
 
-    // Photo picker launcher
+    // Photo picker launcher -> opens Telegram-style review & caption sheet before sending
     val photoPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia(10)
     ) { uris ->
         if (uris.isNotEmpty()) {
-            coroutineScope.launch {
-                uris.forEach { uri ->
-                    try {
-                        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                        if (bytes != null && bytes.isNotEmpty()) {
-                            GroupChatRepository.sendGroupMediaMessage(
-                                context = context,
-                                groupId = group.id,
-                                rawBytes = bytes,
-                                messageType = "image",
-                                mimeType = "image/jpeg"
-                            )
-                        }
-                    } catch (e: Exception) {
-                        Toast.makeText(context, "Error sending photo: ${e.message}", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
+            val merged = (pendingPhotoUris + uris).distinct().take(10)
+            pendingPhotoUris = merged
         }
     }
 
@@ -215,7 +211,8 @@ fun GroupChatScreen(
             items.add(GroupTimelineItem.SecurityHeader("Messages and media in this group are end-to-end encrypted."))
 
             var prevDateLabel = ""
-            for (i in sorted.indices) {
+            var i = 0
+            while (i < sorted.size) {
                 val msg = sorted[i]
                 val dateLabel = formatChatDateChip(msg.timestamp)
                 if (dateLabel != prevDateLabel) {
@@ -225,21 +222,85 @@ fun GroupChatScreen(
 
                 if (msg.messageType == "system") {
                     items.add(GroupTimelineItem.SystemEvent(msg.id, msg.text))
+                    i++
+                    continue
+                }
+
+                // Group consecutive same-sender images (<= 60s, max 10) into a Telegram album collage
+                if (isGroupImageMessage(msg)) {
+                    val albumMsgs = mutableListOf(msg)
+                    var j = i + 1
+                    while (j < sorted.size && albumMsgs.size < 10) {
+                        val next = sorted[j]
+                        if (next.messageType != "system" &&
+                            isGroupImageMessage(next) &&
+                            next.senderId == msg.senderId &&
+                            formatChatDateChip(next.timestamp) == dateLabel &&
+                            (next.timestamp - albumMsgs.last().timestamp) <= 60_000L
+                        ) {
+                            albumMsgs.add(next)
+                            j++
+                        } else {
+                            break
+                        }
+                    }
+
+                    val lastInAlbum = albumMsgs.last()
+                    val isOlderSameSender = i > 0 &&
+                        sorted[i - 1].messageType != "system" &&
+                        sorted[i - 1].senderId == msg.senderId &&
+                        (msg.timestamp - sorted[i - 1].timestamp) <= 2 * 60 * 1000L &&
+                        formatChatDateChip(sorted[i - 1].timestamp) == dateLabel
+
+                    val isNewerSameSender = j < sorted.size &&
+                        sorted[j].messageType != "system" &&
+                        sorted[j].senderId == lastInAlbum.senderId &&
+                        (sorted[j].timestamp - lastInAlbum.timestamp) <= 2 * 60 * 1000L &&
+                        formatChatDateChip(sorted[j].timestamp) == dateLabel
+
+                    val position = computeGroupPosition(isOlderSameSender, isNewerSameSender)
+                    val reactionUis = rawReactions.filter { it.targetMessageId == msg.id }
+                        .groupBy { it.emoji }
+                        .map { (emoji, list) ->
+                            ReactionUi(
+                                emoji = emoji,
+                                count = list.size,
+                                mine = list.any { it.senderId == currentUserId }
+                            )
+                        }
+                    val photoNodes = albumMsgs.map { m ->
+                        parseGroupPhotoNode(
+                            msg = m,
+                            isOutgoing = m.senderId == currentUserId
+                        )
+                    }
+                    items.add(
+                        GroupTimelineItem.MediaAlbumItem(
+                            messages = albumMsgs,
+                            photos = photoNodes,
+                            position = position,
+                            reactions = reactionUis,
+                            isFirstInGroup = !isOlderSameSender,
+                            isLastInGroup = !isNewerSameSender
+                        )
+                    )
+                    i = j
                     continue
                 }
 
                 val isOlderSameSender = i > 0 &&
-                        sorted[i - 1].senderId == msg.senderId &&
-                        (msg.timestamp - sorted[i - 1].timestamp) <= 2 * 60 * 1000L
+                    sorted[i - 1].messageType != "system" &&
+                    sorted[i - 1].senderId == msg.senderId &&
+                    (msg.timestamp - sorted[i - 1].timestamp) <= 2 * 60 * 1000L &&
+                    formatChatDateChip(sorted[i - 1].timestamp) == dateLabel
 
                 val isNewerSameSender = i < sorted.size - 1 &&
-                        sorted[i + 1].senderId == msg.senderId &&
-                        (sorted[i + 1].timestamp - msg.timestamp) <= 2 * 60 * 1000L
+                    sorted[i + 1].messageType != "system" &&
+                    sorted[i + 1].senderId == msg.senderId &&
+                    (sorted[i + 1].timestamp - msg.timestamp) <= 2 * 60 * 1000L &&
+                    formatChatDateChip(sorted[i + 1].timestamp) == dateLabel
 
                 val position = computeGroupPosition(isOlderSameSender, isNewerSameSender)
-                val isFirst = !isOlderSameSender
-                val isLast = !isNewerSameSender
-
                 val msgReactions = rawReactions.filter { it.targetMessageId == msg.id }
                 val reactionUis = msgReactions.groupBy { it.emoji }.map { (emoji, list) ->
                     ReactionUi(
@@ -254,10 +315,11 @@ fun GroupChatScreen(
                         message = msg,
                         position = position,
                         reactions = reactionUis,
-                        isFirstInGroup = isFirst,
-                        isLastInGroup = isLast
+                        isFirstInGroup = !isOlderSameSender,
+                        isLastInGroup = !isNewerSameSender
                     )
                 )
+                i++
             }
             items
         }
@@ -268,16 +330,17 @@ fun GroupChatScreen(
             }
         }
 
-        val allMediaItems = remember(rawMessages) {
-            rawMessages.filter { it.messageType == "image" || it.messageType == "video" || it.text.startsWith("[img]") }
+        val allMediaItems = remember(rawMessages, currentUserId) {
+            rawMessages.sortedBy { it.timestamp }
+                .filter { isGroupImageMessage(it) || it.messageType == "video" }
                 .map { msg ->
-                    val url = msg.localMediaPath ?: msg.text.removePrefix("[img]").removePrefix("[imgs]").substringBefore("|")
+                    val node = parseGroupPhotoNode(msg, isOutgoing = msg.senderId == currentUserId)
                     ChatViewerMediaItem(
                         id = msg.id,
-                        url = url,
+                        url = node.source,
                         senderName = if (msg.senderId == currentUserId) "You" else msg.senderName,
-                        dateText = formatChatTime(msg.timestamp),
-                        caption = null,
+                        dateText = node.timeText,
+                        caption = node.caption,
                         isVideo = msg.messageType == "video"
                     )
                 }
@@ -568,6 +631,148 @@ fun GroupChatScreen(
                             is GroupTimelineItem.SystemEvent -> {
                                 SystemEventLine(text = item.text)
                             }
+                            is GroupTimelineItem.MediaAlbumItem -> {
+                                val firstMsg = item.messages.first()
+                                val isOutgoing = firstMsg.senderId == currentUserId
+                                val flashAlpha = flashAnimatables[firstMsg.id]?.value ?: 0f
+                                val isSelected = item.messages.any { selectedMessageIds.contains(it.id) }
+                                val status = if (isOutgoing) MessageStatus.Read else null
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(
+                                            start = if (isOutgoing) 48.dp else 12.dp,
+                                            end = if (isOutgoing) 12.dp else 48.dp,
+                                            top = if (item.position == GroupPosition.First || item.position == GroupPosition.Single) 6.dp else 2.dp,
+                                            bottom = 2.dp
+                                        ),
+                                    horizontalArrangement = if (isOutgoing) Arrangement.End else Arrangement.Start,
+                                    verticalAlignment = Alignment.Bottom
+                                ) {
+                                    if (!isOutgoing) {
+                                        if (item.isLastInGroup) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(28.dp)
+                                                    .clip(CircleShape)
+                                                    .background(colors.senderColor(firstMsg.senderId).copy(alpha = 0.2f)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (!firstMsg.senderAvatar.isNullOrBlank()) {
+                                                    AsyncImage(
+                                                        model = firstMsg.senderAvatar,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.fillMaxSize(),
+                                                        contentScale = ContentScale.Crop
+                                                    )
+                                                } else {
+                                                    Text(
+                                                        text = firstMsg.senderName.take(1).uppercase(),
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = colors.senderColor(firstMsg.senderId)
+                                                    )
+                                                }
+                                            }
+                                        } else {
+                                            Spacer(modifier = Modifier.size(28.dp))
+                                        }
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                    }
+
+                                    Column(
+                                        horizontalAlignment = if (isOutgoing) Alignment.End else Alignment.Start
+                                    ) {
+                                        if (!isOutgoing && (item.position == GroupPosition.Single || item.position == GroupPosition.First)) {
+                                            SenderName(
+                                                name = firstMsg.senderName,
+                                                userId = firstMsg.senderId,
+                                                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
+                                            )
+                                        }
+
+                                        MessageBubble(
+                                            outgoing = isOutgoing,
+                                            position = item.position,
+                                            highlighted = flashAlpha > 0f,
+                                            selected = isSelected,
+                                            contentPadding = PaddingValues(2.dp)
+                                        ) {
+                                            TelegramMediaAlbumContent(
+                                                photos = item.photos,
+                                                outgoing = isOutgoing,
+                                                position = item.position,
+                                                status = status,
+                                                replyQuote = if (!firstMsg.replyToMessageId.isNullOrBlank()) {
+                                                    {
+                                                        ReplyQuote(
+                                                            sender = firstMsg.replyToSenderName ?: "Reply",
+                                                            preview = firstMsg.replyToPreview ?: "Message",
+                                                            outgoing = isOutgoing,
+                                                            onClick = {
+                                                                val targetIdx = timelineItems.indexOfFirst { tl ->
+                                                                    (tl is GroupTimelineItem.MessageItem && tl.message.id == firstMsg.replyToMessageId) ||
+                                                                        (tl is GroupTimelineItem.MediaAlbumItem && tl.messages.any { it.id == firstMsg.replyToMessageId })
+                                                                }
+                                                                if (targetIdx != -1) {
+                                                                    val flashTargetId = when (val found = timelineItems[targetIdx]) {
+                                                                        is GroupTimelineItem.MessageItem -> found.message.id
+                                                                        is GroupTimelineItem.MediaAlbumItem -> found.messages.first().id
+                                                                        else -> null
+                                                                    }
+                                                                    coroutineScope.launch {
+                                                                        listState.animateScrollToItem(targetIdx)
+                                                                        if (flashTargetId != null) flashMessage(flashTargetId)
+                                                                    }
+                                                                }
+                                                            }
+                                                        )
+                                                    }
+                                                } else null,
+                                                onPhotoClick = { _, photo ->
+                                                    if (isSelectionMode) {
+                                                        val clickedId = photo.id
+                                                        if (selectedMessageIds.contains(clickedId)) selectedMessageIds.remove(clickedId)
+                                                        else selectedMessageIds.add(clickedId)
+                                                    } else {
+                                                        val idx = allMediaItems.indexOfFirst { it.id == photo.id }
+                                                        if (idx >= 0) activeMediaViewerIndex = idx
+                                                    }
+                                                },
+                                                onPhotoLongPress = { photo ->
+                                                    if (!isSelectionMode) {
+                                                        selectedMessageForMenu = item.messages.find { it.id == photo.id } ?: firstMsg
+                                                    }
+                                                },
+                                                onDownloadClick = { photo ->
+                                                    val targetMsg = item.messages.find { it.id == photo.id }
+                                                    if (targetMsg != null) {
+                                                        coroutineScope.launch {
+                                                            val res = GroupChatRepository.downloadGroupMessageMediaOnDemand(context, targetMsg)
+                                                            if (res.isFailure) {
+                                                                Toast.makeText(context, res.exceptionOrNull()?.message ?: "Could not load photo", Toast.LENGTH_SHORT).show()
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            )
+                                        }
+
+                                        if (item.reactions.isNotEmpty()) {
+                                            ReactionRow(
+                                                reactions = item.reactions,
+                                                onClick = { emoji ->
+                                                    coroutineScope.launch {
+                                                        GroupChatRepository.sendGroupReaction(context, group.id, firstMsg.id, emoji)
+                                                    }
+                                                },
+                                                modifier = Modifier.padding(top = 2.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                             is GroupTimelineItem.MessageItem -> {
                                 val msg = item.message
                                 val isOutgoing = msg.senderId == currentUserId
@@ -679,14 +884,19 @@ fun GroupChatScreen(
                                                         preview = msg.replyToPreview ?: "Message",
                                                         outgoing = isOutgoing,
                                                         onClick = {
-                                                            val targetIdx = timelineItems.indexOfFirst {
-                                                                it is GroupTimelineItem.MessageItem && it.message.id == msg.replyToMessageId
+                                                            val targetIdx = timelineItems.indexOfFirst { tl ->
+                                                                (tl is GroupTimelineItem.MessageItem && tl.message.id == msg.replyToMessageId) ||
+                                                                    (tl is GroupTimelineItem.MediaAlbumItem && tl.messages.any { it.id == msg.replyToMessageId })
                                                             }
                                                             if (targetIdx != -1) {
-                                                                val found = timelineItems[targetIdx] as GroupTimelineItem.MessageItem
+                                                                val flashTargetId = when (val found = timelineItems[targetIdx]) {
+                                                                    is GroupTimelineItem.MessageItem -> found.message.id
+                                                                    is GroupTimelineItem.MediaAlbumItem -> found.messages.first().id
+                                                                    else -> null
+                                                                }
                                                                 coroutineScope.launch {
                                                                     listState.animateScrollToItem(targetIdx)
-                                                                    flashMessage(found.message.id)
+                                                                    if (flashTargetId != null) flashMessage(flashTargetId)
                                                                 }
                                                             }
                                                         }
@@ -900,6 +1110,57 @@ fun GroupChatScreen(
                     selectedMessageForMenu = null
                 },
                 onDismiss = { selectedMessageForMenu = null }
+            )
+        }
+
+        // Telegram Pre-Send Photo Review & Caption Sheet
+        if (pendingPhotoUris.isNotEmpty()) {
+            TelegramPendingMediaDialog(
+                uris = pendingPhotoUris,
+                recipientLabel = group.name,
+                onDismiss = { pendingPhotoUris = emptyList() },
+                onRemoveAt = { removeIdx ->
+                    if (removeIdx in pendingPhotoUris.indices) {
+                        pendingPhotoUris = pendingPhotoUris.toMutableList().apply { removeAt(removeIdx) }
+                    }
+                },
+                onAddMore = {
+                    photoPickerLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                },
+                onSend = { urisToSend, captionText ->
+                    pendingPhotoUris = emptyList()
+                    coroutineScope.launch {
+                        urisToSend.forEachIndexed { idx, uri ->
+                            try {
+                                val bytes = readChatImageBytes(context, uri)
+                                if (bytes != null && bytes.isNotEmpty()) {
+                                    val sendRes = GroupChatRepository.sendGroupMediaMessage(
+                                        context = context,
+                                        groupId = group.id,
+                                        rawBytes = bytes,
+                                        messageType = "image",
+                                        mimeType = "image/jpeg",
+                                        caption = if (idx == 0) captionText.takeIf { it.isNotBlank() } else null
+                                    )
+                                    if (sendRes.isFailure) {
+                                        Toast.makeText(
+                                            context,
+                                            sendRes.exceptionOrNull()?.message ?: "Could not send photo",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Error sending photo: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        if (timelineItems.isNotEmpty()) {
+                            listState.animateScrollToItem(timelineItems.size - 1)
+                        }
+                    }
+                }
             )
         }
 

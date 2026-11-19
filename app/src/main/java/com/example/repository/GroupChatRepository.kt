@@ -1944,7 +1944,8 @@ object GroupChatRepository {
         groupId: String,
         rawBytes: ByteArray,
         mimeType: String = "image/jpeg",
-        messageType: String = "image" // "image" or "voice"
+        messageType: String = "image", // "image" or "voice"
+        caption: String? = null
     ): Result<SendGroupMessageOutcome> = withContext(Dispatchers.IO) {
         try {
             val activeUid = SupabaseSessionManager.ensureActiveSession(context)
@@ -1983,12 +1984,16 @@ object GroupChatRepository {
             val nonceB64 = Base64.encodeToString(encResult.nonceBytes, Base64.NO_WRAP)
 
             // 3. Layer 2: Prepare media descriptor JSON
+            val cleanCaption = caption?.replace("\n", " ")?.trim()?.takeIf { it.isNotBlank() }
             val descriptorJson = JSONObject().apply {
                 put("storage_path", mediaUrl)
                 put("media_key", keyB64)
                 put("media_nonce", nonceB64)
                 put("mime_type", mimeType)
                 put("message_type", messageType)
+                if (cleanCaption != null) {
+                    put("caption", cleanCaption)
+                }
             }.toString()
 
             // Save local decrypted copy immediately
@@ -2060,7 +2065,11 @@ object GroupChatRepository {
             val group = database?.groupConversationDao()?.getGroup(cleanGroupId)
             val disSec = group?.disappearingSeconds ?: 0
             val expiresAt = if (disSec > 0) now + disSec * 1000L else null
-            val displayLabel = if (effectiveType == "voice") "Voice message" else "Photo"
+            val displayLabel = when {
+                effectiveType == "voice" -> "Voice message"
+                cleanCaption != null -> cleanCaption
+                else -> "Photo"
+            }
 
             val localMsg = LocalGroupMessage(
                 id = serverMessageId,
@@ -2295,11 +2304,16 @@ object GroupChatRepository {
             savedMime = jsonEnvelope.optString("mime_type", "image/jpeg")
             savedStoragePath = jsonEnvelope.optString("storage_path").ifBlank { row.storage_path.orEmpty() }
             val descType = jsonEnvelope.optString("message_type")
+            val descCaption = jsonEnvelope.optString("caption", "").trim().takeIf { it.isNotBlank() }
             resolvedType = when {
                 descType == "voice" || rowMessageType == "voice" || savedMime.contains("audio") -> "voice"
                 else -> "image"
             }
-            displayText = if (resolvedType == "voice") "Voice message" else "Photo"
+            displayText = when {
+                resolvedType == "voice" -> "Voice message"
+                descCaption != null -> descCaption
+                else -> "Photo"
+            }
         } else if (jsonEnvelope != null && (jsonEnvelope.optBoolean("__e2ee_v2", false) || jsonEnvelope.has("mentions"))) {
             displayText = jsonEnvelope.optString("text", plaintext)
             jsonEnvelope.optJSONArray("mentions")?.let { arr ->

@@ -96,7 +96,10 @@ fun DmMessageReactionOverlay(
             // 1. Highlighted Bubble Preview in Center
             val isMedia = message.text.startsWith("[img]") || message.text.startsWith("[imgs]") || message.text.startsWith("[voice]")
             val previewText = when {
-                message.text.startsWith("[img]") || message.text.startsWith("[imgs]") -> "Photo"
+                message.text.startsWith("[img]") || message.text.startsWith("[imgs]") -> {
+                    val cap = message.text.substringAfter("|", "").trim()
+                    if (cap.isNotBlank()) "📷 $cap" else "Photo"
+                }
                 message.text.startsWith("[voice]") -> "Voice Note"
                 else -> message.text
             }
