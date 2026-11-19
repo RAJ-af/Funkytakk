@@ -590,7 +590,7 @@ object PushNotificationManager : DefaultLifecycleObserver {
                     _debugState.value.lastUserId == currentUserId &&
                     (nowCheck - _debugState.value.lastRegisteredAtMillis) in 0..DEBOUNCE_WINDOW_MS
                 ) {
-                    Log.d(TAG, "Skipping register_push_token (debounced: registered ${(nowCheck - _debugState.value.lastRegisteredAtMillis) / 1000}s ago for same user & token, last6=${token.takeLast(6)})")
+                    Log.d(TAG, "Skipping register_push_token (debounced: registered ${(nowCheck - _debugState.value.lastRegisteredAtMillis) / 1000}s ago)")
                     return true
                 }
 
@@ -604,7 +604,7 @@ object PushNotificationManager : DefaultLifecycleObserver {
                         )
                         if (unregResp.isSuccessful) {
                             previousUnregistered = true
-                            Log.d(TAG, "Unregistered rotated old push token (last6=${previousTokenToUnregister.takeLast(6)})")
+                            Log.d(TAG, "Unregistered rotated old push token")
                         } else {
                             Log.w(TAG, "Failed unregistering rotated old push token: HTTP ${unregResp.code()}")
                         }
@@ -612,12 +612,6 @@ object PushNotificationManager : DefaultLifecycleObserver {
                         Log.w(TAG, "Exception unregistering rotated old push token: ${e.message}")
                     }
                 }
-
-                // 5. Call RPC register_push_token(p_token = token, p_platform = 'android')
-                Log.e(
-                    TAG,
-                    "[PUSH_RPC_CALL] >> BEFORE calling register_push_token: attempt=$attempt/$MAX_RETRY_ATTEMPTS, user=$currentUserId, tokenSuffix=${token.takeLast(6)}, authHeaderLength=${authToken.length}"
-                )
 
                 val resp = SupabaseClient.api.registerPushToken(
                     apiKey = BuildConfig.SUPABASE_ANON_KEY,
@@ -633,10 +627,12 @@ object PushNotificationManager : DefaultLifecycleObserver {
                     try { resp.errorBody()?.string() } catch (_: Exception) { null }
                 } else null
 
-                Log.e(
-                    TAG,
-                    "[PUSH_RPC_CALL] << AFTER calling register_push_token: code=${resp.code()}, isSuccess=${resp.isSuccessful}, msg=${resp.message()}, errorBody=$errBody"
-                )
+                if (com.example.BuildConfig.DEBUG) {
+                    Log.d(
+                        TAG,
+                        "register_push_token response: code=${resp.code()}, isSuccess=${resp.isSuccessful}, attempt=$attempt/$MAX_RETRY_ATTEMPTS"
+                    )
+                }
 
                 if (resp.isSuccessful) {
                     val now = System.currentTimeMillis()
@@ -649,11 +645,11 @@ object PushNotificationManager : DefaultLifecycleObserver {
                         lastHttpStatus = httpStatusText,
                         lastError = null
                     )
-                    Log.d(TAG, "Successfully registered push token on attempt $attempt/$MAX_RETRY_ATTEMPTS (last6=${token.takeLast(6)})")
+                    Log.d(TAG, "Successfully registered push token on attempt $attempt/$MAX_RETRY_ATTEMPTS")
                     return true
                 } else {
                     val errMsg = httpStatusText + (if (!errBody.isNullOrBlank()) " - $errBody" else "")
-                    Log.e(TAG, "Attempt $attempt/$MAX_RETRY_ATTEMPTS register_push_token RPC failed: $errMsg")
+                    Log.e(TAG, "Attempt $attempt/$MAX_RETRY_ATTEMPTS register_push_token RPC failed: $httpStatusText")
                     updateDebugState(
                         context = appCtx,
                         isRegistered = false,
@@ -682,7 +678,7 @@ object PushNotificationManager : DefaultLifecycleObserver {
             }
         }
 
-        Log.w(TAG, "Push token registration completed with status: ${_debugState.value.lastHttpStatus}, error: ${_debugState.value.lastError}")
+        Log.w(TAG, "Push token registration completed with status: ${_debugState.value.lastHttpStatus}")
         return false
     }
 
@@ -786,6 +782,7 @@ object PushNotificationManager : DefaultLifecycleObserver {
         try { com.example.repository.EncryptedChatRepository.resetForLogout() } catch (_: Exception) {}
         try { com.example.repository.GroupChatRepository.resetForLogout() } catch (_: Exception) {}
         try { com.example.ChatPreferencesManager.resetForLogout() } catch (_: Exception) {}
+        try { com.example.repository.BlockRepository.resetForLogout() } catch (_: Exception) {}
         try { com.example.SupportChatManager.resetForLogout() } catch (_: Exception) {}
         try { com.example.CloudAiManager.resetForLogout() } catch (_: Exception) {}
         try { com.example.NotificationsManager.clear() } catch (_: Exception) {}
@@ -876,10 +873,9 @@ object PushNotificationManager : DefaultLifecycleObserver {
                     )
                     if (resp.isSuccessful) {
                         rpcSuccess = true
-                        Log.d(TAG, "Successfully unregistered push token on server (last6=${token.takeLast(6)})")
+                        Log.d(TAG, "Successfully unregistered push token on server")
                     } else {
-                        val errBody = try { resp.errorBody()?.string() } catch (_: Exception) { null }
-                        Log.e(TAG, "Failed unregistering push token: HTTP ${resp.code()} ${resp.message()} | body=$errBody")
+                        Log.e(TAG, "Failed unregistering push token: HTTP ${resp.code()}")
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Exception calling unregister_push_token RPC: ${e.message}", e)

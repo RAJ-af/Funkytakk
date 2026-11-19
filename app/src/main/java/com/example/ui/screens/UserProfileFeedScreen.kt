@@ -56,8 +56,12 @@ import com.example.MomentDto
 import com.example.SupabaseClient
 import com.example.SupabaseFollower
 import com.example.SupabaseSessionManager
+import com.example.repository.BlockRepository
 import com.example.repository.EncryptedChatRepository
 import com.example.repository.MomentsRepository
+import com.example.repository.USER_BLOCKED_ERROR_MESSAGE
+import com.example.repository.UserBlockedException
+import com.example.ui.components.BlockUserConfirmDialog
 import com.example.ui.components.CircleFlag
 import com.example.ui.components.ProfileBadgesRow
 import com.example.ui.components.DynamicHobbyChip
@@ -244,9 +248,23 @@ fun UserProfileFeedScreen(
     var showSendGiftSheet by remember { mutableStateOf(false) }
     var showReportDialog by remember { mutableStateOf(false) }
     var showMoreOptionsMenu by remember { mutableStateOf(false) }
+    var showBlockConfirmDialog by remember { mutableStateOf(false) }
+    var isBlockingUser by remember { mutableStateOf(false) }
+    val blockedUserIds by BlockRepository.blockedUserIds.collectAsState()
+    val isBlockedLocally = !isSelfProfile && userId.isNotBlank() && blockedUserIds.contains(userId)
+    var isBlockedWithPair by remember(userId) { mutableStateOf(false) }
+    val isBlockedEffective = !isSelfProfile && (isBlockedLocally || isBlockedWithPair)
     val giftsReceived = remember { mutableStateListOf<GiftTransactionItem>() }
     val userBadges = remember { mutableStateListOf<com.example.ProfileBadge>() }
     var isGiftsLoading by remember { mutableStateOf(false) }
+
+    LaunchedEffect(userId, blockedUserIds) {
+        if (!isSelfProfile && userId.isNotBlank()) {
+            isBlockedWithPair = isBlockedLocally || BlockRepository.isBlockedWith(context, userId)
+        } else {
+            isBlockedWithPair = false
+        }
+    }
 
     // -------------------------------------------------------------------------
     // 1. FETCH REAL SUPABASE DATA ON LAUNCH
@@ -474,10 +492,22 @@ fun UserProfileFeedScreen(
         }
     }
 
+    var showVaultGateDialog by remember { mutableStateOf(false) }
+    var pendingWaveGreeting by remember { mutableStateOf<String?>(null) }
+    val vaultStatus by com.example.crypto.VaultSecurityManager.vaultStatus.collectAsState()
+
     // Say Hi / Wave Handler
     fun handleSendWave(greetingMessage: String) {
         if (userId.isBlank() || isSendingHi) {
             onStartChat()
+            return
+        }
+        if (com.example.crypto.VaultSecurityManager.isVaultLocked() ||
+            vaultStatus != com.example.crypto.VaultStatus.UNLOCKED
+        ) {
+            showWaveDialog = false
+            pendingWaveGreeting = greetingMessage
+            showVaultGateDialog = true
             return
         }
         isSendingHi = true
@@ -496,11 +526,19 @@ fun UserProfileFeedScreen(
                     )
                     if (result.isSuccess) {
                         Toast.makeText(context, "Wave sent to $currentProfileName!", Toast.LENGTH_SHORT).show()
+                        onStartChat()
                     } else {
-                        Log.w("UserProfileFeed", "Wave send: ${result.exceptionOrNull()?.message}")
+                        val err = result.exceptionOrNull()
+                        if (err is UserBlockedException || BlockRepository.isUserBlockedError(err?.message)) {
+                            Toast.makeText(context, USER_BLOCKED_ERROR_MESSAGE, Toast.LENGTH_SHORT).show()
+                        } else {
+                            Log.w("UserProfileFeed", "Wave send: ${err?.message}")
+                            onStartChat()
+                        }
                     }
                 } else {
-                    Log.d("UserProfileFeed", "E2EE keys missing for $currentProfileName, starting chat window.")
+                    Log.d("UserProfileFeed", "E2EE keys missing, starting chat window.")
+                    onStartChat()
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
@@ -508,7 +546,17 @@ fun UserProfileFeedScreen(
             } finally {
                 isSendingHi = false
                 showWaveDialog = false
-                onStartChat()
+            }
+        }
+    }
+
+    LaunchedEffect(vaultStatus) {
+        if (vaultStatus == com.example.crypto.VaultStatus.UNLOCKED && showVaultGateDialog) {
+            showVaultGateDialog = false
+            val pending = pendingWaveGreeting
+            pendingWaveGreeting = null
+            if (pending != null) {
+                handleSendWave(pending)
             }
         }
     }
@@ -542,9 +590,11 @@ fun UserProfileFeedScreen(
         }
     }
 
-    val displayedPosts by remember {
+    val displayedPosts by remember(isBlockedEffective) {
         derivedStateOf {
-            when (selectedFeedTab) {
+            if (isBlockedEffective) {
+                emptyList()
+            } else when (selectedFeedTab) {
                 1 -> momentsList.filter { it.isVideo }
                 2 -> momentsList.toList()
                 else -> momentsList.toList()
@@ -657,11 +707,38 @@ fun UserProfileFeedScreen(
                                         .border(1.dp, funkyColors.line, RoundedCornerShape(14.dp))
                                 ) {
                                     if (!isSelfProfile) {
+                                        if (!isBlockedEffective) {
+                                            DropdownMenuItem(
+                                                text = { Text("Send Gift", fontWeight = FontWeight.Bold, color = funkyColors.mango) },
+                                                onClick = {
+                                                    showMoreOptionsMenu = false
+                                                    showSendGiftSheet = true
+                                                }
+                                            )
+                                        }
                                         DropdownMenuItem(
-                                            text = { Text("Send Gift", fontWeight = FontWeight.Bold, color = funkyColors.mango) },
+                                            text = {
+                                                Text(
+                                                    text = if (isBlockedLocally) "Unblock" else "Block user",
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = funkyColors.danger
+                                                )
+                                            },
                                             onClick = {
                                                 showMoreOptionsMenu = false
-                                                showSendGiftSheet = true
+                                                if (isBlockedLocally) {
+                                                    coroutineScope.launch {
+                                                        val res = BlockRepository.unblockUser(context, userId)
+                                                        res.onSuccess {
+                                                            isBlockedWithPair = false
+                                                            Toast.makeText(context, "$currentProfileName unblocked", Toast.LENGTH_SHORT).show()
+                                                        }.onFailure { err ->
+                                                            Toast.makeText(context, err.message ?: "Could not unblock user.", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    }
+                                                } else {
+                                                    showBlockConfirmDialog = true
+                                                }
                                             }
                                         )
                                         DropdownMenuItem(
@@ -901,99 +978,149 @@ fun UserProfileFeedScreen(
                     // 4. ACTION BUTTONS: "Say Hi", "Send Gift", "Follow / Following"
                     // ---------------------------------------------------------
                     if (!isSelfProfile) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            // Yellow Filled Button: Say Hi
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(46.dp)
-                                    .background(funkyColors.mango, RoundedCornerShape(100.dp))
-                                    .clickable { showWaveDialog = true },
-                                contentAlignment = Alignment.Center
+                        if (isBlockedEffective) {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp),
+                                color = funkyColors.soft,
+                                border = BorderStroke(1.dp, funkyColors.line)
                             ) {
                                 Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 14.dp),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    ProfileWavingHandIcon(modifier = Modifier.size(16.dp), color = funkyColors.onMango)
                                     Text(
-                                        text = "Say Hi",
+                                        text = if (isBlockedLocally) "You blocked this user" else USER_BLOCKED_ERROR_MESSAGE,
                                         fontSize = 13.5.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = funkyColors.onMango
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = funkyColors.ink,
+                                        modifier = Modifier.weight(1f)
                                     )
+                                    if (isBlockedLocally) {
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        OutlinedButton(
+                                            onClick = {
+                                                coroutineScope.launch {
+                                                    val res = BlockRepository.unblockUser(context, userId)
+                                                    res.onSuccess {
+                                                        isBlockedWithPair = false
+                                                        Toast.makeText(context, "$currentProfileName unblocked", Toast.LENGTH_SHORT).show()
+                                                    }.onFailure { err ->
+                                                        Toast.makeText(context, err.message ?: "Could not unblock user.", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                            },
+                                            shape = RoundedCornerShape(100.dp),
+                                            border = BorderStroke(1.dp, funkyColors.danger.copy(alpha = 0.45f))
+                                        ) {
+                                            Text(
+                                                text = "Unblock",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = funkyColors.danger
+                                            )
+                                        }
+                                    }
                                 }
                             }
-
-                            // Gift Button
-                            Box(
-                                modifier = Modifier
-                                    .weight(1.1f)
-                                    .height(46.dp)
-                                    .background(funkyColors.soft, RoundedCornerShape(100.dp))
-                                    .border(1.dp, funkyColors.mango.copy(alpha = 0.55f), RoundedCornerShape(100.dp))
-                                    .clickable { showSendGiftSheet = true },
-                                contentAlignment = Alignment.Center
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                // Yellow Filled Button: Say Hi
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(46.dp)
+                                        .background(funkyColors.mango, RoundedCornerShape(100.dp))
+                                        .clickable { showWaveDialog = true },
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Text(
-                                        text = "Send Gift",
-                                        fontSize = 13.5.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (isDark) funkyColors.mango else Color(0xFFB45309)
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    ) {
+                                        ProfileWavingHandIcon(modifier = Modifier.size(16.dp), color = funkyColors.onMango)
+                                        Text(
+                                            text = "Say Hi",
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = funkyColors.onMango
+                                        )
+                                    }
                                 }
-                            }
 
-                            // Follow / Following Pill Button
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(46.dp)
-                                    .background(
-                                        if (isFollowing) {
-                                            if (isDark) Color(0xFF143523) else Color(0xFFEBFDF2)
-                                        } else {
-                                            funkyColors.surface
-                                        },
-                                        RoundedCornerShape(100.dp)
-                                    )
-                                    .border(
-                                        width = 1.dp,
-                                        color = if (isFollowing) funkyColors.ok else funkyColors.line,
-                                        shape = RoundedCornerShape(100.dp)
-                                    )
-                                    .clickable { handleFollowToggle() },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                // Gift Button
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1.1f)
+                                        .height(46.dp)
+                                        .background(funkyColors.soft, RoundedCornerShape(100.dp))
+                                        .border(1.dp, funkyColors.mango.copy(alpha = 0.55f), RoundedCornerShape(100.dp))
+                                        .clickable { showSendGiftSheet = true },
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    ProfileAddPersonIcon(
-                                        modifier = Modifier.size(16.dp),
-                                        color = if (isFollowing) {
-                                            if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A)
-                                        } else {
-                                            funkyColors.ink
-                                        }
-                                    )
-                                    Text(
-                                        text = if (isFollowing) "Following" else "Follow",
-                                        fontSize = 13.5.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (isFollowing) {
-                                            if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A)
-                                        } else {
-                                            funkyColors.ink
-                                        }
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    ) {
+                                        Text(
+                                            text = "Send Gift",
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isDark) funkyColors.mango else Color(0xFFB45309)
+                                        )
+                                    }
+                                }
+
+                                // Follow / Following Pill Button
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(46.dp)
+                                        .background(
+                                            if (isFollowing) {
+                                                if (isDark) Color(0xFF143523) else Color(0xFFEBFDF2)
+                                            } else {
+                                                funkyColors.surface
+                                            },
+                                            RoundedCornerShape(100.dp)
+                                        )
+                                        .border(
+                                            width = 1.dp,
+                                            color = if (isFollowing) funkyColors.ok else funkyColors.line,
+                                            shape = RoundedCornerShape(100.dp)
+                                        )
+                                        .clickable { handleFollowToggle() },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    ) {
+                                        ProfileAddPersonIcon(
+                                            modifier = Modifier.size(16.dp),
+                                            color = if (isFollowing) {
+                                                if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A)
+                                            } else {
+                                                funkyColors.ink
+                                            }
+                                        )
+                                        Text(
+                                            text = if (isFollowing) "Following" else "Follow",
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isFollowing) {
+                                                if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A)
+                                            } else {
+                                                funkyColors.ink
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1129,7 +1256,7 @@ fun UserProfileFeedScreen(
                                     color = funkyColors.mute,
                                     textAlign = TextAlign.Center
                                 )
-                                if (!isSelfProfile) {
+                                if (!isSelfProfile && !isBlockedEffective) {
                                     Spacer(modifier = Modifier.height(10.dp))
                                     Surface(
                                         onClick = { showSendGiftSheet = true },
@@ -1778,6 +1905,39 @@ fun UserProfileFeedScreen(
                 onBack = { activeClickedProfile = null },
                 onStartChat = {
                     activeClickedProfile = null
+                }
+            )
+        }
+
+        if (showVaultGateDialog) {
+            com.example.ui.screens.chat.VaultManagementDialogs(
+                onDismissRequest = {
+                    showVaultGateDialog = false
+                    pendingWaveGreeting = null
+                }
+            )
+        }
+
+        if (showBlockConfirmDialog) {
+            BlockUserConfirmDialog(
+                displayName = currentProfileName.ifBlank { "User" },
+                isBlocking = isBlockingUser,
+                onDismiss = { if (!isBlockingUser) showBlockConfirmDialog = false },
+                onConfirm = {
+                    isBlockingUser = true
+                    coroutineScope.launch {
+                        val res = BlockRepository.blockUser(context, userId)
+                        isBlockingUser = false
+                        showBlockConfirmDialog = false
+                        res.onSuccess {
+                            isFollowing = false
+                            isBlockedWithPair = true
+                            Toast.makeText(context, "$currentProfileName blocked", Toast.LENGTH_SHORT).show()
+                            onBack()
+                        }.onFailure { err ->
+                            Toast.makeText(context, err.message ?: "Could not block user.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 }
             )
         }

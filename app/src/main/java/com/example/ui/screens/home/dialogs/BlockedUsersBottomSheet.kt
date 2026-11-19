@@ -20,18 +20,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ChatPreferencesManager
-import com.example.SupabaseClient
-import com.example.SupabaseSessionManager
+import com.example.repository.BlockRepository
 import com.example.ui.components.*
 import com.example.ui.theme.LocalFunkyColors
 import kotlinx.coroutines.launch
-
-data class BlockedUserItem(
-    val id: String,
-    val name: String,
-    val avatarUrl: String
-)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,58 +33,13 @@ fun BlockedUsersBottomSheet(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val funkyColors = LocalFunkyColors.current
-    val blockedIds by ChatPreferencesManager.blockedUsers.collectAsState()
+    val blockedUsers by BlockRepository.blockedUsers.collectAsState()
+    val isLoading by BlockRepository.isLoading.collectAsState()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var unblockingUserId by remember { mutableStateOf<String?>(null) }
 
-    val blockedUsersList = remember { mutableStateListOf<BlockedUserItem>() }
-    var isLoading by remember { mutableStateOf(true) }
-
-    LaunchedEffect(blockedIds) {
-        isLoading = true
-        try {
-            val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
-            val profileMap = mutableMapOf<String, Pair<String, String>>()
-            if (!token.isNullOrBlank()) {
-                val res = SupabaseClient.api.getAllProfiles(
-                    apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
-                    auth = token
-                )
-                if (res.isSuccessful && res.body() != null) {
-                    res.body()!!.forEach { p ->
-                        val uid = p.auth_user_id ?: p.id.toString()
-                        val name = p.profile_name ?: p.username ?: "Learner"
-                        val avatar = p.avatar_url ?: ""
-                        profileMap[uid] = name to avatar
-                    }
-                }
-            }
-
-            blockedUsersList.clear()
-            blockedIds.forEach { id ->
-                val cached = profileMap[id]
-                blockedUsersList.add(
-                    BlockedUserItem(
-                        id = id,
-                        name = cached?.first ?: "User (${id.take(8)})",
-                        avatarUrl = cached?.second?.ifBlank { "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200" }
-                            ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200"
-                    )
-                )
-            }
-        } catch (_: Exception) {
-            blockedUsersList.clear()
-            blockedIds.forEach { id ->
-                blockedUsersList.add(
-                    BlockedUserItem(
-                        id = id,
-                        name = "User (${id.take(8)})",
-                        avatarUrl = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200"
-                    )
-                )
-            }
-        } finally {
-            isLoading = false
-        }
+    LaunchedEffect(Unit) {
+        BlockRepository.refreshBlockedUsers(context)
     }
 
     ModalBottomSheet(
@@ -137,7 +84,7 @@ fun BlockedUsersBottomSheet(
                             color = funkyColors.ink
                         )
                         Text(
-                            text = "${blockedIds.size} user(s) blocked",
+                            text = "${blockedUsers.size} user(s) blocked",
                             fontSize = 12.sp,
                             color = funkyColors.mute
                         )
@@ -159,7 +106,16 @@ fun BlockedUsersBottomSheet(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            if (blockedIds.isEmpty()) {
+            if (isLoading && blockedUsers.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 40.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = funkyColors.mango, modifier = Modifier.size(28.dp))
+                }
+            } else if (blockedUsers.isEmpty()) {
                 // Empty state
                 Column(
                     modifier = Modifier
@@ -180,16 +136,17 @@ fun BlockedUsersBottomSheet(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Text(
-                        text = "No Blocked Users",
-                        fontSize = 17.sp,
+                        text = "You haven't blocked anyone.",
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
-                        color = funkyColors.ink
+                        color = funkyColors.ink,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
 
                     Spacer(modifier = Modifier.height(4.dp))
 
                     Text(
-                        text = "You haven't blocked anyone. Blocked users will appear here and can be unblocked anytime.",
+                        text = "Blocked users will appear here and can be unblocked anytime.",
                         fontSize = 13.sp,
                         color = funkyColors.mute,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -205,7 +162,14 @@ fun BlockedUsersBottomSheet(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     contentPadding = PaddingValues(vertical = 6.dp)
                 ) {
-                    items(blockedUsersList, key = { it.id }) { user ->
+                    items(blockedUsers, key = { it.user_id }) { user ->
+                        val displayName = user.profile_name?.takeIf { it.isNotBlank() }
+                            ?: user.username?.takeIf { it.isNotBlank() }
+                            ?: "User (${user.user_id.take(8)})"
+                        val handleText = user.username?.takeIf { it.isNotBlank() }?.let { "@$it" }
+                            ?: "Blocked from chatting & calls"
+                        val isUnblockingThis = unblockingUserId == user.user_id
+
                         Surface(
                             shape = RoundedCornerShape(18.dp),
                             color = funkyColors.bg,
@@ -219,8 +183,8 @@ fun BlockedUsersBottomSheet(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 UserAvatarImage(
-                                    avatarUrl = user.avatarUrl,
-                                    contentDescription = user.name,
+                                    avatarUrl = user.avatar_url.orEmpty(),
+                                    contentDescription = displayName,
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier
                                         .size(46.dp)
@@ -231,7 +195,7 @@ fun BlockedUsersBottomSheet(
 
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = user.name,
+                                        text = displayName,
                                         fontSize = 15.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = funkyColors.ink,
@@ -239,18 +203,29 @@ fun BlockedUsersBottomSheet(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
-                                        text = "Blocked from chatting & calls",
+                                        text = handleText,
                                         fontSize = 11.5.sp,
-                                        color = funkyColors.mute
+                                        color = funkyColors.mute,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
 
                                 Spacer(modifier = Modifier.width(8.dp))
 
                                 Button(
+                                    enabled = !isUnblockingThis,
                                     onClick = {
-                                        ChatPreferencesManager.unblockUser(context, user.id)
-                                        Toast.makeText(context, "${user.name} unblocked successfully", Toast.LENGTH_SHORT).show()
+                                        unblockingUserId = user.user_id
+                                        scope.launch {
+                                            val res = BlockRepository.unblockUser(context, user.user_id)
+                                            unblockingUserId = null
+                                            res.onSuccess {
+                                                Toast.makeText(context, "$displayName unblocked", Toast.LENGTH_SHORT).show()
+                                            }.onFailure { err ->
+                                                Toast.makeText(context, err.message ?: "Could not unblock user.", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
                                     },
                                     shape = RoundedCornerShape(50.dp),
                                     colors = ButtonDefaults.buttonColors(
@@ -262,7 +237,7 @@ fun BlockedUsersBottomSheet(
                                     elevation = ButtonDefaults.buttonElevation(0.dp, 0.dp)
                                 ) {
                                     Text(
-                                        text = "Unblock",
+                                        text = if (isUnblockingThis) "..." else "Unblock",
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold
                                     )

@@ -201,16 +201,10 @@ fun SendGiftBottomSheet(
                         .padding(12.dp)
                 ) {
                     Text(
-                        text = "⚠️ Not Enough Coins",
+                        text = "You don't have enough coins.",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFFDC2626)
-                    )
-                    Spacer(modifier = Modifier.height(3.dp))
-                    Text(
-                        text = "You need more coins to send this gift. More ways to get coins coming soon!",
-                        fontSize = 12.sp,
-                        color = Color(0xFFB91C1C)
                     )
                 }
             }
@@ -401,7 +395,14 @@ fun SendGiftBottomSheet(
                                 onDismiss()
                             },
                             onFailure = { err ->
-                                if (err is InsufficientCoinsException || err.message?.contains("insufficient", ignoreCase = true) == true) {
+                                if (err is com.example.repository.UserBlockedException ||
+                                    com.example.repository.BlockRepository.isUserBlockedError(err.message)
+                                ) {
+                                    errorMessage = com.example.repository.USER_BLOCKED_ERROR_MESSAGE
+                                } else if (err is InsufficientCoinsException ||
+                                    err.message?.contains("insufficient", ignoreCase = true) == true ||
+                                    err.message?.contains("not enough coins", ignoreCase = true) == true
+                                ) {
                                     isInsufficientCoins = true
                                 } else {
                                     errorMessage = err.message ?: "Failed to send gift"

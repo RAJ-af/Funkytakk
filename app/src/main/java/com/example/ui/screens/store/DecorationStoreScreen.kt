@@ -119,6 +119,7 @@ fun DecorationStoreScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val appFlags by com.example.AppFlagsRepository.flags.collectAsState()
 
     BackHandler { onDismiss() }
 
@@ -193,8 +194,13 @@ fun DecorationStoreScreen(
             }.onFailure { err ->
                 val raw = err.message.orEmpty()
                 when {
-                    raw.contains("insufficient_coins", ignoreCase = true) -> {
-                        insufficientCoinsError = true
+                    raw.contains("insufficient_coins", ignoreCase = true) ||
+                        raw.contains("not enough coins", ignoreCase = true) -> {
+                        if (appFlags.coinStoreEnabled) {
+                            insufficientCoinsError = true
+                        } else {
+                            generalErrorDialogMessage = "You don't have enough coins."
+                        }
                     }
                     raw.contains("item_not_found", ignoreCase = true) -> {
                         generalErrorDialogMessage = "This item is no longer available"
@@ -225,8 +231,13 @@ fun DecorationStoreScreen(
         topBar = {
             StoreTopBar(
                 coinsBalance = walletBalance,
+                showAddCoinsButton = appFlags.coinStoreEnabled,
                 onBack = onDismiss,
-                onAddCoins = { showCoinStoreDialog = true }
+                onAddCoins = {
+                    if (appFlags.coinStoreEnabled) {
+                        showCoinStoreDialog = true
+                    }
+                }
             )
         },
         bottomBar = {
@@ -361,8 +372,8 @@ fun DecorationStoreScreen(
         )
     }
 
-    // Full-screen Coin Store (when clicking "+" or on insufficient coins)
-    if (showCoinStoreDialog || insufficientCoinsError) {
+    // Full-screen Coin Store (only when coinStoreEnabled flag is true)
+    if (appFlags.coinStoreEnabled && (showCoinStoreDialog || insufficientCoinsError)) {
         CoinStoreScreen(
             currentBalance = walletBalance,
             insufficientCoinsAlert = insufficientCoinsError,
@@ -389,6 +400,7 @@ fun DecorationStoreScreen(
 @Composable
 private fun StoreTopBar(
     coinsBalance: Int,
+    showAddCoinsButton: Boolean,
     onBack: () -> Unit,
     onAddCoins: () -> Unit
 ) {
@@ -467,7 +479,7 @@ private fun StoreTopBar(
                     )
                 }
 
-                // Coins balance chip with "+" button
+                // Coins balance chip (with "+" button only when coin store is enabled)
                 Surface(
                     shape = RoundedCornerShape(100.dp),
                     color = ColorSurface,
@@ -476,8 +488,13 @@ private fun StoreTopBar(
                 ) {
                     Row(
                         modifier = Modifier
-                            .clickable { onAddCoins() }
-                            .padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                            .then(if (showAddCoinsButton) Modifier.clickable { onAddCoins() } else Modifier)
+                            .padding(
+                                start = 10.dp,
+                                end = if (showAddCoinsButton) 4.dp else 12.dp,
+                                top = if (showAddCoinsButton) 4.dp else 6.dp,
+                                bottom = if (showAddCoinsButton) 4.dp else 6.dp
+                            ),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
@@ -489,20 +506,21 @@ private fun StoreTopBar(
                             color = ColorTextPrimary
                         )
 
-                        // "+" button
-                        IconButton(
-                            onClick = onAddCoins,
-                            modifier = Modifier
-                                .size(28.dp)
-                                .clip(CircleShape)
-                                .background(ColorPrimary)
-                        ) {
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_plus),
-                                contentDescription = "Add Coins",
-                                tint = ColorOnPrimary,
-                                modifier = Modifier.size(15.dp)
-                            )
+                        if (showAddCoinsButton) {
+                            IconButton(
+                                onClick = onAddCoins,
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(ColorPrimary)
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_plus),
+                                    contentDescription = "Add Coins",
+                                    tint = ColorOnPrimary,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
                         }
                     }
                 }

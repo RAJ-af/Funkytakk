@@ -44,6 +44,7 @@ import com.example.ReportGroupRequest
 import com.example.ReportUserRequest
 import com.example.SupabaseClient
 import com.example.SupabaseSessionManager
+import com.example.repository.BlockRepository
 import com.example.repository.EncryptedChatRepository
 import com.example.repository.GroupChatRepository
 import com.example.ui.components.FunkyLockIcon
@@ -137,6 +138,8 @@ fun ReportUserDialog(
     var submitState by remember { mutableStateOf(ReportSubmitState.IDLE) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var attachmentWarning by remember { mutableStateOf<String?>(null) }
+    val showBlockTooOption = reportedUserId.isNotBlank() && contextType.lowercase() != "group"
+    var blockUserToo by remember { mutableStateOf(false) }
 
     val showProofSection = contextType.lowercase() != "moment"
     val showProofSwitch = (contextType.lowercase() == "dm" || contextType.lowercase() == "group") && !dmProofMessages.isNullOrEmpty()
@@ -154,6 +157,9 @@ fun ReportUserDialog(
 
     LaunchedEffect(submitState) {
         if (submitState == ReportSubmitState.SUCCESS) {
+            if (blockUserToo && showBlockTooOption) {
+                BlockRepository.blockUser(context, reportedUserId)
+            }
             delay(1500L)
             onReportSubmitted()
             onDismiss()
@@ -631,6 +637,35 @@ fun ReportUserDialog(
                                 }
                             }
                         }
+                    }
+                }
+
+                if (showBlockTooOption) {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(funkyColors.bg)
+                            .clickable { blockUserToo = !blockUserToo }
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = blockUserToo,
+                            onCheckedChange = { blockUserToo = it },
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = funkyColors.danger,
+                                uncheckedColor = funkyColors.mute
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Block this user too",
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = funkyColors.ink
+                        )
                     }
                 }
 

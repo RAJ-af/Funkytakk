@@ -83,6 +83,7 @@ fun GroupChatScreen(
     onNavigateToManageMembers: (openAdd: Boolean) -> Unit,
     onNavigateToSettings: () -> Unit
 ) {
+    com.example.ui.components.SecureWindow(enabled = true)
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val clipboardManager = LocalClipboardManager.current

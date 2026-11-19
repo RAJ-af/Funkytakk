@@ -21,7 +21,7 @@ class FunkyFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        Log.d(TAG, "onNewToken received (last6=${token.takeLast(6)})")
+        Log.d(TAG, "onNewToken received")
         PushNotificationManager.createNotificationChannels(applicationContext)
         serviceScope.launch {
             PushNotificationManager.registerToken(applicationContext, token)

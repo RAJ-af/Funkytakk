@@ -11,6 +11,7 @@ import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.example.service.PresenceManager
 import com.example.service.PushNotificationManager
+import com.google.firebase.FirebaseApp
 import okhttp3.OkHttpClient
 
 class FunkyTalkApplication : Application(), ImageLoaderFactory {
@@ -35,7 +36,16 @@ class FunkyTalkApplication : Application(), ImageLoaderFactory {
         super.onCreate()
         _instance = this
         appContext = applicationContext
+        try {
+            if (FirebaseApp.getApps(this).isEmpty()) {
+                FirebaseApp.initializeApp(this)
+            }
+            AppCheckInstaller.install(this)
+        } catch (_: Exception) {
+        }
         LegacySecurityMigration.runIfNeeded(this)
+        AppFlagsRepository.init(this)
+        AppFlagsRepository.refreshAsync(this)
         com.example.ui.theme.AppThemeManager.init(this)
         TelemetryManager.init(this)
         PushNotificationManager.initialize(this)

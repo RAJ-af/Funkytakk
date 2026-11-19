@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -13,6 +14,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import android.util.Log
 import com.example.AuthState
 import com.example.AuthViewModel
@@ -149,23 +152,26 @@ fun HomeScreen(
 
     // Followed friends state loaded from Firestore in real-time
     var activeFriends by remember { mutableStateOf<List<FollowedFriend>>(emptyList()) }
+    val blockedUserIds by com.example.repository.BlockRepository.blockedUserIds.collectAsState()
 
-    val activeFriendsList = remember(activeFriends, supabaseProfiles) {
+    val activeFriendsList = remember(activeFriends, supabaseProfiles, blockedUserIds) {
         val mapped = if (activeFriends.isNotEmpty()) {
-            activeFriends.map { f ->
-                val p = supabaseProfiles.find { it.uid == f.id }
-                if (p != null) {
-                    f.copy(
-                        name = p.displayName ?: p.username ?: f.name,
-                        avatarUrl = p.avatar ?: f.avatarUrl,
-                        flagCode = p.countryCode ?: f.flagCode
-                    )
-                } else {
-                    f
-                }
-            }
-        } else {
             activeFriends
+                .filterNot { blockedUserIds.contains(it.id) }
+                .map { f ->
+                    val p = supabaseProfiles.find { it.uid == f.id }
+                    if (p != null) {
+                        f.copy(
+                            name = p.displayName ?: p.username ?: f.name,
+                            avatarUrl = p.avatar ?: f.avatarUrl,
+                            flagCode = p.countryCode ?: f.flagCode
+                        )
+                    } else {
+                        f
+                    }
+                }
+        } else {
+            activeFriends.filterNot { blockedUserIds.contains(it.id) }
         }
         // Place genuine online users first, followed by offline users with moon badges
         mapped.sortedByDescending { it.isOnline }
@@ -173,9 +179,30 @@ fun HomeScreen(
 
     // Dynamic Rooms list state loaded from Supabase voice_rooms in real-time
     var roomsList by remember { mutableStateOf<List<CustomRoom>>(emptyList()) }
+    val visibleRoomsList = remember(roomsList, blockedUserIds) {
+        roomsList.filterNot { blockedUserIds.contains(it.hostId) }
+    }
+    var homeLoadError by remember { mutableStateOf<String?>(null) }
+    var retryTrigger by remember { mutableIntStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    fun isNetworkOfflineError(t: Throwable): Boolean {
+        var cur: Throwable? = t
+        while (cur != null) {
+            if (cur is java.net.UnknownHostException ||
+                cur is java.net.SocketTimeoutException ||
+                cur is java.net.ConnectException ||
+                cur is java.io.IOException
+            ) {
+                return true
+            }
+            cur = cur.cause
+        }
+        return false
+    }
 
     val currentUserId = currentUserProfile.uid
-    LaunchedEffect(currentUserId, supabaseProfiles) {
+    LaunchedEffect(currentUserId, supabaseProfiles, retryTrigger) {
         VoiceRoomRealtimeManager.start()
 
         suspend fun refreshRoomsAndFriends() {
@@ -183,6 +210,14 @@ fun HomeScreen(
                 // 1. Fetch voice rooms from Supabase (only active, live rooms) with authenticated bearer token
                 val authToken = SupabaseSessionManager.getBearerToken(context)
                 val roomsRes = SupabaseClient.api.getVoiceRooms(auth = authToken)
+                if (!roomsRes.isSuccessful) {
+                    Log.w("HomeScreen", "Voice rooms query returned HTTP ${roomsRes.code()}")
+                    if (roomsList.isEmpty()) {
+                        homeLoadError = "Temporarily unable to load rooms (${roomsRes.code()})."
+                    }
+                    return
+                }
+                homeLoadError = null
                 val supaRooms = (roomsRes.body() ?: emptyList()).filter {
                     (it.is_live == true) && (it.status != "ended")
                 }
@@ -196,16 +231,27 @@ fun HomeScreen(
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    Log.e("HomeScreen", "Error fetching active events from Supabase", e)
+                    if (!isNetworkOfflineError(e)) {
+                        Log.w("HomeScreen", "Error fetching active events: ${e.javaClass.simpleName}")
+                    }
                 }
 
-                // 3. Fetch room participants from Supabase and merge with live Realtime participants
-                val participantsRes = SupabaseClient.api.getAllRoomParticipants(auth = authToken)
-                val supaParticipants = participantsRes.body() ?: emptyList()
+                // 3. Fetch participants only for currently visible live rooms (skip when empty)
+                val visibleRoomIds = supaRooms.mapNotNull { it.id?.takeIf { id -> id.isNotBlank() } }
+                val supaParticipants = if (visibleRoomIds.isNotEmpty()) {
+                    val roomIdFilter = "in.(${visibleRoomIds.joinToString(",")})"
+                    val participantsRes = SupabaseClient.api.getAllRoomParticipants(
+                        auth = authToken,
+                        roomIdIn = roomIdFilter
+                    )
+                    participantsRes.body() ?: emptyList()
+                } else {
+                    emptyList()
+                }
                 val liveParticipants = com.example.realtime.VoiceRoomRealtimeManager.getAllLiveParticipants()
                 val allParticipants = (supaParticipants + liveParticipants).distinctBy { "${it.room_id}_${it.user_id}" }
 
-                // 3. Derive real followed friends & presence from Supabase DB followers and room participants
+                // 4. Derive real followed friends & presence from Supabase DB followers and room participants
                 val followedUserIds = try {
                     val followersResp = SupabaseClient.api.getFollowers(
                         auth = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
@@ -214,8 +260,12 @@ fun HomeScreen(
                     if (followersResp.isSuccessful) {
                         followersResp.body()?.map { it.following_id }?.toSet() ?: emptySet()
                     } else emptySet()
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
                 } catch (e: Exception) {
-                    Log.w("HomeScreen", "Could not fetch followed IDs: ${e.message}")
+                    if (!isNetworkOfflineError(e)) {
+                        Log.w("HomeScreen", "Could not fetch followed IDs: ${e.javaClass.simpleName}")
+                    }
                     emptySet()
                 }
 
@@ -331,17 +381,25 @@ fun HomeScreen(
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.w("HomeScreen", "Supabase database table access temporarily unavailable or undergoing schema maintenance: ${e.message}")
+                if (isNetworkOfflineError(e)) {
+                    homeLoadError = "You're offline. Check your connection."
+                    Log.i("HomeScreen", "Offline loading home feed: ${e.javaClass.simpleName}")
+                } else {
+                    homeLoadError = "Unable to refresh rooms right now."
+                    Log.w("HomeScreen", "Supabase backend error refreshing home feed: ${e.javaClass.simpleName}")
+                }
             }
         }
 
         refreshRoomsAndFriends()
 
-        // Background polling fallback every 8 seconds to ensure voice rooms and friends stay in sync
+        // Background polling fallback every 8 seconds only while UI is foregrounded (STARTED)
         launch {
             while (isActive) {
                 delay(8000)
-                refreshRoomsAndFriends()
+                if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+                    refreshRoomsAndFriends()
+                }
             }
         }
 
@@ -375,6 +433,29 @@ fun HomeScreen(
 
     val pendingChatTarget by com.example.service.PushNotificationManager.pendingChatNavigation.collectAsState()
     val vaultStatus by com.example.crypto.VaultSecurityManager.vaultStatus.collectAsState()
+
+    var showVaultGateDialog by remember { mutableStateOf(false) }
+    var pendingPostUnlockAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    LaunchedEffect(vaultStatus) {
+        if (vaultStatus == com.example.crypto.VaultStatus.UNLOCKED && showVaultGateDialog) {
+            showVaultGateDialog = false
+            val action = pendingPostUnlockAction
+            pendingPostUnlockAction = null
+            action?.invoke()
+        }
+    }
+
+    fun requireUnlockedVault(action: () -> Unit) {
+        if (!com.example.crypto.VaultSecurityManager.isVaultLocked() &&
+            vaultStatus == com.example.crypto.VaultStatus.UNLOCKED
+        ) {
+            action()
+        } else {
+            pendingPostUnlockAction = action
+            showVaultGateDialog = true
+        }
+    }
 
     // Handle push notification tap routing to DM or Group chat (with Vault unlock gate & inbox drain)
     LaunchedEffect(pendingChatTarget, vaultStatus) {
@@ -589,7 +670,7 @@ fun HomeScreen(
                         HomeTabContent(
                             currentUserProfile = currentUserProfile,
                             activeFriendsList = activeFriendsList,
-                            roomsList = roomsList,
+                            roomsList = visibleRoomsList,
                             searchQuery = searchQuery,
                             onSearchQueryChange = { searchQuery = it },
                             selectedLanguageFilters = selectedLanguageFilters,
@@ -613,6 +694,11 @@ fun HomeScreen(
                                 val myRole = if (room.hostId == currentUserId) "speaker" else "listener"
                                 viewModel.joinRoom(room.id, room.title, context, role = myRole, hostId = room.hostId)
                                 onRoomClick()
+                            },
+                            homeLoadError = homeLoadError,
+                            onRetryLoad = {
+                                homeLoadError = null
+                                retryTrigger++
                             }
                         )
                     }
@@ -621,41 +707,47 @@ fun HomeScreen(
                             supabaseProfiles = supabaseProfiles,
                             onCreateRoom = { showCreateRoomBottomSheet = true },
                             onStartDirectChat = { userId, name, avatarUrl, flagCode ->
-                                val newChat = DirectChat(
-                                    id = userId.ifBlank { name.hashCode().toString() },
-                                    name = name,
-                                    avatar = avatarUrl,
-                                    lastMsg = "🔒 Secure chat started",
-                                    time = "Just now",
-                                    unreadCount = 0,
-                                    onlineStatus = "online",
-                                    isNativeLanguage = flagCode
-                                )
-                                if (dynamicInitiatedChats.none { it.id == newChat.id }) {
-                                    dynamicInitiatedChats.add(0, newChat)
-                                }
-                                activeChatWindowContact = newChat
+                                requireUnlockedVault {
+                                    val newChat = DirectChat(
+                                        id = userId.ifBlank { name.hashCode().toString() },
+                                        name = name,
+                                        avatar = avatarUrl,
+                                        lastMsg = "🔒 Secure chat started",
+                                        time = "Just now",
+                                        unreadCount = 0,
+                                        onlineStatus = "online",
+                                        isNativeLanguage = flagCode
+                                    )
+                                    if (dynamicInitiatedChats.none { it.id == newChat.id }) {
+                                        dynamicInitiatedChats.add(0, newChat)
+                                    }
+                                    activeChatWindowContact = newChat
 
-                                // Wave send "Hi" using existing E2EE chat system
-                                if (userId.isNotBlank() && !userId.startsWith("partner_mock")) {
-                                    homeScope.launch {
-                                        try {
-                                            com.example.repository.EncryptedChatRepository.init(context)
-                                            val ready = com.example.repository.EncryptedChatRepository.checkRecipientKeyStatus(context, userId)
-                                            if (ready) {
-                                                com.example.repository.EncryptedChatRepository.sendMessage(
-                                                    context = context,
-                                                    recipientUserId = userId,
-                                                    recipientName = name,
-                                                    recipientAvatar = avatarUrl,
-                                                    text = "Hi"
-                                                )
-                                                android.util.Log.d("HomeScreen", "Successfully waved hello (E2EE sent) to $name")
-                                            } else {
-                                                android.util.Log.d("HomeScreen", "E2EE keys missing for $name, Secure Chat Unavailable flow active.")
+                                    // Wave send "Hi" using existing E2EE chat system once vault is unlocked
+                                    if (userId.isNotBlank() && !userId.startsWith("partner_mock")) {
+                                        homeScope.launch {
+                                            try {
+                                                com.example.repository.EncryptedChatRepository.init(context)
+                                                val ready = com.example.repository.EncryptedChatRepository.checkRecipientKeyStatus(context, userId)
+                                                if (ready) {
+                                                    val res = com.example.repository.EncryptedChatRepository.sendMessage(
+                                                        context = context,
+                                                        recipientUserId = userId,
+                                                        recipientName = name,
+                                                        recipientAvatar = avatarUrl,
+                                                        text = "Hi"
+                                                    )
+                                                    if (res.isFailure) {
+                                                        android.util.Log.w("HomeScreen", "Wave deferred: ${res.exceptionOrNull()?.message}")
+                                                    }
+                                                } else {
+                                                    android.util.Log.d("HomeScreen", "E2EE keys missing, Secure Chat Unavailable flow active.")
+                                                }
+                                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                                throw e
+                                            } catch (e: Exception) {
+                                                android.util.Log.e("HomeScreen", "Error waving to user: ${e.javaClass.simpleName}", e)
                                             }
-                                        } catch (e: Exception) {
-                                            android.util.Log.e("HomeScreen", "Error waving to $name: ${e.message}", e)
                                         }
                                     }
                                 }
@@ -678,7 +770,9 @@ fun HomeScreen(
                             conversationsList = dynamicInitiatedChats,
                             supabaseProfiles = supabaseProfiles,
                             onSelectChat = { chat ->
-                                activeChatWindowContact = chat
+                                requireUnlockedVault {
+                                    activeChatWindowContact = chat
+                                }
                             },
                             onOpenSupportChat = onOpenSupportChat,
                             onNavigateToDiscover = { activeTab = "rooms" },
@@ -754,6 +848,54 @@ fun HomeScreen(
                 }
             )
         }
+
+        val hasHomeOverlayOpen = selectedAmusementEvent != null ||
+            showAmusementEventsDialog ||
+            showFilterDialog ||
+            showJoinCodeDialog ||
+            showCreateRoomBottomSheet ||
+            showLogoutDialog ||
+            showVaultGateDialog ||
+            pendingInviteCode != null ||
+            activeGroupChat != null ||
+            activeChatWindowContact != null
+
+        BackHandler(enabled = hasHomeOverlayOpen || activeTab != "home") {
+            when {
+                selectedAmusementEvent != null -> selectedAmusementEvent = null
+                showAmusementEventsDialog -> showAmusementEventsDialog = false
+                showFilterDialog -> showFilterDialog = false
+                showJoinCodeDialog -> {
+                    showJoinCodeDialog = false
+                    joinCodeInputText = ""
+                }
+                showCreateRoomBottomSheet -> showCreateRoomBottomSheet = false
+                showLogoutDialog -> showLogoutDialog = false
+                showVaultGateDialog -> {
+                    showVaultGateDialog = false
+                    pendingPostUnlockAction = null
+                }
+                pendingInviteCode != null -> {
+                    com.example.repository.GroupChatRepository.setPendingInviteCode(null)
+                    context.getSharedPreferences("funky_talk_prefs", android.content.Context.MODE_PRIVATE)
+                        .edit()
+                        .remove("pending_group_invite_code")
+                        .apply()
+                }
+                activeGroupChat != null -> activeGroupChat = null
+                activeChatWindowContact != null -> activeChatWindowContact = null
+                activeTab != "home" -> activeTab = "home"
+            }
+        }
+    }
+
+    if (showVaultGateDialog) {
+        com.example.ui.screens.chat.VaultManagementDialogs(
+            onDismissRequest = {
+                showVaultGateDialog = false
+                pendingPostUnlockAction = null
+            }
+        )
     }
 
     val isAccountSuspended = myModerationStatus?.action_type == "suspend" &&
@@ -888,7 +1030,9 @@ fun HomeScreen(
                             body = mapOf("entered_code" to enteredPasscode)
                         )
                         val rawBody = response.body()?.string()?.trim() ?: ""
-                        android.util.Log.d("JoinRoomByCode", "RPC response status: ${response.code()}, body: $rawBody")
+                        if (BuildConfig.DEBUG) {
+                            android.util.Log.d("JoinRoomByCode", "RPC response status: ${response.code()}")
+                        }
 
                         var targetRoomId: String? = null
                         var targetRoomTitle: String? = null

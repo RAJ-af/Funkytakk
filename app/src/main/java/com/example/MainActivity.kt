@@ -8,18 +8,48 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.fragment.app.FragmentActivity
 import androidx.compose.animation.Crossfade
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.example.ui.screens.*
 import com.example.ui.screens.chat.RestoreChatBackupScreen
 import com.example.ui.components.FloatingBubbleOverlay
 import com.example.ui.theme.MyApplicationTheme
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 class MainActivity : FragmentActivity() {
     private val authViewModel: AuthViewModel by viewModels()
@@ -28,6 +58,9 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            setRecentsScreenshotEnabled(false)
+        }
         enableEdgeToEdge()
 
         // Create System Notification Channels (including channel ID "messages" with importance HIGH)
@@ -127,6 +160,8 @@ class MainActivity : FragmentActivity() {
                             com.example.crypto.VaultSecurityManager.init(applicationContext)
                             com.example.repository.EncryptedChatRepository.init(applicationContext)
                             com.example.repository.GroupChatRepository.init(applicationContext)
+                            com.example.repository.BlockRepository.init(applicationContext)
+                            com.example.repository.BlockRepository.refreshBlockedUsers(applicationContext)
                             TelemetryManager.onLogin(authedUid)
                             authViewModel.refreshModerationStatus(applicationContext)
                             authViewModel.checkAccountReview(applicationContext)
@@ -147,11 +182,37 @@ class MainActivity : FragmentActivity() {
                         }
                     }
 
-                    // Lifecycle observer: refresh moderation status, register push token, and sync group events when app enters foreground / resumes
+                    // Observe remote device revocation / single-device sign-out
+                    val remoteSignOutCounter by com.example.repository.DeviceSessionRepository.remoteSignOutCounter.collectAsState()
+                    val pendingRevokedNotice by com.example.repository.DeviceSessionRepository.deviceRevokedNotice.collectAsState()
+                    var activeRevokedDialogMessage by rememberSaveable { mutableStateOf<String?>(null) }
+
+                    LaunchedEffect(remoteSignOutCounter) {
+                        if (remoteSignOutCounter > 0L) {
+                            authViewModel.clearStateOnRemoteSignOut()
+                            val msg = com.example.repository.DeviceSessionRepository.deviceRevokedNotice.value
+                            if (!msg.isNullOrBlank()) {
+                                activeRevokedDialogMessage = msg
+                                com.example.repository.DeviceSessionRepository.consumeDeviceRevokedNotice()
+                            }
+                            currentScreen = "auth"
+                        }
+                    }
+
+                    LaunchedEffect(pendingRevokedNotice) {
+                        val msg = pendingRevokedNotice
+                        if (!msg.isNullOrBlank()) {
+                            activeRevokedDialogMessage = msg
+                            com.example.repository.DeviceSessionRepository.consumeDeviceRevokedNotice()
+                        }
+                    }
+
+                    // Lifecycle observer: refresh app flags if stale, moderation status, push token, touch_device, and group events on resume
                     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
                     DisposableEffect(lifecycleOwner) {
                         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
                             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                                AppFlagsRepository.refreshIfStale(applicationContext)
                                 // Keep Side Dynamic Island strictly in-app while foregrounded
                                 com.example.service.VoiceRoomOverlayManager.stopService(this@MainActivity)
                                 if (SupabaseSessionManager.hasValidAuthenticatedSession(applicationContext) && authState is AuthState.Success) {
@@ -162,6 +223,9 @@ class MainActivity : FragmentActivity() {
                                     com.example.service.PushNotificationManager.onUserLoggedIn(applicationContext)
                                     com.example.repository.GroupChatRepository.onAppResumed(applicationContext)
                                     com.example.ui.components.RoomInviteOverlayManager.checkAndShowPendingInvite(applicationContext)
+                                    lifecycleOwner.lifecycleScope.launch {
+                                        com.example.repository.DeviceSessionRepository.touchDevice(applicationContext)
+                                    }
                                 }
                             }
                         }
@@ -170,6 +234,23 @@ class MainActivity : FragmentActivity() {
                             lifecycleOwner.lifecycle.removeObserver(observer)
                         }
                     }
+
+                    // Foreground heartbeat every 60s while signed in and foregrounded
+                    LaunchedEffect(authState, lifecycleOwner) {
+                        if (authState !is AuthState.Success) return@LaunchedEffect
+                        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                            while (isActive) {
+                                delay(60_000L)
+                                if (SupabaseSessionManager.hasValidAuthenticatedSession(applicationContext)) {
+                                    com.example.repository.DeviceSessionRepository.touchDevice(applicationContext)
+                                }
+                            }
+                        }
+                    }
+
+                    val appFlags by AppFlagsRepository.flags.collectAsState()
+                    val updateRequired = appFlags.minSupportedVersionCode > 0 &&
+                        BuildConfig.VERSION_CODE < appFlags.minSupportedVersionCode
 
                     val isSuspended = remember(myModerationStatus) {
                         myModerationStatus != null &&
@@ -314,7 +395,21 @@ class MainActivity : FragmentActivity() {
                         }
                     }
 
-                    if (isSuspended) {
+                    if (updateRequired) {
+                        UpdateRequiredGateScreen(
+                            onOpenUpdateUrl = {
+                                try {
+                                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(AppFlagsRepository.UPDATE_URL)))
+                                } catch (_: Exception) {
+                                    android.widget.Toast.makeText(
+                                        applicationContext,
+                                        "Unable to open update link",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
+                        )
+                    } else if (isSuspended) {
                         if (currentScreen == "support_chat") {
                             SupportChatScreen(
                                 reportId = activeSupportReportId,
@@ -397,6 +492,9 @@ class MainActivity : FragmentActivity() {
                             "privacy" -> PrivacyScreen(
                                 onContinueClick = {
                                     currentScreen = "auth"
+                                },
+                                onBackClick = {
+                                    currentScreen = "welcome"
                                 }
                             )
                             "restore_chat_backup" -> RestoreChatBackupScreen(
@@ -414,6 +512,9 @@ class MainActivity : FragmentActivity() {
                                 },
                                 onVerificationWaiting = {
                                     currentScreen = "verify_email"
+                                },
+                                onBackClick = {
+                                    currentScreen = "privacy"
                                 }
                             )
                             "verify_email" -> VerifyEmailScreen(
@@ -751,11 +852,50 @@ class MainActivity : FragmentActivity() {
                             onDismiss = { com.example.ui.components.AppNetworkManager.dismissNoInternetDialog() }
                         )
                     }
+
+                    activeRevokedDialogMessage?.let { revokedMsg ->
+                        val colors = com.example.ui.theme.LocalFunkyColors.current
+                        androidx.compose.material3.AlertDialog(
+                            onDismissRequest = { activeRevokedDialogMessage = null },
+                            containerColor = colors.surface,
+                            titleContentColor = colors.ink,
+                            textContentColor = colors.ink,
+                            title = {
+                                androidx.compose.material3.Text(
+                                    text = "Signed out",
+                                    style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            },
+                            text = {
+                                androidx.compose.material3.Text(text = revokedMsg)
+                            },
+                            confirmButton = {
+                                androidx.compose.material3.TextButton(
+                                    onClick = { activeRevokedDialogMessage = null },
+                                    modifier = Modifier.testTag("device_revoked_ok_button")
+                                ) {
+                                    androidx.compose.material3.Text("OK", color = colors.mango, fontWeight = FontWeight.Bold)
+                                }
+                            },
+                            modifier = Modifier.testTag("device_revoked_dialog")
+                        )
+                    }
                 }
                 }
                 }
             }
         }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        com.example.ui.components.SecureWindowRegistry.setActivityPaused(this, true)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        com.example.ui.components.SecureWindowRegistry.setActivityPaused(this, false)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -871,6 +1011,83 @@ class MainActivity : FragmentActivity() {
             }
             if (scheme == "funkytalk" || scheme == "https" || scheme == "http") {
                 pendingDeepLinkUri = data
+            }
+        }
+    }
+}
+
+@Composable
+private fun UpdateRequiredGateScreen(
+    onOpenUpdateUrl: () -> Unit
+) {
+    val funkyColors = com.example.ui.theme.LocalFunkyColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(horizontal = 28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(80.dp)
+                .clip(CircleShape)
+                .background(funkyColors.mango.copy(alpha = 0.16f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                painter = painterResource(id = R.drawable.ic_rocket),
+                contentDescription = "Update required",
+                tint = funkyColors.mango,
+                modifier = Modifier.size(38.dp)
+            )
+        }
+        Spacer(modifier = Modifier.height(22.dp))
+        Text(
+            text = "Update required",
+            fontSize = 24.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color = funkyColors.ink
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        Text(
+            text = "A newer version of FunkyTalk is required to continue. Please update your app to get the latest fixes and security improvements.",
+            fontSize = 14.5.sp,
+            color = funkyColors.mute,
+            textAlign = TextAlign.Center,
+            lineHeight = 21.sp
+        )
+        Spacer(modifier = Modifier.height(26.dp))
+        Button(
+            onClick = onOpenUpdateUrl,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = funkyColors.mango,
+                contentColor = funkyColors.onMango
+            ),
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+                .testTag("update_required_button")
+        ) {
+            Text(
+                text = "Update App",
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 15.5.sp
+            )
+        }
+        if (BuildConfig.DEBUG && AppFlagsRepository.hasDebugOverrides()) {
+            Spacer(modifier = Modifier.height(12.dp))
+            TextButton(
+                onClick = { AppFlagsRepository.clearDebugOverrides() },
+                modifier = Modifier.testTag("debug_reset_update_gate_button")
+            ) {
+                Text(
+                    text = "Debug: Clear Flag Overrides",
+                    color = funkyColors.mute
+                )
             }
         }
     }

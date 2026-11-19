@@ -7,6 +7,9 @@ import android.util.Log
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -19,7 +22,18 @@ object SupabaseSessionManager {
     private const val KEY_REFRESH_TOKEN = "refresh_token"
     private const val KEY_USER_ID = "user_id" // Must always be Supabase Auth UUID
 
+    private const val PROACTIVE_REFRESH_BUFFER_MS = 5 * 60 * 1000L
+    private const val HARD_EXPIRY_BUFFER_MS = 60_000L
+    private const val MAX_VERIFY_ATTEMPTS = 4
+    private val VERIFY_BACKOFF_DELAYS_MS = longArrayOf(2000L, 4000L, 8000L)
+
+    const val KIND_LOGIN = "login"
+    const val KIND_REFRESH = "refresh"
+
     private val UUID_REGEX = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+    // Single-flight guard so concurrent callers share one verify-firebase-token call
+    private val refreshMutex = Mutex()
 
     @Volatile
     private var cachedAccessToken: String? = null
@@ -29,6 +43,24 @@ object SupabaseSessionManager {
 
     @Volatile
     private var cachedUserId: String? = null
+
+    sealed class ExchangeResult {
+        data class Success(
+            val accessToken: String,
+            val refreshToken: String?,
+            val userId: String
+        ) : ExchangeResult()
+
+        data class DeviceRevoked(
+            val message: String = com.example.repository.DeviceSessionRepository.DEVICE_REVOKED_MESSAGE
+        ) : ExchangeResult()
+
+        data class Failure(
+            val httpCode: Int? = null,
+            val code: String? = null,
+            val message: String
+        ) : ExchangeResult()
+    }
 
     fun isValidUuid(str: String?): Boolean {
         if (str.isNullOrBlank()) return false
@@ -59,30 +91,44 @@ object SupabaseSessionManager {
                     }
                 }
             } else null
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to extract sub from JWT: ${e.message}")
+        } catch (_: Exception) {
+            if (BuildConfig.DEBUG) {
+                Log.d(TAG, "Failed to extract sub claim from JWT")
+            }
             null
         }
+    }
+
+    fun getTokenExpirationMillis(token: String?): Long? {
+        if (token.isNullOrBlank()) return null
+        if (token == BuildConfig.SUPABASE_ANON_KEY) return Long.MAX_VALUE
+        return try {
+            val parts = token.split(".")
+            if (parts.size < 2) return null
+            val decodedBytes = Base64.decode(
+                parts[1],
+                Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP
+            )
+            val json = JSONObject(String(decodedBytes, Charsets.UTF_8))
+            val exp = json.optLong("exp", 0L)
+            if (exp <= 0L) null else exp * 1000L
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun shouldRefreshToken(token: String?): Boolean {
+        if (token.isNullOrBlank()) return true
+        if (token == BuildConfig.SUPABASE_ANON_KEY) return false
+        val expMs = getTokenExpirationMillis(token) ?: return true
+        return expMs <= (System.currentTimeMillis() + PROACTIVE_REFRESH_BUFFER_MS)
     }
 
     fun isTokenExpired(token: String?): Boolean {
         if (token.isNullOrBlank()) return true
         if (token == BuildConfig.SUPABASE_ANON_KEY) return false
-        return try {
-            val parts = token.split(".")
-            if (parts.size >= 2) {
-                val decodedBytes = Base64.decode(
-                    parts[1],
-                    Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP
-                )
-                val json = JSONObject(String(decodedBytes, Charsets.UTF_8))
-                val exp = json.optLong("exp", 0L)
-                if (exp == 0L) false
-                else (exp * 1000L) <= (System.currentTimeMillis() + 60_000L) // expired or expiring in 60s
-            } else true
-        } catch (e: Exception) {
-            true
-        }
+        val expMs = getTokenExpirationMillis(token) ?: return true
+        return expMs <= (System.currentTimeMillis() + HARD_EXPIRY_BUFFER_MS)
     }
 
     private fun getPrefs(context: Context): SharedPreferences {
@@ -92,7 +138,7 @@ object SupabaseSessionManager {
     fun setSession(context: Context, accessToken: String?, refreshToken: String? = null, userId: String? = null) {
         // Never save anon key as authenticated access token
         val realAccessToken = if (accessToken == BuildConfig.SUPABASE_ANON_KEY) null else accessToken
-        
+
         // Resolve the true Supabase Auth UUID
         val resolvedUuid = when {
             isValidUuid(userId) -> userId
@@ -124,7 +170,9 @@ object SupabaseSessionManager {
             apply()
         }
 
-        Log.d(TAG, "Session updated: hasAccessToken=${realAccessToken != null}, resolvedUuid=$resolvedUuid")
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "Session updated: hasAccessToken=${realAccessToken != null}, hasUuid=${resolvedUuid != null}")
+        }
         try {
             com.example.realtime.VoiceRoomRealtimeManager.setAuthToken(realAccessToken)
         } catch (_: Exception) {}
@@ -196,99 +244,260 @@ object SupabaseSessionManager {
     }
 
     /**
-     * Ensures an active, valid Supabase session. If the token is missing or expired,
-     * uses the current Firebase user token to mint a real Supabase session.
+     * Ensures an active, valid Supabase session using a single-flight Mutex.
+     * Proactively refreshes when the JWT is within 5 minutes of `exp` using kind = "refresh".
      * Returns the Supabase Auth UUID, or null if unauthenticated.
      */
     suspend fun ensureActiveSession(context: Context): String? = withContext(Dispatchers.IO) {
+        if (com.example.repository.DeviceSessionRepository.isRevocationInProgress()) {
+            return@withContext null
+        }
         val existingToken = getAccessToken(context)
         val existingUid = getUserId(context)
 
-        if (!existingToken.isNullOrBlank() && !isTokenExpired(existingToken) && isValidUuid(existingUid)) {
+        if (!existingToken.isNullOrBlank() && !shouldRefreshToken(existingToken) && isValidUuid(existingUid)) {
             return@withContext existingUid
         }
 
-        return@withContext refreshSessionFromFirebase(context, forceFirebaseRefresh = false)
+        return@withContext refreshMutex.withLock {
+            if (com.example.repository.DeviceSessionRepository.isRevocationInProgress()) {
+                return@withLock null
+            }
+            // Re-check inside lock so queued callers reuse the freshly minted session
+            val tokenAfterLock = getAccessToken(context)
+            val uidAfterLock = getUserId(context)
+            if (!tokenAfterLock.isNullOrBlank() && !shouldRefreshToken(tokenAfterLock) && isValidUuid(uidAfterLock)) {
+                return@withLock uidAfterLock
+            }
+            refreshSessionFromFirebaseLocked(context, forceFirebaseRefresh = false)
+        }
     }
 
     /**
-     * Force-refreshes the Supabase session from Firebase (e.g., on HTTP 401 or before logout when expired).
-     * Aborts without writing the session if FirebaseAuth.currentUser becomes null while in flight.
+     * Force-refreshes the Supabase session from Firebase (e.g., on HTTP 401 or before logout when expired)
+     * with kind = "refresh". Concurrent 401 handlers serialize on [refreshMutex] and reuse the updated
+     * token if already rotated.
      */
     suspend fun forceRefreshSession(context: Context): String? = withContext(Dispatchers.IO) {
-        return@withContext refreshSessionFromFirebase(context, forceFirebaseRefresh = true)
+        if (com.example.repository.DeviceSessionRepository.isRevocationInProgress()) {
+            return@withContext null
+        }
+        val tokenBeforeWait = getAccessToken(context)
+        return@withContext refreshMutex.withLock {
+            if (com.example.repository.DeviceSessionRepository.isRevocationInProgress()) {
+                return@withLock null
+            }
+            val currentToken = getAccessToken(context)
+            val currentUid = getUserId(context)
+            if (!currentToken.isNullOrBlank() &&
+                currentToken != tokenBeforeWait &&
+                !shouldRefreshToken(currentToken) &&
+                isValidUuid(currentUid)
+            ) {
+                return@withLock currentUid
+            }
+            refreshSessionFromFirebaseLocked(context, forceFirebaseRefresh = true)
+        }
     }
 
-    private suspend fun refreshSessionFromFirebase(
+    /**
+     * Exchanges an explicit Firebase ID token under the single-flight [refreshMutex]
+     * with device metadata and [kind] ("login" after interactive sign-in, "refresh" otherwise).
+     */
+    suspend fun exchangeFirebaseToken(
+        context: Context,
+        firebaseIdToken: String,
+        fallbackUserId: String? = null,
+        kind: String = KIND_LOGIN
+    ): ExchangeResult = withContext(Dispatchers.IO) {
+        if (kind == KIND_LOGIN) {
+            com.example.repository.DeviceSessionRepository.resetRevokedGuardForInteractiveSignIn()
+        }
+        val devicePayload = DeviceIdentity.getVerifyDevicePayload(context)
+        return@withContext refreshMutex.withLock {
+            val outcome = verifyTokenWithBackoff(
+                firebaseIdToken = firebaseIdToken,
+                devicePayload = devicePayload,
+                kind = kind
+            )
+            when (outcome) {
+                is ExchangeResult.Success -> {
+                    val resolvedUid = outcome.userId.takeIf { isValidUuid(it) } ?: fallbackUserId
+                    setSession(context, outcome.accessToken, outcome.refreshToken, resolvedUid)
+                    val finalUid = getUserId(context) ?: resolvedUid ?: outcome.userId
+                    ExchangeResult.Success(
+                        accessToken = outcome.accessToken,
+                        refreshToken = outcome.refreshToken,
+                        userId = finalUid
+                    )
+                }
+                is ExchangeResult.DeviceRevoked -> {
+                    com.example.repository.DeviceSessionRepository.triggerLocalSignOutForRevocation(
+                        context = context,
+                        showNotice = true
+                    )
+                    outcome
+                }
+                is ExchangeResult.Failure -> outcome
+            }
+        }
+    }
+
+    internal suspend fun verifyTokenWithBackoff(
+        firebaseIdToken: String,
+        devicePayload: VerifyDevicePayload,
+        kind: String,
+        invokeVerify: suspend (VerifyFirebaseTokenRequest) -> retrofit2.Response<VerifyFirebaseTokenResponse> = { req ->
+            SupabaseClient.api.verifyFirebaseToken(request = req)
+        }
+    ): ExchangeResult {
+        var lastCode: Int? = null
+        var lastErrorCode: String? = null
+        var lastMessage = com.example.repository.DeviceSessionRepository.SESSION_MINT_FAILED_MESSAGE
+
+        for (attempt in 0 until MAX_VERIFY_ATTEMPTS) {
+            if (attempt > 0) {
+                delay(VERIFY_BACKOFF_DELAYS_MS[(attempt - 1).coerceIn(VERIFY_BACKOFF_DELAYS_MS.indices)])
+            }
+            try {
+                val verifyRes = invokeVerify(
+                    VerifyFirebaseTokenRequest(
+                        firebase_token = firebaseIdToken,
+                        device = devicePayload,
+                        kind = kind
+                    )
+                )
+                if (verifyRes.isSuccessful && verifyRes.body() != null) {
+                    val body = verifyRes.body()!!
+                    val accessToken = body.access_token
+                    val refreshToken = body.refresh_token
+                    val userId = body.user_id ?: body.user?.id ?: extractUserIdFromJwt(accessToken)
+                    if (!accessToken.isNullOrBlank() && !userId.isNullOrBlank()) {
+                        return ExchangeResult.Success(
+                            accessToken = accessToken,
+                            refreshToken = refreshToken,
+                            userId = userId
+                        )
+                    }
+                    lastCode = verifyRes.code()
+                    lastErrorCode = body.code
+                    lastMessage = body.error ?: com.example.repository.DeviceSessionRepository.SESSION_MINT_FAILED_MESSAGE
+                    if (BuildConfig.DEBUG) {
+                        Log.w(TAG, "verify-firebase-token attempt ${attempt + 1} missing access_token")
+                    }
+                } else {
+                    lastCode = verifyRes.code()
+                    val rawErrorBody = try { verifyRes.errorBody()?.string() } catch (_: Exception) { null }
+                    lastErrorCode = com.example.repository.DeviceSessionRepository.extractErrorCode(rawErrorBody)
+
+                    if (lastCode == 403 && lastErrorCode == "device_revoked") {
+                        Log.w(TAG, "verify-firebase-token returned HTTP 403 device_revoked; stopping immediately")
+                        return ExchangeResult.DeviceRevoked()
+                    }
+
+                    lastMessage = when {
+                        lastCode == 503 || lastErrorCode == "session_mint_failed" ->
+                            com.example.repository.DeviceSessionRepository.SESSION_MINT_FAILED_MESSAGE
+                        lastCode == 401 -> "Session expired. Please sign in again."
+                        lastCode in 500..599 -> com.example.repository.DeviceSessionRepository.SESSION_MINT_FAILED_MESSAGE
+                        else -> "Couldn't sign in. Try again."
+                    }
+                    Log.w(
+                        TAG,
+                        "verify-firebase-token HTTP $lastCode code=${lastErrorCode ?: "none"} on attempt ${attempt + 1}/$MAX_VERIFY_ATTEMPTS"
+                    )
+                    if (lastCode != 503 && lastCode !in 500..599) {
+                        return ExchangeResult.Failure(lastCode, lastErrorCode, lastMessage)
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                lastMessage = e.localizedMessage ?: "Network error contacting auth service."
+                Log.w(TAG, "verify-firebase-token exception on attempt ${attempt + 1}/$MAX_VERIFY_ATTEMPTS: ${e.javaClass.simpleName}")
+                if (attempt >= MAX_VERIFY_ATTEMPTS - 1) {
+                    return ExchangeResult.Failure(lastCode, lastErrorCode, lastMessage)
+                }
+            }
+        }
+        return ExchangeResult.Failure(lastCode, lastErrorCode, lastMessage)
+    }
+
+    private suspend fun refreshSessionFromFirebaseLocked(
         context: Context,
         forceFirebaseRefresh: Boolean
-    ): String? = withContext(Dispatchers.IO) {
+    ): String? {
         val firebaseUser = try { FirebaseAuth.getInstance().currentUser } catch (_: Exception) { null }
         if (firebaseUser == null) {
-            Log.w(TAG, "ensureActiveSession: No Firebase user logged in")
-            return@withContext null
+            if (BuildConfig.DEBUG) {
+                Log.w(TAG, "ensureActiveSession: No Firebase user logged in")
+            }
+            return null
         }
 
         try {
-            Log.d(TAG, "ensureActiveSession: Refreshing Supabase session from Firebase token (force=$forceFirebaseRefresh)...")
+            if (BuildConfig.DEBUG) {
+                Log.d(TAG, "Refreshing Supabase session from Firebase token (force=$forceFirebaseRefresh)")
+            }
             val idToken = withTimeoutOrNull(12000L) {
                 firebaseUser.getIdToken(forceFirebaseRefresh).await()?.token
             }
 
             if (idToken.isNullOrBlank()) {
                 Log.e(TAG, "ensureActiveSession: Firebase getIdToken returned null")
-                return@withContext null
+                return null
             }
 
-            val verifyRes = SupabaseClient.api.verifyFirebaseToken(
-                request = VerifyFirebaseTokenRequest(
-                    firebase_token = idToken,
-                    firebaseIdToken = idToken
-                )
+            val exchangeResult = verifyTokenWithBackoff(
+                firebaseIdToken = idToken,
+                devicePayload = DeviceIdentity.getVerifyDevicePayload(context),
+                kind = KIND_REFRESH
             )
 
-            // Abort without writing the session if FirebaseAuth.currentUser is now null (e.g., user logged out while verifyFirebaseToken was in flight)
-            val currentFirebaseUser = try { FirebaseAuth.getInstance().currentUser } catch (_: Exception) { null }
-            if (currentFirebaseUser == null || currentFirebaseUser.uid != firebaseUser.uid) {
-                Log.w(TAG, "ensureActiveSession: FirebaseAuth.currentUser is now null or changed after verifyFirebaseToken; aborting without writing session")
-                return@withContext null
+            if (exchangeResult is ExchangeResult.DeviceRevoked) {
+                com.example.repository.DeviceSessionRepository.triggerLocalSignOutForRevocation(
+                    context = context,
+                    showNotice = true
+                )
+                return null
             }
 
-            if (verifyRes.isSuccessful && verifyRes.body() != null) {
-                val body = verifyRes.body()!!
-                val accessToken = body.access_token
-                val refreshToken = body.refresh_token
-                val userId = body.user_id ?: body.user?.id ?: extractUserIdFromJwt(accessToken)
-
-                if (!accessToken.isNullOrBlank()) {
-                    setSession(context, accessToken, refreshToken, userId)
-                    val resolvedId = getUserId(context)
-                    Log.d(TAG, "ensureActiveSession: Successfully established Supabase session, uuid=$resolvedId")
-                    return@withContext resolvedId
-                } else {
-                    Log.e(TAG, "ensureActiveSession: verifyFirebaseToken response missing access_token")
+            // Abort without writing the session if FirebaseAuth.currentUser is now null
+            val currentFirebaseUser = try { FirebaseAuth.getInstance().currentUser } catch (_: Exception) { null }
+            if (currentFirebaseUser == null || currentFirebaseUser.uid != firebaseUser.uid) {
+                if (BuildConfig.DEBUG) {
+                    Log.w(TAG, "FirebaseAuth.currentUser changed during refresh; aborting session write")
                 }
-            } else {
-                val err = verifyRes.errorBody()?.string() ?: verifyRes.message()
-                Log.e(TAG, "ensureActiveSession: verifyFirebaseToken failed (code ${verifyRes.code()}): $err")
+                return null
+            }
+
+            if (exchangeResult is ExchangeResult.Success) {
+                setSession(context, exchangeResult.accessToken, exchangeResult.refreshToken, exchangeResult.userId)
+                val resolvedId = getUserId(context)
+                if (BuildConfig.DEBUG) {
+                    Log.d(TAG, "Established Supabase session successfully")
+                }
+                return resolvedId
+            } else if (exchangeResult is ExchangeResult.Failure) {
+                Log.e(TAG, "Session refresh failed: code=${exchangeResult.httpCode}")
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.e(TAG, "ensureActiveSession: Exception refreshing session", e)
+            Log.e(TAG, "Exception refreshing session: ${e.javaClass.simpleName}")
         }
 
         val postCheckFirebaseUser = try { FirebaseAuth.getInstance().currentUser } catch (_: Exception) { null }
         if (postCheckFirebaseUser == null) {
-            return@withContext null
+            return null
         }
 
         val activeToken = getAccessToken(context)
         val activeUid = getUserId(context)
         if (!activeToken.isNullOrBlank() && !isTokenExpired(activeToken) && isValidUuid(activeUid)) {
-            return@withContext activeUid
+            return activeUid
         }
-        return@withContext null
+        return null
     }
 
     fun clearSession(context: Context) {

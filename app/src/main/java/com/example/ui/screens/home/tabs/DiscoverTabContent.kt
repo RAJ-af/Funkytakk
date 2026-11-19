@@ -293,9 +293,12 @@ fun DiscoverTabContent(
     val filterSettingsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val profileSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
+    val blockedUserIds by com.example.repository.BlockRepository.blockedUserIds.collectAsState()
+
     // Filter logic
-    val filteredPartners = remember(partnersList, searchQuery, activeCategoryFilter, selectedLanguageFilter, languageFilterType, selectedInterestTag) {
+    val filteredPartners = remember(partnersList, blockedUserIds, searchQuery, activeCategoryFilter, selectedLanguageFilter, languageFilterType, selectedInterestTag) {
         partnersList.filter { partner ->
+            if (blockedUserIds.contains(partner.id)) return@filter false
             // Search query filter
             val matchesSearch = if (searchQuery.isBlank()) true else {
                 partner.name.contains(searchQuery, ignoreCase = true) ||
@@ -743,6 +746,12 @@ fun DiscoverTabContent(
             confirmButton = {
                 Button(
                     onClick = {
+                        if (blockedUserIds.contains(targetUser.id)) {
+                            Toast.makeText(context, com.example.repository.USER_BLOCKED_ERROR_MESSAGE, Toast.LENGTH_SHORT).show()
+                            waveDialogUser = null
+                            waveCustomMessage = ""
+                            return@Button
+                        }
                         // Mark as waved
                         partnersList = partnersList.map {
                             if (it.id == targetUser.id) it.copy(isWaved = true) else it

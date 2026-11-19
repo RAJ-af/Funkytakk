@@ -77,6 +77,7 @@ fun MomentsTabContent(
     val trendingFeed = remember { MomentTabFeedState("trending") }
     val myLangFeed = remember { MomentTabFeedState("my_language") }
     val activeFeed = if (selectedTab == 0) trendingFeed else myLangFeed
+    val blockedUserIds by com.example.repository.BlockRepository.blockedUserIds.collectAsState()
 
     var showCommentsSheet by remember { mutableStateOf(false) }
     var commentsInitialTab by remember { mutableIntStateOf(0) }
@@ -214,22 +215,25 @@ fun MomentsTabContent(
         }
     }
 
-    val verticalPagerState = rememberPagerState(pageCount = { activeFeed.items.size })
+    val visibleFeedItems = remember(activeFeed.items.toList(), blockedUserIds) {
+        activeFeed.items.filterNot { blockedUserIds.contains(it.author.id) }
+    }
+    val verticalPagerState = rememberPagerState(pageCount = { visibleFeedItems.size })
 
-    LaunchedEffect(verticalPagerState.currentPage, activeFeed.items.size, selectedTab) {
-        val count = activeFeed.items.size
+    LaunchedEffect(verticalPagerState.currentPage, visibleFeedItems.size, selectedTab) {
+        val count = visibleFeedItems.size
         if (count > 0 && verticalPagerState.currentPage >= count - 3 && activeFeed.hasMore) {
             loadFeedPage(activeFeed, reset = false)
         }
     }
 
-    val currentDisplayedMoment = activeFeed.items.getOrNull(verticalPagerState.currentPage)
+    val currentDisplayedMoment = visibleFeedItems.getOrNull(verticalPagerState.currentPage)
     val pullToRefreshState = rememberPullToRefreshState()
 
     val isCurrentSlideLightCanvas = currentDisplayedMoment != null &&
         currentDisplayedMoment.media.isEmpty() &&
         MomentsRepository.resolveBgPreset(currentDisplayedMoment.bg_key).isDarkText
-    val useLightHeaderContrast = !isAppDark && (activeFeed.items.isEmpty() || isCurrentSlideLightCanvas)
+    val useLightHeaderContrast = !isAppDark && (visibleFeedItems.isEmpty() || isCurrentSlideLightCanvas)
     val headerInk = if (useLightHeaderContrast) funkyColors.ink else Color.White
     val headerMutedInk = if (useLightHeaderContrast) funkyColors.mute else Color.White.copy(alpha = 0.72f)
     val headerBtnBg = if (useLightHeaderContrast) funkyColors.surface else Color.White.copy(alpha = 0.2f)
@@ -259,7 +263,7 @@ fun MomentsTabContent(
             modifier = Modifier.fillMaxSize()
         ) {
             when {
-                activeFeed.isInitialLoading && activeFeed.items.isEmpty() -> {
+                activeFeed.isInitialLoading && visibleFeedItems.isEmpty() -> {
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
@@ -268,7 +272,7 @@ fun MomentsTabContent(
                     }
                 }
 
-                activeFeed.items.isEmpty() -> {
+                visibleFeedItems.isEmpty() -> {
                     val isErrorState = !activeFeed.errorMessage.isNullOrBlank()
                     Box(
                         modifier = Modifier
@@ -340,10 +344,10 @@ fun MomentsTabContent(
                 else -> {
                     VerticalPager(
                         state = verticalPagerState,
-                        key = { idx -> activeFeed.items.getOrNull(idx)?.id ?: idx },
+                        key = { idx -> visibleFeedItems.getOrNull(idx)?.id ?: idx },
                         modifier = Modifier.fillMaxSize()
                     ) { pageIndex ->
-                        val moment = activeFeed.items.getOrNull(pageIndex) ?: return@VerticalPager
+                        val moment = visibleFeedItems.getOrNull(pageIndex) ?: return@VerticalPager
                         val isBookmarked = bookmarkedIds.contains(moment.id)
 
                         MomentV2Slide(

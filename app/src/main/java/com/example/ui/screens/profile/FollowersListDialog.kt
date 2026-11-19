@@ -45,6 +45,10 @@ fun FollowersListBottomSheet(
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     val userList = remember { mutableStateListOf<DiscoverableProfile>() }
+    val blockedUserIds by com.example.repository.BlockRepository.blockedUserIds.collectAsState()
+    val visibleUsers = remember(userList.toList(), blockedUserIds) {
+        userList.filterNot { blockedUserIds.contains(it.auth_user_id) }
+    }
 
     LaunchedEffect(userId, showFollowers) {
         isLoading = true
@@ -165,7 +169,7 @@ fun FollowersListBottomSheet(
                         fontWeight = FontWeight.Medium
                     )
                 }
-            } else if (userList.isEmpty()) {
+            } else if (visibleUsers.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -181,8 +185,8 @@ fun FollowersListBottomSheet(
                 }
             } else {
                 val context = androidx.compose.ui.platform.LocalContext.current
-                LaunchedEffect(userList) {
-                    val uids = userList.map { it.auth_user_id }.filter { it.isNotBlank() }
+                LaunchedEffect(visibleUsers) {
+                    val uids = visibleUsers.map { it.auth_user_id }.filter { it.isNotBlank() }
                     if (uids.isNotEmpty()) {
                         com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, uids)
                     }
@@ -191,7 +195,7 @@ fun FollowersListBottomSheet(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.heightIn(max = 400.dp)
                 ) {
-                    items(userList) { user ->
+                    items(visibleUsers, key = { it.auth_user_id }) { user ->
                         val targetUid = user.auth_user_id
                         Row(
                             modifier = Modifier

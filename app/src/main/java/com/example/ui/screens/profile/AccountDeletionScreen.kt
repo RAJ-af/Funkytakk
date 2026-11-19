@@ -1,6 +1,7 @@
 package com.example.ui.screens.profile
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -71,6 +72,14 @@ fun AccountDeletionScreen(
     var passwordVisible by remember { mutableStateOf(false) }
     var reauthError by remember { mutableStateOf<String?>(null) }
     var isReauthenticating by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = !isLoading && !isReauthenticating) {
+        if (showPasswordDialog) {
+            showPasswordDialog = false
+        } else {
+            onBack()
+        }
+    }
 
     val reasons = listOf(
         "Taking a break",

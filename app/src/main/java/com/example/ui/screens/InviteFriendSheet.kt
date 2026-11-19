@@ -51,6 +51,10 @@ fun InviteFriendBottomSheetContent(
 
     var isLoading by remember { mutableStateOf(true) }
     var invitableUsers by remember { mutableStateOf<List<com.example.InvitableUserResponse>>(emptyList()) }
+    val blockedUserIds by com.example.repository.BlockRepository.blockedUserIds.collectAsState()
+    val visibleInvitableUsers = remember(invitableUsers, blockedUserIds) {
+        invitableUsers.filterNot { blockedUserIds.contains(it.user_id) }
+    }
     val invitedUserIds = remember { mutableStateMapOf<String, Boolean>() }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var reloadTrigger by remember { mutableIntStateOf(0) }
@@ -259,7 +263,7 @@ fun InviteFriendBottomSheetContent(
                 }
             }
 
-            invitableUsers.isEmpty() -> {
+            visibleInvitableUsers.isEmpty() -> {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -312,7 +316,7 @@ fun InviteFriendBottomSheetContent(
                         .weight(1f)
                 ) {
                     items(
-                        items = invitableUsers,
+                        items = visibleInvitableUsers,
                         key = { it.user_id }
                     ) { user ->
                         val isPending = user.invite_status == "pending" || invitedUserIds[user.user_id] == true
@@ -373,29 +377,44 @@ fun InviteFriendBottomSheetContent(
                                 onClick = {
                                     if (!isButtonDisabled) {
                                         scope.launch(Dispatchers.IO) {
+                                            fun mapInviteError(raw: String): String = when {
+                                                com.example.repository.BlockRepository.isUserBlockedError(raw) ->
+                                                    com.example.repository.USER_BLOCKED_ERROR_MESSAGE
+                                                raw.contains("already_invited") -> "Already invited, try again in a minute"
+                                                raw.contains("not_following") -> "You can only invite people you follow"
+                                                raw.contains("already_in_room") -> "User is already in the room"
+                                                raw.contains("not_in_room") -> "You must be in the room to invite others"
+                                                raw.contains("room_not_live") -> "This room has ended"
+                                                raw.contains("rate_limited") -> "Too many invites, try later"
+                                                raw.contains("cannot_invite_self") -> "You cannot invite yourself"
+                                                else -> "Could not send invite"
+                                            }
                                             try {
-                                                val token = com.example.SupabaseSessionManager.getBearerToken(context)
+                                                val token = com.example.SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                                                    ?: com.example.SupabaseSessionManager.getBearerToken(context)
                                                 val res = com.example.SupabaseClient.api.sendRoomInvite(
                                                     auth = token,
                                                     body = mapOf("p_room_id" to roomId, "p_user_id" to user.user_id)
                                                 )
                                                 if (res.isSuccessful) {
-                                                    invitedUserIds[user.user_id] = true
-                                                    withContext(Dispatchers.Main) {
-                                                        android.widget.Toast.makeText(context, "Invite sent to $username!", android.widget.Toast.LENGTH_SHORT).show()
+                                                    val bodyStr = runCatching { res.body()?.string().orEmpty() }.getOrDefault("")
+                                                    val parsed = runCatching { org.json.JSONObject(bodyStr) }.getOrNull()
+                                                    val isSuccess = parsed?.optBoolean("success", true) ?: true
+                                                    val errCode = parsed?.optString("error", "").orEmpty()
+                                                    if (isSuccess && !com.example.repository.BlockRepository.isUserBlockedError(bodyStr)) {
+                                                        invitedUserIds[user.user_id] = true
+                                                        withContext(Dispatchers.Main) {
+                                                            android.widget.Toast.makeText(context, "Invite sent to $username!", android.widget.Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    } else {
+                                                        val msg = mapInviteError("$errCode $bodyStr")
+                                                        withContext(Dispatchers.Main) {
+                                                            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                                                        }
                                                     }
                                                 } else {
                                                     val errBody = res.errorBody()?.string() ?: res.message()
-                                                    val msg = when {
-                                                        errBody.contains("already_invited") -> "Already invited, try again in a minute"
-                                                        errBody.contains("not_following") -> "You can only invite people you follow"
-                                                        errBody.contains("already_in_room") -> "User is already in the room"
-                                                        errBody.contains("not_in_room") -> "You must be in the room to invite others"
-                                                        errBody.contains("room_not_live") -> "This room has ended"
-                                                        errBody.contains("rate_limited") -> "Too many invites, try later"
-                                                        errBody.contains("cannot_invite_self") -> "You cannot invite yourself"
-                                                        else -> "Could not send invite"
-                                                    }
+                                                    val msg = mapInviteError(errBody)
                                                     withContext(Dispatchers.Main) {
                                                         android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
                                                     }

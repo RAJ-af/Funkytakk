@@ -295,7 +295,13 @@ fun FunkyStoreSheet(
                                 loadData()
                             }.onFailure { err ->
                                 val msg = when {
-                                    err.message?.contains("insufficient_coins", ignoreCase = true) == true -> "Insufficient coins! Earn or buy more coins."
+                                    err.message?.contains("insufficient_coins", ignoreCase = true) == true ||
+                                        err.message?.contains("not enough coins", ignoreCase = true) == true ->
+                                        if (com.example.AppFlagsRepository.flags.value.coinStoreEnabled) {
+                                            "Insufficient coins! Earn or buy more coins."
+                                        } else {
+                                            "You don't have enough coins."
+                                        }
                                     err.message?.contains("already_owned", ignoreCase = true) == true -> "You already own this item!"
                                     else -> err.message ?: "Purchase failed"
                                 }

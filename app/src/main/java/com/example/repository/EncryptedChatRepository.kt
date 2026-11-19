@@ -925,6 +925,10 @@ object EncryptedChatRepository {
                 body = GetOrCreateDmConversationRequest(p_other_user_id = resolvedUserId)
             )
             if (!rpcResp.isSuccessful) {
+                val errBody = runCatching { rpcResp.errorBody()?.string().orEmpty() }.getOrDefault("")
+                if (BlockRepository.isUserBlockedError(errBody)) {
+                    return@withContext Result.failure(UserBlockedException())
+                }
                 return@withContext Result.failure(
                     IllegalStateException("Could not establish conversation: ${rpcResp.message()}")
                 )
@@ -950,6 +954,10 @@ object EncryptedChatRepository {
                 )
             )
             if (!sendResp.isSuccessful) {
+                val errBody = runCatching { sendResp.errorBody()?.string().orEmpty() }.getOrDefault("")
+                if (BlockRepository.isUserBlockedError(errBody)) {
+                    return@withContext Result.failure(UserBlockedException())
+                }
                 return@withContext Result.failure(
                     IllegalStateException("Failed to send message: code ${sendResp.code()}")
                 )
@@ -1062,6 +1070,10 @@ object EncryptedChatRepository {
                 body = GetOrCreateDmConversationRequest(p_other_user_id = resolvedUserId)
             )
             if (!rpcResp.isSuccessful) {
+                val errBody = runCatching { rpcResp.errorBody()?.string().orEmpty() }.getOrDefault("")
+                if (BlockRepository.isUserBlockedError(errBody)) {
+                    return@withContext Result.failure(UserBlockedException())
+                }
                 return@withContext Result.failure(IllegalStateException("Could not establish conversation"))
             }
             val rawUuid = rpcResp.body()?.string()?.trim() ?: ""
@@ -1139,6 +1151,9 @@ object EncryptedChatRepository {
             if (!sendResp.isSuccessful) {
                 val errStr = sendResp.errorBody()?.string() ?: sendResp.message()
                 Log.e(TAG, "Failed to insert dm_messages row: code=${sendResp.code()} err=$errStr")
+                if (BlockRepository.isUserBlockedError(errStr)) {
+                    return@withContext Result.failure(UserBlockedException())
+                }
                 return@withContext Result.failure(IllegalStateException("Failed to send media message: code ${sendResp.code()} - $errStr"))
             }
 
@@ -1352,6 +1367,7 @@ object EncryptedChatRepository {
 
         // Establish conversation via RPC if online
         var convId = UUID.randomUUID().toString()
+        var blockedByRpc = false
         try {
             SupabaseSessionManager.ensureActiveSession(context)
             val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
@@ -1367,9 +1383,17 @@ object EncryptedChatRepository {
                 if (!parsed.isNullOrBlank()) {
                     convId = parsed
                 }
+            } else {
+                val errBody = runCatching { rpcResp.errorBody()?.string().orEmpty() }.getOrDefault("")
+                if (BlockRepository.isUserBlockedError(errBody)) {
+                    blockedByRpc = true
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "Could not fetch RPC conversation ID, using temporary UUID", e)
+        }
+        if (blockedByRpc) {
+            throw UserBlockedException()
         }
 
         val newConv = LocalDmConversation(

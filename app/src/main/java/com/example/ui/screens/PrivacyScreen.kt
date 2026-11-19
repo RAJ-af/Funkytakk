@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -28,8 +29,10 @@ import com.example.ui.theme.LocalFunkyColors
 
 @Composable
 fun PrivacyScreen(
-    onContinueClick: () -> Unit
+    onContinueClick: () -> Unit,
+    onBackClick: () -> Unit = {}
 ) {
+    BackHandler { onBackClick() }
     val uriHandler = LocalUriHandler.current
     val funkyColors = LocalFunkyColors.current
     var isAgreed by remember { mutableStateOf(false) }

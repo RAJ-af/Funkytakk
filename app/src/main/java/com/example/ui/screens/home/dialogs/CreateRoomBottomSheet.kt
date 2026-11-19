@@ -132,6 +132,7 @@ fun CreateRoomBottomSheet(
     var selectedLevel by remember { mutableStateOf("Beginner") }
 
     var isUserVip by remember { mutableStateOf(userProfile?.isEmailVerified == true) }
+    val appFlags by com.example.AppFlagsRepository.flags.collectAsState()
     var showVipTag by remember { mutableStateOf(false) }
     var isPrivateRoom by remember { mutableStateOf(initialIsPrivate) }
     var joinCodeInput by remember { mutableStateOf((100000..999999).random().toString()) }
@@ -323,7 +324,7 @@ fun CreateRoomBottomSheet(
                                 }
                             }
 
-                            if (showVipTag) {
+                            if (appFlags.vipEnabled && showVipTag) {
                                 Surface(
                                     shape = RoundedCornerShape(99.dp),
                                     color = mangoColor
@@ -471,81 +472,83 @@ fun CreateRoomBottomSheet(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     contentPadding = PaddingValues(horizontal = 2.dp)
                 ) {
-                    item {
-                        val isCustomSelected = customBannerUri != null
-                        Box(
-                            modifier = Modifier
-                                .width(108.dp)
-                                .height(76.dp)
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(softSurface)
-                                .border(
-                                    width = if (isCustomSelected) 3.dp else 1.5.dp,
-                                    color = if (isCustomSelected) mangoColor else muteColor.copy(alpha = 0.45f),
-                                    shape = RoundedCornerShape(20.dp)
-                                )
-                                .clickable {
-                                    if (!isUserVip) {
-                                        showVipSheet = true
-                                    } else {
-                                        pickCustomBannerLauncher.launch(
-                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    if (appFlags.vipEnabled) {
+                        item {
+                            val isCustomSelected = customBannerUri != null
+                            Box(
+                                modifier = Modifier
+                                    .width(108.dp)
+                                    .height(76.dp)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(softSurface)
+                                    .border(
+                                        width = if (isCustomSelected) 3.dp else 1.5.dp,
+                                        color = if (isCustomSelected) mangoColor else muteColor.copy(alpha = 0.45f),
+                                        shape = RoundedCornerShape(20.dp)
+                                    )
+                                    .clickable {
+                                        if (!isUserVip) {
+                                            showVipSheet = true
+                                        } else {
+                                            pickCustomBannerLauncher.launch(
+                                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                            )
+                                        }
+                                    }
+                                    .testTag("banner_custom_upload_button"),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (customBannerUri != null) {
+                                    AsyncImage(
+                                        model = customBannerUri,
+                                        contentDescription = "Selected custom banner",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(
+                                            painter = painterResource(id = R.drawable.ic_photo),
+                                            contentDescription = "Upload banner",
+                                            tint = inkColor,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = "Upload",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = muteColor
                                         )
                                     }
                                 }
-                                .testTag("banner_custom_upload_button"),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (customBannerUri != null) {
-                                AsyncImage(
-                                    model = customBannerUri,
-                                    contentDescription = "Selected custom banner",
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            } else {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Icon(
-                                        painter = painterResource(id = R.drawable.ic_photo),
-                                        contentDescription = "Upload banner",
-                                        tint = inkColor,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = "Upload",
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = muteColor
-                                    )
-                                }
-                            }
 
-                            Surface(
-                                shape = RoundedCornerShape(99.dp),
-                                color = mangoColor,
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(5.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                Surface(
+                                    shape = RoundedCornerShape(99.dp),
+                                    color = mangoColor,
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .padding(5.dp)
                                 ) {
-                                    Text(
-                                        text = "VIP",
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = Color(0xFF2B2118)
-                                    )
-                                    if (!isUserVip) {
-                                        Spacer(modifier = Modifier.width(3.dp))
-                                        Icon(
-                                            painter = painterResource(id = R.drawable.ic_lock),
-                                            contentDescription = "Locked",
-                                            tint = Color(0xFF2B2118),
-                                            modifier = Modifier.size(9.dp)
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "VIP",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Color(0xFF2B2118)
                                         )
+                                        if (!isUserVip) {
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                            Icon(
+                                                painter = painterResource(id = R.drawable.ic_lock),
+                                                contentDescription = "Locked",
+                                                tint = Color(0xFF2B2118),
+                                                modifier = Modifier.size(9.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -878,67 +881,69 @@ fun CreateRoomBottomSheet(
                 Spacer(modifier = Modifier.height(18.dp))
                 HorizontalDivider(color = lineColor, thickness = 1.5.dp)
 
-                // SHOW VIP TAG ROW
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                if (appFlags.vipEnabled) {
+                    // SHOW VIP TAG ROW
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(RoundedCornerShape(15.dp))
-                                .background(softSurface),
-                            contentAlignment = Alignment.Center
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
                         ) {
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_crown_filled),
-                                contentDescription = null,
-                                tint = mangoColor,
-                                modifier = Modifier.size(21.dp)
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(RoundedCornerShape(15.dp))
+                                    .background(softSurface),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_crown_filled),
+                                    contentDescription = null,
+                                    tint = mangoColor,
+                                    modifier = Modifier.size(21.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Show VIP tag",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = inkColor
+                                )
+                                Text(
+                                    text = "Stand out in the lobby",
+                                    fontSize = 12.5.sp,
+                                    color = muteColor
+                                )
+                            }
                         }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = "Show VIP tag",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = inkColor
+
+                        Switch(
+                            checked = showVipTag,
+                            onCheckedChange = { checked ->
+                                if (checked && !isUserVip) {
+                                    showVipSheet = true
+                                } else {
+                                    showVipTag = checked
+                                }
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = surfColor,
+                                checkedTrackColor = mangoColor,
+                                uncheckedThumbColor = surfColor,
+                                uncheckedTrackColor = lineColor
                             )
-                            Text(
-                                text = "Stand out in the lobby",
-                                fontSize = 12.5.sp,
-                                color = muteColor
-                            )
-                        }
+                        )
                     }
 
-                    Switch(
-                        checked = showVipTag,
-                        onCheckedChange = { checked ->
-                            if (checked && !isUserVip) {
-                                showVipSheet = true
-                            } else {
-                                showVipTag = checked
-                            }
-                        },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = surfColor,
-                            checkedTrackColor = mangoColor,
-                            uncheckedThumbColor = surfColor,
-                            uncheckedTrackColor = lineColor
-                        )
-                    )
+                    HorizontalDivider(color = lineColor, thickness = 1.5.dp)
                 }
-
-                HorizontalDivider(color = lineColor, thickness = 1.5.dp)
 
                 // PRIVATE ROOM ROW + 6-DIGIT PASSCODE EDITOR
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -1160,7 +1165,7 @@ fun CreateRoomBottomSheet(
                                         banner_image_url = resolvedBannerUrl,
                                         card_background_type = "image",
                                         host_is_verified = false,
-                                        host_is_vip = (isUserVip || showVipTag),
+                                        host_is_vip = appFlags.vipEnabled && (isUserVip || showVipTag),
                                         is_live = true,
                                         language_code = selectedLanguage.flagCode,
                                         language_flag = getProgrammingIconUrl(selectedLanguage.name).ifBlank {
@@ -1283,7 +1288,7 @@ fun CreateRoomBottomSheet(
                 )
             }
 
-            if (showVipSheet) {
+            if (appFlags.vipEnabled && showVipSheet) {
                 FunkyTalkVipModalSheet(
                     isDark = isDark,
                     onDismiss = { showVipSheet = false },

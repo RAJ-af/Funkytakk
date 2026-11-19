@@ -8,6 +8,7 @@ import android.util.Base64
 import android.util.Log
 import androidx.biometric.BiometricPrompt
 import com.example.ActiveUserManager
+import com.example.BuildConfig
 import com.example.LegacySecurityMigration
 import com.example.db.EncryptedChatDatabase
 import kotlinx.coroutines.Dispatchers
@@ -24,12 +25,16 @@ import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
+import kotlin.math.ceil
 
 enum class VaultStatus {
     NOT_CONFIGURED,
     LOCKED,
     UNLOCKED
 }
+
+class VaultCooldownException(val remainingSeconds: Int) :
+    IllegalStateException("Too many wrong attempts. Try again in ${remainingSeconds}s.")
 
 object VaultSecurityManager {
     private const val TAG = "VaultSecurityManager"
@@ -41,6 +46,11 @@ object VaultSecurityManager {
     private const val PREF_PASSWORD_IV = "vault_password_iv"
     private const val PREF_BIOMETRIC_WRAPPED_KEY = "vault_biometric_wrapped_key"
     private const val PREF_BIOMETRIC_IV = "vault_biometric_iv"
+    private const val PREF_FAILED_ATTEMPTS = "vault_failed_attempts"
+    private const val PREF_COOLDOWN_UNTIL_MS = "vault_cooldown_until_ms"
+
+    private const val MAX_ATTEMPTS_BEFORE_COOLDOWN = 5
+    private val COOLDOWN_DURATIONS_SEC = intArrayOf(30, 60, 120, 300)
 
     private const val PBKDF2_ALGORITHM = "PBKDF2WithHmacSHA256"
     private const val PBKDF2_ITERATIONS = 310_000
@@ -65,6 +75,35 @@ object VaultSecurityManager {
         return ActiveUserManager.getActiveUid(context)
     }
 
+    fun getQaTestVaultPassword(): String? {
+        return BuildConfig.QA_TEST_VAULT_PASSWORD.takeIf { BuildConfig.DEBUG && it.isNotBlank() }
+    }
+
+    fun getRemainingCooldownSeconds(context: Context): Int {
+        val uid = resolveUid(context) ?: return 0
+        val prefs = getPrefsForUid(context, uid)
+        val untilMs = prefs.getLong(PREF_COOLDOWN_UNTIL_MS, 0L)
+        if (untilMs <= 0L) return 0
+        val remainingMs = untilMs - System.currentTimeMillis()
+        if (remainingMs <= 0L) {
+            prefs.edit().remove(PREF_COOLDOWN_UNTIL_MS).apply()
+            return 0
+        }
+        return ceil(remainingMs / 1000.0).toInt().coerceAtLeast(1)
+    }
+
+    private fun clearCooldownCounters(prefs: SharedPreferences) {
+        prefs.edit()
+            .remove(PREF_FAILED_ATTEMPTS)
+            .remove(PREF_COOLDOWN_UNTIL_MS)
+            .apply()
+    }
+
+    private fun computeCooldownSeconds(failedAttempts: Int): Int {
+        val step = (failedAttempts - MAX_ATTEMPTS_BEFORE_COOLDOWN).coerceAtLeast(0)
+        return COOLDOWN_DURATIONS_SEC[step.coerceAtMost(COOLDOWN_DURATIONS_SEC.lastIndex)]
+    }
+
     fun isVaultConfigured(context: Context): Boolean {
         val uid = resolveUid(context) ?: return false
         return getPrefsForUid(context, uid).getBoolean(PREF_IS_CONFIGURED, false)
@@ -74,7 +113,7 @@ object VaultSecurityManager {
         val uid = resolveUid(context) ?: return false
         val prefs = getPrefsForUid(context, uid)
         return prefs.getBoolean(PREF_BIOMETRIC_ENABLED, false) &&
-                !prefs.getString(PREF_BIOMETRIC_WRAPPED_KEY, null).isNullOrBlank()
+            !prefs.getString(PREF_BIOMETRIC_WRAPPED_KEY, null).isNullOrBlank()
     }
 
     fun isUnlocked(): Boolean {
@@ -95,7 +134,6 @@ object VaultSecurityManager {
             if (currentUid == null || activeKeyUid == currentUid) {
                 return activeVaultKey
             }
-            // Mismatched UID: immediately wipe stale key in memory
             lock()
         }
         if (context != null && currentUid != null) {
@@ -155,13 +193,17 @@ object VaultSecurityManager {
                 .putString(PREF_PASSWORD_SALT, Base64.encodeToString(salt, Base64.NO_WRAP))
                 .putString(PREF_PASSWORD_WRAPPED_KEY, Base64.encodeToString(wrappedVaultKey, Base64.NO_WRAP))
                 .putString(PREF_PASSWORD_IV, Base64.encodeToString(iv, Base64.NO_WRAP))
+                .remove(PREF_FAILED_ATTEMPTS)
+                .remove(PREF_COOLDOWN_UNTIL_MS)
                 .apply()
 
             activeVaultKey = vaultKey
             activeKeyUid = uid
             _vaultStatus.value = VaultStatus.UNLOCKED
             BackupCrypto.saveVaultKeyToKeystore(context, vaultKey, uid)
-            Log.d(TAG, "Vault configured and unlocked for UID $uid.")
+            if (BuildConfig.DEBUG) {
+                Log.d(TAG, "Vault configured and unlocked.")
+            }
             Result.success(vaultKey)
         } catch (e: Exception) {
             Log.e(TAG, "Error setting up vault", e)
@@ -170,12 +212,23 @@ object VaultSecurityManager {
     }
 
     /**
-     * Unwraps the vault key using the user's password for the active UID.
+     * Unwraps the vault key using the user's password for the active UID, enforcing
+     * escalating per-account cooldown after 5 consecutive failed attempts.
      */
     suspend fun unlockWithPassword(context: Context, password: String): Result<ByteArray> = withContext(Dispatchers.Default) {
+        val uid = try {
+            ActiveUserManager.requireActiveUid(context)
+        } catch (e: Exception) {
+            return@withContext Result.failure(e)
+        }
+        val prefs = getPrefsForUid(context, uid)
+
+        val cooldownRemaining = getRemainingCooldownSeconds(context)
+        if (cooldownRemaining > 0) {
+            return@withContext Result.failure(VaultCooldownException(cooldownRemaining))
+        }
+
         try {
-            val uid = ActiveUserManager.requireActiveUid(context)
-            val prefs = getPrefsForUid(context, uid)
             val saltBase64 = prefs.getString(PREF_PASSWORD_SALT, null)
                 ?: return@withContext Result.failure(IllegalStateException("Vault not configured"))
             val wrappedBase64 = prefs.getString(PREF_PASSWORD_WRAPPED_KEY, null)
@@ -192,15 +245,32 @@ object VaultSecurityManager {
             cipher.init(Cipher.DECRYPT_MODE, kek, GCMParameterSpec(GCM_TAG_LENGTH, iv))
 
             val unwrappedKey = cipher.doFinal(wrappedVaultKey)
+            clearCooldownCounters(prefs)
             activeVaultKey = unwrappedKey
             activeKeyUid = uid
             _vaultStatus.value = VaultStatus.UNLOCKED
             BackupCrypto.saveVaultKeyToKeystore(context, unwrappedKey, uid)
-            Log.d(TAG, "Vault unlocked successfully with password for UID $uid.")
+            if (BuildConfig.DEBUG) {
+                Log.d(TAG, "Vault unlocked successfully with password.")
+            }
             Result.success(unwrappedKey)
         } catch (e: javax.crypto.AEADBadTagException) {
-            Log.w(TAG, "Password authentication failed (AEADBadTagException)")
-            Result.failure(IllegalArgumentException("Incorrect password. Please try again."))
+            val attempts = prefs.getInt(PREF_FAILED_ATTEMPTS, 0) + 1
+            if (attempts >= MAX_ATTEMPTS_BEFORE_COOLDOWN) {
+                val cooldownSec = computeCooldownSeconds(attempts)
+                val untilMs = System.currentTimeMillis() + (cooldownSec * 1000L)
+                prefs.edit()
+                    .putInt(PREF_FAILED_ATTEMPTS, attempts)
+                    .putLong(PREF_COOLDOWN_UNTIL_MS, untilMs)
+                    .apply()
+                Log.w(TAG, "Vault unlock entered ${cooldownSec}s cooldown after $attempts failed attempts")
+                Result.failure(VaultCooldownException(cooldownSec))
+            } else {
+                prefs.edit().putInt(PREF_FAILED_ATTEMPTS, attempts).apply()
+                val left = MAX_ATTEMPTS_BEFORE_COOLDOWN - attempts
+                Log.w(TAG, "Password authentication failed ($attempts/$MAX_ATTEMPTS_BEFORE_COOLDOWN)")
+                Result.failure(IllegalArgumentException("Incorrect password. $left ${if (left == 1) "attempt" else "attempts"} remaining before cooldown."))
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to unlock vault with password", e)
             Result.failure(e)
@@ -233,7 +303,9 @@ object VaultSecurityManager {
                 .putString(PREF_BIOMETRIC_WRAPPED_KEY, Base64.encodeToString(wrapped, Base64.NO_WRAP))
                 .putString(PREF_BIOMETRIC_IV, Base64.encodeToString(iv, Base64.NO_WRAP))
                 .apply()
-            Log.d(TAG, "Biometric copy of vault key saved for UID $uid.")
+            if (BuildConfig.DEBUG) {
+                Log.d(TAG, "Biometric copy of vault key saved.")
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e(TAG, "Error saving biometric wrapped key", e)
@@ -270,10 +342,13 @@ object VaultSecurityManager {
             val wrapped = Base64.decode(wrappedBase64, Base64.DEFAULT)
 
             val unwrapped = authenticatedCipher.doFinal(wrapped)
+            clearCooldownCounters(prefs)
             activeVaultKey = unwrapped
             activeKeyUid = uid
             _vaultStatus.value = VaultStatus.UNLOCKED
-            Log.d(TAG, "Vault unlocked with biometric prompt for UID $uid.")
+            if (BuildConfig.DEBUG) {
+                Log.d(TAG, "Vault unlocked with biometric prompt.")
+            }
             Result.success(unwrapped)
         } catch (e: Exception) {
             Log.e(TAG, "Error unlocking with biometric cipher", e)
@@ -286,7 +361,9 @@ object VaultSecurityManager {
         activeVaultKey = null
         activeKeyUid = null
         _vaultStatus.value = VaultStatus.LOCKED
-        Log.d(TAG, "Vault locked.")
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "Vault locked.")
+        }
     }
 
     /**
@@ -307,7 +384,9 @@ object VaultSecurityManager {
             wipeForUid(context, targetUid)
         }
         _vaultStatus.value = VaultStatus.NOT_CONFIGURED
-        Log.d(TAG, "Vault reset complete for UID=$targetUid.")
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "Vault reset complete.")
+        }
     }
 
     fun wipeForUid(context: Context, uid: String) {
@@ -323,7 +402,7 @@ object VaultSecurityManager {
                 keyStore.deleteEntry(alias)
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Error deleting biometric KeyStore entry for $uid", e)
+            Log.w(TAG, "Error deleting biometric KeyStore entry", e)
         }
         EncryptedChatDatabase.deleteDatabaseForUid(context, uid)
         BackupCrypto.wipeForUid(context, uid)

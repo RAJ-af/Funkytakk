@@ -34,12 +34,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
@@ -798,6 +801,8 @@ fun MomentCommentsBottomSheet(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val commentInputFocusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
     val limits = remember { MomentsRepository.getCachedOptions().limits }
 
     // Warm Cream Palette (with Dark mode support) honoring app theme preference
@@ -815,7 +820,11 @@ fun MomentCommentsBottomSheet(
     var selectedSheetTab by remember(moment.id, initialTab) { mutableIntStateOf(initialTab) }
     val kindParam = if (selectedSheetTab == 0) "all" else "corrections"
 
+    val blockedUserIds by com.example.repository.BlockRepository.blockedUserIds.collectAsState()
     val commentsList = remember(moment.id) { mutableStateListOf<MomentCommentDto>() }
+    val visibleComments = remember(commentsList.toList(), blockedUserIds) {
+        commentsList.filterNot { blockedUserIds.contains(it.author.id) }
+    }
     var isLoadingComments by remember { mutableStateOf(false) }
     var isLoadingMoreComments by remember { mutableStateOf(false) }
     var hasMoreComments by remember { mutableStateOf(true) }
@@ -910,6 +919,7 @@ fun MomentCommentsBottomSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = sheetBg,
         contentColor = inkColor,
+        contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         dragHandle = {
             Box(
@@ -1041,7 +1051,7 @@ fun MomentCommentsBottomSheet(
                     .fillMaxWidth()
             ) {
                 when {
-                    isLoadingComments && commentsList.isEmpty() -> {
+                    isLoadingComments && visibleComments.isEmpty() -> {
                         Box(
                             modifier = Modifier.align(Alignment.Center),
                             contentAlignment = Alignment.Center
@@ -1053,7 +1063,7 @@ fun MomentCommentsBottomSheet(
                             )
                         }
                     }
-                    commentsList.isEmpty() -> {
+                    visibleComments.isEmpty() -> {
                         Column(
                             modifier = Modifier
                                 .align(Alignment.Center)
@@ -1099,8 +1109,9 @@ fun MomentCommentsBottomSheet(
                                 .padding(vertical = 4.dp),
                             verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
-                            items(commentsList, key = { it.id }) { comment ->
+                            items(visibleComments, key = { it.id }) { comment ->
                                 val replies = expandedRepliesMap[comment.id].orEmpty()
+                                    .filterNot { blockedUserIds.contains(it.author.id) }
                                 val isLoadingReplies = loadingRepliesIds[comment.id] == true
 
                                 CommentItemRow(
@@ -1203,6 +1214,8 @@ fun MomentCommentsBottomSheet(
                                     onReply = { target ->
                                         replyingTo = target
                                         isNativeFixMode = false
+                                        commentInputFocusRequester.requestFocus()
+                                        keyboardController?.show()
                                     },
                                     onDelete = { target ->
                                         coroutineScope.launch {
@@ -1677,6 +1690,10 @@ fun MomentCommentsBottomSheet(
                                 .heightIn(min = 50.dp)
                                 .clip(RoundedCornerShape(25.dp))
                                 .background(softSurface)
+                                .clickable {
+                                    commentInputFocusRequester.requestFocus()
+                                    keyboardController?.show()
+                                }
                                 .padding(horizontal = 18.dp, vertical = 14.dp),
                             contentAlignment = Alignment.CenterStart
                         ) {
@@ -1702,6 +1719,7 @@ fun MomentCommentsBottomSheet(
                                 },
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .focusRequester(commentInputFocusRequester)
                                     .testTag("comment_input_field")
                             )
                         }
@@ -2202,6 +2220,7 @@ fun MomentsV2FeedViewerDialog(
         }
     }
 
+    val blockedUserIds by com.example.repository.BlockRepository.blockedUserIds.collectAsState()
     val localMoments = remember {
         mutableStateListOf<MomentDto>().apply { addAll(moments) }
     }
@@ -2213,18 +2232,21 @@ fun MomentsV2FeedViewerDialog(
             localMoments.addAll(moments)
         }
     }
+    val visibleMoments = remember(localMoments.toList(), blockedUserIds) {
+        localMoments.filterNot { blockedUserIds.contains(it.author.id) }
+    }
 
-    if (localMoments.isEmpty()) {
+    if (visibleMoments.isEmpty()) {
         LaunchedEffect(Unit) { onDismiss() }
         return
     }
 
-    val startIdx = remember(initialMomentId) {
-        localMoments.indexOfFirst { it.id == initialMomentId }.coerceAtLeast(0)
+    val startIdx = remember(initialMomentId, visibleMoments) {
+        visibleMoments.indexOfFirst { it.id == initialMomentId }.coerceAtLeast(0)
     }
     val pagerState = rememberPagerState(
         initialPage = startIdx,
-        pageCount = { localMoments.size }
+        pageCount = { visibleMoments.size }
     )
 
     var showCommentsSheet by remember { mutableStateOf(false) }
@@ -2236,7 +2258,7 @@ fun MomentsV2FeedViewerDialog(
     var reportingMoment by remember { mutableStateOf<MomentDto?>(null) }
     var showTopMenu by remember { mutableStateOf(false) }
 
-    val currentMoment = localMoments.getOrNull(pagerState.currentPage)
+    val currentMoment = visibleMoments.getOrNull(pagerState.currentPage)
 
     // Refresh current visible moment from Supabase RPC on swipe/open
     LaunchedEffect(currentMoment?.id) {
@@ -2298,10 +2320,10 @@ fun MomentsV2FeedViewerDialog(
         ) {
             VerticalPager(
                 state = pagerState,
-                key = { idx -> localMoments.getOrNull(idx)?.id ?: idx },
+                key = { idx -> visibleMoments.getOrNull(idx)?.id ?: idx },
                 modifier = Modifier.fillMaxSize()
             ) { pageIndex ->
-                val moment = localMoments.getOrNull(pageIndex) ?: return@VerticalPager
+                val moment = visibleMoments.getOrNull(pageIndex) ?: return@VerticalPager
                 val isBookmarked = bookmarkedIds.contains(moment.id)
 
                 MomentV2Slide(

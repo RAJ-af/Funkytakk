@@ -172,20 +172,28 @@ object GiftManager {
                     return@withContext Result.success(remaining)
                 } else {
                     val err = json.optString("error", "Failed to send gift")
+                    if (com.example.repository.BlockRepository.isUserBlockedError(err)) {
+                        return@withContext Result.failure(com.example.repository.UserBlockedException())
+                    }
                     if (err.contains("insufficient", ignoreCase = true) || err.contains("not_enough", ignoreCase = true)) {
-                        return@withContext Result.failure(InsufficientCoinsException("You do not have enough coins."))
+                        return@withContext Result.failure(InsufficientCoinsException("You don't have enough coins."))
                     }
                     return@withContext Result.failure(Exception(err))
                 }
             } else {
                 val errBody = resp.errorBody()?.string().orEmpty()
                 Log.w(TAG, "send_gift error: ${resp.code()} $errBody")
-                if (errBody.contains("insufficient_coins", ignoreCase = true) || errBody.contains("not enough coins", ignoreCase = true)) {
-                    return@withContext Result.failure(InsufficientCoinsException("You do not have enough coins."))
+                if (com.example.repository.BlockRepository.isUserBlockedError(errBody)) {
+                    return@withContext Result.failure(com.example.repository.UserBlockedException())
                 }
-                return@withContext Result.failure(Exception("Failed to send gift: $errBody"))
+                if (errBody.contains("insufficient_coins", ignoreCase = true) || errBody.contains("not enough coins", ignoreCase = true)) {
+                    return@withContext Result.failure(InsufficientCoinsException("You don't have enough coins."))
+                }
+                return@withContext Result.failure(Exception("Failed to send gift. Please try again."))
             }
         } catch (e: InsufficientCoinsException) {
+            Result.failure<Int>(e)
+        } catch (e: com.example.repository.UserBlockedException) {
             Result.failure<Int>(e)
         } catch (e: CancellationException) {
             throw e
@@ -198,7 +206,8 @@ object GiftManager {
      * Sends a gift to a recipient inside a voice room via RPC send_room_gift.
      * Updates wallet balance immediately from returned remaining_balance.
      * Maps errors:
-     * - insufficient_coins -> "Insufficient coins"
+     * - insufficient_coins -> "You don't have enough coins."
+     * - user_blocked -> "You can't interact with this user."
      * - recipient_not_in_room -> "This user is no longer in the room"
      * - room_not_live -> "Room has ended"
      * - rate_limited -> "Sending too fast, please slow down"
@@ -277,8 +286,10 @@ object GiftManager {
     fun mapRoomGiftError(rawError: String): String {
         val lower = rawError.lowercase()
         return when {
+            lower.contains("user_blocked") ->
+                com.example.repository.USER_BLOCKED_ERROR_MESSAGE
             lower.contains("insufficient_coins") || lower.contains("insufficient") || lower.contains("not enough coins") ->
-                "Insufficient coins"
+                "You don't have enough coins."
             lower.contains("recipient_not_in_room") ->
                 "This user is no longer in the room"
             lower.contains("room_not_live") || lower.contains("room ended") || lower.contains("not_live") ->

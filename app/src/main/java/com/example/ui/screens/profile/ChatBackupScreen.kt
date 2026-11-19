@@ -63,6 +63,7 @@ import java.util.Locale
 fun ChatBackupScreen(
     onBackClick: () -> Unit
 ) {
+    com.example.ui.components.SecureWindow(enabled = true)
     val context = LocalContext.current
     val funkyColors = LocalFunkyColors.current
     val isDark = funkyColors.isDark

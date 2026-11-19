@@ -45,6 +45,10 @@ class MomentUploadException(
 object CloudinaryUploader {
     private const val TAG = "CloudinaryUploader"
     private const val MOMENT_TAG = "MomentUpload"
+    private const val GENERIC_UPLOAD_FAILED = "Upload failed. Please try again."
+
+    private fun uploadErrorMessage(debugDetail: String): String =
+        if (BuildConfig.DEBUG) debugDetail else GENERIC_UPLOAD_FAILED
 
     private const val MAX_PHOTO_BYTES = 10L * 1024L * 1024L
     private const val MAX_VIDEO_BYTES = 50L * 1024L * 1024L
@@ -202,9 +206,10 @@ object CloudinaryUploader {
                 } catch (e: Exception) {
                     Log.e(MOMENT_TAG, "Photo compression failed: ${e.javaClass.simpleName}: ${e.message}", e)
                     TelemetryManager.recordMediaDecodeFailure("moment_photo", e)
-                    // TODO remove detail before release
                     return@withContext Result.failure(
-                        MomentUploadException("Upload failed (${e.javaClass.simpleName}: ${e.message ?: "compression error"})")
+                        MomentUploadException(
+                            uploadErrorMessage("Upload failed (${e.javaClass.simpleName}: ${e.message ?: "compression error"})")
+                        )
                     )
                 }
 
@@ -224,8 +229,7 @@ object CloudinaryUploader {
                 )
                 val url = uploaded.secure_url?.takeIf { it.isNotBlank() }
                     ?: throw MomentUploadException(
-                        // TODO remove detail before release
-                        "Upload failed (IllegalStateException: Missing secure_url in Cloudinary response)"
+                        uploadErrorMessage("Upload failed (IllegalStateException: Missing secure_url in Cloudinary response)")
                     )
 
                 return@withContext Result.success(
@@ -277,8 +281,7 @@ object CloudinaryUploader {
 
                     val videoUrl = uploadedVideo.secure_url?.takeIf { it.isNotBlank() }
                         ?: throw MomentUploadException(
-                            // TODO remove detail before release
-                            "Upload failed (IllegalStateException: Missing secure_url in Cloudinary video response)"
+                            uploadErrorMessage("Upload failed (IllegalStateException: Missing secure_url in Cloudinary video response)")
                         )
                     val durationSec = uploadedVideo.duration?.roundToInt()?.coerceAtLeast(1)
                     val thumbUrl = deriveVideoThumbUrl(videoUrl)
@@ -305,9 +308,10 @@ object CloudinaryUploader {
             return@withContext Result.failure(e)
         } catch (e: Exception) {
             Log.e(MOMENT_TAG, "Unexpected exception uploading moment media: ${e.javaClass.simpleName}: ${e.message}", e)
-            // TODO remove detail before release
             return@withContext Result.failure(
-                MomentUploadException("Upload failed (${e.javaClass.simpleName}: ${e.message ?: "unknown error"})")
+                MomentUploadException(
+                    uploadErrorMessage("Upload failed (${e.javaClass.simpleName}: ${e.message ?: "unknown error"})")
+                )
             )
         }
     }
@@ -343,8 +347,7 @@ object CloudinaryUploader {
             ByteArrayOutputStream().use { baos ->
                 if (!bitmapForJpeg.compress(Bitmap.CompressFormat.JPEG, PHOTO_JPEG_QUALITY, baos)) {
                     throw MomentUploadException(
-                        // TODO remove detail before release
-                        "Upload failed (IllegalStateException: Failed to compress JPEG)"
+                        uploadErrorMessage("Upload failed (IllegalStateException: Failed to compress JPEG)")
                     )
                 }
                 baos.toByteArray()
@@ -385,8 +388,7 @@ object CloudinaryUploader {
     ): Long {
         val input = context.contentResolver.openInputStream(uri)
             ?: throw MomentUploadException(
-                // TODO remove detail before release
-                "Upload failed (IOException: Unable to open selected video)"
+                uploadErrorMessage("Upload failed (IOException: Unable to open selected video)")
             )
         var total = 0L
         input.use { src ->
@@ -470,9 +472,8 @@ object CloudinaryUploader {
             throw e
         } catch (e: Exception) {
             Log.e(MOMENT_TAG, "get-cloudinary-signature exception: ${e.javaClass.simpleName}: ${e.message}", e)
-            // TODO remove detail before release
             throw MomentUploadException(
-                "Upload failed (${e.javaClass.simpleName}: ${e.message ?: "signature request error"})"
+                uploadErrorMessage("Upload failed (${e.javaClass.simpleName}: ${e.message ?: "signature request error"})")
             )
         }
 
@@ -495,8 +496,9 @@ object CloudinaryUploader {
                 "get-cloudinary-signature failed: http=${sigResp.code()} body=$rawBody"
             )
             TelemetryManager.recordCloudinaryFailure("signature", "HTTP ${sigResp.code()}: $errMsg")
-            // TODO remove detail before release
-            throw MomentUploadException("Upload failed (${sigResp.code()}: $errMsg)")
+            throw MomentUploadException(
+                uploadErrorMessage("Upload failed (${sigResp.code()}: $errMsg)")
+            )
         }
 
         // Log response fields WITHOUT signature value
@@ -577,8 +579,9 @@ object CloudinaryUploader {
                 "Cloudinary call exception: url=$uploadUrl cloud_name=${sigData.cloud_name} folder=${sigData.folder} err=${e.javaClass.simpleName}: ${e.message}",
                 e
             )
-            // TODO remove detail before release
-            throw MomentUploadException("Upload failed (${e.javaClass.simpleName}: ${e.message ?: "network error"})")
+            throw MomentUploadException(
+                uploadErrorMessage("Upload failed (${e.javaClass.simpleName}: ${e.message ?: "network error"})")
+            )
         }
 
         if (httpCode in 200..299 && !respBodyStr.isNullOrBlank()) {
@@ -589,15 +592,15 @@ object CloudinaryUploader {
             return try {
                 moshi.adapter(CloudinaryUploadResponse::class.java).fromJson(respBodyStr)
                     ?: throw MomentUploadException(
-                        // TODO remove detail before release
-                        "Upload failed (JsonDataException: Null Cloudinary response object)"
+                        uploadErrorMessage("Upload failed (JsonDataException: Null Cloudinary response object)")
                     )
             } catch (e: MomentUploadException) {
                 throw e
             } catch (e: Exception) {
                 Log.e(MOMENT_TAG, "Failed parsing Cloudinary response JSON: url=$uploadUrl http=$httpCode body=$respBodyStr", e)
-                // TODO remove detail before release
-                throw MomentUploadException("Upload failed (${e.javaClass.simpleName}: ${e.message ?: "parse error"})")
+                throw MomentUploadException(
+                    uploadErrorMessage("Upload failed (${e.javaClass.simpleName}: ${e.message ?: "parse error"})")
+                )
             }
         }
 
@@ -617,7 +620,8 @@ object CloudinaryUploader {
             synchronized(sigLock) { cachedMomentSignature = null }
         }
 
-        // TODO remove detail before release
-        throw MomentUploadException("Upload failed ($httpCode: $parsedMessage)")
+        throw MomentUploadException(
+            uploadErrorMessage("Upload failed ($httpCode: $parsedMessage)")
+        )
     }
 }

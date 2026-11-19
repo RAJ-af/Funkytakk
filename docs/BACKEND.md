@@ -126,3 +126,12 @@
 - Staff: `admin_set_rtc_provider(p_provider, p_enabled)`, `admin_set_rtc_strategy(p_strategy)`; `get_rtc_provider_minutes_status()` (service role).
 - `get-room-token` v22: Agora tokens last 1 hour (duration in seconds, not timestamp). Zego Token04 is server-generated; Daily `permissions.canSend` enforces publisher/listener rights.
 - Usage counters estimate time spent inside rooms (join to leave), not exact SDK minutes. Compare with provider dashboards.
+
+---
+
+## Release Flags, User Blocking, Beta Signups & Session Minting (v22)
+- `app_flags` + `get_app_flags()`: server switches the app reads at start (`coin_store_enabled`, `vip_enabled`, `min_supported_version_code`). Change with: `update public.app_flags set value='true'::jsonb, updated_at=now() where key='coin_store_enabled';`
+- Blocking: `user_blocks` (RPC only), `block_user`, `unblock_user`, `get_my_blocked_users`, `is_blocked_with`; enforced server-side in `get_or_create_dm_conversation`, `send_gift`, `send_room_invite`.
+- Beta signups: Edge Function `beta-signup` (public, no JWT) -> table `beta_signups`; rate limit 5/hour per hashed IP in `beta_signup_attempts`. Optional secrets: `BREVO_API_KEY` (welcome mail), `BETA_ALLOWED_ORIGINS` (comma list of site origins), `BETA_IP_SALT`.
+- `verify-firebase-token` v22: retry-safe session minting (`503` + code `session_mint_failed` instead of `500`).
+

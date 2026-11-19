@@ -14,6 +14,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -66,6 +68,7 @@ fun SettingsScreen(
     onOpenBlockedGroups: () -> Unit,
     onOpenChatBackup: () -> Unit,
     onOpenChatAppearance: () -> Unit,
+    onOpenLoggedInDevices: () -> Unit = {},
     onOpenDebugGallery: () -> Unit,
     onLogout: () -> Unit,
     onDeleteAccount: () -> Unit
@@ -79,6 +82,7 @@ fun SettingsScreen(
     val supportUnread by SupportChatManager.unreadCount.collectAsState()
     val feedbackUpdates by FeedbackRepository.myUpdatesCount.collectAsState()
     val helpTotalBadge = supportUnread + feedbackUpdates
+    val appFlags by com.example.AppFlagsRepository.flags.collectAsState()
 
     BackHandler { onBack() }
 
@@ -262,22 +266,24 @@ fun SettingsScreen(
                         },
                         onClick = onOpenDecorationStore
                     )
-                    HorizontalDivider(
-                        color = funkyColors.line,
-                        modifier = Modifier.padding(horizontal = 16.dp)
-                    )
-                    SettingsRowItem(
-                        title = "Coin Store",
-                        subtitle = "Top up coins for gifts & cosmetics",
-                        trailingBadge = "$walletBalance",
-                        trailingBadgeBg = funkyColors.mango,
-                        trailingBadgeFg = funkyColors.onMango,
-                        iconBg = Color(0xFFFEF3C7),
-                        iconContent = {
-                            CuteCoinIcon(modifier = Modifier.size(22.dp))
-                        },
-                        onClick = onOpenCoinStore
-                    )
+                    if (appFlags.coinStoreEnabled) {
+                        HorizontalDivider(
+                            color = funkyColors.line,
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        )
+                        SettingsRowItem(
+                            title = "Coin Store",
+                            subtitle = "Top up coins for gifts & cosmetics",
+                            trailingBadge = "$walletBalance",
+                            trailingBadgeBg = funkyColors.mango,
+                            trailingBadgeFg = funkyColors.onMango,
+                            iconBg = Color(0xFFFEF3C7),
+                            iconContent = {
+                                CuteCoinIcon(modifier = Modifier.size(22.dp))
+                            },
+                            onClick = onOpenCoinStore
+                        )
+                    }
                 }
 
                 // ---------------------------------------------------------
@@ -299,6 +305,21 @@ fun SettingsScreen(
                             )
                         },
                         onClick = onEditProfile
+                    )
+                    HorizontalDivider(color = funkyColors.line, modifier = Modifier.padding(horizontal = 16.dp))
+                    SettingsRowItem(
+                        title = "Logged-in devices",
+                        subtitle = "Manage devices signed into your account",
+                        iconBg = Color(0xFFE0F2FE),
+                        iconContent = {
+                            Icon(
+                                imageVector = Icons.Outlined.Devices,
+                                contentDescription = null,
+                                tint = Color(0xFF0284C7),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        },
+                        onClick = onOpenLoggedInDevices
                     )
                     HorizontalDivider(color = funkyColors.line, modifier = Modifier.padding(horizontal = 16.dp))
                     SettingsRowItem(
@@ -471,9 +492,15 @@ fun SettingsScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .combinedClickable(
-                                onClick = {},
-                                onLongClick = onOpenDebugGallery
+                            .then(
+                                if (BuildConfig.DEBUG) {
+                                    Modifier.combinedClickable(
+                                        onClick = {},
+                                        onLongClick = onOpenDebugGallery
+                                    )
+                                } else {
+                                    Modifier
+                                }
                             )
                             .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -640,6 +667,64 @@ fun SettingsScreen(
                                     fontWeight = FontWeight.Bold,
                                     color = funkyColors.ink
                                 )
+                            }
+                            HorizontalDivider(
+                                modifier = Modifier.padding(vertical = 8.dp),
+                                color = funkyColors.line
+                            )
+                            Text(
+                                text = "Release Flag Overrides (Debug Only)",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = funkyColors.ink
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Coin Store enabled", fontSize = 12.sp, color = funkyColors.ink)
+                                Switch(
+                                    checked = appFlags.coinStoreEnabled,
+                                    onCheckedChange = { com.example.AppFlagsRepository.setDebugCoinStoreOverride(it) },
+                                    modifier = Modifier.testTag("debug_flag_coin_store_switch")
+                                )
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("VIP enabled", fontSize = 12.sp, color = funkyColors.ink)
+                                Switch(
+                                    checked = appFlags.vipEnabled,
+                                    onCheckedChange = { com.example.AppFlagsRepository.setDebugVipOverride(it) },
+                                    modifier = Modifier.testTag("debug_flag_vip_switch")
+                                )
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Force Update Gate", fontSize = 12.sp, color = funkyColors.ink)
+                                Switch(
+                                    checked = appFlags.minSupportedVersionCode > BuildConfig.VERSION_CODE,
+                                    onCheckedChange = { enabled ->
+                                        com.example.AppFlagsRepository.setDebugMinVersionOverride(
+                                            if (enabled) BuildConfig.VERSION_CODE + 1 else 0
+                                        )
+                                    },
+                                    modifier = Modifier.testTag("debug_flag_update_gate_switch")
+                                )
+                            }
+                            if (com.example.AppFlagsRepository.hasDebugOverrides()) {
+                                TextButton(
+                                    onClick = { com.example.AppFlagsRepository.clearDebugOverrides() },
+                                    modifier = Modifier.align(Alignment.End)
+                                ) {
+                                    Text("Reset to server flags", fontSize = 11.5.sp, color = funkyColors.mango)
+                                }
                             }
                         }
                     }

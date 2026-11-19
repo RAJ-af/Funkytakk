@@ -16,12 +16,21 @@ android {
     applicationId = "com.funkytalk.app"
     minSdk = 28
     targetSdk = 36
-    versionCode = 11
-    versionName = "2.0"
+    versionCode = project.findProperty("APP_VERSION_CODE")?.toString()?.toIntOrNull() ?: 1
+    versionName = project.findProperty("APP_VERSION_NAME")?.toString() ?: "0.9.0-beta1"
 
     buildConfigField("String", "GROUP_INVITE_HOST", "\"funkytalk-f1aae.web.app\"")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+  }
+
+  splits {
+    abi {
+      isEnable = true
+      reset()
+      include("arm64-v8a", "armeabi-v7a")
+      isUniversalApk = true
+    }
   }
 
   val envKeystorePath = System.getenv("KEYSTORE_PATH")
@@ -55,13 +64,37 @@ android {
     }
   }
 
+  val qaTestVaultPassword = run {
+    val envFile = rootProject.file(".env")
+    var found = ""
+    if (envFile.exists()) {
+      envFile.readLines().forEach { line ->
+        val trimmed = line.trim()
+        if (trimmed.startsWith("QA_TEST_VAULT_PASSWORD=")) {
+          found = trimmed.substringAfter("QA_TEST_VAULT_PASSWORD=")
+            .trim()
+            .removeSurrounding("\"")
+            .removeSurrounding("'")
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+        }
+      }
+    }
+    found
+  }
+
   buildTypes {
     release {
+      buildConfigField("String", "QA_TEST_VAULT_PASSWORD", "\"\"")
+      isDebuggable = false
       isCrunchPngs = false
       isMinifyEnabled = true
       isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       manifestPlaceholders["firebase_crashlytics_collection_enabled"] = "true"
+      configure<com.google.firebase.crashlytics.buildtools.gradle.CrashlyticsExtension> {
+        mappingFileUploadEnabled = true
+      }
       if (hasReleaseSigningCredentials) {
         signingConfig = signingConfigs.getByName("release")
       } else {
@@ -70,6 +103,7 @@ android {
       }
     }
     debug {
+      buildConfigField("String", "QA_TEST_VAULT_PASSWORD", "\"$qaTestVaultPassword\"")
       signingConfig = signingConfigs.getByName("debug")
       manifestPlaceholders["firebase_crashlytics_collection_enabled"] = "false"
       // Testing/Debug optimization: support 64-bit and 32-bit ARM physical test devices.
@@ -98,6 +132,7 @@ secrets {
   ignoreList.add("GEMINI_API_KEY")
   ignoreList.add("BREVO_API_KEY")
   ignoreList.add("BREVO_TEMPLATE_ID")
+  ignoreList.add("QA_TEST_VAULT_PASSWORD")
 }
 
 // Some unused dependencies are commented out below instead of being removed.
@@ -131,6 +166,7 @@ dependencies {
   implementation(libs.firebase.messaging)
   implementation(libs.firebase.crashlytics)
   implementation(libs.firebase.analytics)
+  implementation(libs.firebase.appcheck.playintegrity)
   implementation(libs.play.services.auth)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
@@ -174,5 +210,6 @@ dependencies {
   androidTestImplementation(libs.androidx.runner)
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
+  debugImplementation(libs.firebase.appcheck.debug)
   // "ksp"(libs.moshi.kotlin.codegen)
 }

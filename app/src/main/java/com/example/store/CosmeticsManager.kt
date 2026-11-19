@@ -146,7 +146,12 @@ object CosmeticsManager {
                     ?: jsonObj?.optString("error")
                     ?: rawBody
                 val mappedMsg = when {
-                    errorMsg.contains("insufficient_coins", ignoreCase = true) -> "Insufficient coins! Earn or buy more coins."
+                    errorMsg.contains("insufficient_coins", ignoreCase = true) ->
+                        if (com.example.AppFlagsRepository.flags.value.coinStoreEnabled) {
+                            "Insufficient coins! Earn or buy more coins."
+                        } else {
+                            "You don't have enough coins."
+                        }
                     errorMsg.contains("already_owned", ignoreCase = true) -> "You already own this item!"
                     errorMsg.contains("item_not_found", ignoreCase = true) -> "Item not found in store."
                     else -> errorMsg.ifEmpty { "Purchase failed" }
@@ -235,7 +240,7 @@ object CosmeticsManager {
                     ?: jsonObj?.optString("error")
                     ?: rawBody
                 val mappedMsg = when {
-                    errorMsg.contains("insufficient_coins", ignoreCase = true) -> "Not enough coins."
+                    errorMsg.contains("insufficient_coins", ignoreCase = true) -> "You don't have enough coins."
                     errorMsg.contains("item_not_found", ignoreCase = true) -> "Item not found in store."
                     errorMsg.contains("no_items", ignoreCase = true) -> "No items selected."
                     errorMsg.contains("too_many_items", ignoreCase = true) -> "Too many items selected."

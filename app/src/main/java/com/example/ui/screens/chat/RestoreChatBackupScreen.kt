@@ -2,6 +2,7 @@ package com.example.ui.screens.chat
 
 import android.app.Activity
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -48,6 +49,7 @@ fun RestoreChatBackupScreen(
     onRestoreSuccess: () -> Unit,
     onSkipRestore: () -> Unit
 ) {
+    com.example.ui.components.SecureWindow(enabled = true)
     val context = LocalContext.current
     val funkyColors = LocalFunkyColors.current
     val coroutineScope = rememberCoroutineScope()
@@ -68,6 +70,10 @@ fun RestoreChatBackupScreen(
     var lockoutSecondsRemaining by remember { mutableIntStateOf(0) }
 
     val restoreState by RestoreProgressTracker.progress.collectAsState()
+
+    BackHandler(enabled = !restoreState.isRestoring && !isVerifyingPassword) {
+        onSkipRestore()
+    }
 
     // Countdown timer for lockout
     LaunchedEffect(lockoutSecondsRemaining) {

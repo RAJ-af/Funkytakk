@@ -48,6 +48,7 @@ import com.example.AuthState
 import com.example.AuthViewModel
 import com.example.R
 import com.example.GoogleServicesConfig
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.google.android.gms.auth.api.signin.GoogleSignIn
@@ -61,7 +62,8 @@ import java.security.MessageDigest
 fun AuthScreen(
     viewModel: AuthViewModel,
     onAuthSuccess: () -> Unit,
-    onVerificationWaiting: () -> Unit
+    onVerificationWaiting: () -> Unit,
+    onBackClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
@@ -157,6 +159,14 @@ fun AuthScreen(
 
     val authState by viewModel.authState.collectAsState()
     val isLoading = authState is AuthState.Loading
+
+    BackHandler(enabled = !isLoading) {
+        if (showGoogleDiagnosticDialog) {
+            showGoogleDiagnosticDialog = false
+        } else {
+            onBackClick()
+        }
+    }
 
     // Email format validator regex
     val isEmailFormatValid: (String) -> Boolean = { input ->

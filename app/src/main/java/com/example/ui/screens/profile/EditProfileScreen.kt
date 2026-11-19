@@ -432,6 +432,8 @@ fun EditProfileScreen(
     // Profile Commit to Supabase & Local Cache
     fun performSave() {
         if (isSaving) return
+        val sanitizedDisplayName = sanitizeProfileName(editDisplayName)
+        editDisplayName = sanitizedDisplayName
         errorMessage = null
         isSaving = true
         coroutineScope.launch {
@@ -444,7 +446,7 @@ fun EditProfileScreen(
                     viewModel.updateProfile(
                         context = context,
                         username = cleanUsername,
-                        displayName = editDisplayName.trim(),
+                        displayName = sanitizedDisplayName,
                         avatar = editAvatar,
                         coverUrl = editCover.trim().ifBlank { null },
                         dob = editBio.trim(),
@@ -493,12 +495,14 @@ fun EditProfileScreen(
 
     fun onSaveClicked() {
         if (isSaving) return
+        val sanitizedDisplayName = sanitizeProfileName(editDisplayName)
+        editDisplayName = sanitizedDisplayName
         if (cleanUsername.isBlank() || !isUsernameFormatValid) {
             errorMessage = "Use 3-20 letters, numbers, dots or underscores"
             Toast.makeText(context, errorMessage, Toast.LENGTH_SHORT).show()
             return
         }
-        if (editDisplayName.trim().isBlank()) {
+        if (sanitizedDisplayName.isBlank()) {
             errorMessage = "Display name cannot be blank"
             Toast.makeText(context, errorMessage, Toast.LENGTH_SHORT).show()
             return

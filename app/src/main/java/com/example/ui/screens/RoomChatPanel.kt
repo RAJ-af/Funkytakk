@@ -68,6 +68,15 @@ fun RoomChatPanel(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val blockedUserIds by com.example.repository.BlockRepository.blockedUserIds.collectAsState()
+    val visibleMessages = remember(renderedMessages, blockedUserIds) {
+        renderedMessages.filterNot { msg ->
+            !msg.userId.isNullOrBlank() &&
+                !msg.userId.equals("System", ignoreCase = true) &&
+                msg.messageType?.equals("system", ignoreCase = true) != true &&
+                blockedUserIds.contains(msg.userId)
+        }
+    }
 
     val inlineContentMap = remember {
         globalFluentEmojis.associate { (url, unicode) ->
@@ -88,8 +97,8 @@ fun RoomChatPanel(
     }
 
     // Auto-scroll to the newest message whenever new messages arrive
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
+    LaunchedEffect(visibleMessages.size) {
+        if (visibleMessages.isNotEmpty()) {
             try {
                 chatListState.animateScrollToItem(0)
             } catch (_: Exception) {}
@@ -109,7 +118,7 @@ fun RoomChatPanel(
             reverseLayout = true
         ) {
             items(
-                items = renderedMessages,
+                items = visibleMessages,
                 key = { it.id?.takeIf { k -> k.isNotBlank() } ?: "${it.userId}_${it.text}_${it.createdAt}_${it.messageType}_${it.hashCode()}" }
             ) { msg ->
                 val isSystem = msg.messageType?.equals("system", ignoreCase = true) == true

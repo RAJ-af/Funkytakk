@@ -524,6 +524,10 @@ fun VoiceRoomScreen(
 
     var hostAwaySecondsLeft by remember { mutableStateOf<Int?>(null) }
     var openDirectChatPartner by remember { mutableStateOf<PrivateChatItem?>(null) }
+    val blockedUserIds by com.example.repository.BlockRepository.blockedUserIds.collectAsState()
+    var selectedPersonTarget by remember { mutableStateOf<ModerationTargetUser?>(null) }
+    var pendingBlockTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var isBlockingUser by remember { mutableStateOf(false) }
 
     if (isRoomEnded) {
         RoomEndedScreen(
@@ -634,9 +638,14 @@ fun VoiceRoomScreen(
     var latestReqStatus by remember { mutableStateOf<String?>(null) }
     val messages = remember { mutableStateListOf<ChillRoomMessage>() }
     var renderedMessageCount by remember { mutableStateOf(30) }
-    val renderedMessages = remember(messages, renderedMessageCount) {
+    val renderedMessages = remember(messages, renderedMessageCount, blockedUserIds) {
         derivedStateOf {
-            messages.takeLast(renderedMessageCount).reversed()
+            messages.filterNot { msg ->
+                !msg.userId.isNullOrBlank() &&
+                    !msg.userId.equals("System", ignoreCase = true) &&
+                    msg.messageType?.equals("system", ignoreCase = true) != true &&
+                    blockedUserIds.contains(msg.userId)
+            }.takeLast(renderedMessageCount).reversed()
         }
     }.value
     val chatListState = rememberLazyListState()
@@ -755,10 +764,10 @@ fun VoiceRoomScreen(
         }
     }
 
-    val speakerSeats = remember(participantsData, supabaseProfiles, voiceProfilesState, roomHostId, hostSeat, isMicOn, speakingUserIds) {
+    val speakerSeats = remember(participantsData, supabaseProfiles, voiceProfilesState, roomHostId, hostSeat, isMicOn, speakingUserIds, blockedUserIds) {
         participantsData.filter { p ->
             val isHost = (p.role == "host") || (p.user_id == roomHostId)
-            !isHost && p.role == "speaker"
+            !isHost && p.role == "speaker" && !blockedUserIds.contains(p.user_id)
         }.sortedBy { it.joined_at ?: "" }.take(4).map { p ->
             val pProfile = supabaseProfiles.find { it.uid == p.user_id }
             val cachedProf = voiceProfilesState[p.user_id] ?: com.example.realtime.VoiceRoomProfileManager.getCachedProfile(p.user_id)
@@ -792,10 +801,10 @@ fun VoiceRoomScreen(
         }
     }
 
-    val listenerSeats = remember(participantsData, supabaseProfiles, voiceProfilesState, roomHostId) {
+    val listenerSeats = remember(participantsData, supabaseProfiles, voiceProfilesState, roomHostId, blockedUserIds) {
         participantsData.filter { p ->
             val isHost = (p.role == "host") || (p.user_id == roomHostId)
-            !isHost && p.role != "speaker"
+            !isHost && p.role != "speaker" && !blockedUserIds.contains(p.user_id)
         }.map { p ->
             val pProfile = supabaseProfiles.find { it.uid == p.user_id }
             val cachedProf = voiceProfilesState[p.user_id] ?: com.example.realtime.VoiceRoomProfileManager.getCachedProfile(p.user_id)
@@ -819,10 +828,10 @@ fun VoiceRoomScreen(
         }
     }
 
-    val listenerUserIds = remember(participantsData, roomHostId) {
+    val listenerUserIds = remember(participantsData, roomHostId, blockedUserIds) {
         participantsData.filter { p ->
             val isHost = (p.role == "host") || (p.user_id == roomHostId)
-            !isHost && p.role != "speaker"
+            !isHost && p.role != "speaker" && !blockedUserIds.contains(p.user_id)
         }.map { it.user_id }
     }
 
@@ -1189,7 +1198,10 @@ fun VoiceRoomScreen(
                             }
                         }
                         withContext(Dispatchers.Main) {
-                            if (messages.none { it.id == event.messageId }) {
+                            val isBlockedSender = senderUid.isNotBlank() &&
+                                !event.senderName.equals("System", ignoreCase = true) &&
+                                com.example.repository.BlockRepository.blockedUserIds.value.contains(senderUid)
+                            if (!isBlockedSender && messages.none { it.id == event.messageId }) {
                                 val isMe = (event.userId == currentUserId)
                                 val name = if (isMe) "You" else event.senderName.ifBlank { "User" }
                                 val avatar = event.senderAvatar.ifBlank {
@@ -1238,7 +1250,9 @@ fun VoiceRoomScreen(
                                 Log.d("VoiceRoomScreen", "[Realtime] Processing gift message: id=$msgId, text='$text', userId=$userId")
 
                                 withContext(Dispatchers.Main) {
-                                    if (msgId.isBlank() || messages.none { it.id == msgId }) {
+                                    val isBlockedGiftSender = userId.isNotBlank() &&
+                                        com.example.repository.BlockRepository.blockedUserIds.value.contains(userId)
+                                    if (!isBlockedGiftSender && (msgId.isBlank() || messages.none { it.id == msgId })) {
                                         val p = supabaseProfiles.find { it.uid == userId }
                                         val isMe = (userId == currentUserId)
                                         val name = if (isMe) (p?.displayName ?: "You") else (p?.displayName ?: p?.username ?: "User")
@@ -1659,6 +1673,7 @@ fun VoiceRoomScreen(
     var isUploadingClip by remember { mutableStateOf(false) }
     var isSubmittingReport by remember { mutableStateOf(false) }
     var reportAdditionalDetails by remember { mutableStateOf("") }
+    var reportBlockHostToo by remember { mutableStateOf(false) }
     var showReportSubmittedSheet by remember { mutableStateOf(false) }
 
     val reportScreenshotLauncher = rememberLauncherForActivityResult(
@@ -1878,8 +1893,8 @@ fun VoiceRoomScreen(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     
     val dbConversations by EncryptedChatRepository.conversations.collectAsState()
-    val privateChats = remember(dbConversations) {
-        dbConversations.map { conv ->
+    val privateChats = remember(dbConversations, blockedUserIds) {
+        dbConversations.filterNot { blockedUserIds.contains(it.otherUserId) }.map { conv ->
             val lastMsgPreview = when {
                 conv.lastMessageText.startsWith("📷") || conv.lastMessageText.contains("Photo", ignoreCase = true) -> "Photo"
                 conv.lastMessageText.startsWith("🎤") || conv.lastMessageText.contains("Voice message", ignoreCase = true) -> "Voice message"
@@ -2720,12 +2735,27 @@ fun VoiceRoomScreen(
                 currentUserId = currentUserId,
                 scope = scope,
                 onHostClick = {
-                    oneToOneChatUser = PrivateChatItem("host", hostSeat.name, hostSeat.imageUrl, hostSeat.flagCode, "Host", "Now", 0, true, false)
-                    showOneToOneChatSheet = true
+                    val targetHostUid = hostSeat.userId.ifBlank { roomHostId.orEmpty() }
+                    if (targetHostUid.isNotBlank() && targetHostUid != currentUserId) {
+                        selectedPersonTarget = ModerationTargetUser(
+                            userId = targetHostUid,
+                            name = hostSeat.name,
+                            imageUrl = hostSeat.imageUrl,
+                            flagCode = hostSeat.flagCode,
+                            role = "host"
+                        )
+                    }
                 },
-                onSpeakerClick = { index, sp ->
-                    oneToOneChatUser = PrivateChatItem("sp${index + 1}", sp.name, sp.imageUrl, sp.flagCode, "", "Now", 0, true, false)
-                    showOneToOneChatSheet = true
+                onSpeakerClick = { _, sp ->
+                    if (sp.userId.isNotBlank() && sp.userId != currentUserId) {
+                        selectedPersonTarget = ModerationTargetUser(
+                            userId = sp.userId,
+                            name = sp.name,
+                            imageUrl = sp.imageUrl,
+                            flagCode = sp.flagCode,
+                            role = if (sp.isHost) "host" else "speaker"
+                        )
+                    }
                 },
                 isSpeakerRequestPending = isSpeakerRequestPending || mySpeakerRequestStatus == "pending",
                 isCurrentUserSpeakerOrHost = isCurrentUserSpeakerOrHost,
@@ -3166,20 +3196,43 @@ fun VoiceRoomScreen(
             }
         ) {
             if (openDirectChatPartner != null) {
+                val activePartner = openDirectChatPartner!!
+                val partnerBlocked = blockedUserIds.contains(activePartner.id)
                 OneToOneChatBottomSheetContent(
                     selectedThemeIndex = selectedThemeIndex,
-                    chatUser = openDirectChatPartner!!,
+                    chatUser = activePartner,
                     messagesList = emptyList(),
+                    isBlocked = partnerBlocked,
+                    onBlockToggleClick = if (activePartner.id.isNotBlank() && activePartner.id != currentUserId) {
+                        {
+                            if (partnerBlocked) {
+                                scope.launch {
+                                    com.example.repository.BlockRepository.unblockUser(context, activePartner.id)
+                                        .onSuccess { Toast.makeText(context, "${activePartner.name} unblocked", Toast.LENGTH_SHORT).show() }
+                                        .onFailure { Toast.makeText(context, it.message ?: "Failed to unblock user.", Toast.LENGTH_SHORT).show() }
+                                }
+                            } else {
+                                pendingBlockTarget = activePartner.id to activePartner.name
+                            }
+                        }
+                    } else null,
                     onSendMessage = { msg ->
                         scope.launch {
                             try {
-                                com.example.repository.EncryptedChatRepository.sendMessage(
+                                val res = com.example.repository.EncryptedChatRepository.sendMessage(
                                     context = context,
-                                    recipientUserId = openDirectChatPartner!!.id,
-                                    recipientName = openDirectChatPartner!!.name,
-                                    recipientAvatar = openDirectChatPartner!!.imageUrl,
+                                    recipientUserId = activePartner.id,
+                                    recipientName = activePartner.name,
+                                    recipientAvatar = activePartner.imageUrl,
                                     text = msg
                                 )
+                                res.onFailure { err ->
+                                    if (err is com.example.repository.UserBlockedException ||
+                                        com.example.repository.BlockRepository.isUserBlockedError(err.message)
+                                    ) {
+                                        Toast.makeText(context, com.example.repository.USER_BLOCKED_ERROR_MESSAGE, Toast.LENGTH_SHORT).show()
+                                    }
+                                }
                             } catch (e: Exception) {
                                 Log.e("VoiceRoomScreen", "Failed to send chat: ${e.message}")
                             }
@@ -3233,6 +3286,14 @@ fun VoiceRoomScreen(
                 isCurrentUserHost = (currentUserId == roomHostId && currentUserId.isNotBlank()),
                 currentUserId = currentUserId,
                 pendingSpeakerRequests = pendingSpeakerRequests,
+                blockedUserIds = blockedUserIds,
+                onPersonClick = { person ->
+                    showPeopleSheet = false
+                    selectedPersonTarget = person
+                },
+                onBlockUser = { targetUserId, targetName ->
+                    pendingBlockTarget = targetUserId to targetName
+                },
                 onRespondToSpeakerRequest = { reqId, accept ->
                     viewModel?.respondToSpeakerRequest(reqId, accept, context)
                 },
@@ -3477,10 +3538,10 @@ fun VoiceRoomScreen(
         }
     }
 
-    val giftReceiversList = remember(participantsData, supabaseProfiles, roomHostId, hostSeat, speakerSeats) {
+    val giftReceiversList = remember(participantsData, supabaseProfiles, roomHostId, hostSeat, speakerSeats, blockedUserIds) {
         val list = mutableListOf<GiftReceiverUser>()
         val hUid = hostSeat.userId.ifBlank { roomHostId ?: "" }
-        if (hUid.isNotBlank()) {
+        if (hUid.isNotBlank() && !blockedUserIds.contains(hUid)) {
             list.add(
                 GiftReceiverUser(
                     userId = hUid,
@@ -3492,7 +3553,7 @@ fun VoiceRoomScreen(
             )
         }
         speakerSeats.forEach { sp ->
-            if (sp.userId.isNotBlank()) {
+            if (sp.userId.isNotBlank() && !blockedUserIds.contains(sp.userId)) {
                 list.add(
                     GiftReceiverUser(
                         userId = sp.userId,
@@ -3505,7 +3566,9 @@ fun VoiceRoomScreen(
             }
         }
         participantsData.filter { p ->
-            p.user_id != hUid && speakerSeats.none { it.userId == p.user_id }
+            p.user_id != hUid &&
+                !blockedUserIds.contains(p.user_id) &&
+                speakerSeats.none { it.userId == p.user_id }
         }.forEach { p ->
             val pProfile = supabaseProfiles.find { it.uid == p.user_id }
             val snippet = com.example.realtime.VoiceRoomRealtimeManager.getUserSnippet(p.user_id)
@@ -3732,6 +3795,7 @@ fun VoiceRoomScreen(
                 )
             }
 
+            val showReportBlockHost = !roomHostId.isNullOrBlank() && roomHostId != currentUserId
             ReportRoomBottomSheetContent(
                 selectedThemeIndex = selectedThemeIndex,
                 selectedReasonIndex = selectedReportReasonIndex,
@@ -3748,10 +3812,17 @@ fun VoiceRoomScreen(
                 onRemoveClip = { reportAudioClipUrl = null },
                 additionalDetails = reportAdditionalDetails,
                 onDetailsChange = { reportAdditionalDetails = it },
+                showBlockUserToo = showReportBlockHost,
+                blockUserToo = reportBlockHostToo,
+                onBlockUserTooChange = { reportBlockHostToo = it },
                 isSubmitting = isSubmittingReport,
-                onDismiss = { showReportDialog = false },
+                onDismiss = {
+                    reportBlockHostToo = false
+                    showReportDialog = false
+                },
                 onSubmit = {
                     val category = reportCategories.getOrElse(selectedReportReasonIndex) { "Other Concerns" }
+                    val shouldBlockToo = reportBlockHostToo
                     isSubmittingReport = true
                     scope.launch(Dispatchers.IO) {
                         try {
@@ -3805,7 +3876,10 @@ fun VoiceRoomScreen(
 
                             if (res.isSuccessful) {
                                 Log.i("VoiceRoomReport", "Report room persisted successfully: code=${res.code()}")
-                                
+                                if (shouldBlockToo && targetReportedUserId.isNotBlank() && targetReportedUserId != effectiveReporterId) {
+                                    com.example.repository.BlockRepository.blockUser(context, targetReportedUserId)
+                                }
+
                                 // Broadcast report event via Realtime websocket after persistence
                                 VoiceRoomRealtimeManager.broadcastRoomReport(
                                     roomId = activeRoomId,
@@ -3817,6 +3891,7 @@ fun VoiceRoomScreen(
 
                                 withContext(Dispatchers.Main) {
                                     isSubmittingReport = false
+                                    reportBlockHostToo = false
                                     showReportDialog = false
                                     showReportSubmittedSheet = true
                                     reportAdditionalDetails = ""
@@ -3887,6 +3962,7 @@ fun VoiceRoomScreen(
         val activeChatUser = oneToOneChatUser ?: PrivateChatItem("1", "Riya", "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400", "in", "Started chat", "Now", 0, true, false)
         val msgs = directMessagesMap[activeChatUser.name] ?: emptyList()
 
+        val isActiveChatBlocked = blockedUserIds.contains(activeChatUser.id)
         ModalBottomSheet(
             onDismissRequest = { showOneToOneChatSheet = false },
             containerColor = currentTheme.startColor,
@@ -3897,6 +3973,20 @@ fun VoiceRoomScreen(
                 selectedThemeIndex = selectedThemeIndex,
                 chatUser = activeChatUser,
                 messagesList = msgs,
+                isBlocked = isActiveChatBlocked,
+                onBlockToggleClick = if (activeChatUser.id.isNotBlank() && activeChatUser.id != currentUserId) {
+                    {
+                        if (isActiveChatBlocked) {
+                            scope.launch {
+                                com.example.repository.BlockRepository.unblockUser(context, activeChatUser.id)
+                                    .onSuccess { Toast.makeText(context, "${activeChatUser.name} unblocked", Toast.LENGTH_SHORT).show() }
+                                    .onFailure { Toast.makeText(context, it.message ?: "Failed to unblock user.", Toast.LENGTH_SHORT).show() }
+                            }
+                        } else {
+                            pendingBlockTarget = activeChatUser.id to activeChatUser.name
+                        }
+                    }
+                } else null,
                 onSendMessage = { txt ->
                     val newList = msgs + DirectMessage(
                         id = (msgs.size + 1).toString(),
@@ -3910,6 +4000,156 @@ fun VoiceRoomScreen(
                 onBack = { showOneToOneChatSheet = false }
             )
         }
+    }
+
+    // 5) Voice Room Person Action Sheet (from clicking speakers or participants)
+    selectedPersonTarget?.let { target ->
+        val currentTheme = roomThemes[selectedThemeIndex]
+        val isTargetBlocked = blockedUserIds.contains(target.userId)
+        ModalBottomSheet(
+            onDismissRequest = { selectedPersonTarget = null },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = currentTheme.startColor,
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 24.dp, vertical = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                com.example.ui.components.PresenceAvatar(
+                    avatarUrl = target.imageUrl,
+                    size = 76.dp,
+                    isOnline = true,
+                    countryCode = target.flagCode,
+                    userId = target.userId,
+                    showFlagBadge = true,
+                    enableFrameAnimation = true
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                com.example.store.DecoratedUserName(
+                    userId = target.userId,
+                    name = target.name,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    defaultColor = if (currentTheme.isDark) Color.White else Color.Black
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = target.role.replaceFirstChar { it.uppercase() },
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = if (currentTheme.isDark) Color.White.copy(alpha = 0.65f) else Color.Gray
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+
+                if (!isTargetBlocked) {
+                    ModerationActionButton(
+                        label = "Send Message",
+                        iconText = "💬",
+                        containerColor = if (currentTheme.isDark) Color(0xFF2A2B3D) else Color(0xFFF3F4F6),
+                        textColor = if (currentTheme.isDark) Color.White else Color.Black,
+                        onClick = {
+                            oneToOneChatUser = PrivateChatItem(
+                                target.userId,
+                                target.name,
+                                target.imageUrl,
+                                target.flagCode,
+                                "",
+                                "Now",
+                                0,
+                                true,
+                                false
+                            )
+                            selectedPersonTarget = null
+                            showOneToOneChatSheet = true
+                        }
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    ModerationActionButton(
+                        label = "Send Gift",
+                        iconText = "🎁",
+                        containerColor = if (currentTheme.isDark) Color(0xFF332A1E) else Color(0xFFFEF3C7),
+                        textColor = Color(0xFFD97706),
+                        onClick = {
+                            giftTargetUserId = target.userId
+                            selectedPersonTarget = null
+                            showGiftSheet = true
+                        }
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+
+                if (isTargetBlocked) {
+                    ModerationActionButton(
+                        label = "Unblock",
+                        iconText = "🔓",
+                        containerColor = if (currentTheme.isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9),
+                        textColor = if (currentTheme.isDark) Color.White else Color(0xFF0F172A),
+                        onClick = {
+                            scope.launch {
+                                com.example.repository.BlockRepository.unblockUser(context, target.userId)
+                                    .onSuccess {
+                                        Toast.makeText(context, "${target.name} unblocked", Toast.LENGTH_SHORT).show()
+                                        selectedPersonTarget = null
+                                    }
+                                    .onFailure {
+                                        Toast.makeText(context, it.message ?: "Failed to unblock user.", Toast.LENGTH_SHORT).show()
+                                    }
+                            }
+                        }
+                    )
+                } else {
+                    ModerationActionButton(
+                        label = "Block user",
+                        iconText = "⛔",
+                        containerColor = if (currentTheme.isDark) Color(0xFF451A1A) else Color(0xFFFEE2E2),
+                        textColor = Color(0xFFDC2626),
+                        onClick = {
+                            pendingBlockTarget = target.userId to target.name
+                        }
+                    )
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+        }
+    }
+
+    // Block Confirmation Dialog inside Voice Room
+    pendingBlockTarget?.let { (targetUid, targetName) ->
+        com.example.ui.components.BlockUserConfirmDialog(
+            displayName = targetName,
+            isBlocking = isBlockingUser,
+            onDismiss = {
+                if (!isBlockingUser) pendingBlockTarget = null
+            },
+            onConfirm = {
+                isBlockingUser = true
+                scope.launch {
+                    com.example.repository.BlockRepository.blockUser(context, targetUid)
+                        .onSuccess {
+                            isBlockingUser = false
+                            pendingBlockTarget = null
+                            selectedPersonTarget = null
+                            showOneToOneChatSheet = false
+                            openDirectChatPartner = null
+                            showPeopleSheet = false
+                            Toast.makeText(context, "$targetName blocked", Toast.LENGTH_SHORT).show()
+                        }
+                        .onFailure { err ->
+                            isBlockingUser = false
+                            Toast.makeText(
+                                context,
+                                err.message ?: "Failed to block user.",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                }
+            }
+        )
     }
 
     // Gift Animation Overlay (Non-blocking touch overlay for room animations)
@@ -5601,6 +5841,9 @@ fun ReportRoomBottomSheetContent(
     onRemoveClip: () -> Unit,
     additionalDetails: String,
     onDetailsChange: (String) -> Unit,
+    showBlockUserToo: Boolean = false,
+    blockUserToo: Boolean = false,
+    onBlockUserTooChange: (Boolean) -> Unit = {},
     isSubmitting: Boolean,
     onDismiss: () -> Unit,
     onSubmit: () -> Unit
@@ -6118,6 +6361,43 @@ fun ReportRoomBottomSheetContent(
             )
         }
 
+        if (showBlockUserToo) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(cardBg)
+                    .border(1.dp, cardBorder, RoundedCornerShape(14.dp))
+                    .clickable { onBlockUserTooChange(!blockUserToo) }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(
+                    checked = blockUserToo,
+                    onCheckedChange = onBlockUserTooChange,
+                    colors = CheckboxDefaults.colors(
+                        checkedColor = Color(0xFFF59E0B),
+                        checkmarkColor = Color(0xFF451A03)
+                    )
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Block this user too",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = titleColor
+                    )
+                    Text(
+                        text = "They will not be able to message you, and you will not see their posts.",
+                        fontSize = 11.5.sp,
+                        color = subtitleColor
+                    )
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(20.dp))
 
         // Submit Button
@@ -6307,9 +6587,12 @@ fun OneToOneChatBottomSheetContent(
     selectedThemeIndex: Int,
     chatUser: PrivateChatItem,
     messagesList: List<DirectMessage>,
+    isBlocked: Boolean = false,
+    onBlockToggleClick: (() -> Unit)? = null,
     onSendMessage: (String) -> Unit,
     onBack: () -> Unit
 ) {
+    com.example.ui.components.SecureWindow(enabled = true)
     val currentTheme = roomThemes[selectedThemeIndex]
     val textColor = if (currentTheme.isDark) Color.White else Color.Black
     val secondaryTextColor = if (currentTheme.isDark) Color.White.copy(alpha = 0.7f) else Color.Gray
@@ -6391,15 +6674,32 @@ fun OneToOneChatBottomSheetContent(
                     }
                 }
 
-                Text(
-                    text = "invite",
-                    color = Color(0xFF00C4FF),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
-                    modifier = Modifier
-                        .clickable { }
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (onBlockToggleClick != null) {
+                        Text(
+                            text = if (isBlocked) "Unblock" else "Block",
+                            color = Color(0xFFEF4444),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(100.dp))
+                                .clickable { onBlockToggleClick() }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                    Text(
+                        text = "invite",
+                        color = Color(0xFF00C4FF),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        modifier = Modifier
+                            .clickable { }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
             }
 
             // Status room bar
@@ -6574,6 +6874,23 @@ fun OneToOneChatBottomSheetContent(
         }
 
         // Bottom input rows
+        if (isBlocked) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(if (currentTheme.isDark) Color(0xFF1F2937) else Color.White)
+                    .padding(horizontal = 20.dp, vertical = 16.dp)
+                    .navigationBarsPadding(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = com.example.repository.USER_BLOCKED_ERROR_MESSAGE,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = secondaryTextColor
+                )
+            }
+        } else {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -6714,6 +7031,7 @@ fun OneToOneChatBottomSheetContent(
                     SoftHeartIcon(isLiked = true, size = 22.dp, color = Color(0xFFEC4899))
                 }
             }
+        }
         }
     }
 }

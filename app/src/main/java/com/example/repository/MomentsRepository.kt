@@ -499,8 +499,12 @@ object MomentsRepository {
                 }
             )
             val uploaded = uploadRes.getOrElse { err ->
-                // TODO remove detail before release
-                val msg = err.message ?: "Upload failed (${err.javaClass.simpleName}: unknown error)"
+                val isValidation = (err as? com.example.MomentUploadException)?.isValidationError == true
+                val msg = when {
+                    isValidation -> err.message ?: "Upload failed. Please try again."
+                    com.example.BuildConfig.DEBUG -> err.message ?: "Upload failed (${err.javaClass.simpleName}: unknown error)"
+                    else -> "Upload failed. Please try again."
+                }
                 TelemetryManager.logMomentPostFailed(if (isVideo) "video_upload_failed" else "photo_upload_failed")
                 return@withContext Result.failure(
                     MomentRpcException(rawCode = "invalid_media", message = msg)

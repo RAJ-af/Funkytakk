@@ -50,8 +50,12 @@ import com.example.db.LocalDmConversation
 import com.example.db.LocalDmMessage
 import com.example.db.LocalDmMessageReaction
 import com.example.moderation.ReportUserDialog
+import com.example.repository.BlockRepository
 import com.example.repository.EncryptedChatRepository
+import com.example.repository.USER_BLOCKED_ERROR_MESSAGE
+import com.example.repository.UserBlockedException
 import com.example.ui.chat.*
+import com.example.ui.components.BlockUserConfirmDialog
 import com.example.ui.components.CircleFlag
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -99,6 +103,7 @@ fun DirectChatScreen(
     partnerCountryCode: String? = null,
     onBack: () -> Unit
 ) {
+    com.example.ui.components.SecureWindow(enabled = true)
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val clipboardManager = LocalClipboardManager.current
@@ -130,6 +135,35 @@ fun DirectChatScreen(
     var activeMediaViewerIndex by remember { mutableStateOf<Int?>(null) }
     var showReportUserDialog by remember { mutableStateOf(false) }
     var showTopMenu by remember { mutableStateOf(false) }
+    var showBlockConfirmDialog by remember { mutableStateOf(false) }
+    var isBlockingUser by remember { mutableStateOf(false) }
+    var isChatBlocked by remember { mutableStateOf(false) }
+    val blockedUserIds by BlockRepository.blockedUserIds.collectAsState()
+    val isPartnerBlockedLocally = partnerUserId.isNotBlank() && blockedUserIds.contains(partnerUserId)
+
+    val vaultStatus by com.example.crypto.VaultSecurityManager.vaultStatus.collectAsState()
+    var showVaultGateDialog by remember { mutableStateOf(false) }
+    var pendingVaultAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    fun ensureVaultUnlocked(action: () -> Unit) {
+        if (!com.example.crypto.VaultSecurityManager.isVaultLocked() &&
+            vaultStatus == com.example.crypto.VaultStatus.UNLOCKED
+        ) {
+            action()
+        } else {
+            pendingVaultAction = action
+            showVaultGateDialog = true
+        }
+    }
+
+    LaunchedEffect(vaultStatus) {
+        if (vaultStatus == com.example.crypto.VaultStatus.UNLOCKED && showVaultGateDialog) {
+            showVaultGateDialog = false
+            val action = pendingVaultAction
+            pendingVaultAction = null
+            action?.invoke()
+        }
+    }
 
     val listState = rememberLazyListState()
     val voicePlayer = rememberVoicePlaybackController()
@@ -181,7 +215,7 @@ fun DirectChatScreen(
                     try {
                         val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                         if (bytes != null && bytes.isNotEmpty()) {
-                            EncryptedChatRepository.sendMediaMessage(
+                            val sendRes = EncryptedChatRepository.sendMediaMessage(
                                 context = context,
                                 recipientUserId = partnerUserId,
                                 recipientName = partnerName,
@@ -190,6 +224,11 @@ fun DirectChatScreen(
                                 messageType = "image",
                                 mimeType = "image/jpeg"
                             )
+                            if (sendRes.isFailure) {
+                                val err = sendRes.exceptionOrNull()
+                                if (err is UserBlockedException) isChatBlocked = true
+                                Toast.makeText(context, err?.message ?: "Could not send photo.", Toast.LENGTH_SHORT).show()
+                            }
                         }
                     } catch (e: Exception) {
                         Toast.makeText(context, "Error sending photo: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -263,12 +302,24 @@ fun DirectChatScreen(
         }
     }
 
-    LaunchedEffect(partnerUserId) {
+    LaunchedEffect(partnerUserId, vaultStatus) {
+        if (com.example.crypto.VaultSecurityManager.isVaultLocked() ||
+            vaultStatus != com.example.crypto.VaultStatus.UNLOCKED
+        ) {
+            showVaultGateDialog = true
+            return@LaunchedEffect
+        }
         try {
+            EncryptedChatRepository.init(context)
             currentUserId = SupabaseSessionManager.getUserId(context) ?: ""
             val conv = EncryptedChatRepository.getOrCreateLocalConversation(context, partnerUserId, partnerName, partnerAvatarUrl)
             conversationId = conv.id
             EncryptedChatRepository.markConversationRead(conv.id)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: UserBlockedException) {
+            isChatBlocked = true
+            Toast.makeText(context, USER_BLOCKED_ERROR_MESSAGE, Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             android.util.Log.e("DirectChatScreen", "Error resolving conversation", e)
         }
@@ -369,14 +420,19 @@ fun DirectChatScreen(
             rawMessages.count { !it.isOutgoing }
         }
 
-        BackHandler(enabled = isEmojiPickerOpen || isSelectionMode || selectedMessageForMenu != null) {
+        BackHandler {
             if (isEmojiPickerOpen) {
                 isEmojiPickerOpen = false
             } else if (isSelectionMode) {
                 isSelectionMode = false
                 selectedMessageIds.clear()
-            } else {
+            } else if (selectedMessageForMenu != null) {
                 selectedMessageForMenu = null
+            } else if (showVaultGateDialog) {
+                showVaultGateDialog = false
+                pendingVaultAction = null
+            } else {
+                onBack()
             }
         }
 
@@ -481,6 +537,37 @@ fun DirectChatScreen(
                                     onDismissRequest = { showTopMenu = false },
                                     modifier = Modifier.background(colors.surface)
                                 ) {
+                                    if (partnerUserId.isNotBlank()) {
+                                        DropdownMenuItem(
+                                            text = {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    com.example.ui.components.SoftBlockIcon(size = 16.dp, color = Color(0xFFEF4444))
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    Text(
+                                                        text = if (isPartnerBlockedLocally) "Unblock user" else "Block user",
+                                                        color = Color(0xFFEF4444),
+                                                        fontWeight = FontWeight.Medium
+                                                    )
+                                                }
+                                            },
+                                            onClick = {
+                                                showTopMenu = false
+                                                if (isPartnerBlockedLocally) {
+                                                    coroutineScope.launch {
+                                                        val res = BlockRepository.unblockUser(context, partnerUserId)
+                                                        res.onSuccess {
+                                                            isChatBlocked = false
+                                                            Toast.makeText(context, "$partnerName unblocked", Toast.LENGTH_SHORT).show()
+                                                        }.onFailure { err ->
+                                                            Toast.makeText(context, err.message ?: "Could not unblock user.", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    }
+                                                } else {
+                                                    showBlockConfirmDialog = true
+                                                }
+                                            }
+                                        )
+                                    }
                                     DropdownMenuItem(
                                         text = {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -507,6 +594,22 @@ fun DirectChatScreen(
                         .background(colors.surface)
                         .imePadding()
                 ) {
+                    if (isChatBlocked || isPartnerBlockedLocally) {
+                        Surface(
+                            color = colors.surface,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .navigationBarsPadding()
+                                .padding(horizontal = 16.dp, vertical = 14.dp)
+                        ) {
+                            Text(
+                                text = USER_BLOCKED_ERROR_MESSAGE,
+                                color = colors.textSecondary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    } else {
                     ChatInputBar(
                         text = inputText,
                         onTextChange = {
@@ -519,23 +622,31 @@ fun DirectChatScreen(
                             if (inputText.isNotBlank()) {
                                 val reply = replyingToMessage
                                 val textToSend = inputText
-                                inputText = ""
-                                replyingToMessage = null
-                                isEmojiPickerOpen = false
-                                coroutineScope.launch {
-                                    EncryptedChatRepository.sendMessage(
-                                        context = context,
-                                        recipientUserId = partnerUserId,
-                                        recipientName = partnerName,
-                                        recipientAvatar = partnerAvatarUrl,
-                                        text = textToSend,
-                                        replyToText = reply?.text,
-                                        replyToSender = if (reply != null) {
-                                            if (reply.isOutgoing) "You" else partnerName
-                                        } else null
-                                    )
-                                    if (timelineItems.isNotEmpty()) {
-                                        listState.animateScrollToItem(timelineItems.size - 1)
+                                ensureVaultUnlocked {
+                                    inputText = ""
+                                    replyingToMessage = null
+                                    isEmojiPickerOpen = false
+                                    coroutineScope.launch {
+                                        val res = EncryptedChatRepository.sendMessage(
+                                            context = context,
+                                            recipientUserId = partnerUserId,
+                                            recipientName = partnerName,
+                                            recipientAvatar = partnerAvatarUrl,
+                                            text = textToSend,
+                                            replyToText = reply?.text,
+                                            replyToSender = if (reply != null) {
+                                                if (reply.isOutgoing) "You" else partnerName
+                                            } else null
+                                        )
+                                        if (res.isFailure) {
+                                            Toast.makeText(
+                                                context,
+                                                res.exceptionOrNull()?.message ?: "Could not send message.",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        } else if (timelineItems.isNotEmpty()) {
+                                            listState.animateScrollToItem(timelineItems.size - 1)
+                                        }
                                     }
                                 }
                             }
@@ -573,7 +684,7 @@ fun DirectChatScreen(
                                         val result = voiceRecorder.stop()
                                         if (result != null && result.bytes.isNotEmpty()) {
                                             coroutineScope.launch {
-                                                EncryptedChatRepository.sendMediaMessage(
+                                                val sendRes = EncryptedChatRepository.sendMediaMessage(
                                                     context = context,
                                                     recipientUserId = partnerUserId,
                                                     recipientName = partnerName,
@@ -583,7 +694,11 @@ fun DirectChatScreen(
                                                     mimeType = "audio/aac",
                                                     durationSeconds = (result.durationMs / 1000).toInt().coerceAtLeast(1)
                                                 )
-                                                if (timelineItems.isNotEmpty()) {
+                                                if (sendRes.isFailure) {
+                                                    val err = sendRes.exceptionOrNull()
+                                                    if (err is UserBlockedException) isChatBlocked = true
+                                                    Toast.makeText(context, err?.message ?: "Could not send voice note.", Toast.LENGTH_SHORT).show()
+                                                } else if (timelineItems.isNotEmpty()) {
                                                     listState.animateScrollToItem(timelineItems.size - 1)
                                                 }
                                             }
@@ -610,7 +725,7 @@ fun DirectChatScreen(
                                         val result = voiceRecorder.stop()
                                         if (result != null && result.bytes.isNotEmpty()) {
                                             coroutineScope.launch {
-                                                EncryptedChatRepository.sendMediaMessage(
+                                                val sendRes = EncryptedChatRepository.sendMediaMessage(
                                                     context = context,
                                                     recipientUserId = partnerUserId,
                                                     recipientName = partnerName,
@@ -620,6 +735,11 @@ fun DirectChatScreen(
                                                     mimeType = "audio/aac",
                                                     durationSeconds = (result.durationMs / 1000).toInt().coerceAtLeast(1)
                                                 )
+                                                if (sendRes.isFailure) {
+                                                    val err = sendRes.exceptionOrNull()
+                                                    if (err is UserBlockedException) isChatBlocked = true
+                                                    Toast.makeText(context, err?.message ?: "Could not send voice note.", Toast.LENGTH_SHORT).show()
+                                                }
                                             }
                                         }
                                     }
@@ -645,6 +765,7 @@ fun DirectChatScreen(
                                 }
                             }
                         )
+                    }
                     }
                 }
             },
@@ -1114,6 +1235,37 @@ fun DirectChatScreen(
                 existingScreenshotUrl = null,
                 onDismiss = { showReportUserDialog = false },
                 onReportSubmitted = { showReportUserDialog = false }
+            )
+        }
+
+        if (showVaultGateDialog) {
+            VaultManagementDialogs(
+                onDismissRequest = {
+                    showVaultGateDialog = false
+                    pendingVaultAction = null
+                }
+            )
+        }
+
+        if (showBlockConfirmDialog) {
+            BlockUserConfirmDialog(
+                displayName = partnerName,
+                isBlocking = isBlockingUser,
+                onDismiss = { if (!isBlockingUser) showBlockConfirmDialog = false },
+                onConfirm = {
+                    isBlockingUser = true
+                    coroutineScope.launch {
+                        val res = BlockRepository.blockUser(context, partnerUserId)
+                        isBlockingUser = false
+                        showBlockConfirmDialog = false
+                        res.onSuccess {
+                            Toast.makeText(context, "$partnerName blocked", Toast.LENGTH_SHORT).show()
+                            onBack()
+                        }.onFailure { err ->
+                            Toast.makeText(context, err.message ?: "Could not block user.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
             )
         }
     }

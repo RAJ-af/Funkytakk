@@ -113,6 +113,7 @@ fun ProfileTabContent(
     var showCoinStoreScreen by remember { mutableStateOf(false) }
     var showChatKitGalleryDebug by remember { mutableStateOf(false) }
     var showSettingsScreen by remember { mutableStateOf(false) }
+    var showLoggedInDevicesScreen by remember { mutableStateOf(false) }
     var isAdmin by remember { mutableStateOf(false) }
 
     var activeFollowerUserId by remember { mutableStateOf<String?>(null) }
@@ -121,6 +122,7 @@ fun ProfileTabContent(
 
     val anyOverlayOpen = showEditProfileDialog ||
         showSettingsScreen ||
+        showLoggedInDevicesScreen ||
         showModerationDialog ||
         showBlockedUsersSheet ||
         showBlockedGroupsSheet ||
@@ -1136,9 +1138,10 @@ fun ProfileTabContent(
                 }
 
                 // -------------------------------------------------------------
-                // CARD 5: COIN WALLET & REWARDS (Tap to open CoinStoreScreen)
+                // CARD 5: COIN WALLET & REWARDS (Tap to open CoinStoreScreen when enabled)
                 // -------------------------------------------------------------
                 item {
+                    val appFlags by com.example.AppFlagsRepository.flags.collectAsState()
                     ProfileCardContainer(
                         title = "Coin Wallet",
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 5.dp)
@@ -1150,7 +1153,13 @@ fun ProfileTabContent(
                                     .clip(RoundedCornerShape(14.dp))
                                     .background(funkyColors.soft)
                                     .border(BorderStroke(1.dp, funkyColors.mango.copy(alpha = 0.5f)), RoundedCornerShape(14.dp))
-                                    .clickable { showCoinStoreScreen = true }
+                                    .then(
+                                        if (appFlags.coinStoreEnabled) {
+                                            Modifier.clickable { showCoinStoreScreen = true }
+                                        } else {
+                                            Modifier
+                                        }
+                                    )
                                     .padding(14.dp)
                                     .testTag("profile_coin_wallet_card"),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -1167,24 +1176,26 @@ fun ProfileTabContent(
                                             color = funkyColors.ink
                                         )
                                         Text(
-                                            text = "Tap to open Coin Store",
+                                            text = if (appFlags.coinStoreEnabled) "Tap to open Coin Store" else "Coins balance",
                                             fontSize = 11.5.sp,
                                             color = funkyColors.mute
                                         )
                                     }
                                 }
 
-                                Surface(
-                                    shape = RoundedCornerShape(50.dp),
-                                    color = funkyColors.mango
-                                ) {
-                                    Text(
-                                        text = "+ Top Up",
-                                        fontSize = 11.5.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = funkyColors.onMango,
-                                        modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp)
-                                    )
+                                if (appFlags.coinStoreEnabled) {
+                                    Surface(
+                                        shape = RoundedCornerShape(50.dp),
+                                        color = funkyColors.mango
+                                    ) {
+                                        Text(
+                                            text = "+ Top Up",
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = funkyColors.onMango,
+                                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp)
+                                        )
+                                    }
                                 }
                             }
 
@@ -1620,8 +1631,10 @@ fun ProfileTabContent(
                 showEditProfileDialog = true
             },
             onOpenCoinStore = {
-                showSettingsScreen = false
-                showCoinStoreScreen = true
+                if (com.example.AppFlagsRepository.flags.value.coinStoreEnabled) {
+                    showSettingsScreen = false
+                    showCoinStoreScreen = true
+                }
             },
             onOpenDecorationStore = {
                 showSettingsScreen = false
@@ -1659,9 +1672,15 @@ fun ProfileTabContent(
                 showSettingsScreen = false
                 showChatAppearanceSheet = true
             },
-            onOpenDebugGallery = {
+            onOpenLoggedInDevices = {
                 showSettingsScreen = false
-                showChatKitGalleryDebug = true
+                showLoggedInDevicesScreen = true
+            },
+            onOpenDebugGallery = {
+                if (com.example.BuildConfig.DEBUG) {
+                    showSettingsScreen = false
+                    showChatKitGalleryDebug = true
+                }
             },
             onLogout = {
                 showSettingsScreen = false
@@ -1674,8 +1693,22 @@ fun ProfileTabContent(
         )
     }
 
+    if (showLoggedInDevicesScreen) {
+        com.example.ui.screens.profile.LoggedInDevicesScreen(
+            onBack = {
+                showLoggedInDevicesScreen = false
+                showSettingsScreen = true
+            },
+            onSignedOutCurrentDevice = {
+                showLoggedInDevicesScreen = false
+                showSettingsScreen = false
+            }
+        )
+    }
+
+    val profileAppFlags by com.example.AppFlagsRepository.flags.collectAsState()
     // Full-screen Coin Store Screen
-    if (showCoinStoreScreen) {
+    if (showCoinStoreScreen && profileAppFlags.coinStoreEnabled) {
         CoinStoreScreen(
             currentBalance = walletBalance,
             onDismiss = { showCoinStoreScreen = false },
@@ -1689,13 +1722,15 @@ fun ProfileTabContent(
         com.example.ui.chat.ChatAppearanceBottomSheet(
             onDismiss = { showChatAppearanceSheet = false },
             onOpenDebugGallery = {
-                showChatAppearanceSheet = false
-                showChatKitGalleryDebug = true
+                if (com.example.BuildConfig.DEBUG) {
+                    showChatAppearanceSheet = false
+                    showChatKitGalleryDebug = true
+                }
             }
         )
     }
 
-    if (showChatKitGalleryDebug) {
+    if (com.example.BuildConfig.DEBUG && showChatKitGalleryDebug) {
         com.example.ui.chat.ChatKitGalleryDebugDialog(
             onDismiss = { showChatKitGalleryDebug = false }
         )

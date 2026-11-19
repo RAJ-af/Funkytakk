@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -33,9 +34,11 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import com.example.crypto.VaultCooldownException
 import com.example.crypto.VaultSecurityManager
 import com.example.crypto.VaultStatus
 import com.example.ui.components.*
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -85,6 +88,7 @@ fun VaultSetupDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = false)
     ) {
+        SecureWindow(enabled = true)
         Surface(
             shape = RoundedCornerShape(32.dp),
             color = Color.White,
@@ -385,9 +389,24 @@ fun VaultUnlockDialog(
     var passwordVisible by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
+    var cooldownSeconds by remember { mutableIntStateOf(VaultSecurityManager.getRemainingCooldownSeconds(context)) }
+    var showForgotOptionsDialog by remember { mutableStateOf(false) }
+    var showRestoreBackupOverlay by remember { mutableStateOf(false) }
     var showResetConfirmation by remember { mutableStateOf(false) }
 
+    val qaVaultPassword = remember { VaultSecurityManager.getQaTestVaultPassword() }
     val hasBiometric = remember { VaultSecurityManager.isBiometricEnabled(context) }
+
+    LaunchedEffect(cooldownSeconds) {
+        if (cooldownSeconds > 0) {
+            delay(1000L)
+            val next = VaultSecurityManager.getRemainingCooldownSeconds(context)
+            cooldownSeconds = next
+            if (next == 0 && errorMessage?.contains("Too many", ignoreCase = true) == true) {
+                errorMessage = null
+            }
+        }
+    }
 
     // Auto-prompt biometric on launch if enabled
     LaunchedEffect(hasBiometric) {
@@ -399,10 +418,36 @@ fun VaultUnlockDialog(
         }
     }
 
+    fun submitPasswordUnlock() {
+        if (isLoading || cooldownSeconds > 0) return
+        if (password.isBlank()) {
+            errorMessage = "Please enter your chat password."
+            return
+        }
+        isLoading = true
+        scope.launch {
+            val res = VaultSecurityManager.unlockWithPassword(context, password)
+            isLoading = false
+            res.onSuccess {
+                cooldownSeconds = 0
+                com.example.util.ChatBackupPreferencesManager.setCachedVaultPassword(context, password)
+            }
+            res.onFailure { ex ->
+                if (ex is VaultCooldownException) {
+                    cooldownSeconds = ex.remainingSeconds
+                } else {
+                    cooldownSeconds = VaultSecurityManager.getRemainingCooldownSeconds(context)
+                }
+                errorMessage = ex.message ?: "Incorrect password. Please try again."
+            }
+        }
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = false)
     ) {
+        SecureWindow(enabled = true)
         Surface(
             shape = RoundedCornerShape(32.dp),
             color = Color.White,
@@ -418,7 +463,6 @@ fun VaultUnlockDialog(
                     .padding(26.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Header Soft Badge with Custom Soft Lock Icon
                 SoftIconBadge(
                     badgeSize = 64.dp,
                     backgroundColor = Color(0xFFEEF2FF),
@@ -467,7 +511,7 @@ fun VaultUnlockDialog(
                     trailingIcon = {
                         Box(
                             modifier = Modifier
-                                .size(40.dp)
+                                .size(48.dp)
                                 .clickable { passwordVisible = !passwordVisible },
                             contentAlignment = Alignment.Center
                         ) {
@@ -492,27 +536,40 @@ fun VaultUnlockDialog(
                         unfocusedBorderColor = Color(0xFFE5E7EB)
                     ),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = {
-                        if (password.isNotBlank() && !isLoading) {
-                            isLoading = true
-                            scope.launch {
-                                val res = VaultSecurityManager.unlockWithPassword(context, password)
-                                isLoading = false
-                                res.onSuccess {
-                                    com.example.util.ChatBackupPreferencesManager.setCachedVaultPassword(context, password)
-                                }
-                                res.onFailure { ex ->
-                                    errorMessage = ex.message ?: "Incorrect password. Please try again."
-                                }
-                            }
-                        }
-                    }),
-                    modifier = Modifier.fillMaxWidth(),
+                    keyboardActions = KeyboardActions(onDone = { submitPasswordUnlock() }),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("vault_password_input"),
                     shape = RoundedCornerShape(16.dp)
                 )
 
-                errorMessage?.let { err ->
-                    Spacer(modifier = Modifier.height(12.dp))
+                if (qaVaultPassword != null) {
+                    TextButton(
+                        onClick = {
+                            password = qaVaultPassword
+                            errorMessage = null
+                        },
+                        modifier = Modifier
+                            .align(Alignment.End)
+                            .testTag("vault_fill_qa_password_button")
+                    ) {
+                        Text(
+                            text = "Use QA Test Password",
+                            fontSize = 12.sp,
+                            color = Color(0xFF4F46E5),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+
+                val displayError = if (cooldownSeconds > 0) {
+                    "Too many failed attempts. Try again in ${cooldownSeconds}s."
+                } else {
+                    errorMessage
+                }
+
+                displayError?.let { err ->
+                    Spacer(modifier = Modifier.height(10.dp))
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -534,37 +591,21 @@ fun VaultUnlockDialog(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // Primary Unlock Button
                 Button(
-                    onClick = {
-                        if (password.isBlank()) {
-                            errorMessage = "Please enter your chat password."
-                            return@Button
-                        }
-                        isLoading = true
-                        scope.launch {
-                            val res = VaultSecurityManager.unlockWithPassword(context, password)
-                            isLoading = false
-                            res.onSuccess {
-                                com.example.util.ChatBackupPreferencesManager.setCachedVaultPassword(context, password)
-                            }
-                            res.onFailure { ex ->
-                                errorMessage = ex.message ?: "Incorrect password. Please try again."
-                            }
-                        }
-                    },
+                    onClick = { submitPasswordUnlock() },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(52.dp),
+                        .height(52.dp)
+                        .testTag("vault_unlock_button"),
                     shape = RoundedCornerShape(50.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF111827)),
-                    enabled = !isLoading
+                    enabled = !isLoading && cooldownSeconds == 0
                 ) {
                     if (isLoading) {
                         CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
                     } else {
                         Text(
-                            text = "Unlock Chats",
+                            text = if (cooldownSeconds > 0) "Locked (${cooldownSeconds}s)" else "Unlock Chats",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
@@ -572,7 +613,6 @@ fun VaultUnlockDialog(
                     }
                 }
 
-                // Biometrics Unlock option with Custom Soft Fingerprint Icon
                 if (hasBiometric && activity != null) {
                     Spacer(modifier = Modifier.height(12.dp))
                     OutlinedButton(
@@ -590,7 +630,8 @@ fun VaultUnlockDialog(
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(50.dp),
+                            .height(50.dp)
+                            .testTag("vault_biometric_unlock_button"),
                         shape = RoundedCornerShape(50.dp),
                         border = BorderStroke(1.dp, Color(0xFFE5E7EB))
                     ) {
@@ -605,17 +646,56 @@ fun VaultUnlockDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                // Reset Vault Option
-                TextButton(onClick = { showResetConfirmation = true }) {
+                TextButton(
+                    onClick = { showForgotOptionsDialog = true },
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("vault_forgot_password_button")
+                ) {
                     Text(
-                        text = "Forgot password? Reset Vault",
-                        fontSize = 12.sp,
-                        color = Color(0xFF9CA3AF),
-                        fontWeight = FontWeight.Medium
+                        text = "Forgot password?",
+                        fontSize = 13.sp,
+                        color = Color(0xFF6B7280),
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
+            }
+        }
+    }
+
+    if (showForgotOptionsDialog) {
+        VaultForgotPasswordDialog(
+            onDismiss = { showForgotOptionsDialog = false },
+            onRestoreFromDrive = {
+                showForgotOptionsDialog = false
+                showRestoreBackupOverlay = true
+            },
+            onResetVault = {
+                showForgotOptionsDialog = false
+                showResetConfirmation = true
+            }
+        )
+    }
+
+    if (showRestoreBackupOverlay) {
+        Dialog(
+            onDismissRequest = { showRestoreBackupOverlay = false },
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                dismissOnBackPress = true,
+                dismissOnClickOutside = false
+            )
+        ) {
+            Surface(modifier = Modifier.fillMaxSize()) {
+                RestoreChatBackupScreen(
+                    onRestoreSuccess = {
+                        showRestoreBackupOverlay = false
+                        onDismiss()
+                    },
+                    onSkipRestore = { showRestoreBackupOverlay = false }
+                )
             }
         }
     }
@@ -625,6 +705,7 @@ fun VaultUnlockDialog(
             onDismissRequest = { showResetConfirmation = false },
             properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = false)
         ) {
+            SecureWindow(enabled = true)
             Surface(
                 shape = RoundedCornerShape(28.dp),
                 color = Color.White,
@@ -681,6 +762,7 @@ fun VaultUnlockDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(50.dp)
+                            .testTag("vault_confirm_reset_button")
                     ) {
                         Text(
                             text = "Reset & Erase History",
@@ -696,7 +778,7 @@ fun VaultUnlockDialog(
                         onClick = { showResetConfirmation = false },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(44.dp)
+                            .height(48.dp)
                     ) {
                         Text(
                             text = "Cancel",
@@ -705,6 +787,119 @@ fun VaultUnlockDialog(
                             fontSize = 14.sp
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun VaultForgotPasswordDialog(
+    onDismiss: () -> Unit,
+    onRestoreFromDrive: () -> Unit,
+    onResetVault: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = true)
+    ) {
+        SecureWindow(enabled = true)
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            color = Color.White,
+            shadowElevation = 20.dp,
+            border = BorderStroke(1.dp, Color(0xFFE5E7EB)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                SoftIconBadge(
+                    badgeSize = 56.dp,
+                    backgroundColor = Color(0xFFEEF2FF),
+                    borderColor = Color(0xFFC7D2FE)
+                ) {
+                    SoftShieldIcon(size = 28.dp, color = Color(0xFF4338CA))
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "Can't Remember Password?",
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF111827),
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(
+                    text = "Your chat vault is end-to-end encrypted on this device, so FunkyTalk servers never store your password and cannot recover it.\n\nIf you backed up your chats, restore them from Google Drive. Otherwise, resetting the vault starts fresh and erases old local messages.",
+                    fontSize = 13.sp,
+                    color = Color(0xFF4B5563),
+                    textAlign = TextAlign.Center,
+                    lineHeight = 19.sp
+                )
+
+                Spacer(modifier = Modifier.height(22.dp))
+
+                Button(
+                    onClick = onRestoreFromDrive,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF111827)),
+                    shape = RoundedCornerShape(50.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 50.dp)
+                        .testTag("vault_forgot_restore_button")
+                ) {
+                    Text(
+                        text = "Restore from my Google Drive backup",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.5.sp,
+                        textAlign = TextAlign.Center
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedButton(
+                    onClick = onResetVault,
+                    shape = RoundedCornerShape(50.dp),
+                    border = BorderStroke(1.dp, Color(0xFFFCA5A5)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .testTag("vault_forgot_reset_button")
+                ) {
+                    Text(
+                        text = "Reset chat vault",
+                        color = Color(0xFFDC2626),
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                ) {
+                    Text(
+                        text = "Cancel",
+                        color = Color(0xFF6B7280),
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 14.sp
+                    )
                 }
             }
         }

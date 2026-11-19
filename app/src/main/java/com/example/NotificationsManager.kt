@@ -35,7 +35,7 @@ object NotificationsManager {
                     when (event) {
                         is RealtimeTableEvent.NotificationChanged -> {
                             if (event.userId.isNullOrBlank() || event.userId == currentUserId) {
-                                Log.d(TAG, "Notification changed via Realtime for user $currentUserId: ${event.eventType}")
+                                Log.d(TAG, "Notification changed via Realtime: ${event.eventType}")
                                 fetchNotifications(context)
                             }
                         }
@@ -90,7 +90,7 @@ object NotificationsManager {
                     _notifications.value = list
                     val newUnread = list.count { !it.is_read }
                     _unreadCount.value = newUnread
-                    Log.d(TAG, "Fetched ${list.size} notifications for user $uid, unread: $newUnread")
+                    Log.d(TAG, "Fetched ${list.size} notifications, unread: $newUnread")
 
                     // If new unread notifications arrived, trigger system notification
                     if (newUnread > prevUnread) {

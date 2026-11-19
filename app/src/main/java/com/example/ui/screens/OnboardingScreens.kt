@@ -483,7 +483,9 @@ fun OnboardingProfileScreen(
                 onClick = {
                     if (isCheckingUsername) return@Button
                     val cleanUsername = username.trim().lowercase()
-                    if (cleanUsername.isBlank() || displayName.isBlank()) {
+                    val cleanDisplayName = com.example.ui.screens.profile.sanitizeProfileName(displayName)
+                    displayName = cleanDisplayName
+                    if (cleanUsername.isBlank() || cleanDisplayName.isBlank()) {
                         Toast.makeText(context, "Please enter both username and display name.", Toast.LENGTH_SHORT).show()
                         return@Button
                     }
@@ -491,13 +493,13 @@ fun OnboardingProfileScreen(
                         Toast.makeText(context, "Username must be at least 3 characters.", Toast.LENGTH_SHORT).show()
                         return@Button
                     }
-                    
+
                     isCheckingUsername = true
                     val currentUserId = SupabaseSessionManager.getUserId(context) ?: (authState as? AuthState.Success)?.user?.uid
                     viewModel.checkUsernameUnique(cleanUsername, currentUserId) { isUnique ->
                         isCheckingUsername = false
                         if (isUnique) {
-                            onNext(cleanUsername, displayName, if (useCustomAvatar) customAvatarPath else AvailableAvatars[selectedAvatarIndex].second)
+                            onNext(cleanUsername, cleanDisplayName, if (useCustomAvatar) customAvatarPath else AvailableAvatars[selectedAvatarIndex].second)
                         } else {
                             Toast.makeText(context, "This username is already taken. Please choose another one.", Toast.LENGTH_LONG).show()
                         }

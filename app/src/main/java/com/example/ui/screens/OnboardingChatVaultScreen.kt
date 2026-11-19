@@ -38,6 +38,7 @@ fun OnboardingChatVaultScreen(
     onComplete: () -> Unit,
     onBack: () -> Unit
 ) {
+    SecureWindow(enabled = true)
     val context = LocalContext.current
     val activity = context as? FragmentActivity
     val scope = rememberCoroutineScope()

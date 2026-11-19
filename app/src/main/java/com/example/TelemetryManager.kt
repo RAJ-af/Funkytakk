@@ -9,6 +9,7 @@ import com.google.firebase.crashlytics.FirebaseCrashlytics
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.security.MessageDigest
 
 object TelemetryManager {
     private const val TAG = "TelemetryManager"
@@ -78,11 +79,17 @@ object TelemetryManager {
         } catch (_: Exception) {}
     }
 
+    private fun sha256Hex(input: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(input.toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { byte -> "%02x".format(byte) }
+    }
+
     fun onLogin(uid: String) {
         if (uid.isBlank()) return
+        val hashedUid = sha256Hex(uid)
         try {
-            crashlytics()?.setUserId(uid)
-            analytics()?.setUserId(uid)
+            crashlytics()?.setUserId(hashedUid)
+            analytics()?.setUserId(hashedUid)
         } catch (_: Exception) {}
     }
 

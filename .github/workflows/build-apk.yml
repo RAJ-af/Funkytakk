@@ -207,19 +207,45 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || secrets.KEYSTORE_PASSWORD || secrets.STORE_PASSWORD }}
         run: python3 .github/scripts/setup_keystore.py
 
-      - name: Build Debug APK with Gradle
-        run: gradle :app:assembleDebug --stacktrace
+      - name: Build Debug & Release APKs with Gradle
+        run: gradle :app:assembleDebug :app:assembleRelease --stacktrace
 
-      - name: Check APK Output
+      - name: Check APK Outputs
         id: check_apk
         run: |
+          DEBUG_EXISTS=false
+          RELEASE_EXISTS=false
+          MAPPING_EXISTS=false
+
           if compgen -G "app/build/outputs/apk/debug/*.apk" > /dev/null; then
-            echo "apk_exists=true" >> "$GITHUB_OUTPUT"
-            echo "Found APK:"
+            DEBUG_EXISTS=true
+            echo "Found Debug APKs:"
             ls -lh app/build/outputs/apk/debug/*.apk
           else
+            echo "::warning::No Debug APK files found in app/build/outputs/apk/debug/"
+          fi
+
+          if compgen -G "app/build/outputs/apk/release/*.apk" > /dev/null; then
+            RELEASE_EXISTS=true
+            echo "Found Release APKs:"
+            ls -lh app/build/outputs/apk/release/*.apk
+          else
+            echo "::warning::No Release APK files found in app/build/outputs/apk/release/"
+          fi
+
+          if [ -f "app/build/outputs/mapping/release/mapping.txt" ]; then
+            MAPPING_EXISTS=true
+            ls -lh app/build/outputs/mapping/release/mapping.txt
+          fi
+
+          echo "debug_apk_exists=$DEBUG_EXISTS" >> "$GITHUB_OUTPUT"
+          echo "release_apk_exists=$RELEASE_EXISTS" >> "$GITHUB_OUTPUT"
+          echo "mapping_exists=$MAPPING_EXISTS" >> "$GITHUB_OUTPUT"
+
+          if [ "$DEBUG_EXISTS" = "true" ] || [ "$RELEASE_EXISTS" = "true" ]; then
+            echo "apk_exists=true" >> "$GITHUB_OUTPUT"
+          else
             echo "apk_exists=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::No APK file found in app/build/outputs/apk/debug/"
           fi
 
       - name: Add Build Status & Direct Download Links to Summary
@@ -233,22 +259,35 @@ jobs:
 
           | Asset | Direct Link |
           | :--- | :--- |
-          | 📱 **FunkyTalk Debug APK** | ⬇️ **[Click Here to Download app-debug.apk](https://github.com/${{ github.repository }}/releases/download/release-build-${{ github.run_number }}/app-debug.apk)** |
+          | 📱 **Release Universal APK (Recommended)** | ⬇️ **[Download app-universal-release.apk](https://github.com/${{ github.repository }}/releases/download/release-build-${{ github.run_number }}/app-universal-release.apk)** |
+          | ⚡ **Release ARM64 APK** | ⬇️ **[Download app-arm64-v8a-release.apk](https://github.com/${{ github.repository }}/releases/download/release-build-${{ github.run_number }}/app-arm64-v8a-release.apk)** |
+          | 🛠️ **Debug Universal APK** | ⬇️ **[Download app-universal-debug.apk](https://github.com/${{ github.repository }}/releases/download/release-build-${{ github.run_number }}/app-universal-debug.apk)** |
           | 📦 **GitHub Release Page** | 🔗 **[Open Release Build #${{ github.run_number }}](https://github.com/${{ github.repository }}/releases/tag/release-build-${{ github.run_number }})** |
 
           > 💡 **How to Install**:
-          > 1. Click **[Click Here to Download app-debug.apk](https://github.com/${{ github.repository }}/releases/download/release-build-${{ github.run_number }}/app-debug.apk)** to save the APK to your phone or PC.
-          > 2. You can also download the `app-debug-apk-build-${{ github.run_number }}` file from the **Artifacts** section on this Summary page.
+          > 1. Install `app-universal-release.apk` (or `app-arm64-v8a-release.apk` for modern Android devices) from the links above.
+          > 2. Split APKs for both **Debug** and **Release** are also attached on the GitHub Release page and in workflow artifacts.
           
           EOF
 
-      - name: Upload APK Artifact to GitHub Summary
-        if: (!cancelled()) && steps.check_apk.outputs.apk_exists == 'true'
+      - name: Upload Debug APKs Artifact to GitHub Summary
+        if: (!cancelled()) && steps.check_apk.outputs.debug_apk_exists == 'true'
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
           name: app-debug-apk-build-${{ github.run_number }}
           path: app/build/outputs/apk/debug/*.apk
+          retention-days: 3
+
+      - name: Upload Release APKs Artifact to GitHub Summary
+        if: (!cancelled()) && steps.check_apk.outputs.release_apk_exists == 'true'
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: app-release-apk-build-${{ github.run_number }}
+          path: |
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/mapping/release/mapping.txt
           retention-days: 3
 
       - name: Upload Keystore and SHA Artifacts
@@ -260,18 +299,18 @@ jobs:
           path: keystore-artifacts/*
           retention-days: 3
 
-      - name: Create GitHub Release (Direct APK & Keystore Download)
+      - name: Create GitHub Release (Direct Debug & Release APKs)
         if: (!cancelled()) && steps.check_apk.outputs.apk_exists == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: release-build-${{ github.run_number }}
-          name: "FunkyTalk Android APK (Build #${{ github.run_number }})"
+          name: "FunkyTalk Android APKs (Build #${{ github.run_number }})"
           body: |
-            ### 🚀 FunkyTalk Automated Android APK Build #${{ github.run_number }}
+            ### 🚀 FunkyTalk Automated Android Build #${{ github.run_number }}
             
             - **Commit**: `${{ github.sha }}`
             - **Package**: `com.funkytalk.app`
-            - **Type**: Debug APK (Ready to install directly on Android phones)
+            - **Variants**: Debug + Signed Release (`arm64-v8a`, `armeabi-v7a`, `universal`)
             
             ---
             
@@ -282,7 +321,7 @@ jobs:
             ${{ steps.keystore.outputs.debug_sha1 }}
             ```
             - **SHA-256**: `${{ steps.keystore.outputs.debug_sha256 }}`
-            - **Keystore File**: `debug.keystore` (download below)
+            - **Keystore File**: `debug.keystore` (attached below)
             - **Password**: `android` | **Alias**: `androiddebugkey`
             
             #### 🔐 Release Keystore Fingerprint:
@@ -290,7 +329,7 @@ jobs:
             ${{ steps.keystore.outputs.release_sha1 }}
             ```
             - **SHA-256**: `${{ steps.keystore.outputs.release_sha256 }}`
-            - **Keystore File**: `funkytalk-release.keystore` (download below)
+            - **Keystore File**: `funkytalk-release.keystore` (attached below)
             - **Password**: *(Configured in GitHub Secrets: KEYSTORE_PASSWORD)* | **Alias**: `${{ steps.keystore.outputs.release_alias }}`
             
             ---
@@ -298,19 +337,25 @@ jobs:
             ### 🛠️ Google Sign-in Setup in Firebase (Error 10 Fix):
             1. Open [Firebase Console](https://console.firebase.google.com/) -> **Project Settings** (Gear icon) -> **General**.
             2. Scroll down to **Your apps** -> Select `com.funkytalk.app`.
-            3. Click **Add fingerprint** and paste the **SHA-1** above.
+            3. Click **Add fingerprint** and paste the **SHA-1** above (for both Debug and Release).
             4. Save!
             
             ---
             
             ### 📦 Download Assets:
-            - **APK file**: `app-debug.apk`
+            - **Release APKs**: `app-universal-release.apk`, `app-arm64-v8a-release.apk`, `app-armeabi-v7a-release.apk`
+            - **Debug APKs**: `app-universal-debug.apk`, `app-arm64-v8a-debug.apk`, `app-armeabi-v7a-debug.apk`
+            - **R8 Mapping**: `mapping.txt`
             - **Keystore files & SHA info**: `debug.keystore`, `funkytalk-release.keystore`, `SHA_FINGERPRINTS.txt`
           draft: false
           prerelease: false
+          fail_on_unmatched_files: false
           files: |
+            app/build/outputs/apk/release/*.apk
             app/build/outputs/apk/debug/*.apk
+            app/build/outputs/mapping/release/mapping.txt
             keystore-artifacts/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
+

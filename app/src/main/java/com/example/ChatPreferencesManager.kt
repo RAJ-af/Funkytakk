@@ -283,6 +283,13 @@ object ChatPreferencesManager {
         unmarkChatDeleted(context, userId)
     }
 
+    fun replaceBlockedUsers(context: Context, userIds: Set<String>) {
+        init(context)
+        val cleaned = userIds.filter { it.isNotBlank() }.toSet()
+        _blockedUsers.value = cleaned
+        saveStringSet(context, KEY_BLOCKED_USERS, cleaned)
+    }
+
     fun isChatDeleted(chatId: String): Boolean = _deletedChats.value.contains(chatId)
 
     fun markChatDeleted(context: Context, chatId: String) {

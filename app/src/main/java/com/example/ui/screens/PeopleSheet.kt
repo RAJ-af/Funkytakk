@@ -39,13 +39,25 @@ fun PeopleBottomSheetContent(
     onInviteToSpeakerSeat: (targetUserId: String) -> Unit = {},
     onDemoteSpeaker: (targetUserId: String) -> Unit = {},
     onModeratorAction: (targetUserId: String, targetUserName: String, actionType: String) -> Unit = { _, _, _ -> },
+    blockedUserIds: Set<String> = emptySet(),
+    onPersonClick: ((ModerationTargetUser) -> Unit)? = null,
+    onBlockUser: (targetUserId: String, targetUserName: String) -> Unit = { _, _ -> },
     onDismiss: () -> Unit
 ) {
     val currentTheme = roomThemes[selectedThemeIndex]
     val isDark = currentTheme.isDark
-    val totalCount = 1 + speakerSeats.size + listenerSeats.size
-    val speakingCount = 1 + speakerSeats.size
-    val listeningCount = listenerSeats.size
+    val visibleSpeakerSeats = remember(speakerSeats, blockedUserIds) {
+        speakerSeats.filterNot { blockedUserIds.contains(it.userId) }
+    }
+    val visibleListeners = remember(listenerSeats, listenerUserIds, blockedUserIds) {
+        listenerSeats.mapIndexedNotNull { idx, triple ->
+            val uid = listenerUserIds.getOrNull(idx).orEmpty()
+            if (uid.isNotBlank() && blockedUserIds.contains(uid)) null else (triple to uid)
+        }
+    }
+    val totalCount = 1 + visibleSpeakerSeats.size + visibleListeners.size
+    val speakingCount = 1 + visibleSpeakerSeats.size
+    val listeningCount = visibleListeners.size
 
     var selectedUserForAction by androidx.compose.runtime.remember {
         androidx.compose.runtime.mutableStateOf<ModerationTargetUser?>(null)
@@ -259,7 +271,7 @@ fun PeopleBottomSheetContent(
             }
 
             // Host & Speakers Row
-            val allSpeakers = listOf(hostSeat) + speakerSeats
+            val allSpeakers = listOf(hostSeat) + visibleSpeakerSeats
             Row(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 28.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly
@@ -273,14 +285,26 @@ fun PeopleBottomSheetContent(
                         isHost = sp.isHost,
                         flagEmoji = mapCountryCodeToFlagEmoji(sp.flagCode),
                         isDarkMode = isDark,
+                        userId = sp.userId,
                         onClick = {
-                            if (isCurrentUserHost && !sp.isHost && sp.userId != currentUserId) {
+                            if (sp.userId.isNotBlank() && sp.userId == currentUserId) return@PeopleSheetSpeakerItem
+                            if (isCurrentUserHost && !sp.isHost) {
                                 selectedUserForAction = ModerationTargetUser(
                                     userId = sp.userId,
                                     name = sp.name,
                                     imageUrl = sp.imageUrl,
                                     flagCode = sp.flagCode,
                                     role = "speaker"
+                                )
+                            } else if (onPersonClick != null && sp.userId.isNotBlank()) {
+                                onPersonClick(
+                                    ModerationTargetUser(
+                                        userId = sp.userId,
+                                        name = sp.name,
+                                        imageUrl = sp.imageUrl,
+                                        flagCode = sp.flagCode,
+                                        role = if (sp.isHost) "host" else "speaker"
+                                    )
                                 )
                             } else {
                                 onUserClick(PrivateChatItem(sp.userId.ifBlank { sp.name.hashCode().toString() }, sp.name, sp.imageUrl, sp.flagCode, "", "Now", 0, true, false))
@@ -305,7 +329,7 @@ fun PeopleBottomSheetContent(
                 )
             }
 
-            if (listenerSeats.isEmpty()) {
+            if (visibleListeners.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -319,13 +343,13 @@ fun PeopleBottomSheetContent(
                     )
                 }
             } else if (isCurrentUserHost) {
-                val areSeatsFull = speakerSeats.size >= 4
+                val areSeatsFull = visibleSpeakerSeats.size >= 4
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    listenerSeats.forEachIndexed { index, (name, imageUrl, flagCode) ->
-                        val targetUserId = if (index < listenerUserIds.size) listenerUserIds[index] else ""
+                    visibleListeners.forEach { (triple, targetUserId) ->
+                        val (name, imageUrl, flagCode) = triple
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -396,29 +420,32 @@ fun PeopleBottomSheetContent(
                     }
                 }
             } else {
-                val listenerRows = listenerSeats.chunked(4)
-                listenerRows.forEachIndexed { rowIndex, rowItems ->
+                val listenerRows = visibleListeners.chunked(4)
+                listenerRows.forEach { rowItems ->
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        rowItems.forEachIndexed { colIndex, (name, imageUrl, flagCode) ->
-                            val globalIndex = rowIndex * 4 + colIndex
-                            val targetUserId = if (globalIndex < listenerUserIds.size) listenerUserIds[globalIndex] else ""
+                        rowItems.forEach { (triple, targetUserId) ->
+                            val (name, imageUrl, flagCode) = triple
                             PeopleSheetListenerItem(
                                 name = name,
                                 imageUrl = imageUrl,
                                 modifier = Modifier.weight(1f),
                                 flagEmoji = mapCountryCodeToFlagEmoji(flagCode),
                                 isDarkMode = isDark,
+                                userId = targetUserId,
                                 onClick = {
-                                    if (isCurrentUserHost && targetUserId.isNotBlank() && targetUserId != currentUserId) {
-                                        selectedUserForAction = ModerationTargetUser(
-                                            userId = targetUserId,
-                                            name = name,
-                                            imageUrl = imageUrl,
-                                            flagCode = flagCode,
-                                            role = "listener"
+                                    if (targetUserId.isNotBlank() && targetUserId == currentUserId) return@PeopleSheetListenerItem
+                                    if (onPersonClick != null && targetUserId.isNotBlank()) {
+                                        onPersonClick(
+                                            ModerationTargetUser(
+                                                userId = targetUserId,
+                                                name = name,
+                                                imageUrl = imageUrl,
+                                                flagCode = flagCode,
+                                                role = "listener"
+                                            )
                                         )
                                     } else {
                                         onUserClick(
@@ -503,7 +530,7 @@ fun PeopleBottomSheetContent(
             ModerationActionDialog(
                 target = target,
                 isDark = isDark,
-                speakerSeatsCount = speakerSeats.size,
+                speakerSeatsCount = visibleSpeakerSeats.size,
                 onDismiss = { selectedUserForAction = null },
                 onMessage = {
                     val uid = target.userId.ifBlank { target.name.hashCode().toString() }
@@ -528,6 +555,12 @@ fun PeopleBottomSheetContent(
                 },
                 onBan = {
                     onModeratorAction(target.userId, target.name, "ban_user")
+                    selectedUserForAction = null
+                },
+                onBlockUser = {
+                    if (target.userId.isNotBlank()) {
+                        onBlockUser(target.userId, target.name)
+                    }
                     selectedUserForAction = null
                 }
             )
@@ -554,7 +587,8 @@ fun ModerationActionDialog(
     onMoveToListeners: () -> Unit,
     onMute: () -> Unit,
     onKick: () -> Unit,
-    onBan: () -> Unit
+    onBan: () -> Unit,
+    onBlockUser: () -> Unit = {}
 ) {
     androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
         Column(
@@ -660,6 +694,17 @@ fun ModerationActionDialog(
                 textColor = Color(0xFFB91C1C),
                 onClick = onBan
             )
+
+            if (target.userId.isNotBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                ModerationActionButton(
+                    label = "Block User",
+                    iconText = "⛔",
+                    containerColor = if (isDark) Color(0xFF451A1A) else Color(0xFFFEE2E2),
+                    textColor = Color(0xFFDC2626),
+                    onClick = onBlockUser
+                )
+            }
 
             Spacer(modifier = Modifier.height(16.dp))
 

@@ -244,7 +244,7 @@ fun decideRoomTag(
     if (room.isLive && room.speakingCount > 3) {
         return "LIVE"
     }
-    if (room.hostIsVip) {
+    if (room.hostIsVip && com.example.AppFlagsRepository.flags.value.vipEnabled) {
         return "VIP"
     }
     if (room.hostIsVerified && room.totalVisits24h > 20) {
@@ -283,7 +283,7 @@ fun decideSupabaseRoomTag(
     if (totalInRoom >= 5 || (room.last_1h_joins ?: 0) > 4) {
         return "HOT"
     }
-    if (room.host_is_vip == true) {
+    if (room.host_is_vip == true && com.example.AppFlagsRepository.flags.value.vipEnabled) {
         return "VIP"
     }
     if (room.host_is_verified == true && (room.total_visits_24h ?: 0) > 15) {

@@ -1851,7 +1851,21 @@ class AuthViewModel : ViewModel() {
                     SupabaseSessionManager.getUserId(context)
                 } else {
                     SupabaseSessionManager.ensureActiveSession(context)
-                        ?: SupabaseSessionManager.forceRefreshSession(context)
+                        ?: if (!com.example.repository.DeviceSessionRepository.isRevocationInProgress() &&
+                            firebaseAuth?.currentUser != null
+                        ) {
+                            SupabaseSessionManager.forceRefreshSession(context)
+                        } else {
+                            null
+                        }
+                }
+
+                if (com.example.repository.DeviceSessionRepository.isRevocationInProgress() ||
+                    firebaseAuth?.currentUser == null
+                ) {
+                    _sessionVerificationState.value = SessionVerificationState.Idle
+                    _authState.value = AuthState.Idle
+                    return@launch
                 }
 
                 if (verifiedUid.isNullOrBlank()) {
@@ -2022,80 +2036,76 @@ class AuthViewModel : ViewModel() {
                                     viewModelScope.launch {
                                         // STEP 2: POST to verify-firebase-token edge function
                                         try {
-                                            val verifyReq = VerifyFirebaseTokenRequest(
-                                                firebase_token = firebaseIdToken,
-                                                firebaseIdToken = firebaseIdToken
+                                            val exchange = SupabaseSessionManager.exchangeFirebaseToken(
+                                                context = context,
+                                                firebaseIdToken = firebaseIdToken,
+                                                fallbackUserId = firebaseUser.uid,
+                                                kind = SupabaseSessionManager.KIND_LOGIN
                                             )
-                                            val verifyRes = withContext(Dispatchers.IO) {
-                                                SupabaseClient.api.verifyFirebaseToken(request = verifyReq)
-                                            }
 
-                                            if (verifyRes.isSuccessful && verifyRes.body() != null) {
-                                                val body = verifyRes.body()!!
-                                                val accessToken = body.access_token
-                                                val refreshToken = body.refresh_token
-                                                val userId = body.user_id ?: body.user?.id ?: firebaseUser.uid
+                                            if (exchange is SupabaseSessionManager.ExchangeResult.Success) {
+                                                val accessToken = exchange.accessToken
+                                                val userId = exchange.userId
 
-                                                if (!accessToken.isNullOrEmpty()) {
-                                                    // STEP 3: supabase.auth.setSession(access_token, refresh_token)
-                                                    SupabaseSessionManager.setSession(
-                                                        context = context,
-                                                        accessToken = accessToken,
-                                                        refreshToken = refreshToken,
-                                                        userId = userId
+                                                // Save user locally
+                                                saveUserToFirestore(firebaseUser)
+                                                val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
+                                                prefs.edit()
+                                                    .putBoolean("custom_email_verified_${userId}", false)
+                                                    .putLong("last_verification_send_time_${userId}", System.currentTimeMillis())
+                                                    .putInt("verification_resend_count_${userId}", 0)
+                                                    .apply()
+
+                                                // Call send-verification-email with Authorization: Bearer <access_token>
+                                                // The edge function generates token server-side and derives uid from JWT
+                                                val bearerAuth = "Bearer $accessToken"
+                                                val sendReq = SendVerificationRequest(
+                                                    displayName = firebaseUser.displayName
+                                                )
+
+                                                val sendRes = withContext(Dispatchers.IO) {
+                                                    SupabaseClient.api.sendVerificationEmail(
+                                                        auth = bearerAuth,
+                                                        request = sendReq
                                                     )
-
-                                                    // Save user locally
-                                                    saveUserToFirestore(firebaseUser)
-                                                    val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
-                                                    prefs.edit()
-                                                        .putBoolean("custom_email_verified_${userId}", false)
-                                                        .putLong("last_verification_send_time_${userId}", System.currentTimeMillis())
-                                                        .putInt("verification_resend_count_${userId}", 0)
-                                                        .apply()
-
-                                                    // Call send-verification-email with Authorization: Bearer <access_token>
-                                                    // The edge function generates token server-side and derives uid from JWT
-                                                    val bearerAuth = "Bearer $accessToken"
-                                                    val sendReq = SendVerificationRequest(
-                                                        displayName = firebaseUser.displayName
-                                                    )
-
-                                                    val sendRes = withContext(Dispatchers.IO) {
-                                                        SupabaseClient.api.sendVerificationEmail(
-                                                            auth = bearerAuth,
-                                                            request = sendReq
-                                                        )
-                                                    }
-
-                                                    if (sendRes.isSuccessful) {
-                                                        Log.d("AuthViewModel", "Verification email dispatched successfully via Brevo/Supabase")
-                                                    } else {
-                                                        Log.w("AuthViewModel", "send-verification-email call status: ${sendRes.code()}")
-                                                    }
-
-                                                    TelemetryManager.onLogin(userId)
-                                                    TelemetryManager.logSignupCompleted()
-                                                    _authState.value = AuthState.Success(
-                                                        UserProfile(
-                                                            uid = userId,
-                                                            email = cleanEmail,
-                                                            displayName = null,
-                                                            isEmailVerified = false
-                                                        )
-                                                    )
-                                                    onVerificationSent()
-                                                } else {
-                                                    _authState.value = AuthState.Error(body.error ?: "Unable to mint Supabase session tokens.")
                                                 }
+
+                                                if (sendRes.isSuccessful) {
+                                                    if (BuildConfig.DEBUG) {
+                                                        Log.d("AuthViewModel", "Verification email dispatched successfully via Brevo/Supabase")
+                                                    }
+                                                } else {
+                                                    Log.w("AuthViewModel", "send-verification-email call status: ${sendRes.code()}")
+                                                }
+
+                                                TelemetryManager.onLogin(userId)
+                                                TelemetryManager.logSignupCompleted()
+                                                _authState.value = AuthState.Success(
+                                                    UserProfile(
+                                                        uid = userId,
+                                                        email = cleanEmail,
+                                                        displayName = null,
+                                                        isEmailVerified = false
+                                                    )
+                                                )
+                                                onVerificationSent()
+                                            } else if (exchange is SupabaseSessionManager.ExchangeResult.DeviceRevoked) {
+                                                _authState.value = AuthState.Idle
                                             } else {
-                                                val err = verifyRes.errorBody()?.string() ?: verifyRes.message()
-                                                Log.e("AuthViewModel", "verify-firebase-token failed: $err")
-                                                _authState.value = AuthState.Error("Token verification failed: $err")
+                                                val failMsg = (exchange as? SupabaseSessionManager.ExchangeResult.Failure)?.message
+                                                    ?: com.example.repository.DeviceSessionRepository.SESSION_MINT_FAILED_MESSAGE
+                                                Log.e("AuthViewModel", "verify-firebase-token failed during signup")
+                                                try { auth.signOut() } catch (_: Exception) {}
+                                                _authState.value = AuthState.Error(failMsg)
                                             }
+                                        } catch (e: kotlinx.coroutines.CancellationException) {
+                                            throw e
                                         } catch (e: Exception) {
-                                            Log.e("AuthViewModel", "verify-firebase-token exception: ${e.message}", e)
-                                            _authState.value = AuthState.Error(e.localizedMessage ?: "Network error connecting to auth service.")
+                                            Log.e("AuthViewModel", "verify-firebase-token exception: ${e.javaClass.simpleName}")
+                                            try { auth.signOut() } catch (_: Exception) {}
+                                            _authState.value = AuthState.Error(
+                                                com.example.repository.DeviceSessionRepository.SESSION_MINT_FAILED_MESSAGE
+                                            )
                                         }
                                     }
                                 } else {
@@ -2166,87 +2176,81 @@ class AuthViewModel : ViewModel() {
                                     viewModelScope.launch {
                                         // STEP 2: POST to verify-firebase-token edge function
                                         try {
-                                            val verifyReq = VerifyFirebaseTokenRequest(
-                                                firebase_token = firebaseIdToken,
-                                                firebaseIdToken = firebaseIdToken
+                                            val exchange = SupabaseSessionManager.exchangeFirebaseToken(
+                                                context = context,
+                                                firebaseIdToken = firebaseIdToken,
+                                                fallbackUserId = firebaseUser.uid,
+                                                kind = SupabaseSessionManager.KIND_LOGIN
                                             )
-                                            val verifyRes = withContext(Dispatchers.IO) {
-                                                SupabaseClient.api.verifyFirebaseToken(request = verifyReq)
-                                            }
 
-                                            if (verifyRes.isSuccessful && verifyRes.body() != null) {
-                                                val body = verifyRes.body()!!
-                                                val accessToken = body.access_token
-                                                val refreshToken = body.refresh_token
-                                                val userId = body.user_id ?: body.user?.id ?: firebaseUser.uid
+                                            if (exchange is SupabaseSessionManager.ExchangeResult.Success) {
+                                                val accessToken = exchange.accessToken
+                                                val userId = exchange.userId
 
-                                                if (!accessToken.isNullOrEmpty()) {
-                                                    // STEP 3: supabase.auth.setSession(...)
-                                                    SupabaseSessionManager.setSession(
-                                                        context = context,
-                                                        accessToken = accessToken,
-                                                        refreshToken = refreshToken,
-                                                        userId = userId
-                                                    )
+                                                // STEP 4: Query public.users for custom_email_verified (Ignore Firebase isEmailVerified)
+                                                var isCustomVerified = false
+                                                val bearerAuth = "Bearer $accessToken"
 
-                                                    // STEP 4: Query public.users for custom_email_verified (Ignore Firebase isEmailVerified)
-                                                    var isCustomVerified = false
-                                                    val bearerAuth = "Bearer $accessToken"
-
-                                                    try {
-                                                        val userRes = withContext(Dispatchers.IO) {
-                                                            SupabaseClient.api.getUser(
-                                                                auth = bearerAuth,
-                                                                uidEq = "eq.$userId"
-                                                            )
-                                                        }
-                                                        if (userRes.isSuccessful) {
-                                                            val supaUsers = userRes.body()
-                                                            if (!supaUsers.isNullOrEmpty() && supaUsers.first().custom_email_verified == true) {
-                                                                isCustomVerified = true
-                                                            }
-                                                        }
-                                                    } catch (e: Exception) {
-                                                        Log.e("AuthViewModel", "Error fetching user from Supabase: ${e.message}")
+                                                try {
+                                                    val userRes = withContext(Dispatchers.IO) {
+                                                        SupabaseClient.api.getUser(
+                                                            auth = bearerAuth,
+                                                            uidEq = "eq.$userId"
+                                                        )
                                                     }
-
-                                                    val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
-                                                    prefs.edit().putBoolean("custom_email_verified_${userId}", isCustomVerified).apply()
-
-                                                    loadUserProfileFromSpOrFirestore(context, userId) { finalProfile ->
-                                                        val finalProfileWithVerified = finalProfile.copy(isEmailVerified = isCustomVerified)
-                                                        TelemetryManager.onLogin(userId)
-                                                        TelemetryManager.logLoginCompleted()
-                                                        _authState.value = AuthState.Success(finalProfileWithVerified)
-                                                        com.example.service.PushNotificationManager.onUserLoggedIn(context)
-
-                                                        if (isCustomVerified) {
-                                                            registerAndStartSession(context, userId)
-                                                            // Send login notification email via Supabase Edge Function
-                                                            triggerSupabaseLoginNotification(
-                                                                context = context,
-                                                                email = firebaseUser.email ?: cleanEmail,
-                                                                displayName = finalProfile.displayName,
-                                                                accessToken = accessToken
-                                                            )
-                                                            onSuccess()
-                                                        } else {
-                                                            // Redirect to "Please verify your email" screen
-                                                            Toast.makeText(context, "Please verify your email before continuing.", Toast.LENGTH_LONG).show()
-                                                            onSignUpNeeded()
+                                                    if (userRes.isSuccessful) {
+                                                        val supaUsers = userRes.body()
+                                                        if (!supaUsers.isNullOrEmpty() && supaUsers.first().custom_email_verified == true) {
+                                                            isCustomVerified = true
                                                         }
                                                     }
-                                                } else {
-                                                    _authState.value = AuthState.Error(body.error ?: "Failed to authenticate session.")
+                                                } catch (e: Exception) {
+                                                    Log.e("AuthViewModel", "Error fetching user from Supabase: ${e.javaClass.simpleName}")
                                                 }
+
+                                                val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
+                                                prefs.edit().putBoolean("custom_email_verified_${userId}", isCustomVerified).apply()
+
+                                                loadUserProfileFromSpOrFirestore(context, userId) { finalProfile ->
+                                                    val finalProfileWithVerified = finalProfile.copy(isEmailVerified = isCustomVerified)
+                                                    TelemetryManager.onLogin(userId)
+                                                    TelemetryManager.logLoginCompleted()
+                                                    _authState.value = AuthState.Success(finalProfileWithVerified)
+                                                    com.example.service.PushNotificationManager.onUserLoggedIn(context)
+
+                                                    if (isCustomVerified) {
+                                                        registerAndStartSession(context, userId)
+                                                        // Send login notification email via Supabase Edge Function
+                                                        triggerSupabaseLoginNotification(
+                                                            context = context,
+                                                            email = firebaseUser.email ?: cleanEmail,
+                                                            displayName = finalProfile.displayName,
+                                                            accessToken = accessToken
+                                                        )
+                                                        onSuccess()
+                                                    } else {
+                                                        // Redirect to "Please verify your email" screen
+                                                        Toast.makeText(context, "Please verify your email before continuing.", Toast.LENGTH_LONG).show()
+                                                        onSignUpNeeded()
+                                                    }
+                                                }
+                                            } else if (exchange is SupabaseSessionManager.ExchangeResult.DeviceRevoked) {
+                                                _authState.value = AuthState.Idle
                                             } else {
-                                                val err = verifyRes.errorBody()?.string() ?: verifyRes.message()
-                                                Log.e("AuthViewModel", "verify-firebase-token failed: $err")
-                                                _authState.value = AuthState.Error("Authentication failed: $err")
+                                                val failMsg = (exchange as? SupabaseSessionManager.ExchangeResult.Failure)?.message
+                                                    ?: com.example.repository.DeviceSessionRepository.SESSION_MINT_FAILED_MESSAGE
+                                                Log.e("AuthViewModel", "verify-firebase-token failed during login")
+                                                try { auth.signOut() } catch (_: Exception) {}
+                                                _authState.value = AuthState.Error(failMsg)
                                             }
+                                        } catch (e: kotlinx.coroutines.CancellationException) {
+                                            throw e
                                         } catch (e: Exception) {
-                                            Log.e("AuthViewModel", "verify-firebase-token exception: ${e.message}", e)
-                                            _authState.value = AuthState.Error(e.localizedMessage ?: "Network error during login.")
+                                            Log.e("AuthViewModel", "verify-firebase-token exception: ${e.javaClass.simpleName}")
+                                            try { auth.signOut() } catch (_: Exception) {}
+                                            _authState.value = AuthState.Error(
+                                                com.example.repository.DeviceSessionRepository.SESSION_MINT_FAILED_MESSAGE
+                                            )
                                         }
                                     }
                                 } else {
@@ -2642,41 +2646,40 @@ class AuthViewModel : ViewModel() {
                             val firebaseIdToken = tokenResult.token
                             if (!firebaseIdToken.isNullOrEmpty()) {
                                 viewModelScope.launch(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
-                                    var supaAccessToken: String? = null
-                                    var sUserId: String = user.uid
-                                    try {
-                                        val verifyReq = VerifyFirebaseTokenRequest(
-                                            firebase_token = firebaseIdToken,
-                                            firebaseIdToken = firebaseIdToken
+                                    val exchange = try {
+                                        SupabaseSessionManager.exchangeFirebaseToken(
+                                            context = context,
+                                            firebaseIdToken = firebaseIdToken,
+                                            fallbackUserId = user.uid,
+                                            kind = SupabaseSessionManager.KIND_LOGIN
                                         )
-                                        val verifyRes = SupabaseClient.api.verifyFirebaseToken(request = verifyReq)
-                                        if (verifyRes.isSuccessful && verifyRes.body() != null) {
-                                            val body = verifyRes.body()!!
-                                            supaAccessToken = body.access_token
-                                            sUserId = body.user_id ?: body.user?.id ?: user.uid
-                                            if (!supaAccessToken.isNullOrEmpty()) {
-                                                SupabaseSessionManager.setSession(
-                                                    context = context,
-                                                    accessToken = supaAccessToken!!,
-                                                    refreshToken = body.refresh_token,
-                                                    userId = sUserId
-                                                )
-                                            }
-                                        }
                                     } catch (e: Exception) {
                                         if (e is kotlinx.coroutines.CancellationException) throw e
-                                        Log.e("AuthViewModel", "Google Supabase session exchange error: ${e.message}")
-                                    }
-
-                                    // Ensure Supabase session is at minimum initialized with this user ID
-                                    if (SupabaseSessionManager.getUserId(context).isNullOrBlank()) {
-                                        SupabaseSessionManager.setSession(
-                                            context = context,
-                                            accessToken = supaAccessToken ?: SupabaseSessionManager.getAccessToken(context) ?: BuildConfig.SUPABASE_ANON_KEY,
-                                            refreshToken = null,
-                                            userId = sUserId
+                                        Log.e("AuthViewModel", "Google Supabase session exchange error: ${e.javaClass.simpleName}")
+                                        SupabaseSessionManager.ExchangeResult.Failure(
+                                            message = com.example.repository.DeviceSessionRepository.SESSION_MINT_FAILED_MESSAGE
                                         )
                                     }
+
+                                    when (exchange) {
+                                        is SupabaseSessionManager.ExchangeResult.DeviceRevoked -> {
+                                            withContext(Dispatchers.Main) {
+                                                _authState.value = AuthState.Idle
+                                            }
+                                            return@launch
+                                        }
+                                        is SupabaseSessionManager.ExchangeResult.Failure -> {
+                                            try { auth.signOut() } catch (_: Exception) {}
+                                            withContext(Dispatchers.Main) {
+                                                _authState.value = AuthState.Error(exchange.message)
+                                            }
+                                            return@launch
+                                        }
+                                        is SupabaseSessionManager.ExchangeResult.Success -> Unit
+                                    }
+
+                                    val supaAccessToken = exchange.accessToken
+                                    val sUserId = exchange.userId
 
                                     // For Google Sign-In: Google accounts are pre-verified via Firebase's own email_verified claim.
                                     // DO NOT generate verification token or call send-verification-email.
@@ -2684,7 +2687,7 @@ class AuthViewModel : ViewModel() {
                                     prefs.edit().putBoolean("custom_email_verified_${sUserId}", true).apply()
 
                                     // Direct check custom_email_verified on Supabase (optional confirmation)
-                                    if (!supaAccessToken.isNullOrEmpty()) {
+                                    if (supaAccessToken.isNotEmpty()) {
                                         try {
                                             val bearerAuth = "Bearer $supaAccessToken"
                                             val userRes = withContext(Dispatchers.IO) {
@@ -2697,7 +2700,9 @@ class AuthViewModel : ViewModel() {
                                                 }
                                             }
                                         } catch (e: Exception) {
-                                            Log.d("AuthViewModel", "Google Supabase custom_email_verified check note: ${e.message}")
+                                            if (BuildConfig.DEBUG) {
+                                                Log.d("AuthViewModel", "Google Supabase custom_email_verified check note: ${e.javaClass.simpleName}")
+                                            }
                                         }
                                     }
 
@@ -2718,44 +2723,16 @@ class AuthViewModel : ViewModel() {
                                     }
                                 }
                             } else {
-                                val sUserId = user.uid
-                                SupabaseSessionManager.setSession(
-                                    context = context,
-                                    accessToken = SupabaseSessionManager.getAccessToken(context) ?: BuildConfig.SUPABASE_ANON_KEY,
-                                    userId = sUserId
+                                try { auth.signOut() } catch (_: Exception) {}
+                                _authState.value = AuthState.Error(
+                                    com.example.repository.DeviceSessionRepository.SESSION_MINT_FAILED_MESSAGE
                                 )
-                                val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
-                                prefs.edit().putBoolean("custom_email_verified_${sUserId}", true).apply()
-                                loadUserProfileFromSpOrFirestore(context, sUserId) { finalProfile ->
-                                    saveUserToFirestore(user, isVerified = true)
-                                    TelemetryManager.onLogin(sUserId)
-                                    if (isNewFirebaseUser) TelemetryManager.logSignupCompleted() else TelemetryManager.logLoginCompleted()
-                                    _authState.value = AuthState.Success(finalProfile.copy(isEmailVerified = true))
-                                    registerAndStartSession(context, sUserId)
-                                    triggerSupabaseLoginNotification(context, user.email ?: "", finalProfile.displayName)
-                                    Toast.makeText(context, "Logged in with Google successfully!", Toast.LENGTH_SHORT).show()
-                                    onSuccess()
-                                }
                             }
                         }.addOnFailureListener {
-                            val sUserId = user.uid
-                            SupabaseSessionManager.setSession(
-                                context = context,
-                                accessToken = SupabaseSessionManager.getAccessToken(context) ?: BuildConfig.SUPABASE_ANON_KEY,
-                                userId = sUserId
+                            try { auth.signOut() } catch (_: Exception) {}
+                            _authState.value = AuthState.Error(
+                                com.example.repository.DeviceSessionRepository.SESSION_MINT_FAILED_MESSAGE
                             )
-                            val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
-                            prefs.edit().putBoolean("custom_email_verified_${sUserId}", true).apply()
-                            loadUserProfileFromSpOrFirestore(context, sUserId) { finalProfile ->
-                                saveUserToFirestore(user, isVerified = true)
-                                TelemetryManager.onLogin(sUserId)
-                                if (isNewFirebaseUser) TelemetryManager.logSignupCompleted() else TelemetryManager.logLoginCompleted()
-                                _authState.value = AuthState.Success(finalProfile.copy(isEmailVerified = true))
-                                registerAndStartSession(context, sUserId)
-                                triggerSupabaseLoginNotification(context, user.email ?: "", finalProfile.displayName)
-                                Toast.makeText(context, "Logged in with Google successfully!", Toast.LENGTH_SHORT).show()
-                                onSuccess()
-                            }
                         }
                     } else {
                         _authState.value = AuthState.Error("Failed to obtain signed in Google user details.")
@@ -2780,6 +2757,28 @@ class AuthViewModel : ViewModel() {
         } else {
             _authState.value = AuthState.Error("Google Sign-In failed. Please try again.")
         }
+    }
+
+    fun clearStateOnRemoteSignOut() {
+        TelemetryManager.onLogout()
+        roomJoinedAtMs = 0L
+        _activeRoomId.value = null
+        _activeRoomTitle.value = null
+        _activeRoomHostId.value = null
+        _activeRoomSpeakers.value = emptyList()
+        _pendingSpeakerRequests.value = emptyList()
+        _pendingSpeakerRequest.value = null
+        _mySpeakerRequestStatus.value = null
+        _supabaseProfiles.value = emptyList()
+        _myModerationStatus.value = null
+        _accountUnderReview.value = false
+        _profileEditLimits.value = emptyMap()
+        _deletionStatus.value = DeletionStatusState.Idle
+        _deletionReceipt.value = null
+        com.example.realtime.RoomMicController.reset()
+        endVoiceSession()
+        _authState.value = AuthState.Idle
+        _sessionVerificationState.value = SessionVerificationState.Idle
     }
 
     fun logout(context: Context? = null) {
@@ -2824,6 +2823,7 @@ class AuthViewModel : ViewModel() {
             com.example.repository.EncryptedChatRepository.resetForLogout()
             com.example.repository.GroupChatRepository.resetForLogout()
             com.example.ChatPreferencesManager.resetForLogout()
+            com.example.repository.BlockRepository.resetForLogout()
             com.example.SupportChatManager.resetForLogout()
             com.example.CloudAiManager.resetForLogout()
             com.example.NotificationsManager.clear()
@@ -3019,11 +3019,12 @@ class AuthViewModel : ViewModel() {
                 }
             }
 
+            val cleanDisplayName = com.example.ui.screens.profile.sanitizeProfileName(displayName)
             patchProfileStep(
                 context = context,
                 updates = mapOf(
                     "username" to cleanUsername,
-                    "profile_name" to displayName,
+                    "profile_name" to cleanDisplayName,
                     "avatar_url" to finalAvatar
                 ),
                 onSuccess = onSuccess,
@@ -3057,7 +3058,7 @@ class AuthViewModel : ViewModel() {
         if (currentState is AuthState.Success) {
             viewModelScope.launch {
                 val cleanUsername = username.trim().lowercase()
-                val cleanDisplayName = displayName.trim()
+                val cleanDisplayName = com.example.ui.screens.profile.sanitizeProfileName(displayName)
                 val cleanBio = (bio ?: dob).trim()
                 val cleanCity = city?.trim().orEmpty()
                 var finalAvatar = avatar

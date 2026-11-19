@@ -8,9 +8,18 @@ import retrofit2.Response
 import retrofit2.http.*
 
 @JsonClass(generateAdapter = true)
+data class VerifyDevicePayload(
+    val device_id: String,
+    val name: String,
+    val os: String,
+    val app_version: String
+)
+
+@JsonClass(generateAdapter = true)
 data class VerifyFirebaseTokenRequest(
-    val firebase_token: String? = null,
-    val firebaseIdToken: String? = null
+    val firebase_token: String,
+    val device: VerifyDevicePayload,
+    val kind: String = "refresh"
 )
 
 @JsonClass(generateAdapter = true)
@@ -19,7 +28,8 @@ data class VerifyFirebaseTokenResponse(
     val refresh_token: String? = null,
     val user_id: String? = null,
     val user: SupabaseAuthUser? = null,
-    val error: String? = null
+    val error: String? = null,
+    val code: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -494,7 +504,7 @@ interface SupabaseApi {
         @QueryMap options: Map<String, String>
     ): Response<List<DiscoverableProfile>>
 
-    @GET("rest/v1/followers?select=*")
+    @GET("rest/v1/followers?select=id,follower_id,following_id,created_at")
     suspend fun getFollowers(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
@@ -550,13 +560,13 @@ interface SupabaseApi {
         @Body profile: SupabaseProfile
     ): Response<Unit>
 
-    @GET("rest/v1/voice_rooms?select=*&is_live=eq.true&order=created_at.desc")
+    @GET("rest/v1/voice_rooms?select=id,title,language,host_id,participants,created_at,country_code,tag,room_type,description,banner_image_url,card_background_type,host_is_verified,host_is_vip,is_live,language_code,language_flag,level_tag,listening_count,speaking_count,preview_avatars,status,status_tag,total_visits_24h,last_1h_joins,last_2h_growth_rate,last_activity_at,is_private,join_code,host_left_at,ended_at&is_live=eq.true&order=created_at.desc")
     suspend fun getVoiceRooms(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
     ): Response<List<SupabaseVoiceRoom>>
 
-    @GET("rest/v1/voice_rooms?select=*")
+    @GET("rest/v1/voice_rooms?select=id,title,language,host_id,participants,created_at,country_code,tag,room_type,description,banner_image_url,card_background_type,host_is_verified,host_is_vip,is_live,language_code,language_flag,level_tag,listening_count,speaking_count,preview_avatars,status,status_tag,total_visits_24h,last_1h_joins,last_2h_growth_rate,last_activity_at,is_private,join_code,host_left_at,ended_at")
     suspend fun getVoiceRoomById(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
@@ -580,20 +590,21 @@ interface SupabaseApi {
         @Body updates: UpdateVoiceRoomRequest
     ): Response<ResponseBody>
 
-    @GET("rest/v1/room_participants?select=*")
+    @GET("rest/v1/room_participants?select=room_id,user_id,role,is_mic_enabled,joined_at")
     suspend fun getRoomParticipants(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
         @Query("room_id") roomIdEq: String // e.g. "eq.<uuid>"
     ): Response<List<SupabaseRoomParticipant>>
 
-    @GET("rest/v1/room_participants?select=*")
+    @GET("rest/v1/room_participants?select=room_id,user_id,role,is_mic_enabled,joined_at")
     suspend fun getAllRoomParticipants(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
+        @Query("room_id") roomIdIn: String? = null
     ): Response<List<SupabaseRoomParticipant>>
 
-    @GET("rest/v1/room_participants?select=*")
+    @GET("rest/v1/room_participants?select=room_id,user_id,role,is_mic_enabled,joined_at")
     suspend fun getUserRoomParticipants(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
@@ -780,7 +791,7 @@ interface SupabaseApi {
         @Body request: ModeratorActionRequest
     ): Response<Map<String, @JvmSuppressWildcards Any?>>
 
-    @GET("rest/v1/events?select=*&is_active=eq.true&order=event_time.asc")
+    @GET("rest/v1/events?select=id,title,description,category_tag,banner_image_url,event_time,timezone_label,join_room_id,join_url,is_active&is_active=eq.true&order=event_time.asc")
     suspend fun getActiveEvents(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
@@ -1005,7 +1016,7 @@ interface SupabaseApi {
     // ----------------------------------------------------
     // IN-APP NOTIFICATIONS (Feature 1)
     // ----------------------------------------------------
-    @GET("rest/v1/notifications?select=*&order=created_at.desc")
+    @GET("rest/v1/notifications?select=id,user_id,type,title,message,report_id,group_id,action_type,is_read,created_at&order=created_at.desc")
     suspend fun getNotifications(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String,
@@ -1826,6 +1837,76 @@ interface SupabaseApi {
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
         @Header("Authorization") auth: String,
         @Body body: AdminSetFeedbackStatusRequest
+    ): Response<ResponseBody>
+
+    // ----------------------------------------------------
+    // RELEASE APP FLAGS (ANON-READABLE)
+    // ----------------------------------------------------
+    @POST("rest/v1/rpc/get_app_flags")
+    suspend fun getAppFlags(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
+    ): Response<ResponseBody>
+
+    // ----------------------------------------------------
+    // USER BLOCKING (PLAY UGC COMPLIANCE)
+    // ----------------------------------------------------
+    @POST("rest/v1/rpc/block_user")
+    suspend fun blockUserRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: BlockUserRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/unblock_user")
+    suspend fun unblockUserRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: BlockUserRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/get_my_blocked_users")
+    suspend fun getMyBlockedUsersRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String
+    ): Response<List<BlockedUserRow>>
+
+    @POST("rest/v1/rpc/is_blocked_with")
+    suspend fun isBlockedWithRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: BlockUserRequest
+    ): Response<ResponseBody>
+
+    // ----------------------------------------------------
+    // DEVICE SESSIONS (SINGLE DEVICE & LOGGED-IN DEVICES)
+    // ----------------------------------------------------
+    @POST("rest/v1/rpc/touch_device")
+    suspend fun touchDeviceRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: TouchDeviceRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/get_my_devices")
+    suspend fun getMyDevicesRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: CurrentDeviceRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/revoke_device")
+    suspend fun revokeDeviceRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: RevokeDeviceRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/revoke_other_devices")
+    suspend fun revokeOtherDevicesRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: CurrentDeviceRequest
     ): Response<ResponseBody>
 }
 
@@ -2960,3 +3041,59 @@ data class ChangeUsernameResponse(
     val username: String = "",
     val next_change_at: String? = null
 )
+
+// ----------------------------------------------------
+// USER BLOCKING DTOs
+// ----------------------------------------------------
+@JsonClass(generateAdapter = true)
+data class BlockUserRequest(
+    val p_user_id: String
+)
+
+@JsonClass(generateAdapter = true)
+data class BlockedUserRow(
+    val user_id: String,
+    val username: String? = null,
+    val profile_name: String? = null,
+    val avatar_url: String? = null,
+    val blocked_at: String? = null
+)
+
+// ----------------------------------------------------
+// DEVICE SESSION DTOs
+// ----------------------------------------------------
+@JsonClass(generateAdapter = true)
+data class TouchDeviceRequest(
+    val p_device_id: String,
+    val p_device_name: String,
+    val p_os: String,
+    val p_app_version: String
+)
+
+@JsonClass(generateAdapter = true)
+data class CurrentDeviceRequest(
+    val p_current_device_id: String
+)
+
+@JsonClass(generateAdapter = true)
+data class RevokeDeviceRequest(
+    val p_device_row_id: String
+)
+
+data class TouchDeviceResponse(
+    val success: Boolean = false,
+    val known: Boolean = false,
+    val revoked: Boolean = false
+)
+
+data class UserDeviceRow(
+    val id: String,
+    val device_name: String,
+    val os: String,
+    val app_version: String,
+    val last_login_at: String? = null,
+    val last_seen_at: String? = null,
+    val revoked: Boolean = false,
+    val is_current: Boolean = false
+)
+

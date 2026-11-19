@@ -45,10 +45,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.example.ChatPreferencesManager
 import com.example.SupportChatManager
+import com.example.crypto.VaultCooldownException
 import com.example.crypto.VaultSecurityManager
 import com.example.crypto.VaultStatus
 import com.example.repository.EncryptedChatRepository
@@ -57,7 +60,10 @@ import com.example.ui.components.UserAvatarImage
 import androidx.compose.material3.Icon
 import com.example.ui.screens.chat.GroupChatScreen
 import com.example.ui.screens.chat.GroupInviteSheet
+import com.example.ui.screens.chat.RestoreChatBackupScreen
+import com.example.ui.screens.chat.VaultForgotPasswordDialog
 import com.example.ui.screens.chat.VaultManagementDialogs
+import kotlinx.coroutines.delay
 import com.example.ui.screens.home.dialogs.BlockedUsersBottomSheet
 import com.example.ui.screens.home.dialogs.ChatLongPressBottomSheet
 import com.example.ui.screens.home.dialogs.CreateGroupBottomSheet
@@ -77,6 +83,7 @@ fun ChatsTabContent(
     onOpenGroupChat: (com.example.db.LocalGroupConversation) -> Unit = {},
     onOverlayVisibilityChange: (Boolean) -> Unit = {}
 ) {
+    SecureWindow(enabled = true)
     val context = LocalContext.current
     val funkyColors = LocalFunkyColors.current
     val isDark = funkyColors.isDark
@@ -109,6 +116,7 @@ fun ChatsTabContent(
     val mutedChats by ChatPreferencesManager.mutedChats.collectAsState()
     val pinnedChats by ChatPreferencesManager.pinnedChats.collectAsState()
     val blockedUsers by ChatPreferencesManager.blockedUsers.collectAsState()
+    val repoBlockedUsers by com.example.repository.BlockRepository.blockedUserIds.collectAsState()
     val deletedChats by ChatPreferencesManager.deletedChats.collectAsState()
     val unreadOverrides by ChatPreferencesManager.unreadOverrideChats.collectAsState()
 
@@ -120,7 +128,7 @@ fun ChatsTabContent(
     }
 
     // Merge real encrypted conversations from Room DB, all groups (joined/invited/requested), and active partner chats
-    val mergedConversations = remember(conversationsList, dbConversations, joinedGroups, allMyGroups, customGroups, pinnedChats, mutedChats, blockedUsers, deletedChats, unreadOverrides, supabaseProfiles) {
+    val mergedConversations = remember(conversationsList, dbConversations, joinedGroups, allMyGroups, customGroups, pinnedChats, mutedChats, blockedUsers, repoBlockedUsers, deletedChats, unreadOverrides, supabaseProfiles) {
         val dbMapped = dbConversations.map { conv ->
             val isUnreadOverridden = unreadOverrides.contains(conv.otherUserId)
             val supaProfile = supabaseProfiles.find { it.uid == conv.otherUserId }
@@ -183,7 +191,7 @@ fun ChatsTabContent(
             } else c
         }
         val combined = (groupsMapped + dbMapped + rest)
-            .filterNot { it.id in deletedChats || it.id in blockedUsers }
+            .filterNot { it.id in deletedChats || it.id in blockedUsers || it.id in repoBlockedUsers }
             .distinctBy { it.id }
 
         // Sort: Pinned chats first, then recent
@@ -474,7 +482,8 @@ fun ChatsTabContent(
                                             fontWeight = FontWeight.Medium,
                                             modifier = Modifier.weight(1f)
                                         )
-                                        if (blockedUsers.isNotEmpty()) {
+                                        val totalBlockedCount = (blockedUsers + repoBlockedUsers).size
+                                        if (totalBlockedCount > 0) {
                                             Box(
                                                 modifier = Modifier
                                                     .clip(RoundedCornerShape(10.dp))
@@ -482,7 +491,7 @@ fun ChatsTabContent(
                                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                                             ) {
                                                 Text(
-                                                    text = "${blockedUsers.size}",
+                                                    text = "$totalBlockedCount",
                                                     color = Color.White,
                                                     fontSize = 10.sp,
                                                     fontWeight = FontWeight.Black
@@ -1523,15 +1532,55 @@ private fun ModernUnlockPasswordCard() {
     var passwordVisible by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
+    var cooldownSeconds by remember { mutableIntStateOf(VaultSecurityManager.getRemainingCooldownSeconds(context)) }
+    var showForgotOptionsDialog by remember { mutableStateOf(false) }
+    var showRestoreBackupOverlay by remember { mutableStateOf(false) }
     var showResetDialog by remember { mutableStateOf(false) }
 
+    val qaVaultPassword = remember { VaultSecurityManager.getQaTestVaultPassword() }
     val hasBiometric = remember { VaultSecurityManager.isBiometricEnabled(context) }
+
+    LaunchedEffect(cooldownSeconds) {
+        if (cooldownSeconds > 0) {
+            delay(1000L)
+            val next = VaultSecurityManager.getRemainingCooldownSeconds(context)
+            cooldownSeconds = next
+            if (next == 0 && errorMessage?.contains("Too many", ignoreCase = true) == true) {
+                errorMessage = null
+            }
+        }
+    }
 
     LaunchedEffect(hasBiometric) {
         if (hasBiometric && activity != null) {
             val cryptoObjResult = VaultSecurityManager.createBiometricDecryptCryptoObject(context)
             cryptoObjResult.onSuccess { cryptoObj ->
                 promptBiometricUnlock(activity, cryptoObj) { /* Handled in callback */ }
+            }
+        }
+    }
+
+    fun submitCardUnlock() {
+        if (isLoading || cooldownSeconds > 0) return
+        if (password.isBlank()) {
+            errorMessage = "Please enter your chat password."
+            return
+        }
+        isLoading = true
+        scope.launch {
+            val res = VaultSecurityManager.unlockWithPassword(context, password)
+            isLoading = false
+            res.onSuccess {
+                cooldownSeconds = 0
+                com.example.util.ChatBackupPreferencesManager.setCachedVaultPassword(context, password)
+            }
+            res.onFailure { ex ->
+                if (ex is VaultCooldownException) {
+                    cooldownSeconds = ex.remainingSeconds
+                } else {
+                    cooldownSeconds = VaultSecurityManager.getRemainingCooldownSeconds(context)
+                }
+                errorMessage = ex.message ?: "Incorrect password. Please try again."
             }
         }
     }
@@ -1600,7 +1649,7 @@ private fun ModernUnlockPasswordCard() {
                 trailingIcon = {
                     Box(
                         modifier = Modifier
-                            .size(40.dp)
+                            .size(48.dp)
                             .clickable { passwordVisible = !passwordVisible },
                         contentAlignment = Alignment.Center
                     ) {
@@ -1626,23 +1675,39 @@ private fun ModernUnlockPasswordCard() {
                     unfocusedBorderColor = funkyColors.line
                 ),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = {
-                    if (password.isNotBlank() && !isLoading) {
-                        isLoading = true
-                        scope.launch {
-                            val res = VaultSecurityManager.unlockWithPassword(context, password)
-                            isLoading = false
-                            res.onFailure { ex ->
-                                errorMessage = ex.message ?: "Incorrect password. Please try again."
-                            }
-                        }
-                    }
-                }),
-                modifier = Modifier.fillMaxWidth(),
+                keyboardActions = KeyboardActions(onDone = { submitCardUnlock() }),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("chats_vault_password_input"),
                 shape = RoundedCornerShape(16.dp)
             )
 
-            errorMessage?.let { err ->
+            if (qaVaultPassword != null) {
+                TextButton(
+                    onClick = {
+                        password = qaVaultPassword
+                        errorMessage = null
+                    },
+                    modifier = Modifier
+                        .align(Alignment.End)
+                        .testTag("chats_vault_fill_qa_password_button")
+                ) {
+                    Text(
+                        text = "Use QA Test Password",
+                        fontSize = 12.sp,
+                        color = funkyColors.mango,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+
+            val displayError = if (cooldownSeconds > 0) {
+                "Too many failed attempts. Try again in ${cooldownSeconds}s."
+            } else {
+                errorMessage
+            }
+
+            displayError?.let { err ->
                 Spacer(modifier = Modifier.height(10.dp))
                 Row(
                     modifier = Modifier
@@ -1667,32 +1732,20 @@ private fun ModernUnlockPasswordCard() {
 
             // Primary Unlock Button
             Button(
-                onClick = {
-                    if (password.isBlank()) {
-                        errorMessage = "Please enter your chat password."
-                        return@Button
-                    }
-                    isLoading = true
-                    scope.launch {
-                        val res = VaultSecurityManager.unlockWithPassword(context, password)
-                        isLoading = false
-                        res.onFailure { ex ->
-                            errorMessage = ex.message ?: "Incorrect password. Please try again."
-                        }
-                    }
-                },
+                onClick = { submitCardUnlock() },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp),
+                    .height(52.dp)
+                    .testTag("chats_vault_unlock_button"),
                 shape = RoundedCornerShape(50.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = funkyColors.mango),
-                enabled = !isLoading
+                enabled = !isLoading && cooldownSeconds == 0
             ) {
                 if (isLoading) {
                     CircularProgressIndicator(modifier = Modifier.size(20.dp), color = funkyColors.onMango, strokeWidth = 2.dp)
                 } else {
                     Text(
-                        text = "Unlock Chats",
+                        text = if (cooldownSeconds > 0) "Locked (${cooldownSeconds}s)" else "Unlock Chats",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = funkyColors.onMango
@@ -1717,7 +1770,8 @@ private fun ModernUnlockPasswordCard() {
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(50.dp),
+                        .height(50.dp)
+                        .testTag("chats_vault_biometric_button"),
                     shape = RoundedCornerShape(50.dp),
                     border = BorderStroke(1.dp, funkyColors.line)
                 ) {
@@ -1732,14 +1786,53 @@ private fun ModernUnlockPasswordCard() {
                 }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            TextButton(onClick = { showResetDialog = true }) {
+            TextButton(
+                onClick = { showForgotOptionsDialog = true },
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("chats_vault_forgot_password_button")
+            ) {
                 Text(
-                    text = "Forgot password? Reset Vault",
-                    fontSize = 12.sp,
+                    text = "Forgot password?",
+                    fontSize = 13.sp,
                     color = funkyColors.mute,
-                    fontWeight = FontWeight.Medium
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+    }
+
+    if (showForgotOptionsDialog) {
+        VaultForgotPasswordDialog(
+            onDismiss = { showForgotOptionsDialog = false },
+            onRestoreFromDrive = {
+                showForgotOptionsDialog = false
+                showRestoreBackupOverlay = true
+            },
+            onResetVault = {
+                showForgotOptionsDialog = false
+                showResetDialog = true
+            }
+        )
+    }
+
+    if (showRestoreBackupOverlay) {
+        Dialog(
+            onDismissRequest = { showRestoreBackupOverlay = false },
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                dismissOnBackPress = true,
+                dismissOnClickOutside = false
+            )
+        ) {
+            Surface(modifier = Modifier.fillMaxSize()) {
+                RestoreChatBackupScreen(
+                    onRestoreSuccess = {
+                        showRestoreBackupOverlay = false
+                    },
+                    onSkipRestore = { showRestoreBackupOverlay = false }
                 )
             }
         }
@@ -1749,6 +1842,7 @@ private fun ModernUnlockPasswordCard() {
         AlertDialog(
             onDismissRequest = { showResetDialog = false },
             title = {
+                SecureWindow(enabled = true)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     SoftWarningIcon(size = 24.dp, color = funkyColors.danger)
                     Spacer(modifier = Modifier.width(8.dp))

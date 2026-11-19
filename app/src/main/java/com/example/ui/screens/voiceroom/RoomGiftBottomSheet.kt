@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.GiftCatalogItem
 import com.example.gifting.GiftManager
+import com.example.repository.BlockRepository
 import com.example.ui.components.FunkyChevronRightIcon
 import com.example.ui.components.FunkySendIcon
 import com.example.ui.components.PresenceAvatar
@@ -130,9 +131,10 @@ fun RoomGiftBottomSheet(
         }
     }
 
-    // Filter out current user from receivers (only real room participants)
-    val eligibleReceivers = remember(participants, currentUserId) {
-        participants.filter { it.userId.isNotBlank() && it.userId != currentUserId }
+    // Filter out current user and blocked users from receivers
+    val blockedIds by BlockRepository.blockedUserIds.collectAsState()
+    val eligibleReceivers = remember(participants, currentUserId, blockedIds) {
+        participants.filter { it.userId.isNotBlank() && it.userId != currentUserId && !blockedIds.contains(it.userId) }
     }
 
     // Selected receiver (preselect initialRecipientId if present, else first eligible receiver)
