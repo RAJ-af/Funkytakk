@@ -62,9 +62,10 @@ fun FunkyStoreSheet(
             val res = CosmeticsManager.getStoreItems(context, type = type)
             val items = res.getOrDefault(emptyList())
             items.filter { it.item_type == "avatar_frame" }.forEach { item ->
-                CosmeticsManager.preloadFrameAsset(context, item.preview_url)
                 val parsed = runCatching { CosmeticsConfigParser.parseAvatarFrame(item.config) }.getOrNull()
-                CosmeticsManager.preloadFrameAsset(context, parsed?.asset?.url)
+                val version = parsed?.asset?.version ?: 1
+                CosmeticsManager.preloadFrameAsset(context, item.preview_url, version)
+                CosmeticsManager.preloadFrameAsset(context, parsed?.asset?.url, version)
             }
             storeItems = items
             isLoading = false
@@ -388,40 +389,24 @@ private fun StoreItemCard(
                         }
                     }
                     "avatar_frame" -> {
-                        val context = LocalContext.current
-                        var previewFailed by remember(item.preview_url) { mutableStateOf(false) }
-                        if (!item.preview_url.isNullOrBlank() && !previewFailed) {
-                            val req = remember(context, item.preview_url) {
-                                coil.request.ImageRequest.Builder(context)
-                                    .data(item.preview_url)
-                                    .diskCachePolicy(coil.request.CachePolicy.ENABLED)
-                                    .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
-                                    .apply {
-                                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                                            decoderFactory(coil.decode.ImageDecoderDecoder.Factory())
-                                        }
-                                    }
-                                    .listener(onError = { _, _ -> previewFailed = true })
-                                    .build()
-                            }
-                            AsyncImage(
-                                model = req,
-                                contentDescription = item.name,
-                                modifier = Modifier.fillMaxSize().padding(4.dp),
-                                contentScale = androidx.compose.ui.layout.ContentScale.Fit
-                            )
-                        } else {
-                            val config = remember(item.config) {
-                                CosmeticsConfigParser.parseAvatarFrame(item.config)
-                            }
-                            AvatarFrame(config = config, sizeDp = 52.dp, enableFrameAnimation = true) {
-                                AsyncImage(
-                                    model = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200",
-                                    contentDescription = "Avatar",
-                                    modifier = Modifier.fillMaxSize().clip(CircleShape)
-                                )
-                            }
+                        val config = remember(item.config) {
+                            CosmeticsConfigParser.parseAvatarFrame(item.config)
                         }
+                        val asset = config.asset
+                        val tileAvatarSize = if (config.kind.equals("asset", ignoreCase = true) && asset != null) {
+                            val ratio = (if (asset.innerRatio > 0f) asset.innerRatio else asset.avatarRatio)
+                                .coerceIn(0.25f, 0.98f)
+                            val maxCanvas = 86.dp / (1f + asset.overflowRatio.coerceIn(0f, 0.5f))
+                            (maxCanvas * ratio).coerceIn(28.dp, 52.dp)
+                        } else {
+                            52.dp
+                        }
+                        com.example.ui.components.FramedAvatar(
+                            avatarUrl = null,
+                            avatarSize = tileAvatarSize,
+                            frame = config,
+                            enableAnimation = true
+                        )
                     }
                     "name_effect" -> {
                         val config = remember(item.config) {

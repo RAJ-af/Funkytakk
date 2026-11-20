@@ -3,6 +3,7 @@ package com.example.store
 import android.content.Context
 import android.util.Log
 import android.util.LruCache
+import com.example.AdminSetFrameCalibrationRequest
 import com.example.BuildConfig
 import com.example.CosmeticSlotInfo
 import com.example.EquipItemRequest
@@ -375,9 +376,9 @@ object CosmeticsManager {
                             val frameRaw = row.avatar_frame?.config
                             if (frameRaw != null) {
                                 val parsed = runCatching { CosmeticsConfigParser.parseAvatarFrame(frameRaw) }.getOrNull()
-                                val assetUrl = parsed?.asset?.url
-                                if (!assetUrl.isNullOrBlank()) {
-                                    preloadFrameAsset(context, assetUrl)
+                                val asset = parsed?.asset
+                                if (asset != null && asset.url.isNotBlank()) {
+                                    preloadFrameAsset(context, asset.url, asset.version)
                                 }
                             }
                         }
@@ -394,11 +395,14 @@ object CosmeticsManager {
         return@withContext result
     }
 
-    fun preloadFrameAsset(context: Context, url: String?) {
+    fun preloadFrameAsset(context: Context, url: String?, version: Int = 1) {
         if (url.isNullOrBlank() || url == "null") return
         val appCtx = context.applicationContext
+        val cacheKey = "${url}_v${version.coerceAtLeast(1)}"
         val request = coil.request.ImageRequest.Builder(appCtx)
             .data(url)
+            .memoryCacheKey(cacheKey)
+            .diskCacheKey(cacheKey)
             .diskCachePolicy(coil.request.CachePolicy.ENABLED)
             .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
             .apply {
@@ -408,6 +412,107 @@ object CosmeticsManager {
             }
             .build()
         coil.Coil.imageLoader(appCtx).enqueue(request)
+    }
+
+    suspend fun setFrameCalibration(
+        context: Context,
+        code: String,
+        innerRatio: Float,
+        offsetX: Float,
+        offsetY: Float,
+        overflowRatio: Float
+    ): Result<Map<String, Any?>> = withContext(Dispatchers.IO) {
+        try {
+            SupabaseSessionManager.ensureActiveSession(context)
+            val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                ?: return@withContext Result.failure(Exception("Please sign in to calibrate frames."))
+
+            fun round4(v: Float): Double = kotlin.math.round(v.toDouble() * 10000.0) / 10000.0
+
+            val resp = SupabaseClient.api.adminSetFrameCalibration(
+                apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                auth = token,
+                body = AdminSetFrameCalibrationRequest(
+                    p_code = code,
+                    p_inner_ratio = round4(innerRatio),
+                    p_offset_x = round4(offsetX),
+                    p_offset_y = round4(offsetY),
+                    p_overflow_ratio = round4(overflowRatio)
+                )
+            )
+
+            val rawBody = if (resp.isSuccessful) resp.body()?.string().orEmpty() else resp.errorBody()?.string().orEmpty()
+            if (resp.isSuccessful) {
+                val assetMap = parseJsonObjectToMap(rawBody)
+                // Evict cached cosmetics for any users using this frame code so every screen refreshes
+                val affectedUids = _userCosmeticsMap.value
+                    .filter { (_, row) -> row.avatar_frame?.code == code }
+                    .keys
+                    .toList()
+                affectedUids.forEach { cosmeticsCache.remove(it) }
+                val myUid = SupabaseSessionManager.getUserId(context).orEmpty()
+                if (myUid.isNotBlank()) {
+                    cosmeticsCache.remove(myUid)
+                    refreshMyCosmetics(context, myUid)
+                }
+                if (affectedUids.isNotEmpty()) {
+                    getUserCosmetics(context, affectedUids)
+                }
+                Result.success(assetMap)
+            } else {
+                val jsonObj = runCatching { JSONObject(rawBody) }.getOrNull()
+                val errText = listOfNotNull(
+                    jsonObj?.optString("message"),
+                    jsonObj?.optString("error"),
+                    jsonObj?.optString("details"),
+                    rawBody
+                ).joinToString(" ").lowercase()
+                val mappedMsg = when {
+                    errText.contains("forbidden") || resp.code() == 403 -> "Only admins can do this"
+                    errText.contains("invalid_inner_ratio") -> "Inner ratio must be between 0.30 and 0.95."
+                    errText.contains("invalid_offset") -> "Offset X and Y must be between -0.25 and 0.25."
+                    errText.contains("invalid_overflow_ratio") -> "Overflow must be between 0.00 and 0.50."
+                    errText.contains("not_an_asset_frame") -> "Only asset frames can be calibrated."
+                    else -> jsonObj?.optString("message")?.takeIf { it.isNotBlank() } ?: "Failed to save calibration."
+                }
+                Result.failure(Exception(mappedMsg))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting frame calibration", e)
+            Result.failure(Exception(e.message ?: "Failed to save calibration."))
+        }
+    }
+
+    private fun parseJsonObjectToMap(raw: String): Map<String, Any?> {
+        if (raw.isBlank()) return emptyMap()
+        return try {
+            jsonObjectToMap(JSONObject(raw))
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
+    private fun jsonObjectToMap(obj: JSONObject): Map<String, Any?> {
+        val out = linkedMapOf<String, Any?>()
+        val keys = obj.keys()
+        while (keys.hasNext()) {
+            val k = keys.next()
+            val v = obj.opt(k)
+            out[k] = when (v) {
+                null, JSONObject.NULL -> null
+                is JSONObject -> jsonObjectToMap(v)
+                is org.json.JSONArray -> (0 until v.length()).map { idx ->
+                    val elem = v.opt(idx)
+                    when (elem) {
+                        null, JSONObject.NULL -> null
+                        is JSONObject -> jsonObjectToMap(elem)
+                        else -> elem
+                    }
+                }
+                else -> v
+            }
+        }
+        return out
     }
 
     suspend fun refreshMyCosmetics(context: Context, myUserId: String) {

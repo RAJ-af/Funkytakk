@@ -238,6 +238,12 @@ fun AuthScreen(
         }
     }
 
+    DisposableEffect(Unit) {
+        onDispose {
+            com.example.ui.components.AppLoadingManager.hide()
+        }
+    }
+
     val funkyColors = LocalFunkyColors.current
     val isDark = funkyColors.isDark
     val bgColor = if (isDark) funkyColors.bg else Color(0xFFFAFAEE)
@@ -445,6 +451,7 @@ fun AuthScreen(
                         onValueChange = { 
                             email = it 
                             emailError = null
+                            if (authState is AuthState.Error) viewModel.resetAuthState()
                         },
                         enabled = !isLoading,
                         isError = emailError != null,
@@ -507,6 +514,7 @@ fun AuthScreen(
                         onValueChange = { 
                             password = it 
                             passwordError = null
+                            if (authState is AuthState.Error) viewModel.resetAuthState()
                         },
                         enabled = !isLoading,
                         isError = passwordError != null,
@@ -688,18 +696,10 @@ fun AuthScreen(
                     }
                 }
 
-                // Error alert states
+                // Error alert state (AccountCollision uses the dedicated modal dialog below)
                 if (authState is AuthState.Error) {
                     Text(
                         text = (authState as AuthState.Error).message,
-                        color = Color(0xFFD32F2F),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.padding(horizontal = 6.dp)
-                    )
-                } else if (authState is AuthState.AccountCollision) {
-                    Text(
-                        text = (authState as AuthState.AccountCollision).message,
                         color = Color(0xFFD32F2F),
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
@@ -850,7 +850,12 @@ fun AuthScreen(
                     fontWeight = FontWeight.Bold,
                     color = accentGold,
                     modifier = Modifier
-                        .clickable { isSignUpMode = !isSignUpMode }
+                        .clickable {
+                            isSignUpMode = !isSignUpMode
+                            emailError = null
+                            passwordError = null
+                            viewModel.resetAuthState()
+                        }
                         .testTag("toggle_auth_mode")
                 )
             }
@@ -1010,13 +1015,27 @@ fun AuthScreen(
                     }
                 },
                 confirmButton = {
+                    val canDirectLogin = isSignUpMode &&
+                        password.length >= 6 &&
+                        collision.email.equals(email.trim(), ignoreCase = true)
                     Button(
                         onClick = {
                             isSignUpMode = false // switch tab to Log In mode
+                            emailError = null
+                            passwordError = null
                             if (collision.email.isNotBlank()) {
                                 email = collision.email
                             }
                             viewModel.resetAuthState()
+                            if (canDirectLogin) {
+                                viewModel.loginWithEmail(
+                                    email = collision.email.trim(),
+                                    password = password,
+                                    context = context,
+                                    onSignUpNeeded = onVerificationWaiting,
+                                    onSuccess = onAuthSuccess
+                                )
+                            }
                         },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = accentGold,
@@ -1025,7 +1044,11 @@ fun AuthScreen(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Go to Log In", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        Text(
+                            text = if (canDirectLogin) "Log In Now" else "Go to Log In",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp
+                        )
                     }
                 },
                 dismissButton = {

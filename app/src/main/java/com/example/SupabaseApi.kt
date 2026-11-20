@@ -1344,6 +1344,13 @@ interface SupabaseApi {
         @Body body: VerifyOwnedItemsRequest
     ): Response<List<VerifiedOwnedItemRow>>
 
+    @POST("rest/v1/rpc/admin_set_frame_calibration")
+    suspend fun adminSetFrameCalibration(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: AdminSetFrameCalibrationRequest
+    ): Response<ResponseBody>
+
     // ----------------------------------------------------
     // PROFILE EDIT LIMITS & USERNAME CHANGE RPCs
     // ----------------------------------------------------
@@ -2659,6 +2666,15 @@ data class VerifiedOwnedItemRow(
     val item_id: Long,
     val item_type: String,
     val config: Map<String, Any?>? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class AdminSetFrameCalibrationRequest(
+    val p_code: String,
+    val p_inner_ratio: Double,
+    val p_offset_x: Double,
+    val p_offset_y: Double,
+    val p_overflow_ratio: Double
 )
 
 @JsonClass(generateAdapter = true)

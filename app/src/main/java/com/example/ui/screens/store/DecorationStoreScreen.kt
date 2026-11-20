@@ -43,16 +43,21 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import com.example.ModerationManager
 import com.example.R
 import com.example.StoreItemRow
 import com.example.gifting.CuteCoinIcon
 import com.example.store.*
+import com.example.ui.components.FramedAvatar
+import com.example.ui.components.SoftCheckIcon
+import com.example.ui.components.SoftFilterIcon
 import com.example.ui.components.SoftWarningIcon
 import com.example.ui.theme.AppThemeManager
 import com.example.ui.theme.LocalAppDarkTheme
 import com.example.ui.theme.LocalFunkyColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 private val ColorBg: Color
     @Composable get() = LocalFunkyColors.current.bg
@@ -142,6 +147,7 @@ fun DecorationStoreScreen(
     var generalErrorDialogMessage by remember { mutableStateOf<String?>(null) }
     var isPurchasing by remember { mutableStateOf(false) }
     var activeMiniPreviewItem by remember { mutableStateOf<StoreItemRow?>(null) }
+    var isStaffAdmin by remember { mutableStateOf(false) }
 
     val validCategories = remember {
         listOf("avatar_frame", "name_effect", "entry_animation", "bubble_theme", "chat_bg")
@@ -156,11 +162,19 @@ fun DecorationStoreScreen(
             res.onSuccess { items ->
                 val filtered = items.filter { it.item_type in validCategories }
                 filtered.filter { it.item_type == "avatar_frame" }.forEach { item ->
-                    CosmeticsManager.preloadFrameAsset(context, item.preview_url)
                     val parsed = runCatching { CosmeticsConfigParser.parseAvatarFrame(item.config) }.getOrNull()
-                    CosmeticsManager.preloadFrameAsset(context, parsed?.asset?.url)
+                    val version = parsed?.asset?.version ?: 1
+                    CosmeticsManager.preloadFrameAsset(context, item.preview_url, version)
+                    CosmeticsManager.preloadFrameAsset(context, parsed?.asset?.url, version)
                 }
                 allItems = filtered
+                // Keep currently selected items synced with refreshed store configs
+                if (selectedItems.isNotEmpty()) {
+                    val byId = filtered.associateBy { it.id }
+                    selectedItems = selectedItems.mapValues { (_, oldItem) ->
+                        byId[oldItem.id] ?: oldItem
+                    }
+                }
                 isLoading = false
             }.onFailure { err ->
                 errorMessage = err.message ?: "Failed to load store items"
@@ -170,6 +184,7 @@ fun DecorationStoreScreen(
     }
 
     LaunchedEffect(Unit) {
+        isStaffAdmin = ModerationManager.checkIsAdmin(context)
         loadStoreData()
     }
 
@@ -298,6 +313,7 @@ fun DecorationStoreScreen(
                         // "All" Tab: Each category has 4 items row & "View All"
                         StoreAllTabContent(
                             allItems = allItems,
+                            currentUserAvatar = currentUserAvatar,
                             currentUserName = currentUserName,
                             selectedItemIds = selectedItems.values.map { it.id }.toSet(),
                             onSelectItem = { item ->
@@ -327,6 +343,7 @@ fun DecorationStoreScreen(
                         val filteredItems = allItems.filter { it.item_type == categoryType }
                         StoreCategoryTabContent(
                             items = filteredItems,
+                            currentUserAvatar = currentUserAvatar,
                             currentUserName = currentUserName,
                             categoryType = categoryType,
                             selectedItemIds = selectedItems.values.map { it.id }.toSet(),
@@ -353,12 +370,23 @@ fun DecorationStoreScreen(
             currentUserAvatar = currentUserAvatar,
             currentUserName = currentUserName,
             isPurchasing = isPurchasing,
+            isStaffAdmin = isStaffAdmin,
             onDismiss = { showPreviewModal = false },
             onBuyOnly = {
                 executePurchase(selectedItems.values.toList(), apply = false)
             },
             onApplyAll = {
                 executePurchase(selectedItems.values.toList(), apply = true)
+            },
+            onRefreshStoreAfterCalibration = { updatedCode, updatedAssetMap ->
+                val curFrame = selectedItems["avatar_frame"]
+                if (curFrame != null && curFrame.code == updatedCode && updatedAssetMap.isNotEmpty()) {
+                    val newConfig = curFrame.config.orEmpty().toMutableMap()
+                    newConfig["asset"] = updatedAssetMap
+                    val updatedRow = curFrame.copy(config = newConfig)
+                    selectedItems = selectedItems + ("avatar_frame" to updatedRow)
+                }
+                loadStoreData()
             }
         )
     }
@@ -579,6 +607,7 @@ private fun StoreTabsRow(
 @Composable
 private fun StoreAllTabContent(
     allItems: List<StoreItemRow>,
+    currentUserAvatar: String?,
     currentUserName: String,
     selectedItemIds: Set<Long>,
     onSelectItem: (StoreItemRow) -> Unit,
@@ -643,6 +672,7 @@ private fun StoreAllTabContent(
                         items(previewItems, key = { it.id }) { item ->
                             StoreItemCard(
                                 item = item,
+                                currentUserAvatar = currentUserAvatar,
                                 currentUserName = currentUserName,
                                 isSelected = selectedItemIds.contains(item.id),
                                 onSelect = { onSelectItem(item) },
@@ -664,6 +694,7 @@ private fun StoreAllTabContent(
 @Composable
 private fun StoreCategoryTabContent(
     items: List<StoreItemRow>,
+    currentUserAvatar: String?,
     currentUserName: String,
     categoryType: String,
     selectedItemIds: Set<Long>,
@@ -695,6 +726,7 @@ private fun StoreCategoryTabContent(
         items(items, key = { it.id }) { item ->
             StoreItemCard(
                 item = item,
+                currentUserAvatar = currentUserAvatar,
                 currentUserName = currentUserName,
                 isSelected = selectedItemIds.contains(item.id),
                 onSelect = { onSelectItem(item) },
@@ -711,6 +743,7 @@ private fun StoreCategoryTabContent(
 @Composable
 private fun StoreItemCard(
     item: StoreItemRow,
+    currentUserAvatar: String?,
     currentUserName: String,
     isSelected: Boolean,
     onSelect: () -> Unit,
@@ -752,6 +785,7 @@ private fun StoreItemCard(
                 // Item Preview Renderer
                 ItemThumbnailRenderer(
                     item = item,
+                    currentUserAvatar = currentUserAvatar,
                     currentUserName = currentUserName,
                     onPlayClick = onPlayMiniPreview
                 )
@@ -843,11 +877,36 @@ private fun StoreItemCard(
 @Composable
 private fun ItemThumbnailRenderer(
     item: StoreItemRow,
+    currentUserAvatar: String?,
     currentUserName: String,
     onPlayClick: () -> Unit
 ) {
     val context = LocalContext.current
     var previewUrlFailed by remember(item.preview_url) { mutableStateOf(false) }
+
+    if (item.item_type == "avatar_frame") {
+        val frameConfig = remember(item.config) {
+            CosmeticsConfigParser.parseAvatarFrame(item.config)
+        }
+        val asset = frameConfig.asset
+        if (asset != null || !frameConfig.kind.equals("asset", ignoreCase = true)) {
+            val tileAvatarSize = if (frameConfig.kind.equals("asset", ignoreCase = true) && asset != null) {
+                val ratio = (if (asset.innerRatio > 0f) asset.innerRatio else asset.avatarRatio)
+                    .coerceIn(0.25f, 0.98f)
+                val maxCanvas = 94.dp / (1f + asset.overflowRatio.coerceIn(0f, 0.5f))
+                (maxCanvas * ratio).coerceIn(28.dp, 56.dp)
+            } else {
+                54.dp
+            }
+            FramedAvatar(
+                avatarUrl = currentUserAvatar,
+                avatarSize = tileAvatarSize,
+                frame = frameConfig,
+                enableAnimation = true
+            )
+            return
+        }
+    }
 
     if (!item.preview_url.isNullOrBlank() && !previewUrlFailed && item.item_type != "name_effect") {
         val req = remember(context, item.preview_url) {
@@ -885,20 +944,12 @@ private fun ItemThumbnailRenderer(
             val frameConfig = remember(item.config) {
                 CosmeticsConfigParser.parseAvatarFrame(item.config)
             }
-            AvatarFrame(
-                config = frameConfig,
-                sizeDp = 56.dp,
-                enableFrameAnimation = true
-            ) {
-                AsyncImage(
-                    model = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200",
-                    contentDescription = null,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(CircleShape),
-                    contentScale = ContentScale.Crop
-                )
-            }
+            FramedAvatar(
+                avatarUrl = currentUserAvatar,
+                avatarSize = 54.dp,
+                frame = frameConfig,
+                enableAnimation = true
+            )
         }
         "name_effect" -> {
             val nameConfig = remember(item.config) {
@@ -1197,22 +1248,81 @@ private fun ItemMiniThumbnail(item: StoreItemRow) {
 }
 
 // -----------------------------------------------------------------------------
-// PREVIEW SCREEN DIALOG (Requirement 4)
+// PREVIEW SCREEN DIALOG (Task A + Task B + Task C)
 // -----------------------------------------------------------------------------
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun DecorationPreviewDialog(
     selectedItems: List<StoreItemRow>,
     currentUserAvatar: String?,
     currentUserName: String,
     isPurchasing: Boolean,
+    isStaffAdmin: Boolean,
     onDismiss: () -> Unit,
     onBuyOnly: () -> Unit,
-    onApplyAll: () -> Unit
+    onApplyAll: () -> Unit,
+    onRefreshStoreAfterCalibration: (code: String, updatedAsset: Map<String, Any?>) -> Unit
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val pagerState = rememberPagerState(pageCount = { 5 })
     val previewTabs = remember { listOf("Avatar", "Name", "Entry", "Bubble", "Theme") }
-    val scope = rememberCoroutineScope()
+
+    val selectedFrame = selectedItems.find { it.item_type == "avatar_frame" }
+    val storedFrameConfig = remember(selectedFrame) {
+        selectedFrame?.config?.let { CosmeticsConfigParser.parseAvatarFrame(it) }
+    }
+    val selectedNameEffect = selectedItems.find { it.item_type == "name_effect" }
+    val nameEffectConfig = remember(selectedNameEffect) {
+        selectedNameEffect?.config?.let { CosmeticsConfigParser.parseNameEffect(it) }
+    }
+
+    val isAssetFrameSelected = selectedFrame != null &&
+        storedFrameConfig?.kind.equals("asset", ignoreCase = true) &&
+        storedFrameConfig?.asset != null
+
+    // Live calibration draft state (synced whenever the stored asset changes)
+    val storedAsset = storedFrameConfig?.asset
+    var draftInnerRatio by remember(selectedFrame?.code, storedAsset?.version, storedAsset?.innerRatio) {
+        mutableStateOf((storedAsset?.innerRatio ?: 0.6f).coerceIn(0.30f, 0.95f))
+    }
+    var draftOffsetX by remember(selectedFrame?.code, storedAsset?.version, storedAsset?.offsetX) {
+        mutableStateOf((storedAsset?.offsetX ?: 0f).coerceIn(-0.25f, 0.25f))
+    }
+    var draftOffsetY by remember(selectedFrame?.code, storedAsset?.version, storedAsset?.offsetY) {
+        mutableStateOf((storedAsset?.offsetY ?: 0f).coerceIn(-0.25f, 0.25f))
+    }
+    var draftOverflowRatio by remember(selectedFrame?.code, storedAsset?.version, storedAsset?.overflowRatio) {
+        mutableStateOf((storedAsset?.overflowRatio ?: 0f).coerceIn(0f, 0.50f))
+    }
+    var showCalibrationSheet by remember { mutableStateOf(false) }
+
+    // Live FrameConfig reflecting current slider values while calibrating
+    val liveFrameConfig = remember(
+        storedFrameConfig,
+        showCalibrationSheet,
+        draftInnerRatio,
+        draftOffsetX,
+        draftOffsetY,
+        draftOverflowRatio
+    ) {
+        val base = storedFrameConfig
+        val baseAsset = base?.asset
+        if (base != null && baseAsset != null && base.kind.equals("asset", ignoreCase = true)) {
+            base.copy(
+                asset = baseAsset.copy(
+                    innerRatio = draftInnerRatio,
+                    avatarRatio = draftInnerRatio,
+                    scale = 1f / draftInnerRatio.coerceAtLeast(0.25f),
+                    offsetX = draftOffsetX,
+                    offsetY = draftOffsetY,
+                    overflowRatio = draftOverflowRatio
+                )
+            )
+        } else {
+            base
+        }
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -1221,6 +1331,13 @@ private fun DecorationPreviewDialog(
             decorFitsSystemWindows = false
         )
     ) {
+        val dialogWindow = (androidx.compose.ui.platform.LocalView.current.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
+        LaunchedEffect(dialogWindow) {
+            dialogWindow?.let { w ->
+                androidx.core.view.WindowCompat.setDecorFitsSystemWindows(w, false)
+            }
+        }
+
         Scaffold(
             modifier = Modifier.fillMaxSize(),
             containerColor = ColorBg,
@@ -1231,8 +1348,7 @@ private fun DecorationPreviewDialog(
                         .fillMaxWidth()
                         .statusBarsPadding()
                         .padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(
                         onClick = onDismiss,
@@ -1255,14 +1371,47 @@ private fun DecorationPreviewDialog(
                         text = "Live Preview",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
-                        color = ColorTextPrimary
+                        color = ColorTextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 8.dp)
                     )
 
-                    Spacer(modifier = Modifier.size(48.dp))
+                    if (isStaffAdmin && isAssetFrameSelected) {
+                        Surface(
+                            onClick = { showCalibrationSheet = true },
+                            shape = RoundedCornerShape(100.dp),
+                            color = ColorSurface,
+                            border = BorderStroke(1.dp, ColorPrimary),
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("preview_calibrate_button")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                SoftFilterIcon(size = 15.dp, color = ColorTextPrimary)
+                                Text(
+                                    text = "Calibrate",
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = ColorTextPrimary,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    } else {
+                        Spacer(modifier = Modifier.size(48.dp))
+                    }
                 }
             },
             bottomBar = {
-                // Bottom Buttons: "Buy Only" and "Apply All (n)" anchored cleanly above nav bar
+                // Fixed bottom bar: always respects navigation bar insets and 16.dp side padding
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     color = ColorSurface,
@@ -1274,23 +1423,27 @@ private fun DecorationPreviewDialog(
                             .fillMaxWidth()
                             .navigationBarsPadding()
                             .padding(horizontal = 16.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         OutlinedButton(
                             onClick = onBuyOnly,
                             enabled = !isPurchasing,
                             modifier = Modifier
                                 .weight(1f)
-                                .height(48.dp)
+                                .heightIn(min = 48.dp)
                                 .testTag("preview_buy_only_button"),
                             shape = RoundedCornerShape(100.dp),
-                            border = BorderStroke(1.dp, ColorTextSecondary)
+                            border = BorderStroke(1.dp, ColorTextSecondary),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
                         ) {
                             Text(
                                 text = "Buy Only",
                                 fontSize = 14.5.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = ColorTextPrimary
+                                color = ColorTextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
 
@@ -1299,13 +1452,14 @@ private fun DecorationPreviewDialog(
                             enabled = !isPurchasing,
                             modifier = Modifier
                                 .weight(1.3f)
-                                .height(48.dp)
+                                .heightIn(min = 48.dp)
                                 .testTag("preview_apply_all_button"),
                             shape = RoundedCornerShape(100.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = ColorPrimary,
                                 contentColor = ColorOnPrimary
-                            )
+                            ),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
                         ) {
                             if (isPurchasing) {
                                 CircularProgressIndicator(
@@ -1317,7 +1471,9 @@ private fun DecorationPreviewDialog(
                                 Text(
                                     text = "Apply All (${selectedItems.size})",
                                     fontSize = 14.5.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
@@ -1329,17 +1485,10 @@ private fun DecorationPreviewDialog(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
+                    .verticalScroll(rememberScrollState())
             ) {
-                // Top Hero Section: User avatar with selected frame & name effect
-                val selectedFrame = selectedItems.find { it.item_type == "avatar_frame" }
-                val frameConfig = remember(selectedFrame) {
-                    selectedFrame?.config?.let { CosmeticsConfigParser.parseAvatarFrame(it) }
-                }
-                val selectedNameEffect = selectedItems.find { it.item_type == "name_effect" }
-                val nameEffectConfig = remember(selectedNameEffect) {
-                    selectedNameEffect?.config?.let { CosmeticsConfigParser.parseNameEffect(it) }
-                }
-
+                // Top Hero Section: Header avatar using shared FramedAvatar
+                val heroOuterSize = FramedAvatar.outerSize(76.dp, liveFrameConfig)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1347,18 +1496,15 @@ private fun DecorationPreviewDialog(
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        AvatarFrame(
-                            config = frameConfig,
-                            sizeDp = 76.dp,
-                            enableFrameAnimation = true
+                        Box(
+                            modifier = Modifier.defaultMinSize(minWidth = heroOuterSize, minHeight = heroOuterSize),
+                            contentAlignment = Alignment.Center
                         ) {
-                            AsyncImage(
-                                model = currentUserAvatar ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300",
-                                contentDescription = "Avatar",
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .clip(CircleShape),
-                                contentScale = ContentScale.Crop
+                            FramedAvatar(
+                                avatarUrl = currentUserAvatar,
+                                avatarSize = 76.dp,
+                                frame = liveFrameConfig,
+                                enableAnimation = true
                             )
                         }
 
@@ -1414,16 +1560,22 @@ private fun DecorationPreviewDialog(
                     }
                 }
 
-                // Swipeable Preview Pager
+                // Swipeable Preview Pager (no fixed card height; expands & scrolls cleanly on small screens)
                 HorizontalPager(
                     state = pagerState,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f)
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.Top
                 ) { page ->
                     when (page) {
-                        0 -> PreviewAvatarPage(selectedFrame = selectedFrame)
+                        0 -> PreviewAvatarPage(
+                            selectedFrame = selectedFrame,
+                            frameConfig = liveFrameConfig,
+                            avatarUrl = currentUserAvatar,
+                            isStaffAdmin = isStaffAdmin,
+                            onOpenCalibrate = { showCalibrationSheet = true }
+                        )
                         1 -> PreviewNamePage(selectedName = selectedNameEffect, userName = currentUserName)
                         2 -> PreviewEntryPage(
                             selectedEntry = selectedItems.find { it.item_type == "entry_animation" },
@@ -1433,47 +1585,87 @@ private fun DecorationPreviewDialog(
                         4 -> PreviewThemePage(selectedTheme = selectedItems.find { it.item_type == "chat_bg" })
                     }
                 }
+
+                Spacer(modifier = Modifier.height(12.dp))
             }
+        }
+
+        // Staff-Only Frame Calibration Sheet (Task C)
+        if (showCalibrationSheet && isStaffAdmin && selectedFrame != null && storedAsset != null) {
+            FrameCalibrationBottomSheet(
+                frameCode = selectedFrame.code,
+                frameName = selectedFrame.name,
+                isCalibrated = storedAsset.calibrated,
+                innerRatio = draftInnerRatio,
+                offsetX = draftOffsetX,
+                offsetY = draftOffsetY,
+                overflowRatio = draftOverflowRatio,
+                onInnerRatioChange = { draftInnerRatio = it.coerceIn(0.30f, 0.95f) },
+                onOffsetXChange = { draftOffsetX = it.coerceIn(-0.25f, 0.25f) },
+                onOffsetYChange = { draftOffsetY = it.coerceIn(-0.25f, 0.25f) },
+                onOverflowRatioChange = { draftOverflowRatio = it.coerceIn(0f, 0.50f) },
+                onReset = {
+                    draftInnerRatio = storedAsset.innerRatio.coerceIn(0.30f, 0.95f)
+                    draftOffsetX = storedAsset.offsetX.coerceIn(-0.25f, 0.25f)
+                    draftOffsetY = storedAsset.offsetY.coerceIn(-0.25f, 0.25f)
+                    draftOverflowRatio = storedAsset.overflowRatio.coerceIn(0f, 0.50f)
+                },
+                onSaved = { updatedAssetMap ->
+                    onRefreshStoreAfterCalibration(selectedFrame.code, updatedAssetMap)
+                },
+                onDismiss = { showCalibrationSheet = false }
+            )
         }
     }
 }
 
-// Preview Page 0: Avatar
+// Preview Page 0: Avatar (uses shared FramedAvatar + Size Strip)
 @Composable
-private fun PreviewAvatarPage(selectedFrame: StoreItemRow?) {
-    Box(
+private fun PreviewAvatarPage(
+    selectedFrame: StoreItemRow?,
+    frameConfig: FrameConfig?,
+    avatarUrl: String?,
+    isStaffAdmin: Boolean,
+    onOpenCalibrate: () -> Unit
+) {
+    Surface(
         modifier = Modifier
-            .fillMaxSize()
-            .clip(RoundedCornerShape(20.dp))
-            .background(ColorSurface)
-            .border(1.dp, ColorOutline, RoundedCornerShape(20.dp))
-            .padding(20.dp),
-        contentAlignment = Alignment.Center
+            .fillMaxWidth()
+            .heightIn(min = 340.dp),
+        shape = RoundedCornerShape(20.dp),
+        color = ColorSurface,
+        border = BorderStroke(1.dp, ColorOutline)
     ) {
-        if (selectedFrame != null) {
-            val frameConfig = remember(selectedFrame) {
-                CosmeticsConfigParser.parseAvatarFrame(selectedFrame.config)
-            }
+        if (selectedFrame != null && frameConfig != null) {
+            val bigAvatarSize = 96.dp
+            val bigOuterSize = FramedAvatar.outerSize(bigAvatarSize, frameConfig)
+
             Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                AvatarFrame(config = frameConfig, sizeDp = 88.dp, enableFrameAnimation = true) {
-                    AsyncImage(
-                        model = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300",
-                        contentDescription = null,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(CircleShape),
-                        contentScale = ContentScale.Crop
+                Box(
+                    modifier = Modifier.defaultMinSize(minWidth = bigOuterSize, minHeight = bigOuterSize),
+                    contentAlignment = Alignment.Center
+                ) {
+                    FramedAvatar(
+                        avatarUrl = avatarUrl,
+                        avatarSize = bigAvatarSize,
+                        frame = frameConfig,
+                        enableAnimation = true
                     )
                 }
-                Spacer(modifier = Modifier.height(22.dp))
+
+                Spacer(modifier = Modifier.height(14.dp))
+
                 Text(
                     text = selectedFrame.name,
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
-                    color = ColorTextPrimary
+                    color = ColorTextPrimary,
+                    textAlign = TextAlign.Center
                 )
                 Text(
                     text = selectedFrame.description ?: "Customized animated avatar frame",
@@ -1481,10 +1673,411 @@ private fun PreviewAvatarPage(selectedFrame: StoreItemRow?) {
                     color = ColorTextSecondary,
                     textAlign = TextAlign.Center
                 )
+
+                val asset = frameConfig.asset
+                if (isStaffAdmin && frameConfig.kind.equals("asset", ignoreCase = true) && asset != null) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(100.dp),
+                            color = if (asset.calibrated) ColorSuccessContainer else ColorSurfaceTrack,
+                            border = BorderStroke(
+                                1.dp,
+                                if (asset.calibrated) ColorSuccess.copy(alpha = 0.5f) else ColorOutline
+                            )
+                        ) {
+                            Text(
+                                text = if (asset.calibrated) "Calibrated" else "Not calibrated yet",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (asset.calibrated) ColorSuccess else ColorTextSecondary,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+
+                        Surface(
+                            onClick = onOpenCalibrate,
+                            shape = RoundedCornerShape(100.dp),
+                            color = ColorPrimary.copy(alpha = 0.18f),
+                            border = BorderStroke(1.dp, ColorPrimary)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                SoftFilterIcon(size = 13.dp, color = ColorTextPrimary)
+                                Text(
+                                    text = "Calibrate",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = ColorTextPrimary
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
+                HorizontalDivider(color = ColorOutline)
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Text(
+                    text = "Size Strip",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = ColorTextSecondary
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                val sizeSamples = remember {
+                    listOf(
+                        40.dp to "Chat · 40 dp",
+                        64.dp to "Seat · 64 dp",
+                        120.dp to "Profile · 120 dp"
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp, Alignment.CenterHorizontally),
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    sizeSamples.forEach { (sampleSize, label) ->
+                        val outer = FramedAvatar.outerSize(sampleSize, frameConfig).coerceAtLeast(48.dp)
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Bottom
+                        ) {
+                            Box(
+                                modifier = Modifier.defaultMinSize(minWidth = outer, minHeight = outer),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                FramedAvatar(
+                                    avatarUrl = avatarUrl,
+                                    avatarSize = sampleSize,
+                                    frame = frameConfig,
+                                    enableAnimation = true
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = label,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = ColorTextSecondary,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
             }
         } else {
-            Text("No avatar frame selected", color = ColorTextSecondary)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 340.dp)
+                    .padding(20.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("No avatar frame selected", color = ColorTextSecondary)
+            }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FrameCalibrationBottomSheet(
+    frameCode: String,
+    frameName: String,
+    isCalibrated: Boolean,
+    innerRatio: Float,
+    offsetX: Float,
+    offsetY: Float,
+    overflowRatio: Float,
+    onInnerRatioChange: (Float) -> Unit,
+    onOffsetXChange: (Float) -> Unit,
+    onOffsetYChange: (Float) -> Unit,
+    onOverflowRatioChange: (Float) -> Unit,
+    onReset: () -> Unit,
+    onSaved: (Map<String, Any?>) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+
+    var isSaving by remember { mutableStateOf(false) }
+    var statusMessage by remember { mutableStateOf<String?>(null) }
+    var statusIsError by remember { mutableStateOf(false) }
+    var savedCalibratedState by remember(frameCode, isCalibrated) { mutableStateOf(isCalibrated) }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = ColorSurface,
+        scrimColor = Color.Black.copy(alpha = 0.16f),
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        dragHandle = { BottomSheetDefaults.DragHandle(color = ColorOutline) }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 18.dp)
+        ) {
+            // Header + Calibration Flag
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Calibrate Frame",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = ColorTextPrimary
+                    )
+                    Text(
+                        text = "$frameName ($frameCode)",
+                        fontSize = 12.sp,
+                        color = ColorTextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Surface(
+                    shape = RoundedCornerShape(100.dp),
+                    color = if (savedCalibratedState) ColorSuccessContainer else ColorSurfaceTrack,
+                    border = BorderStroke(
+                        1.dp,
+                        if (savedCalibratedState) ColorSuccess.copy(alpha = 0.55f) else ColorOutline
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        if (savedCalibratedState) {
+                            SoftCheckIcon(size = 13.dp, color = ColorSuccess)
+                        }
+                        Text(
+                            text = if (savedCalibratedState) "Calibrated" else "Not calibrated yet",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (savedCalibratedState) ColorSuccess else ColorTextSecondary
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            CalibrationSliderRow(
+                label = "Inner ratio",
+                value = innerRatio,
+                valueRange = 0.30f..0.95f,
+                onValueChange = {
+                    statusMessage = null
+                    onInnerRatioChange(it)
+                }
+            )
+            CalibrationSliderRow(
+                label = "Offset X",
+                value = offsetX,
+                valueRange = -0.25f..0.25f,
+                onValueChange = {
+                    statusMessage = null
+                    onOffsetXChange(it)
+                }
+            )
+            CalibrationSliderRow(
+                label = "Offset Y",
+                value = offsetY,
+                valueRange = -0.25f..0.25f,
+                onValueChange = {
+                    statusMessage = null
+                    onOffsetYChange(it)
+                }
+            )
+            CalibrationSliderRow(
+                label = "Overflow",
+                value = overflowRatio,
+                valueRange = 0f..0.50f,
+                onValueChange = {
+                    statusMessage = null
+                    onOverflowRatioChange(it)
+                }
+            )
+
+            statusMessage?.let { msg ->
+                Spacer(modifier = Modifier.height(8.dp))
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (statusIsError) ColorErrorContainer else ColorSuccessContainer,
+                    border = BorderStroke(
+                        1.dp,
+                        if (statusIsError) ColorError.copy(alpha = 0.45f) else ColorSuccess.copy(alpha = 0.45f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = msg,
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (statusIsError) ColorError else ColorSuccess,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        statusMessage = null
+                        onReset()
+                    },
+                    enabled = !isSaving,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
+                        .testTag("calibration_reset_button"),
+                    shape = RoundedCornerShape(100.dp),
+                    border = BorderStroke(1.dp, ColorTextSecondary),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
+                ) {
+                    Text(
+                        text = "Reset",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = ColorTextPrimary,
+                        maxLines = 1
+                    )
+                }
+
+                Button(
+                    onClick = {
+                        if (isSaving) return@Button
+                        scope.launch {
+                            isSaving = true
+                            statusMessage = null
+                            val res = CosmeticsManager.setFrameCalibration(
+                                context = context,
+                                code = frameCode,
+                                innerRatio = innerRatio,
+                                offsetX = offsetX,
+                                offsetY = offsetY,
+                                overflowRatio = overflowRatio
+                            )
+                            isSaving = false
+                            res.onSuccess { updatedAssetMap ->
+                                savedCalibratedState = true
+                                statusIsError = false
+                                statusMessage = "Saved calibration for everyone."
+                                onSaved(updatedAssetMap)
+                                Toast.makeText(context, "Frame calibration saved", Toast.LENGTH_SHORT).show()
+                            }.onFailure { err ->
+                                statusIsError = true
+                                statusMessage = err.message ?: "Failed to save calibration."
+                            }
+                        }
+                    },
+                    enabled = !isSaving,
+                    modifier = Modifier
+                        .weight(1.4f)
+                        .heightIn(min = 48.dp)
+                        .testTag("calibration_save_button"),
+                    shape = RoundedCornerShape(100.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = ColorPrimary,
+                        contentColor = ColorOnPrimary
+                    ),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    if (isSaving) {
+                        CircularProgressIndicator(
+                            color = ColorOnPrimary,
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Text(
+                            text = "Save for everyone",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalibrationSliderRow(
+    label: String,
+    value: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    onValueChange: (Float) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = label,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = ColorTextPrimary
+            )
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = ColorBg,
+                border = BorderStroke(1.dp, ColorOutline)
+            ) {
+                Text(
+                    text = String.format(Locale.US, "%.3f", value),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = ColorTextPrimary,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                )
+            }
+        }
+        Slider(
+            value = value.coerceIn(valueRange.start, valueRange.endInclusive),
+            onValueChange = onValueChange,
+            valueRange = valueRange,
+            colors = SliderDefaults.colors(
+                thumbColor = ColorPrimary,
+                activeTrackColor = ColorPrimary,
+                inactiveTrackColor = ColorSurfaceTrack
+            )
+        )
     }
 }
 
@@ -1493,7 +2086,8 @@ private fun PreviewAvatarPage(selectedFrame: StoreItemRow?) {
 private fun PreviewNamePage(selectedName: StoreItemRow?, userName: String) {
     Box(
         modifier = Modifier
-            .fillMaxSize()
+            .fillMaxWidth()
+            .heightIn(min = 340.dp)
             .clip(RoundedCornerShape(20.dp))
             .background(ColorSurface)
             .border(1.dp, ColorOutline, RoundedCornerShape(20.dp))
@@ -1546,14 +2140,15 @@ private fun PreviewNamePage(selectedName: StoreItemRow?, userName: String) {
     }
 }
 
-// Preview Page 1: Entry Animation
+// Preview Page 2: Entry Animation
 @Composable
 private fun PreviewEntryPage(selectedEntry: StoreItemRow?, userName: String) {
     var isPlaying by remember { mutableStateOf(true) }
 
     Box(
         modifier = Modifier
-            .fillMaxSize()
+            .fillMaxWidth()
+            .heightIn(min = 340.dp)
             .clip(RoundedCornerShape(20.dp))
             .background(ColorSurface)
             .border(1.dp, ColorOutline, RoundedCornerShape(20.dp))
@@ -1603,7 +2198,8 @@ private fun PreviewEntryPage(selectedEntry: StoreItemRow?, userName: String) {
                 Button(
                     onClick = { isPlaying = !isPlaying },
                     colors = ButtonDefaults.buttonColors(containerColor = ColorPrimary, contentColor = ColorOnPrimary),
-                    shape = RoundedCornerShape(100.dp)
+                    shape = RoundedCornerShape(100.dp),
+                    modifier = Modifier.heightIn(min = 48.dp)
                 ) {
                     Icon(
                         painter = painterResource(id = R.drawable.ic_refresh),
@@ -1620,16 +2216,18 @@ private fun PreviewEntryPage(selectedEntry: StoreItemRow?, userName: String) {
     }
 }
 
-// Preview Page 2: Bubble Theme
+// Preview Page 3: Bubble Theme
 @Composable
 private fun PreviewBubblePage(selectedBubble: StoreItemRow?) {
     Box(
         modifier = Modifier
-            .fillMaxSize()
+            .fillMaxWidth()
+            .heightIn(min = 340.dp)
             .clip(RoundedCornerShape(20.dp))
             .background(ColorBg)
             .border(1.dp, ColorOutline, RoundedCornerShape(20.dp))
-            .padding(16.dp)
+            .padding(16.dp),
+        contentAlignment = Alignment.Center
     ) {
         if (selectedBubble != null) {
             val bubbleConfig = remember(selectedBubble) {
@@ -1637,7 +2235,7 @@ private fun PreviewBubblePage(selectedBubble: StoreItemRow?) {
             }
 
             Column(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.Center
             ) {
                 // Incoming message
@@ -1666,19 +2264,18 @@ private fun PreviewBubblePage(selectedBubble: StoreItemRow?) {
                 }
             }
         } else {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No bubble theme selected", color = ColorTextSecondary)
-            }
+            Text("No bubble theme selected", color = ColorTextSecondary)
         }
     }
 }
 
-// Preview Page 3: Chat Theme Background
+// Preview Page 4: Chat Theme Background
 @Composable
 private fun PreviewThemePage(selectedTheme: StoreItemRow?) {
     Box(
         modifier = Modifier
-            .fillMaxSize()
+            .fillMaxWidth()
+            .heightIn(min = 340.dp)
             .clip(RoundedCornerShape(20.dp))
             .border(1.dp, ColorOutline, RoundedCornerShape(20.dp))
     ) {
@@ -1687,12 +2284,17 @@ private fun PreviewThemePage(selectedTheme: StoreItemRow?) {
                 CosmeticsConfigParser.parseChatBg(selectedTheme.config)
             }
 
-            ChatBackground(config = bgConfig, isDark = LocalAppDarkTheme.current, modifier = Modifier.fillMaxSize())
+            ChatBackground(
+                config = bgConfig,
+                isDark = LocalAppDarkTheme.current,
+                modifier = Modifier.matchParentSize()
+            )
 
             // Sample floating chat bubbles over wallpaper
             Column(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
                     .padding(16.dp),
                 verticalArrangement = Arrangement.Bottom
             ) {
@@ -1713,7 +2315,12 @@ private fun PreviewThemePage(selectedTheme: StoreItemRow?) {
                 }
             }
         } else {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 340.dp),
+                contentAlignment = Alignment.Center
+            ) {
                 Text("No chat theme selected", color = ColorTextSecondary)
             }
         }

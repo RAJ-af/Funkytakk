@@ -135,3 +135,15 @@
 - Beta signups: Edge Function `beta-signup` (public, no JWT) -> table `beta_signups`; rate limit 5/hour per hashed IP in `beta_signup_attempts`. Optional secrets: `BREVO_API_KEY` (welcome mail), `BETA_ALLOWED_ORIGINS` (comma list of site origins), `BETA_IP_SALT`.
 - `verify-firebase-token` v22: retry-safe session minting (`503` + code `session_mint_failed` instead of `500`).
 
+---
+
+### Decoration metadata v2 (2026-11-20)
+- `store_items.config` for asset avatar frames (`kind = "asset"`, `schema_version = 2`) includes `asset`:
+  - `url`, `format`, `fps`, `size_px`, `source_size_px`, `animated`, `loop`, `inner_ratio`, `offset_x` (`-0.25..0.25`), `offset_y` (`-0.25..0.25`), `overflow_ratio` (`0..0.5`), `z` (`"above"` | `"below"`), `min_render_px`, `version`, `calibrated`, `avatar_ratio` (legacy copy), plus optional `meta` (unknown keys ignored).
+- Shared `FramedAvatar` sizing rule:
+  - Avatar photo always renders at `avatarSize` (circular, centred).
+  - Asset frame renders at `canvas = avatarSize / inner_ratio` (`requiredSize(canvas)`), centred on the avatar, shifted by `(offset_x * canvas, offset_y * canvas)` with unclipped overflow (`outerSize = canvas * (1 + overflow_ratio)`).
+  - `inner_ratio` fallback order: `inner_ratio` -> `avatar_ratio` -> `scale` -> `0.6`.
+  - Respects `loop`, skips asset frame if rendered avatar px < `min_render_px`, and caches by `url + version`.
+- Staff RPC: `admin_set_frame_calibration(p_code, p_inner_ratio, p_offset_x, p_offset_y, p_overflow_ratio)` -> returns updated `asset` JSON. Error codes: `forbidden` ("Only admins can do this"), `invalid_inner_ratio`, `invalid_offset`, `invalid_overflow_ratio`, `not_an_asset_frame`.
+

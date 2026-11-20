@@ -2028,6 +2028,21 @@ class AuthViewModel : ViewModel() {
             auth.createUserWithEmailAndPassword(cleanEmail, password)
                 .addOnSuccessListener { result ->
                     val firebaseUser = result.user
+                    val isNewFirebaseUser = result.additionalUserInfo?.isNewUser ?: true
+                    fun cleanupOrphanedSignupUser() {
+                        if (firebaseUser != null && isNewFirebaseUser) {
+                            try {
+                                firebaseUser.delete().addOnCompleteListener {
+                                    try { auth.signOut() } catch (_: Exception) {}
+                                }
+                            } catch (_: Exception) {
+                                try { auth.signOut() } catch (_: Exception) {}
+                            }
+                        } else {
+                            try { auth.signOut() } catch (_: Exception) {}
+                        }
+                    }
+
                     if (firebaseUser != null) {
                         firebaseUser.getIdToken(true)
                             .addOnSuccessListener { tokenResult ->
@@ -2095,24 +2110,26 @@ class AuthViewModel : ViewModel() {
                                                 val failMsg = (exchange as? SupabaseSessionManager.ExchangeResult.Failure)?.message
                                                     ?: com.example.repository.DeviceSessionRepository.SESSION_MINT_FAILED_MESSAGE
                                                 Log.e("AuthViewModel", "verify-firebase-token failed during signup")
-                                                try { auth.signOut() } catch (_: Exception) {}
+                                                cleanupOrphanedSignupUser()
                                                 _authState.value = AuthState.Error(failMsg)
                                             }
                                         } catch (e: kotlinx.coroutines.CancellationException) {
                                             throw e
                                         } catch (e: Exception) {
                                             Log.e("AuthViewModel", "verify-firebase-token exception: ${e.javaClass.simpleName}")
-                                            try { auth.signOut() } catch (_: Exception) {}
+                                            cleanupOrphanedSignupUser()
                                             _authState.value = AuthState.Error(
                                                 com.example.repository.DeviceSessionRepository.SESSION_MINT_FAILED_MESSAGE
                                             )
                                         }
                                     }
                                 } else {
+                                    cleanupOrphanedSignupUser()
                                     _authState.value = AuthState.Error("Failed to obtain Firebase ID token.")
                                 }
                             }
                             .addOnFailureListener { e ->
+                                cleanupOrphanedSignupUser()
                                 _authState.value = AuthState.Error("Failed to fetch Firebase token: ${e.localizedMessage}")
                             }
                     } else {
@@ -2121,7 +2138,11 @@ class AuthViewModel : ViewModel() {
                 }
                 .addOnFailureListener { e ->
                     val errorCode = (e as? com.google.firebase.auth.FirebaseAuthException)?.errorCode
-                    if (errorCode == "ERROR_EMAIL_ALREADY_IN_USE" || errorCode == "email-already-in-use" || e.message?.contains("already in use", ignoreCase = true) == true) {
+                    if (e is com.google.firebase.auth.FirebaseAuthUserCollisionException ||
+                        errorCode == "ERROR_EMAIL_ALREADY_IN_USE" ||
+                        errorCode == "email-already-in-use" ||
+                        e.message?.contains("already in use", ignoreCase = true) == true
+                    ) {
                         _authState.value = AuthState.AccountCollision(
                             email = cleanEmail,
                             message = "An account with this email address already exists. Only one account is permitted per email address."

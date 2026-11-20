@@ -1585,14 +1585,40 @@ fun DiscoverUserCard(
                     .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Rounded-Square Avatar with bottom-right overlapping country flag
-                DiscoverSquareAvatarWithFlag(
-                    avatarUrl = partner.avatarUrl,
-                    countryCode = partner.countryCode,
-                    isOnline = partner.isOnline,
-                    avatarSize = 80.dp,
-                    flagSize = 24.dp
-                )
+                // Avatar with bottom-right overlapping country flag (FramedAvatar when framed, square avatar otherwise)
+                val userCosmeticsMap by com.example.store.CosmeticsManager.userCosmeticsMap.collectAsState()
+                val partnerFrame = remember(partner.id, userCosmeticsMap) {
+                    val row = userCosmeticsMap[partner.id] ?: com.example.store.CosmeticsManager.getCachedCosmetics(partner.id)
+                    row?.avatar_frame?.config?.let {
+                        runCatching { com.example.store.CosmeticsConfigParser.parseAvatarFrame(it) }.getOrNull()
+                    }
+                }
+                if (partnerFrame != null) {
+                    val slotSize = com.example.ui.components.FramedAvatar.outerSize(68.dp, partnerFrame).coerceIn(76.dp, 104.dp)
+                    Box(
+                        modifier = Modifier.size(slotSize),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        com.example.ui.components.PresenceAvatar(
+                            avatarUrl = partner.avatarUrl,
+                            size = 68.dp,
+                            isOnline = partner.isOnline,
+                            countryCode = partner.countryCode,
+                            userId = partner.id,
+                            frameConfig = partnerFrame,
+                            showFlagBadge = true,
+                            enableFrameAnimation = false
+                        )
+                    }
+                } else {
+                    DiscoverSquareAvatarWithFlag(
+                        avatarUrl = partner.avatarUrl,
+                        countryCode = partner.countryCode,
+                        isOnline = partner.isOnline,
+                        avatarSize = 80.dp,
+                        flagSize = 24.dp
+                    )
+                }
 
                 Spacer(modifier = Modifier.width(14.dp))
 

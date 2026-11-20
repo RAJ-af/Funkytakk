@@ -70,20 +70,25 @@ data class FrameGlowConfig(
     val pulse: Boolean = false
 )
 
-data class FrameAssetOffset(
-    val xDp: Float = 0f,
-    val yDp: Float = 0f
-)
-
 data class FrameAssetConfig(
     val url: String = "",
     val format: String = "webp", // "webp" | "png"
     val sizePx: Int = 320,
+    val sourceSizePx: Int = 320,
     val fps: Int = 24,
-    val avatarRatio: Float = 0.6f,
-    val scale: Float = 1.6667f,
-    val hasAvatarRatio: Boolean = false,
-    val offset: FrameAssetOffset = FrameAssetOffset()
+    val animated: Boolean = true,
+    val loop: Boolean = true,
+    val innerRatio: Float = 0.6f,
+    val offsetX: Float = 0f, // fraction of frame canvas width (-0.25..0.25)
+    val offsetY: Float = 0f, // fraction of frame canvas width (-0.25..0.25)
+    val overflowRatio: Float = 0f, // 0..0.5
+    val z: String = "above", // "above" | "below"
+    val minRenderPx: Int = 32,
+    val version: Int = 1,
+    val calibrated: Boolean = false,
+    val avatarRatio: Float = innerRatio, // legacy copy
+    val scale: Float = 1f / innerRatio.coerceAtLeast(0.25f),
+    val hasInnerRatio: Boolean = false
 )
 
 data class AvatarFrameConfig(
@@ -94,6 +99,8 @@ data class AvatarFrameConfig(
     val glow: FrameGlowConfig? = null,
     val asset: FrameAssetConfig? = null
 )
+
+typealias FrameConfig = AvatarFrameConfig
 
 // ----------------------------------------------------
 // 4. NAME EFFECT CONFIG
@@ -274,28 +281,62 @@ object CosmeticsConfigParser {
             val assetObj = json.optJSONObject("asset")
             val assetUrl = assetObj?.optString("url", "")?.takeIf { it.isNotBlank() && it != "null" }
             val asset = if (assetObj != null && assetUrl != null) {
-                val offsetObj = assetObj.optJSONObject("offset")
-                val hasRatio = assetObj.has("avatar_ratio") && !assetObj.isNull("avatar_ratio")
-                val avatarRatio = if (hasRatio) {
-                    assetObj.optDouble("avatar_ratio", 0.6).toFloat().coerceIn(0.25f, 1.0f)
-                } else if (assetObj.has("scale") && !assetObj.isNull("scale")) {
-                    val sc = assetObj.optDouble("scale", 1.6667).toFloat().coerceAtLeast(0.5f)
-                    (1f / sc).coerceIn(0.25f, 1.0f)
+                val hasInnerRatio = assetObj.has("inner_ratio") && !assetObj.isNull("inner_ratio")
+                val hasAvatarRatio = assetObj.has("avatar_ratio") && !assetObj.isNull("avatar_ratio")
+                val hasScale = assetObj.has("scale") && !assetObj.isNull("scale")
+                val resolvedInnerRatio = when {
+                    hasInnerRatio -> assetObj.optDouble("inner_ratio", 0.6).toFloat()
+                    hasAvatarRatio -> assetObj.optDouble("avatar_ratio", 0.6).toFloat()
+                    hasScale -> {
+                        val sc = assetObj.optDouble("scale", 1.6667).toFloat().coerceAtLeast(0.5f)
+                        1f / sc
+                    }
+                    else -> 0.6f
+                }.let { if (it.isFinite()) it.coerceIn(0.25f, 0.98f) else 0.6f }
+
+                val rawOffsetX = if (assetObj.has("offset_x") && !assetObj.isNull("offset_x")) {
+                    assetObj.optDouble("offset_x", 0.0).toFloat()
                 } else {
-                    0.6f
-                }
+                    0f
+                }.let { if (it.isFinite()) it.coerceIn(-0.25f, 0.25f) else 0f }
+
+                val rawOffsetY = if (assetObj.has("offset_y") && !assetObj.isNull("offset_y")) {
+                    assetObj.optDouble("offset_y", 0.0).toFloat()
+                } else {
+                    0f
+                }.let { if (it.isFinite()) it.coerceIn(-0.25f, 0.25f) else 0f }
+
+                val overflowRatio = if (assetObj.has("overflow_ratio") && !assetObj.isNull("overflow_ratio")) {
+                    assetObj.optDouble("overflow_ratio", 0.0).toFloat()
+                } else {
+                    0f
+                }.let { if (it.isFinite()) it.coerceIn(0f, 0.5f) else 0f }
+
+                val zOrder = assetObj.optString("z", "above").trim().lowercase()
+                    .let { if (it == "below") "below" else "above" }
+
+                val sizePx = assetObj.optInt("size_px", 320).coerceAtLeast(1)
+                val sourceSizePx = assetObj.optInt("source_size_px", sizePx).coerceAtLeast(1)
+
                 FrameAssetConfig(
                     url = assetUrl,
                     format = assetObj.optString("format", "webp"),
-                    sizePx = assetObj.optInt("size_px", 320),
-                    fps = assetObj.optInt("fps", 24),
-                    avatarRatio = avatarRatio,
-                    scale = 1f / avatarRatio,
-                    hasAvatarRatio = hasRatio,
-                    offset = FrameAssetOffset(
-                        xDp = offsetObj?.optDouble("x", 0.0)?.toFloat() ?: 0f,
-                        yDp = offsetObj?.optDouble("y", 0.0)?.toFloat() ?: 0f
-                    )
+                    sizePx = sizePx,
+                    sourceSizePx = sourceSizePx,
+                    fps = assetObj.optInt("fps", 24).coerceAtLeast(1),
+                    animated = assetObj.optBoolean("animated", true),
+                    loop = assetObj.optBoolean("loop", true),
+                    innerRatio = resolvedInnerRatio,
+                    offsetX = rawOffsetX,
+                    offsetY = rawOffsetY,
+                    overflowRatio = overflowRatio,
+                    z = zOrder,
+                    minRenderPx = assetObj.optInt("min_render_px", 32).coerceAtLeast(0),
+                    version = assetObj.optInt("version", 1).coerceAtLeast(1),
+                    calibrated = assetObj.optBoolean("calibrated", false),
+                    avatarRatio = resolvedInnerRatio,
+                    scale = 1f / resolvedInnerRatio,
+                    hasInnerRatio = hasInnerRatio || hasAvatarRatio
                 )
             } else null
 

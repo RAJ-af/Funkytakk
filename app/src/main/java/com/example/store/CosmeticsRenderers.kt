@@ -33,6 +33,7 @@ import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
 import coil.request.CachePolicy
 import coil.request.ImageRequest
+import coil.request.repeatCount
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -198,60 +199,99 @@ fun AvatarFrame(
     }
 
     val context = LocalContext.current
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val avatarPx = with(density) { sizeDp.roundToPx() }
     val asset = config.asset
-    var isAssetLoadFailed by remember(asset?.url) { mutableStateOf(false) }
-    val isAssetFrame = config.kind.equals("asset", ignoreCase = true) &&
+    var isAssetLoadFailed by remember(asset?.url, asset?.version) { mutableStateOf(false) }
+    val isAssetKind = config.kind.equals("asset", ignoreCase = true) && asset != null
+    val isAssetFrame = isAssetKind &&
         asset != null &&
         asset.url.isNotBlank() &&
-        !isAssetLoadFailed
+        !isAssetLoadFailed &&
+        avatarPx >= asset.minRenderPx
 
-    if (isAssetFrame && asset != null) {
-        val ratio = asset.avatarRatio.coerceIn(0.25f, 1.0f)
-        val frameSize = sizeDp / ratio
-        val imageRequest = remember(context, asset.url, enableFrameAnimation) {
-            ImageRequest.Builder(context)
-                .data(asset.url)
-                .diskCachePolicy(CachePolicy.ENABLED)
-                .memoryCachePolicy(CachePolicy.ENABLED)
-                .crossfade(true)
-                .apply {
-                    if (enableFrameAnimation && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                        decoderFactory(coil.decode.ImageDecoderDecoder.Factory())
-                    } else {
-                        decoderFactory(coil.decode.BitmapFactoryDecoder.Factory())
-                    }
-                }
-                .listener(
-                    onError = { _, _ -> isAssetLoadFailed = true }
-                )
-                .build()
-        }
-
+    if (isAssetKind) {
         Box(
             modifier = modifier.size(sizeDp),
             contentAlignment = Alignment.Center
         ) {
-            // Core Avatar Container (zIndex 1f, no ring padding)
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .zIndex(1f)
-                    .clip(CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                content()
-            }
+            if (isAssetFrame && asset != null) {
+                val ratio = (if (asset.innerRatio > 0f) asset.innerRatio else asset.avatarRatio)
+                    .coerceIn(0.25f, 0.98f)
+                val canvas = sizeDp / ratio
+                val dx = canvas * asset.offsetX.coerceIn(-0.25f, 0.25f)
+                val dy = canvas * asset.offsetY.coerceIn(-0.25f, 0.25f)
+                val isBelow = asset.z.equals("below", ignoreCase = true)
+                val animateAsset = enableFrameAnimation && asset.animated
+                val versionKey = "${asset.url}_v${asset.version}"
+                val memCacheKey = "${versionKey}_${if (animateAsset) (if (asset.loop) "loop" else "once") else "static"}"
 
-            // Transparent Frame Image Asset Overlaid ON TOP of Avatar (zIndex 2f, unclipped overhang)
-            AsyncImage(
-                model = imageRequest,
-                contentDescription = "Avatar Frame Asset",
-                modifier = Modifier
-                    .size(frameSize)
-                    .offset(x = asset.offset.xDp.dp, y = asset.offset.yDp.dp)
-                    .zIndex(2f),
-                contentScale = ContentScale.Fit
-            )
+                val imageRequest = remember(context, asset.url, asset.version, animateAsset, asset.loop) {
+                    ImageRequest.Builder(context)
+                        .data(asset.url)
+                        .memoryCacheKey(memCacheKey)
+                        .diskCacheKey(versionKey)
+                        .diskCachePolicy(CachePolicy.ENABLED)
+                        .memoryCachePolicy(CachePolicy.ENABLED)
+                        .crossfade(false)
+                        .apply {
+                            if (animateAsset && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                                decoderFactory(coil.decode.ImageDecoderDecoder.Factory())
+                                repeatCount(if (asset.loop) coil.drawable.MovieDrawable.REPEAT_INFINITE else 0)
+                            } else {
+                                decoderFactory(coil.decode.BitmapFactoryDecoder.Factory())
+                            }
+                        }
+                        .listener(
+                            onError = { _, _ -> isAssetLoadFailed = true }
+                        )
+                        .build()
+                }
+
+                if (isBelow) {
+                    AsyncImage(
+                        model = imageRequest,
+                        contentDescription = "Avatar Frame Asset",
+                        modifier = Modifier
+                            .requiredSize(canvas)
+                            .offset(x = dx, y = dy)
+                            .zIndex(0f),
+                        contentScale = ContentScale.Fit
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(sizeDp)
+                        .zIndex(1f)
+                        .clip(CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    content()
+                }
+
+                if (!isBelow) {
+                    AsyncImage(
+                        model = imageRequest,
+                        contentDescription = "Avatar Frame Asset",
+                        modifier = Modifier
+                            .requiredSize(canvas)
+                            .offset(x = dx, y = dy)
+                            .zIndex(2f),
+                        contentScale = ContentScale.Fit
+                    )
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(sizeDp)
+                        .zIndex(1f)
+                        .clip(CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    content()
+                }
+            }
         }
         return
     }
@@ -390,12 +430,11 @@ fun AvatarFrame(
             }
         }
 
-        // Inner Avatar (flush against inner stroke boundary)
+        // Inner Avatar (ALWAYS full sizeDp, centred, circular)
         Box(
             modifier = Modifier
-                .fillMaxSize()
+                .size(sizeDp)
                 .zIndex(1f)
-                .padding((scaledStrokeDp * 0.8f).dp)
                 .clip(CircleShape),
             contentAlignment = Alignment.Center
         ) {
