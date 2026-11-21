@@ -33,15 +33,16 @@ android {
     }
   }
 
-  val envKeystorePath = System.getenv("KEYSTORE_PATH")
-  val envStorePassword = System.getenv("STORE_PASSWORD")
-  val envKeyPassword = System.getenv("KEY_PASSWORD")
-  val envKeyAlias = System.getenv("KEY_ALIAS") ?: "upload"
+  val envReleaseStoreFile = System.getenv("RELEASE_STORE_FILE")
+  val envReleaseStorePassword = System.getenv("RELEASE_STORE_PASSWORD")
+  val envReleaseKeyAlias = System.getenv("RELEASE_KEY_ALIAS")
+  val envReleaseKeyPassword = System.getenv("RELEASE_KEY_PASSWORD")
 
-  val hasReleaseSigningCredentials = !envKeystorePath.isNullOrBlank() &&
-      !envStorePassword.isNullOrBlank() &&
-      !envKeyPassword.isNullOrBlank() &&
-      file(envKeystorePath).exists()
+  val hasReleaseSigningCredentials = !envReleaseStoreFile.isNullOrBlank() &&
+      !envReleaseStorePassword.isNullOrBlank() &&
+      !envReleaseKeyAlias.isNullOrBlank() &&
+      !envReleaseKeyPassword.isNullOrBlank() &&
+      file(envReleaseStoreFile).exists()
 
   val projectDebugKeystore = rootProject.file("debug.keystore")
 
@@ -56,10 +57,10 @@ android {
     }
     if (hasReleaseSigningCredentials) {
       create("release") {
-        storeFile = file(envKeystorePath!!)
-        storePassword = envStorePassword
-        keyAlias = envKeyAlias
-        keyPassword = envKeyPassword
+        storeFile = file(envReleaseStoreFile!!)
+        storePassword = envReleaseStorePassword
+        keyAlias = envReleaseKeyAlias
+        keyPassword = envReleaseKeyPassword
       }
     }
   }
@@ -99,7 +100,7 @@ android {
         signingConfig = signingConfigs.getByName("release")
       } else {
         signingConfig = null
-        logger.warn("SECURITY WARNING: Release signing credentials (KEYSTORE_PATH, STORE_PASSWORD, KEY_PASSWORD) are not configured or file does not exist. Release build will NOT be signed with debug keys.")
+        logger.warn("SECURITY WARNING: Release signing credentials (RELEASE_STORE_FILE, RELEASE_STORE_PASSWORD, RELEASE_KEY_ALIAS, RELEASE_KEY_PASSWORD) are not configured or keystore file does not exist. Release build will NOT be signed with debug keys.")
       }
     }
     debug {

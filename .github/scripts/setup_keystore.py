@@ -1,262 +1,165 @@
-import os
-import subprocess
-import re
 import base64
+import binascii
+import os
+import re
+import subprocess
+import sys
+import tempfile
 
-artifacts_dir = os.path.abspath("keystore-artifacts")
-os.makedirs(artifacts_dir, exist_ok=True)
-home_android = os.path.expanduser("~/.android")
-os.makedirs(home_android, exist_ok=True)
 
-# ----------------------------------------------------
-# 1. SETUP DEBUG KEYSTORE (Used to sign Debug APK)
-# ----------------------------------------------------
-debug_dst = os.path.abspath(os.path.join(home_android, "debug.keystore"))
-debug_saved = os.path.abspath(os.path.join(artifacts_dir, "debug.keystore"))
-debug_b64_env = os.environ.get("DEBUG_KEYSTORE_BASE64", "").strip()
+def fail(msg: str) -> None:
+    print(f"::error::{msg}", file=sys.stderr)
+    sys.exit(1)
 
-if debug_b64_env:
-    print("Restoring debug.keystore from DEBUG_KEYSTORE_BASE64 secret...")
-    data = base64.b64decode(debug_b64_env)
-    with open(debug_dst, "wb") as f:
-        f.write(data)
-    with open(debug_saved, "wb") as f:
-        f.write(data)
-    with open("debug.keystore", "wb") as f:
-        f.write(data)
-elif os.path.exists("debug.keystore"):
-    print("Found debug.keystore in workspace...")
-    with open("debug.keystore", "rb") as f:
-        data = f.read()
-    with open(debug_dst, "wb") as f:
-        f.write(data)
-    with open(debug_saved, "wb") as f:
-        f.write(data)
-elif os.path.exists("debug.keystore.base64"):
-    print("Decoding debug.keystore from debug.keystore.base64...")
-    with open("debug.keystore.base64", "r") as f:
-        raw_b64 = f.read().strip()
-    data = base64.b64decode(raw_b64)
-    with open(debug_dst, "wb") as f:
-        f.write(data)
-    with open(debug_saved, "wb") as f:
-        f.write(data)
-    with open("debug.keystore", "wb") as f:
-        f.write(data)
-else:
-    print("Generating standard debug.keystore...")
-    gen_debug_cmd = [
-        "keytool", "-genkeypair", "-v",
-        "-keystore", debug_dst,
-        "-alias", "androiddebugkey",
-        "-keyalg", "RSA",
-        "-keysize", "2048",
-        "-validity", "10000",
-        "-storepass", "android",
-        "-keypass", "android",
-        "-dname", "CN=Android Debug, O=Android, C=US"
+
+def extract_sha_fingerprints(keystore_path: str, alias: str, password_env_var: str | None, plain_password: str | None) -> tuple[str, str]:
+    cmd = ["keytool", "-list", "-v", "-keystore", keystore_path, "-alias", alias]
+    run_env = os.environ.copy()
+    if password_env_var:
+        cmd.extend(["-storepass:env", password_env_var])
+    elif plain_password is not None:
+        run_env["KEYTOOL_TMP_PASS"] = plain_password
+        cmd.extend(["-storepass:env", "KEYTOOL_TMP_PASS"])
+
+    try:
+        output = subprocess.check_output(cmd, env=run_env, stderr=subprocess.STDOUT).decode("utf-8", errors="replace")
+    except subprocess.CalledProcessError as exc:
+        fail(f"keytool failed while inspecting {os.path.basename(keystore_path)} (exit {exc.returncode}). Check alias and password secrets.")
+
+    sha1_match = re.search(r"SHA1:\s*([0-9A-Fa-f:]+)", output)
+    sha256_match = re.search(r"SHA256:\s*([0-9A-Fa-f:]+)", output)
+    if not sha1_match or not sha256_match:
+        fail(f"Could not extract SHA-1 and SHA-256 from {os.path.basename(keystore_path)}.")
+
+    return sha1_match.group(1).strip().upper(), sha256_match.group(1).strip().upper()
+
+
+def decode_secret_b64(raw_value: str, secret_name: str) -> bytes:
+    cleaned = "".join(raw_value.split())
+    try:
+        data = base64.b64decode(cleaned, validate=True)
+    except (binascii.Error, ValueError):
+        fail(f"Secret {secret_name} does not contain valid base64 data.")
+    if not data:
+        fail(f"Secret {secret_name} decoded to empty bytes.")
+    return data
+
+
+def main() -> None:
+    required_secrets = [
+        "DEBUG_KEYSTORE_BASE64",
+        "KEYSTORE_BASE64",
+        "KEYSTORE_PASSWORD",
+        "KEY_ALIAS",
+        "KEY_PASSWORD",
     ]
-    subprocess.check_call(gen_debug_cmd)
-    with open(debug_dst, "rb") as f:
-        data = f.read()
-    with open(debug_saved, "wb") as f:
-        f.write(data)
-    with open("debug.keystore", "wb") as f:
-        f.write(data)
+    missing = [name for name in required_secrets if not os.environ.get(name, "").strip()]
+    if missing:
+        fail(f"Missing required GitHub secret(s): {', '.join(missing)}. Never leave keystore secrets empty.")
 
-# Extract Debug Fingerprints
-cmd = ["keytool", "-list", "-v", "-keystore", debug_dst, "-storepass", "android", "-alias", "androiddebugkey"]
-debug_out = subprocess.check_output(cmd).decode("utf-8")
-d_sha1 = (re.search(r"SHA1:\s+([0-9A-Fa-f:]+)", debug_out) or ["", "Unknown"])[1].strip()
-d_sha256 = (re.search(r"SHA256:\s+([0-9A-Fa-f:]+)", debug_out) or ["", "Unknown"])[1].strip()
+    debug_b64 = os.environ["DEBUG_KEYSTORE_BASE64"]
+    release_b64 = os.environ["KEYSTORE_BASE64"]
+    keystore_password = os.environ["KEYSTORE_PASSWORD"].strip()
+    key_alias = os.environ["KEY_ALIAS"].strip()
+    key_password = os.environ["KEY_PASSWORD"].strip()
 
-# ----------------------------------------------------
-# 2. SETUP RELEASE KEYSTORE (For Production Builds)
-# ----------------------------------------------------
-rel_path = os.path.abspath(os.path.join(artifacts_dir, "funkytalk-release.keystore"))
-custom_b64 = os.environ.get("KEYSTORE_BASE64", "").strip()
-# Use secret if provided, otherwise generate a secure random one-time session password (never exposed)
-env_pwd = os.environ.get("KEYSTORE_PASSWORD", "").strip()
-env_key_pwd = os.environ.get("KEY_PASSWORD", "").strip()
-if env_pwd:
-    rel_pwd = env_pwd
-    pwd_display = "[STORED IN GITHUB SECRETS (KEYSTORE_PASSWORD)]"
-else:
-    import secrets as sec
-    rel_pwd = sec.token_hex(16)
-    pwd_display = "[AUTOGENERATED IN WORKFLOW RUNTIME / NOT EXPOSED]"
-rel_key_pwd = env_key_pwd if env_key_pwd else rel_pwd
-rel_alias = os.environ.get("KEY_ALIAS", "upload")
+    # Mask secret values immediately in GitHub Actions logs
+    print(f"::add-mask::{keystore_password}")
+    print(f"::add-mask::{key_password}")
+    print(f"::add-mask::{key_alias}")
 
-if custom_b64:
-    print("Restoring release keystore from KEYSTORE_BASE64 secret...")
-    data = base64.b64decode(custom_b64)
-    with open(rel_path, "wb") as f:
-        f.write(data)
-else:
-    print("Generating dedicated release keystore for FunkyTalk...")
-    gen_rel_cmd = [
-        "keytool", "-genkeypair", "-v",
-        "-keystore", rel_path,
-        "-alias", rel_alias,
-        "-keyalg", "RSA",
-        "-keysize", "2048",
-        "-validity", "10000",
-        "-storepass", rel_pwd,
-        "-keypass", rel_key_pwd,
-        "-dname", "CN=FunkyTalk, OU=Mobile, O=FunkyTalk, L=SanFrancisco, S=CA, C=US"
-    ]
-    subprocess.check_call(gen_rel_cmd)
+    # 1. Restore Debug Keystore -> ~/.android/debug.keystore
+    home_android = os.path.expanduser("~/.android")
+    os.makedirs(home_android, exist_ok=True)
+    debug_dst = os.path.abspath(os.path.join(home_android, "debug.keystore"))
+    debug_bytes = decode_secret_b64(debug_b64, "DEBUG_KEYSTORE_BASE64")
+    with open(debug_dst, "wb") as f:
+        f.write(debug_bytes)
+    os.chmod(debug_dst, 0o600)
 
-# Extract Release Fingerprints
-cmd = ["keytool", "-list", "-v", "-keystore", rel_path, "-storepass", rel_pwd, "-alias", rel_alias]
-rel_out = subprocess.check_output(cmd).decode("utf-8")
-r_sha1 = (re.search(r"SHA1:\s+([0-9A-Fa-f:]+)", rel_out) or ["", "Unknown"])[1].strip()
-r_sha256 = (re.search(r"SHA256:\s+([0-9A-Fa-f:]+)", rel_out) or ["", "Unknown"])[1].strip()
+    # 2. Restore Release Keystore -> $RUNNER_TEMP/release.keystore (outside repo)
+    runner_temp = os.environ.get("RUNNER_TEMP", "").strip() or tempfile.gettempdir()
+    os.makedirs(runner_temp, exist_ok=True)
+    release_dst = os.path.abspath(os.path.join(runner_temp, "release.keystore"))
+    release_bytes = decode_secret_b64(release_b64, "KEYSTORE_BASE64")
+    with open(release_dst, "wb") as f:
+        f.write(release_bytes)
+    os.chmod(release_dst, 0o600)
 
-# ----------------------------------------------------
-# 3. SAVE FINGERPRINTS TEXT FILE & BASE64 BACKUPS
-# ----------------------------------------------------
-txt_content = f"""================================================================================
-FUNKYTALK ANDROID APP - SHA FINGERPRINTS & KEYSTORE DETAILS
-================================================================================
+    # 3. Extract Fingerprints (never generate any keystore)
+    d_sha1, d_sha256 = extract_sha_fingerprints(
+        keystore_path=debug_dst,
+        alias="androiddebugkey",
+        password_env_var=None,
+        plain_password="android",
+    )
+    r_sha1, r_sha256 = extract_sha_fingerprints(
+        keystore_path=release_dst,
+        alias=key_alias,
+        password_env_var="KEYSTORE_PASSWORD",
+        plain_password=None,
+    )
+
+    if d_sha256 == r_sha256:
+        fail("Release keystore fingerprint matches debug keystore fingerprint. Check KEYSTORE_BASE64.")
+
+    # 4. Write fingerprints-only SHA_FINGERPRINTS.txt outside repo
+    fingerprints_file = os.path.abspath(os.path.join(runner_temp, "SHA_FINGERPRINTS.txt"))
+    txt_content = f"""FUNKYTALK ANDROID APP - SHA FINGERPRINTS
 Package Name: com.funkytalk.app
 
-[1] DEBUG KEYSTORE (Used by app-debug.apk):
---------------------------------------------------------------------------------
-Keystore File:      debug.keystore
-Store Password:     android
-Key Alias:          androiddebugkey
-Key Password:       android
+[DEBUG]
+SHA-1:   {d_sha1}
+SHA-256: {d_sha256}
 
-SHA-1:
-{d_sha1}
-
-SHA-256:
-{d_sha256}
-
-[2] RELEASE KEYSTORE (Used for Production Builds):
---------------------------------------------------------------------------------
-Keystore File:      funkytalk-release.keystore
-Store Password:     {pwd_display}
-Key Alias:          {rel_alias}
-Key Password:       {pwd_display}
-
-SHA-1:
-{r_sha1}
-
-SHA-256:
-{r_sha256}
-
-================================================================================
-HOW TO FIX GOOGLE SIGN-IN (ERROR 10) IN FIREBASE:
-================================================================================
-1. Open Google Firebase Console: https://console.firebase.google.com/
-2. Go to Project Settings (Gear icon) -> General.
-3. Under "Your apps", find "com.funkytalk.app".
-4. Click "Add fingerprint".
-5. Paste the SHA-1 for the APK you are installing:
-   - For Debug APK (app-debug.apk):
-     {d_sha1}
-   - For Release APK:
-     {r_sha1}
-6. Click Save! Google Sign-in will immediately work without Error 10.
-================================================================================
+[RELEASE]
+SHA-1:   {r_sha1}
+SHA-256: {r_sha256}
 """
-with open(os.path.join(artifacts_dir, "SHA_FINGERPRINTS.txt"), "w") as f:
-    f.write(txt_content)
+    with open(fingerprints_file, "w", encoding="utf-8") as f:
+        f.write(txt_content)
 
-# Also create base64 string files for easy storing in GitHub Secrets
-with open(debug_saved, "rb") as f:
-    debug_b64 = base64.b64encode(f.read()).decode("utf-8")
-with open(os.path.join(artifacts_dir, "debug.keystore.base64.txt"), "w") as f:
-    f.write(debug_b64)
+    # 5. Print fingerprints only to build log
+    print("=" * 72)
+    print("KEYSTORE FINGERPRINTS RESTORED FROM SECRETS")
+    print(f"DEBUG   SHA-1  : {d_sha1}")
+    print(f"DEBUG   SHA-256: {d_sha256}")
+    print(f"RELEASE SHA-1  : {r_sha1}")
+    print(f"RELEASE SHA-256: {r_sha256}")
+    print("=" * 72)
 
-with open(rel_path, "rb") as f:
-    release_b64 = base64.b64encode(f.read()).decode("utf-8")
-with open(os.path.join(artifacts_dir, "release.keystore.base64.txt"), "w") as f:
-    f.write(release_b64)
+    # 6. Export Gradle signing env vars via GITHUB_ENV
+    github_env = os.environ.get("GITHUB_ENV")
+    if github_env:
+        with open(github_env, "a", encoding="utf-8") as f:
+            f.write(f"RELEASE_STORE_FILE={release_dst}\n")
+            f.write(f"RELEASE_STORE_PASSWORD={keystore_password}\n")
+            f.write(f"RELEASE_KEY_ALIAS={key_alias}\n")
+            f.write(f"RELEASE_KEY_PASSWORD={key_password}\n")
 
-# ----------------------------------------------------
-# 4. PRINT CONSOLE BANNER
-# ----------------------------------------------------
-print("\n" + "="*80)
-print("🔑 FUNKYTALK SHA FINGERPRINTS & KEYSTORE READY")
-print("="*80)
-print(f"DEBUG SHA-1   : {d_sha1}")
-print(f"DEBUG SHA-256 : {d_sha256}")
-print(f"RELEASE SHA-1 : {r_sha1}")
-print(f"RELEASE SHA-256: {r_sha256}")
-print("="*80 + "\n")
+    # 7. Export fingerprints and file path via GITHUB_OUTPUT
+    github_output = os.environ.get("GITHUB_OUTPUT")
+    if github_output:
+        with open(github_output, "a", encoding="utf-8") as f:
+            f.write(f"debug_sha1={d_sha1}\n")
+            f.write(f"debug_sha256={d_sha256}\n")
+            f.write(f"release_sha1={r_sha1}\n")
+            f.write(f"release_sha256={r_sha256}\n")
+            f.write(f"sha_fingerprints_file={fingerprints_file}\n")
 
-# ----------------------------------------------------
-# 5. EXPORT GITHUB OUTPUTS & STEP SUMMARY
-# ----------------------------------------------------
-github_output = os.environ.get("GITHUB_OUTPUT")
-if github_output:
-    with open(github_output, "a") as f:
-        f.write(f"debug_sha1={d_sha1}\n")
-        f.write(f"debug_sha256={d_sha256}\n")
-        f.write(f"release_sha1={r_sha1}\n")
-        f.write(f"release_sha256={r_sha256}\n")
-        f.write(f"release_alias={rel_alias}\n")
+    # 8. Write fingerprints only to Job Summary
+    github_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if github_summary:
+        summary_md = f"""## Signing Certificate Fingerprints
 
-github_env = os.environ.get("GITHUB_ENV")
-if github_env:
-    print(f"::add-mask::{rel_pwd}")
-    if rel_key_pwd != rel_pwd:
-        print(f"::add-mask::{rel_key_pwd}")
-    with open(github_env, "a") as f:
-        f.write(f"KEYSTORE_PATH={rel_path}\n")
-        f.write(f"STORE_PASSWORD={rel_pwd}\n")
-        f.write(f"KEY_PASSWORD={rel_key_pwd}\n")
-        f.write(f"KEY_ALIAS={rel_alias}\n")
-
-github_summary = os.environ.get("GITHUB_STEP_SUMMARY")
-if github_summary:
-    summary_md = f"""## 🔑 FunkyTalk Keystore & Firebase SHA Fingerprints
-
-> **Copy the SHA-1 below and paste it into Firebase Console to fix Google Sign-in (Error 10)!**
-
-### 📱 Debug Keystore (Used by `app-debug.apk`)
-| Property | Value |
-| :--- | :--- |
-| **Package Name** | `com.funkytalk.app` |
-| **Keystore File** | `debug.keystore` (attached below) |
-| **Alias** | `androiddebugkey` |
-| **Password** | `android` |
-| **SHA-1** | `{d_sha1}` |
-| **SHA-256** | `{d_sha256}` |
-
-#### 📋 Quick Copy for Firebase Console (Debug APK):
-```text
-{d_sha1}
-```
-
----
-
-### 🔐 Release Keystore (For Production Builds)
-| Property | Value |
-| :--- | :--- |
-| **Keystore File** | `funkytalk-release.keystore` (attached below) |
-| **Alias** | `{rel_alias}` |
-| **Password** | `{pwd_display}` |
-| **SHA-1** | `{r_sha1}` |
-| **SHA-256** | `{r_sha256}` |
-
-#### 📋 Quick Copy for Firebase Console (Release APK):
-```text
-{r_sha1}
-```
-
----
-
-### 🚀 How to Add to Firebase Console:
-1. Open [Firebase Console](https://console.firebase.google.com/)
-2. Open your project -> **Project Settings** ⚙️ -> **General** tab
-3. Under **Your apps**, select `com.funkytalk.app`
-4. Click **Add fingerprint** and paste the **SHA-1**
-5. Click **Save**! Google Sign-in will work immediately.
+| Build | SHA-1 | SHA-256 |
+| :--- | :--- | :--- |
+| **Debug** | `{d_sha1}` | `{d_sha256}` |
+| **Release** | `{r_sha1}` | `{r_sha256}` |
 """
-    with open(github_summary, "a") as f:
-        f.write(summary_md)
+        with open(github_summary, "a", encoding="utf-8") as f:
+            f.write(summary_md)
+
+
+if __name__ == "__main__":
+    main()
