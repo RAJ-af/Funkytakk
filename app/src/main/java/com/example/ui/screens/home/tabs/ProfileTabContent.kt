@@ -334,6 +334,10 @@ fun ProfileTabContent(
 
         // Load live profile data immediately
         refreshProfileData()
+        val effectiveCosmeticsUid = com.example.SupabaseSessionManager.getUserId(context)
+            ?.takeIf { it.isNotBlank() } ?: userId
+        com.example.store.CosmeticsManager.refreshMyCosmetics(context, effectiveCosmeticsUid)
+        com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, listOf(effectiveCosmeticsUid))
 
         // Load profile badges
         try {
@@ -493,10 +497,29 @@ fun ProfileTabContent(
             // 1. COVER PHOTO & FLOATING ACTION BUTTONS (Share, Menu)
             // -----------------------------------------------------------------
             item {
+                val myUid = remember(userId) {
+                    SupabaseSessionManager.getUserId(context)?.takeIf { it.isNotBlank() } ?: userId
+                }
+                val myCosmetics by com.example.store.CosmeticsManager.myCosmetics.collectAsState()
+                val userCosmeticsMap by com.example.store.CosmeticsManager.userCosmeticsMap.collectAsState()
+                val ownFrameConfig = remember(myUid, myCosmetics, userCosmeticsMap) {
+                    val row = userCosmeticsMap[myUid]
+                        ?: com.example.store.CosmeticsManager.getCachedCosmetics(myUid)
+                        ?: myCosmetics
+                    row?.avatar_frame?.config?.let {
+                        runCatching { com.example.store.CosmeticsConfigParser.parseAvatarFrame(it) }.getOrNull()
+                    }
+                }
+                val contentMargin = 16.dp
+                val avatarPhotoSize = com.example.ui.components.FramedAvatar.PROFILE_AVATAR_SIZE
+                val avatarOuterSize = com.example.ui.components.FramedAvatar.outerSize(avatarPhotoSize, ownFrameConfig)
+                val coverHeight = 185.dp
+                val headerBoxHeight = coverHeight + avatarOuterSize * 0.60f
+
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(235.dp)
+                        .height(headerBoxHeight)
                 ) {
                     // Sunset / City Cover Image
                     AsyncImage(
@@ -508,13 +531,36 @@ fun ProfileTabContent(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(185.dp)
+                            .height(coverHeight)
+                            .align(Alignment.TopStart)
                     )
+
+                    // Circular Avatar with Frame & Bottom-End Photo-Anchored Country Flag
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(start = contentMargin)
+                            .size(avatarOuterSize),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        com.example.ui.components.PresenceAvatar(
+                            avatarUrl = resolveAvatarModel(profileAvatar)?.toString(),
+                            size = avatarPhotoSize,
+                            isSpeaking = false,
+                            isOnline = true,
+                            countryCode = profileCountryCode,
+                            userId = myUid,
+                            frameConfig = ownFrameConfig,
+                            showFlagBadge = true,
+                            enableFrameAnimation = true,
+                            reserveOuterSpace = true
+                        )
+                    }
 
                     // Floating Round Actions (Share & Settings Menu) (Top Right)
                     Row(
                         modifier = Modifier
-                            .padding(end = 16.dp, top = 16.dp)
+                            .padding(end = contentMargin, top = 16.dp)
                             .align(Alignment.TopEnd),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -546,25 +592,6 @@ fun ProfileTabContent(
                             ProfileMoreDotsIcon(modifier = Modifier.size(16.dp), color = funkyColors.ink)
                         }
                     }
-
-                    // Circular Avatar with Presence Ring & Bottom-Right Overlapping Flag
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(start = 20.dp)
-                    ) {
-                        val myUid = SupabaseSessionManager.getUserId(context)
-                        com.example.ui.components.PresenceAvatar(
-                            avatarUrl = resolveAvatarModel(profileAvatar)?.toString(),
-                            size = 80.dp,
-                            isSpeaking = false,
-                            isOnline = true,
-                            countryCode = profileCountryCode,
-                            userId = myUid,
-                            showFlagBadge = true,
-                            enableFrameAnimation = true
-                        )
-                    }
                 }
             }
 
@@ -575,9 +602,9 @@ fun ProfileTabContent(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp)
+                        .padding(horizontal = 16.dp)
                 ) {
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     // Row: Name, Verified Tick, and "Online" Pill Badge
                     Row(
@@ -1872,7 +1899,14 @@ fun ProfileTabContent(
 
     if (showThemeStoreSheet) {
         com.example.ui.screens.store.DecorationStoreScreen(
-            onDismiss = { showThemeStoreSheet = false },
+            onDismiss = {
+                showThemeStoreSheet = false
+                val effectiveCosmeticsUid = com.example.SupabaseSessionManager.getUserId(context)
+                    ?.takeIf { it.isNotBlank() } ?: userId
+                coroutineScope.launch {
+                    com.example.store.CosmeticsManager.refreshMyCosmetics(context, effectiveCosmeticsUid)
+                }
+            },
             currentUserAvatar = currentAvatarUrl,
             currentUserName = currentProfileName
         )

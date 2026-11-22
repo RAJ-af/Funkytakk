@@ -634,10 +634,23 @@ fun UserProfileFeedScreen(
             // 1. COVER PHOTO & FLOATING ACTION BUTTONS (Back, Share, Menu)
             // -----------------------------------------------------------------
             item {
+                val userCosmeticsMap by com.example.store.CosmeticsManager.userCosmeticsMap.collectAsState()
+                val targetFrameConfig = remember(userId, userCosmeticsMap) {
+                    val row = userCosmeticsMap[userId] ?: com.example.store.CosmeticsManager.getCachedCosmetics(userId)
+                    row?.avatar_frame?.config?.let {
+                        runCatching { com.example.store.CosmeticsConfigParser.parseAvatarFrame(it) }.getOrNull()
+                    }
+                }
+                val contentMargin = 16.dp
+                val avatarPhotoSize = com.example.ui.components.FramedAvatar.PROFILE_AVATAR_SIZE
+                val avatarOuterSize = com.example.ui.components.FramedAvatar.outerSize(avatarPhotoSize, targetFrameConfig)
+                val coverHeight = 185.dp
+                val headerBoxHeight = coverHeight + avatarOuterSize * 0.60f
+
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(255.dp)
+                        .height(headerBoxHeight)
                 ) {
                     // Sunset / City Cover Image
                     val displayCover = currentCoverUrl.ifBlank { "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=800" }
@@ -650,15 +663,37 @@ fun UserProfileFeedScreen(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(205.dp)
+                            .height(coverHeight)
+                            .align(Alignment.TopStart)
                     )
 
-                    // Floating Round Buttons Row with statusBarsPadding() (Back, Share, Menu)
+                    // Circular Avatar with Frame & Bottom-End Photo-Anchored Flag
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(start = contentMargin)
+                            .size(avatarOuterSize),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        com.example.ui.components.PresenceAvatar(
+                            avatarUrl = currentAvatarUrl,
+                            size = avatarPhotoSize,
+                            isSpeaking = false,
+                            isOnline = isOnline,
+                            countryCode = currentCountryCode,
+                            userId = userId,
+                            frameConfig = targetFrameConfig,
+                            showFlagBadge = true,
+                            enableFrameAnimation = true,
+                            reserveOuterSpace = true
+                        )
+                    }
+
+                    // Floating Round Buttons Row (Back, Share, Menu)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .statusBarsPadding()
-                            .padding(horizontal = 16.dp, vertical = 10.dp)
+                            .padding(horizontal = contentMargin, vertical = 10.dp)
                             .align(Alignment.TopCenter),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
@@ -863,25 +898,6 @@ fun UserProfileFeedScreen(
                             }
                         }
                     }
-
-                    // Circular Avatar with Online Ring & Bottom-Right Overlapping Flag
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(start = 20.dp)
-                            .size(102.dp)
-                    ) {
-                        com.example.ui.components.PresenceAvatar(
-                            avatarUrl = currentAvatarUrl,
-                            size = 80.dp,
-                            isSpeaking = false,
-                            isOnline = isOnline,
-                            countryCode = currentCountryCode,
-                            userId = userId,
-                            showFlagBadge = true,
-                            enableFrameAnimation = true
-                        )
-                    }
                 }
             }
 
@@ -892,9 +908,9 @@ fun UserProfileFeedScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp)
+                        .padding(horizontal = 16.dp)
                 ) {
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     // Row: Name, Verified/Badges & Online Pill
                     Row(

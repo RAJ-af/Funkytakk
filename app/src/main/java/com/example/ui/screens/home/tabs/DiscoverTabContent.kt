@@ -1594,22 +1594,16 @@ fun DiscoverUserCard(
                     }
                 }
                 if (partnerFrame != null) {
-                    val slotSize = com.example.ui.components.FramedAvatar.outerSize(68.dp, partnerFrame).coerceIn(76.dp, 104.dp)
-                    Box(
-                        modifier = Modifier.size(slotSize),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        com.example.ui.components.PresenceAvatar(
-                            avatarUrl = partner.avatarUrl,
-                            size = 68.dp,
-                            isOnline = partner.isOnline,
-                            countryCode = partner.countryCode,
-                            userId = partner.id,
-                            frameConfig = partnerFrame,
-                            showFlagBadge = true,
-                            enableFrameAnimation = false
-                        )
-                    }
+                    com.example.ui.components.PresenceAvatar(
+                        avatarUrl = partner.avatarUrl,
+                        size = 64.dp,
+                        isOnline = partner.isOnline,
+                        countryCode = partner.countryCode,
+                        userId = partner.id,
+                        frameConfig = partnerFrame,
+                        showFlagBadge = true,
+                        enableFrameAnimation = false
+                    )
                 } else {
                     DiscoverSquareAvatarWithFlag(
                         avatarUrl = partner.avatarUrl,

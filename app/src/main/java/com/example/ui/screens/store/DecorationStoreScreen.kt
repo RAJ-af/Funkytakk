@@ -773,15 +773,19 @@ private fun StoreItemCard(
             modifier = Modifier.padding(10.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top Thumbnail Box
+            // Top Thumbnail Box (background surface clipped; frame art inside is never clipped)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(110.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(ColorBg),
+                    .height(110.dp),
                 contentAlignment = Alignment.Center
             ) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(ColorBg)
+                )
                 // Item Preview Renderer
                 ItemThumbnailRenderer(
                     item = item,
@@ -893,8 +897,9 @@ private fun ItemThumbnailRenderer(
             val tileAvatarSize = if (frameConfig.kind.equals("asset", ignoreCase = true) && asset != null) {
                 val ratio = (if (asset.innerRatio > 0f) asset.innerRatio else asset.avatarRatio)
                     .coerceIn(0.25f, 0.98f)
-                val maxCanvas = 94.dp / (1f + asset.overflowRatio.coerceIn(0f, 0.5f))
-                (maxCanvas * ratio).coerceIn(28.dp, 56.dp)
+                val overflow = asset.overflowRatio.coerceIn(0f, 0.5f)
+                val maxCanvas = 96.dp / (1f + overflow)
+                maxCanvas * ratio
             } else {
                 54.dp
             }

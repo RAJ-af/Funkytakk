@@ -36,6 +36,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import com.example.AuthViewModel
 import com.example.EditProfileSnapshot
@@ -43,6 +44,7 @@ import com.example.ProfileFieldLimitDto
 import com.example.R
 import com.example.UserProfile
 import com.example.ui.components.CircleFlag
+import com.example.ui.components.FramedAvatar
 import com.example.ui.components.resolveAvatarModel
 import com.example.ui.screens.CountryData
 import com.example.ui.screens.LanguageData
@@ -674,17 +676,37 @@ fun EditProfileScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
+                val myCosmetics by com.example.store.CosmeticsManager.myCosmetics.collectAsState()
+                val userCosmeticsMap by com.example.store.CosmeticsManager.userCosmeticsMap.collectAsState()
+                val cosmeticsUid = remember(currentUserProfile.uid) {
+                    com.example.SupabaseSessionManager.getUserId(context)?.takeIf { it.isNotBlank() }
+                        ?: currentUserProfile.uid
+                }
+                val currentFrame = remember(cosmeticsUid, myCosmetics, userCosmeticsMap) {
+                    val row = userCosmeticsMap[cosmeticsUid]
+                        ?: com.example.store.CosmeticsManager.getCachedCosmetics(cosmeticsUid)
+                        ?: myCosmetics
+                    row?.avatar_frame?.config?.let {
+                        runCatching { com.example.store.CosmeticsConfigParser.parseAvatarFrame(it) }.getOrNull()
+                    }
+                }
+                val avatarPhotoSize = FramedAvatar.PROFILE_AVATAR_SIZE
+                val avatarOuterSize = FramedAvatar.outerSize(avatarPhotoSize, currentFrame)
+                val coverHeight = 130.dp
+                val headerBoxHeight = coverHeight + avatarOuterSize * 0.60f
+
                 // Cover Banner & Avatar Header Box
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 8.dp)
+                        .height(headerBoxHeight)
                 ) {
                     // Cover Banner Preview
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(130.dp)
+                            .height(coverHeight)
+                            .align(Alignment.TopCenter)
                             .clip(RoundedCornerShape(16.dp))
                             .background(
                                 androidx.compose.ui.graphics.Brush.linearGradient(
@@ -762,47 +784,51 @@ fun EditProfileScreen(
                         }
                     }
 
-                    // Avatar overlapping bottom center
+                    // Avatar overlapping bottom center with exact FramedAvatar.outerSize reservation
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
-                            .offset(y = 38.dp)
-                            .size(92.dp)
+                            .size(avatarOuterSize),
+                        contentAlignment = Alignment.Center
                     ) {
-                        AsyncImage(
-                            model = resolveAvatarModel(editAvatar),
-                            contentDescription = "User Avatar",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .size(92.dp)
-                                .clip(CircleShape)
-                                .border(3.dp, funkyColors.surface, CircleShape)
-                                .testTag("edit_profile_avatar_button")
-                                .clickable { launchAvatarPickerIfAllowed() }
-                        )
-
-                        // Camera overlay badge
                         Box(
                             modifier = Modifier
-                                .size(32.dp)
-                                .align(Alignment.BottomEnd)
-                                .clip(CircleShape)
-                                .background(if (canChangeAvatar) funkyColors.ink else funkyColors.mute)
-                                .border(2.dp, funkyColors.surface, CircleShape)
+                                .size(avatarPhotoSize)
+                                .testTag("edit_profile_avatar_button")
                                 .clickable { launchAvatarPickerIfAllowed() },
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_photo),
-                                contentDescription = "Change Avatar",
-                                tint = funkyColors.bg,
-                                modifier = Modifier.size(15.dp)
+                            FramedAvatar(
+                                avatarUrl = resolveAvatarModel(editAvatar)?.toString() ?: editAvatar,
+                                avatarSize = avatarPhotoSize,
+                                frame = currentFrame,
+                                enableAnimation = true
                             )
+
+                            // Camera overlay badge anchored to photo circle
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .align(Alignment.BottomEnd)
+                                    .zIndex(6f)
+                                    .clip(CircleShape)
+                                    .background(if (canChangeAvatar) funkyColors.ink else funkyColors.mute)
+                                    .border(2.dp, funkyColors.surface, CircleShape)
+                                    .clickable { launchAvatarPickerIfAllowed() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_photo),
+                                    contentDescription = "Change Avatar",
+                                    tint = funkyColors.bg,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(44.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 val avatarLockedMsg = formatLockedCaption(avatarLimit)
                 val coverLockedMsg = formatLockedCaption(coverLimit)

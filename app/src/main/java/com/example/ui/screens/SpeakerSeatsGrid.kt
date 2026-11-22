@@ -103,7 +103,7 @@ fun SpeakerSeatsGrid(
         // First Row - Seat 1 (Host), Seat 2 (Speaker 1), Seat 3 (Speaker 2)
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.Bottom
         ) {
             // Seat 1: Host
@@ -112,6 +112,7 @@ fun SpeakerSeatsGrid(
                 reactions = speakerReactions[hostSeat.name] ?: emptyList(),
                 theme = currentTheme,
                 isDarkMode = isRoomDarkMode,
+                modifier = Modifier.weight(1f),
                 onReactionComplete = { rid ->
                     speakerReactions[hostSeat.name] = (speakerReactions[hostSeat.name] ?: emptyList()).filter { it.id != rid }
                 },
@@ -126,6 +127,7 @@ fun SpeakerSeatsGrid(
                     reactions = speakerReactions[sp1.name] ?: emptyList(),
                     theme = currentTheme,
                     isDarkMode = isRoomDarkMode,
+                    modifier = Modifier.weight(1f),
                     onReactionComplete = { rid ->
                         speakerReactions[sp1.name] = (speakerReactions[sp1.name] ?: emptyList()).filter { it.id != rid }
                     },
@@ -137,6 +139,7 @@ fun SpeakerSeatsGrid(
                     isSpeakerRequestPending = isSpeakerRequestPending,
                     isCurrentUserSpeakerOrHost = isCurrentUserSpeakerOrHost,
                     isCurrentUserHostOrModerator = isCurrentUserHostOrModerator,
+                    modifier = Modifier.weight(1f),
                     onHostInviteSeatClick = onHostInviteSeatClick,
                     onRequestSlot = handleSlotRequest
                 )
@@ -150,6 +153,7 @@ fun SpeakerSeatsGrid(
                     reactions = speakerReactions[sp2.name] ?: emptyList(),
                     theme = currentTheme,
                     isDarkMode = isRoomDarkMode,
+                    modifier = Modifier.weight(1f),
                     onReactionComplete = { rid ->
                         speakerReactions[sp2.name] = (speakerReactions[sp2.name] ?: emptyList()).filter { it.id != rid }
                     },
@@ -161,6 +165,7 @@ fun SpeakerSeatsGrid(
                     isSpeakerRequestPending = isSpeakerRequestPending,
                     isCurrentUserSpeakerOrHost = isCurrentUserSpeakerOrHost,
                     isCurrentUserHostOrModerator = isCurrentUserHostOrModerator,
+                    modifier = Modifier.weight(1f),
                     onHostInviteSeatClick = onHostInviteSeatClick,
                     onRequestSlot = handleSlotRequest
                 )
@@ -170,7 +175,7 @@ fun SpeakerSeatsGrid(
         // Second Row - Seat 4 (Speaker 3), Seat 5 (Speaker 4)
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.Top
         ) {
             val sp3 = speakerSeats.getOrNull(2)
@@ -180,6 +185,7 @@ fun SpeakerSeatsGrid(
                     reactions = speakerReactions[sp3.name] ?: emptyList(),
                     theme = currentTheme,
                     isDarkMode = isRoomDarkMode,
+                    modifier = Modifier.weight(1f),
                     onReactionComplete = { rid ->
                         speakerReactions[sp3.name] = (speakerReactions[sp3.name] ?: emptyList()).filter { it.id != rid }
                     },
@@ -191,6 +197,7 @@ fun SpeakerSeatsGrid(
                     isSpeakerRequestPending = isSpeakerRequestPending,
                     isCurrentUserSpeakerOrHost = isCurrentUserSpeakerOrHost,
                     isCurrentUserHostOrModerator = isCurrentUserHostOrModerator,
+                    modifier = Modifier.weight(1f),
                     onHostInviteSeatClick = onHostInviteSeatClick,
                     onRequestSlot = handleSlotRequest
                 )
@@ -203,6 +210,7 @@ fun SpeakerSeatsGrid(
                     reactions = speakerReactions[sp4.name] ?: emptyList(),
                     theme = currentTheme,
                     isDarkMode = isRoomDarkMode,
+                    modifier = Modifier.weight(1f),
                     onReactionComplete = { rid ->
                         speakerReactions[sp4.name] = (speakerReactions[sp4.name] ?: emptyList()).filter { it.id != rid }
                     },
@@ -214,6 +222,7 @@ fun SpeakerSeatsGrid(
                     isSpeakerRequestPending = isSpeakerRequestPending,
                     isCurrentUserSpeakerOrHost = isCurrentUserSpeakerOrHost,
                     isCurrentUserHostOrModerator = isCurrentUserHostOrModerator,
+                    modifier = Modifier.weight(1f),
                     onHostInviteSeatClick = onHostInviteSeatClick,
                     onRequestSlot = handleSlotRequest
                 )
@@ -228,6 +237,7 @@ private fun EmptySpeakerSeatItem(
     isSpeakerRequestPending: Boolean,
     isCurrentUserSpeakerOrHost: Boolean,
     isCurrentUserHostOrModerator: Boolean = false,
+    modifier: Modifier = Modifier,
     onHostInviteSeatClick: () -> Unit = {},
     onRequestSlot: () -> Unit = {}
 ) {
@@ -237,7 +247,7 @@ private fun EmptySpeakerSeatItem(
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.width(82.dp)
+        modifier = modifier.widthIn(min = 82.dp)
     ) {
         Box(
             modifier = Modifier
@@ -320,28 +330,18 @@ fun VoiceSpeakerItem(
     reactions: List<FloatingEmojiId> = emptyList(),
     theme: RoomTheme? = null,
     isDarkMode: Boolean = false,
+    modifier: Modifier = Modifier,
     onReactionComplete: (Long) -> Unit = {},
     onClick: () -> Unit = {}
 ) {
-    val size = if (speaker.isCenter) 94.dp else 80.dp
+    val size = if (speaker.isCenter) 72.dp else 64.dp
     val primaryTextColor = theme?.primaryTextColor ?: (if (isDarkMode) Color.White else Color.Black)
     val micIconTint = theme?.accentColor ?: ChillPurpleAccent
-    
-    val infiniteTransition = rememberInfiniteTransition(label = "speaker_ring")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.07f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 500, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulse"
-    )
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .width(if (speaker.isCenter) 100.dp else 86.dp)
+        modifier = modifier
+            .widthIn(min = if (speaker.isCenter) 92.dp else 82.dp)
             .onGloballyPositioned { coords ->
                 if (speaker.userId.isNotBlank()) {
                     SeatPositionRegistry.updatePosition(speaker.userId, coords)
@@ -368,7 +368,7 @@ fun VoiceSpeakerItem(
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopStart)
-                        .offset(x = (-4).dp, y = (-4).dp)
+                        .offset(x = (-2).dp, y = (-2).dp)
                         .background(Color(0xFFFFD700), RoundedCornerShape(10.dp))
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) {
@@ -392,7 +392,7 @@ fun VoiceSpeakerItem(
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .offset(x = 4.dp, y = (-4).dp)
+                        .offset(x = 2.dp, y = (-2).dp)
                         .background(Color(0xFFF59E0B), RoundedCornerShape(10.dp))
                         .padding(horizontal = 5.dp, vertical = 2.dp)
                 ) {
@@ -412,8 +412,8 @@ fun VoiceSpeakerItem(
                 }
             }
         }
-        
-        Spacer(modifier = Modifier.height(10.dp))
+
+        Spacer(modifier = Modifier.height(8.dp))
         
         Row(
             verticalAlignment = Alignment.CenterVertically,

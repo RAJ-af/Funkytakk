@@ -4473,37 +4473,15 @@ fun PrivateChatItemRow(chat: PrivateChatItem, selectedThemeIndex: Int, onClick: 
             .padding(horizontal = 20.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Image
-        Box {
-            AsyncImage(
-                model = chat.imageUrl,
-                contentDescription = chat.name,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .size(56.dp)
-                    .clip(CircleShape)
-                    .background(if (currentTheme.isDark) Color.White.copy(alpha = 0.1f) else Color.LightGray)
-            )
-            // country flag
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .offset(x = 2.dp, y = 2.dp)
-                    .size(20.dp)
-                    .shadow(1.dp, CircleShape)
-                    .clip(CircleShape)
-                    .background(if (currentTheme.isDark) Color(0xFF1E293B) else Color.White)
-                    .border(1.5.dp, if (currentTheme.isDark) Color(0xFF1E293B) else Color.White, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                 AsyncImage(
-                      model = "https://flagcdn.com/w40/${chat.flagCode}.png",
-                      contentDescription = "Flag",
-                      contentScale = ContentScale.Crop,
-                      modifier = Modifier.fillMaxSize()
-                 ) 
-            }
-        }
+        com.example.ui.components.PresenceAvatar(
+            avatarUrl = chat.imageUrl,
+            size = 56.dp,
+            isOnline = chat.isOnline,
+            countryCode = chat.flagCode,
+            userId = chat.id,
+            showFlagBadge = true,
+            enableFrameAnimation = false
+        )
         Spacer(modifier = Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -6628,33 +6606,15 @@ fun OneToOneChatBottomSheetContent(
                     }
                     Spacer(modifier = Modifier.width(4.dp))
 
-                    Box {
-                        AsyncImage(
-                            model = chatUser.imageUrl,
-                            contentDescription = chatUser.name,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(Color.LightGray)
-                        )
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .offset(x = 2.dp, y = 2.dp)
-                                .size(18.dp)
-                                .shadow(1.dp, CircleShape)
-                                .clip(CircleShape)
-                                .background(Color.White)
-                                .padding(1.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircleFlag(
-                                countryCode = chatUser.flagCode,
-                                modifier = Modifier.fillMaxSize().clip(CircleShape)
-                            )
-                        }
-                    }
+                    com.example.ui.components.PresenceAvatar(
+                        avatarUrl = chatUser.imageUrl,
+                        size = 40.dp,
+                        isOnline = chatUser.isOnline,
+                        countryCode = chatUser.flagCode,
+                        userId = chatUser.id,
+                        showFlagBadge = true,
+                        enableFrameAnimation = true
+                    )
 
                     Spacer(modifier = Modifier.width(12.dp))
 

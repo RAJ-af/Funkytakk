@@ -63,6 +63,8 @@ import kotlin.math.sin
  */
 object FramedAvatar {
 
+    val PROFILE_AVATAR_SIZE: Dp = 88.dp
+
     private fun resolveInnerRatio(asset: FrameAssetConfig): Float {
         val raw = when {
             asset.innerRatio > 0f -> asset.innerRatio
@@ -81,13 +83,27 @@ object FramedAvatar {
     }
 
     fun outerSize(avatarSize: Dp, frame: FrameConfig?): Dp {
-        val asset = frame?.asset
-        if (frame == null || !frame.kind.equals("asset", ignoreCase = true) || asset == null) {
-            return avatarSize
+        if (frame == null) return avatarSize
+        val asset = frame.asset
+        if (frame.kind.equals("asset", ignoreCase = true) && asset != null) {
+            val canvas = canvasSize(avatarSize, frame)
+            val overflow = if (asset.overflowRatio.isFinite()) asset.overflowRatio.coerceIn(0f, 0.5f) else 0f
+            return canvas * (1f + overflow)
         }
-        val canvas = canvasSize(avatarSize, frame)
-        val overflow = if (asset.overflowRatio.isFinite()) asset.overflowRatio.coerceIn(0f, 0.5f) else 0f
-        return canvas * (1f + overflow)
+        val ringScale = (avatarSize.value / 48f).coerceIn(0.6f, 1.8f)
+        val strokeDp = (frame.ring.widthDp * ringScale).coerceAtLeast(1.5f).dp
+        val shapeOverhang = when (frame.ring.shape.lowercase()) {
+            "scalloped" -> avatarSize * 0.08f + strokeDp * 0.5f
+            "double" -> strokeDp * 0.9f
+            else -> strokeDp * 0.4f
+        }
+        val pulseOverhang = if (frame.ring.animation.equals("pulse", ignoreCase = true)) {
+            avatarSize * 0.045f + strokeDp * 0.3f
+        } else 0.dp
+        val particleOverhang = if (frame.particles != null) strokeDp * 0.9f + 3.dp else 0.dp
+        val ornamentOverhang = if (frame.ornament != null) 6.dp else 0.dp
+        val sideMargin = maxOf(shapeOverhang, pulseOverhang, particleOverhang, ornamentOverhang)
+        return avatarSize + sideMargin * 2
     }
 
     @Composable

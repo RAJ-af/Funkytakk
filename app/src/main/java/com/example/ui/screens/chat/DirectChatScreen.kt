@@ -544,7 +544,7 @@ fun DirectChatScreen(
 
                             com.example.ui.components.PresenceAvatar(
                                 avatarUrl = resolvedAvatarUrl.ifBlank { null },
-                                size = 42.dp,
+                                size = 40.dp,
                                 userId = partnerUserId,
                                 enableFrameAnimation = true,
                                 countryCode = resolvedCountryCode.takeIf { it.isNotBlank() },

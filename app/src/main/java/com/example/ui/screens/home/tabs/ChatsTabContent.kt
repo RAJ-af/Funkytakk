@@ -1128,10 +1128,11 @@ fun ChatsTabContent(
                                 .padding(if (isMinimalistMode) PaddingValues(horizontal = 12.dp, vertical = 10.dp) else PaddingValues(16.dp)),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Box(modifier = Modifier.size(if (isMinimalistMode) 40.dp else 56.dp)) {
+                            Box(contentAlignment = Alignment.Center) {
+                                val chatAvatarSize = if (isMinimalistMode) 40.dp else 56.dp
                                 PresenceAvatar(
                                     avatarUrl = chat.avatar,
-                                    size = if (isMinimalistMode) 40.dp else 56.dp,
+                                    size = chatAvatarSize,
                                     countryCode = if (isGroup) null else flagCode,
                                     showFlagBadge = !isGroup,
                                     userId = if (!isGroup) chat.id else null,

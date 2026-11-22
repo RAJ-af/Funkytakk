@@ -348,15 +348,19 @@ private fun StoreItemCard(
             modifier = Modifier.padding(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Live Preview Box
+            // Live Preview Box (clip background only; never clip FramedAvatar frame art)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(96.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(funkyColors.bg),
+                    .height(96.dp),
                 contentAlignment = Alignment.Center
             ) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(funkyColors.bg)
+                )
                 when (item.item_type) {
                     "bubble_theme" -> {
                         val config = remember(item.config) {
@@ -396,8 +400,9 @@ private fun StoreItemCard(
                         val tileAvatarSize = if (config.kind.equals("asset", ignoreCase = true) && asset != null) {
                             val ratio = (if (asset.innerRatio > 0f) asset.innerRatio else asset.avatarRatio)
                                 .coerceIn(0.25f, 0.98f)
-                            val maxCanvas = 86.dp / (1f + asset.overflowRatio.coerceIn(0f, 0.5f))
-                            (maxCanvas * ratio).coerceIn(28.dp, 52.dp)
+                            val overflow = asset.overflowRatio.coerceIn(0f, 0.5f)
+                            val maxCanvas = 88.dp / (1f + overflow)
+                            maxCanvas * ratio
                         } else {
                             52.dp
                         }

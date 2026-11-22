@@ -56,6 +56,7 @@ fun PresenceAvatar(
     frameConfig: com.example.store.AvatarFrameConfig? = null,
     enableFrameAnimation: Boolean = false,
     showFlagBadge: Boolean = false,
+    reserveOuterSpace: Boolean = true,
     onClick: (() -> Unit)? = null
 ) {
     val finalCountryCode = (flagCountryCode ?: countryCode)?.trim()?.ifBlank { null }
@@ -85,17 +86,16 @@ fun PresenceAvatar(
         modifier
     }
 
-    // Extra padding if there is a frame to prevent clipping ornaments & glows
-    val outerPadding = if (effectiveFrame != null) 4.dp else 3.dp
+    val outerBoxSize = if (reserveOuterSpace) FramedAvatar.outerSize(size, effectiveFrame) else size
 
-    // Outer container with padding so flag & moon badge offsets don't get clipped by parent
+    // Outer container reserves exact FramedAvatar.outerSize without clipping frame art or photo badges
     Box(
         modifier = clickableModifier
-            .padding(outerPadding)
+            .size(outerBoxSize)
             .semantics { contentDescription = effectiveStatus },
         contentAlignment = Alignment.Center
     ) {
-        // Core Avatar Box of requested size
+        // Core Avatar Box of exact photo size (flag badge anchors to photo circle, not frame canvas)
         Box(
             modifier = Modifier.size(size),
             contentAlignment = Alignment.Center
