@@ -112,6 +112,7 @@ fun DirectChatScreen(
     partnerAvatarUrl: String? = null,
     partnerCountry: String? = null,
     partnerCountryCode: String? = null,
+    embeddedInSheet: Boolean = false,
     onBack: () -> Unit
 ) {
     com.example.ui.components.SecureWindow(enabled = true)
@@ -489,6 +490,7 @@ fun DirectChatScreen(
         }
 
         Scaffold(
+            contentWindowInsets = if (embeddedInSheet) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
             topBar = {
                 if (isSelectionMode) {
                     SelectionTopBar(
@@ -534,7 +536,7 @@ fun DirectChatScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .statusBarsPadding()
+                                .then(if (embeddedInSheet) Modifier else Modifier.statusBarsPadding())
                                 .padding(horizontal = 4.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -674,7 +676,7 @@ fun DirectChatScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(colors.surface)
-                        .imePadding()
+                        .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
                 ) {
                     if (isChatBlocked || isPartnerBlockedLocally) {
                         Surface(

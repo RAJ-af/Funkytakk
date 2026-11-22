@@ -108,7 +108,7 @@ fun RoomChatPanel(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(210.dp)
+            .heightIn(min = 84.dp, max = 210.dp)
             .padding(horizontal = 20.dp, vertical = 6.dp)
     ) {
         LazyColumn(

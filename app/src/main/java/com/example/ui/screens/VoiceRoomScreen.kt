@@ -116,7 +116,10 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.ui.text.font.FontWeight
@@ -524,10 +527,19 @@ fun VoiceRoomScreen(
 
     var hostAwaySecondsLeft by remember { mutableStateOf<Int?>(null) }
     var openDirectChatPartner by remember { mutableStateOf<PrivateChatItem?>(null) }
+    var openedDmFromChatList by remember { mutableStateOf(false) }
+    var showChatSheet by remember { mutableStateOf(false) }
+    var showPeopleSheet by remember { mutableStateOf(false) }
+    var showOneToOneChatSheet by remember { mutableStateOf(false) }
+    var oneToOneChatUser by remember { mutableStateOf<PrivateChatItem?>(null) }
     val blockedUserIds by com.example.repository.BlockRepository.blockedUserIds.collectAsState()
     var selectedPersonTarget by remember { mutableStateOf<ModerationTargetUser?>(null) }
     var pendingBlockTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
     var isBlockingUser by remember { mutableStateOf(false) }
+
+    LaunchedEffect(context) {
+        EncryptedChatRepository.init(context)
+    }
 
     if (isRoomEnded) {
         RoomEndedScreen(
@@ -572,7 +584,13 @@ fun VoiceRoomScreen(
     }
 
     BackHandler {
-        if (isCurrentUserHost) {
+        if (openDirectChatPartner != null || showOneToOneChatSheet) {
+            val reopenList = openedDmFromChatList
+            openDirectChatPartner = null
+            showOneToOneChatSheet = false
+            openedDmFromChatList = false
+            if (reopenList) showChatSheet = true
+        } else if (isCurrentUserHost) {
             showHostLeaveDialog = true
         } else {
             if (com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
@@ -1426,8 +1444,6 @@ fun VoiceRoomScreen(
     var chatInputValue by remember { mutableStateOf("") }
     var showEmojiPicker by remember { mutableStateOf(false) }
     var showReactionsBar by remember { mutableStateOf(false) }
-    var showChatSheet by remember { mutableStateOf(false) }
-    var showPeopleSheet by remember { mutableStateOf(false) }
     var showInviteFriendSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(showPeopleSheet) {
@@ -1854,39 +1870,6 @@ fun VoiceRoomScreen(
         }
     }
 
-    // 1-to-1 Chat State Variables
-    var showOneToOneChatSheet by remember { mutableStateOf(false) }
-    var oneToOneChatUser by remember { mutableStateOf<PrivateChatItem?>(null) }
-    var oneToOneTypedMsg by remember { mutableStateOf("") }
-
-    val directMessagesMap = remember {
-        mutableStateMapOf<String, List<DirectMessage>>(
-            "Sara" to listOf(
-                DirectMessage("11", "Sara", "Hey 👋", "08:40 AM", false),
-                DirectMessage("12", "Me", "Hi Sara! 😊", "08:41 AM", true),
-                DirectMessage("13", "Sara", "Join my room in a bit?", "08:41 AM", false),
-                DirectMessage("14", "Me", "Sure! 5 min me aata hu", "08:41 AM", true),
-                DirectMessage("15", "Sara", "Okay 👍", "08:42 AM", false),
-                DirectMessage("16", "Sara", "See you there!", "08:42 AM", false),
-                DirectMessage("17", "Me", "See you! 🔥", "08:43 AM", true)
-            ),
-            "Riya" to listOf(
-                DirectMessage("21", "Riya", "Aao na room me, bore ho rhi hu!", "08:28 AM", false),
-                DirectMessage("22", "Me", "Bss 2 minut me aaya, kuch kaam tha.", "08:30 AM", true),
-                DirectMessage("23", "Riya", "Yaar tum online kab aoge?", "08:32 AM", false)
-            ),
-            "Arjun" to listOf(
-                DirectMessage("31", "Arjun", "Bro today's match was crazy!", "Yesterday", false),
-                DirectMessage("32", "Me", "Yeah! Unbelievable finish inside the final over.", "Yesterday", true),
-                DirectMessage("33", "Arjun", "Let's catch up later", "Yesterday", false)
-            ),
-            "Vihaan" to listOf(
-                DirectMessage("41", "Me", "Bro did you get the notes?", "Yesterday", true),
-                DirectMessage("42", "Vihaan", "Thanks! 🙌", "Yesterday", false)
-            )
-        )
-    }
-    
     var selectedThemeIndex by remember { mutableStateOf(0) } // Default: "Golden Glow" at index 0
     var isRoomDarkMode by remember { mutableStateOf(false) }
     var selectedDarkBgIndex by remember { mutableStateOf(0) }
@@ -2141,12 +2124,28 @@ fun VoiceRoomScreen(
                 )
         )
 
-        // Layout Container
+        val density = LocalDensity.current
+        val isImeVisible = WindowInsets.ime.getBottom(density) > 0
+        val roomChatInputFocusRequester = remember { FocusRequester() }
+
+        LaunchedEffect(isImeVisible) {
+            if (isImeVisible) {
+                showReactionsBar = false
+                if (renderedMessages.isNotEmpty()) {
+                    try {
+                        chatListState.animateScrollToItem(0)
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+
+        // Layout Container (adapts cleanly to IME keyboard so "Say something..." is always visible)
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = 44.dp, bottom = 12.dp),
-            verticalArrangement = Arrangement.SpaceBetween
+                .statusBarsPadding()
+                .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
+                .padding(top = 8.dp, bottom = 4.dp)
         ) {
             
             // 1. TOP HEADER SECTION (Polished & Interactive)
@@ -2386,7 +2385,7 @@ fun VoiceRoomScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(if (isImeVisible) 8.dp else 18.dp))
 
             if (showOverlayBanner && !com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
                 Card(
@@ -2764,25 +2763,30 @@ fun VoiceRoomScreen(
                 onRequestSpeakerSeat = handleRequestSpeakerSeat
             )
 
-            Spacer(modifier = Modifier.weight(1f))
-
-            // 3. MINIMAL COMPACT CHAT LOG ROW
-            RoomChatPanel(
-                chatListState = chatListState,
-                renderedMessages = renderedMessages,
-                messages = messages,
-                renderedMessageCount = renderedMessageCount,
-                onRenderedCountChange = { renderedMessageCount = it },
-                currentTheme = currentTheme,
-                currentUserId = currentUserId,
-                currentUserName = currentUserName,
-                isSpeakerRequestSubmitting = isSpeakerRequestSubmitting,
-                onSpeakerRequestSubmittingChange = { isSpeakerRequestSubmitting = it },
-                isSpeakerRequestPending = isSpeakerRequestPending,
-                onSpeakerRequestPendingChange = { isSpeakerRequestPending = it },
-                activeRoomId = activeRoomId,
-                scope = scope
-            )
+            // 3. MINIMAL COMPACT CHAT LOG ROW (flexes cleanly above keyboard)
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.BottomStart
+            ) {
+                RoomChatPanel(
+                    chatListState = chatListState,
+                    renderedMessages = renderedMessages,
+                    messages = messages,
+                    renderedMessageCount = renderedMessageCount,
+                    onRenderedCountChange = { renderedMessageCount = it },
+                    currentTheme = currentTheme,
+                    currentUserId = currentUserId,
+                    currentUserName = currentUserName,
+                    isSpeakerRequestSubmitting = isSpeakerRequestSubmitting,
+                    onSpeakerRequestSubmittingChange = { isSpeakerRequestSubmitting = it },
+                    isSpeakerRequestPending = isSpeakerRequestPending,
+                    onSpeakerRequestPendingChange = { isSpeakerRequestPending = it },
+                    activeRoomId = activeRoomId,
+                    scope = scope
+                )
+            }
 
             androidx.compose.animation.AnimatedVisibility(visible = showEmojiPicker) {
                 androidx.compose.foundation.lazy.LazyRow(
@@ -2877,7 +2881,7 @@ fun VoiceRoomScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -2885,15 +2889,21 @@ fun VoiceRoomScreen(
                     modifier = Modifier
                         .weight(1f)
                         .height(48.dp)
+                        .clip(RoundedCornerShape(100.dp))
                         .background(
-                            currentTheme.cardBgColor,
+                            if (isImeVisible && !currentTheme.isDark) Color.White else currentTheme.cardBgColor,
                             RoundedCornerShape(100.dp)
                         )
                         .border(
                             1.dp,
-                            currentTheme.cardBorderColor,
+                            if (isImeVisible) currentTheme.accentColor.copy(alpha = 0.65f) else currentTheme.cardBorderColor,
                             RoundedCornerShape(100.dp)
                         )
+                        .clickable(enabled = !isChatBlocked) {
+                            try {
+                                roomChatInputFocusRequester.requestFocus()
+                            } catch (_: Exception) {}
+                        }
                         .padding(start = 16.dp, end = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -2901,12 +2911,14 @@ fun VoiceRoomScreen(
                         value = chatInputValue,
                         onValueChange = { chatInputValue = it },
                         enabled = !isChatBlocked,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(roomChatInputFocusRequester),
                         textStyle = androidx.compose.ui.text.TextStyle(
                             fontSize = 14.sp,
                             color = if (isChatBlocked) Color.Gray else currentTheme.primaryTextColor
                         ),
-                        cursorBrush = androidx.compose.ui.graphics.SolidColor(currentTheme.primaryTextColor),
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(currentTheme.accentColor),
                         singleLine = true,
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                             imeAction = androidx.compose.ui.text.input.ImeAction.Send
@@ -2917,12 +2929,17 @@ fun VoiceRoomScreen(
                             }
                         ),
                         decorationBox = { innerTextField ->
-                            Box(contentAlignment = Alignment.CenterStart) {
+                            Box(
+                                modifier = Modifier.fillMaxWidth(),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
                                 if (chatInputValue.isEmpty()) {
                                     Text(
                                         text = chatPlaceholder,
                                         color = currentTheme.secondaryTextColor,
-                                        fontSize = 14.sp
+                                        fontSize = 14.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                                 innerTextField()
@@ -2930,14 +2947,18 @@ fun VoiceRoomScreen(
                         }
                     )
                     CustomMoodSmileOutline(
-                        tint = if (showEmojiPicker) currentTheme.accentColor else currentTheme.secondaryTextColor, 
-                        modifier = Modifier.size(24.dp).clickable { showEmojiPicker = !showEmojiPicker }.padding(2.dp)
+                        tint = if (showEmojiPicker) currentTheme.accentColor else currentTheme.secondaryTextColor,
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .clickable { showEmojiPicker = !showEmojiPicker }
+                            .padding(3.dp)
                     )
                     if (chatInputValue.isNotBlank()) {
                         Spacer(modifier = Modifier.width(6.dp))
                         Box(
                             modifier = Modifier
-                                .size(28.dp)
+                                .size(30.dp)
                                 .clip(CircleShape)
                                 .background(currentTheme.accentColor)
                                 .clickable { onSendRoomMessage(chatInputValue) },
@@ -3023,16 +3044,16 @@ fun VoiceRoomScreen(
                 }
             }
 
-            // 5. BOTTOM NAVIGATION BAR SYSTEM
-            val inactiveIconTint = if (isRoomDarkMode) Color(0xFFD1D5DB) else Color.Gray
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(horizontal = 24.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            // 5. BOTTOM NAVIGATION BAR SYSTEM (hidden when keyboard is open so "Say something..." stays right above keyboard)
+            androidx.compose.animation.AnimatedVisibility(visible = !isImeVisible) {
+                val inactiveIconTint = if (isRoomDarkMode) Color(0xFFD1D5DB) else Color.Gray
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                 VoiceBottomBarItem(
                     icon = { CustomChatBubbleIcon(tint = if (isRoomDarkMode) Color(0xFFC084FC) else ChillPurpleAccent, modifier = Modifier.size(24.dp)) },
                     label = "Chat",
@@ -3164,6 +3185,7 @@ fun VoiceRoomScreen(
                     }
                 }
             }
+            }
         }
     }
 
@@ -3180,75 +3202,28 @@ fun VoiceRoomScreen(
 
     @OptIn(ExperimentalMaterial3Api::class)
     if (showChatSheet) {
-        val currentTheme = roomThemes[selectedThemeIndex]
+        val funkyColors = LocalFunkyColors.current
         ModalBottomSheet(
             onDismissRequest = {
                 showChatSheet = false
-                openDirectChatPartner = null
             },
             sheetState = sheetState,
-            containerColor = currentTheme.startColor,
-            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+            containerColor = funkyColors.bg,
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
             dragHandle = {
-                BottomSheetDefaults.DragHandle(
-                    color = if (currentTheme.isDark) Color.White.copy(alpha = 0.3f) else Color.Gray.copy(alpha = 0.3f)
-                )
+                BottomSheetDefaults.DragHandle(color = funkyColors.line)
             }
         ) {
-            if (openDirectChatPartner != null) {
-                val activePartner = openDirectChatPartner!!
-                val partnerBlocked = blockedUserIds.contains(activePartner.id)
-                OneToOneChatBottomSheetContent(
-                    selectedThemeIndex = selectedThemeIndex,
-                    chatUser = activePartner,
-                    messagesList = emptyList(),
-                    isBlocked = partnerBlocked,
-                    onBlockToggleClick = if (activePartner.id.isNotBlank() && activePartner.id != currentUserId) {
-                        {
-                            if (partnerBlocked) {
-                                scope.launch {
-                                    com.example.repository.BlockRepository.unblockUser(context, activePartner.id)
-                                        .onSuccess { Toast.makeText(context, "${activePartner.name} unblocked", Toast.LENGTH_SHORT).show() }
-                                        .onFailure { Toast.makeText(context, it.message ?: "Failed to unblock user.", Toast.LENGTH_SHORT).show() }
-                                }
-                            } else {
-                                pendingBlockTarget = activePartner.id to activePartner.name
-                            }
-                        }
-                    } else null,
-                    onSendMessage = { msg ->
-                        scope.launch {
-                            try {
-                                val res = com.example.repository.EncryptedChatRepository.sendMessage(
-                                    context = context,
-                                    recipientUserId = activePartner.id,
-                                    recipientName = activePartner.name,
-                                    recipientAvatar = activePartner.imageUrl,
-                                    text = msg
-                                )
-                                res.onFailure { err ->
-                                    if (err is com.example.repository.UserBlockedException ||
-                                        com.example.repository.BlockRepository.isUserBlockedError(err.message)
-                                    ) {
-                                        Toast.makeText(context, com.example.repository.USER_BLOCKED_ERROR_MESSAGE, Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            } catch (e: Exception) {
-                                Log.e("VoiceRoomScreen", "Failed to send chat: ${e.message}")
-                            }
-                        }
-                    },
-                    onBack = { openDirectChatPartner = null }
-                )
-            } else {
-                ChatBottomSheetContent(
-                    privateChats = privateChats,
-                    selectedThemeIndex = selectedThemeIndex,
-                    onChatClick = { chatUser ->
-                        openDirectChatPartner = chatUser
-                    }
-                )
-            }
+            ChatBottomSheetContent(
+                privateChats = privateChats,
+                selectedThemeIndex = selectedThemeIndex,
+                onChatClick = { chatUser ->
+                    openDirectChatPartner = chatUser
+                    openedDmFromChatList = true
+                    showChatSheet = false
+                },
+                onClose = { showChatSheet = false }
+            )
         }
     }
 
@@ -3955,50 +3930,52 @@ fun VoiceRoomScreen(
         }
     }
 
-    // 4) 1-to-1 Chat Bottom Sheet container
-    @OptIn(ExperimentalMaterial3Api::class)
-    if (showOneToOneChatSheet) {
-        val currentTheme = roomThemes[selectedThemeIndex]
-        val activeChatUser = oneToOneChatUser ?: PrivateChatItem("1", "Riya", "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400", "in", "Started chat", "Now", 0, true, false)
-        val msgs = directMessagesMap[activeChatUser.name] ?: emptyList()
-
-        val isActiveChatBlocked = blockedUserIds.contains(activeChatUser.id)
-        ModalBottomSheet(
-            onDismissRequest = { showOneToOneChatSheet = false },
-            containerColor = currentTheme.startColor,
-            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-            dragHandle = null
+    // 4) Real E2EE 1-to-1 Chat Overlay (uses DirectChatScreen so UI, cosmetics, media & IME match the app)
+    val activeInRoomDmPartner = openDirectChatPartner ?: if (showOneToOneChatSheet) oneToOneChatUser else null
+    if (activeInRoomDmPartner != null) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.45f))
+                .clickable(
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    indication = null
+                ) {
+                    val reopenList = openedDmFromChatList
+                    openDirectChatPartner = null
+                    showOneToOneChatSheet = false
+                    openedDmFromChatList = false
+                    if (reopenList) showChatSheet = true
+                }
         ) {
-            OneToOneChatBottomSheetContent(
-                selectedThemeIndex = selectedThemeIndex,
-                chatUser = activeChatUser,
-                messagesList = msgs,
-                isBlocked = isActiveChatBlocked,
-                onBlockToggleClick = if (activeChatUser.id.isNotBlank() && activeChatUser.id != currentUserId) {
-                    {
-                        if (isActiveChatBlocked) {
-                            scope.launch {
-                                com.example.repository.BlockRepository.unblockUser(context, activeChatUser.id)
-                                    .onSuccess { Toast.makeText(context, "${activeChatUser.name} unblocked", Toast.LENGTH_SHORT).show() }
-                                    .onFailure { Toast.makeText(context, it.message ?: "Failed to unblock user.", Toast.LENGTH_SHORT).show() }
-                            }
-                        } else {
-                            pendingBlockTarget = activeChatUser.id to activeChatUser.name
-                        }
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.92f)
+                    .align(Alignment.BottomCenter)
+                    .clickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = null
+                    ) {},
+                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+                color = LocalFunkyColors.current.bg,
+                shadowElevation = 18.dp
+            ) {
+                DirectChatScreen(
+                    partnerUserId = activeInRoomDmPartner.id,
+                    partnerName = activeInRoomDmPartner.name,
+                    partnerAvatarUrl = activeInRoomDmPartner.imageUrl,
+                    partnerCountryCode = activeInRoomDmPartner.flagCode,
+                    embeddedInSheet = true,
+                    onBack = {
+                        val reopenList = openedDmFromChatList
+                        openDirectChatPartner = null
+                        showOneToOneChatSheet = false
+                        openedDmFromChatList = false
+                        if (reopenList) showChatSheet = true
                     }
-                } else null,
-                onSendMessage = { txt ->
-                    val newList = msgs + DirectMessage(
-                        id = (msgs.size + 1).toString(),
-                        senderName = "Me",
-                        text = txt,
-                        time = "08:42 AM",
-                        isSentByMe = true
-                    )
-                    directMessagesMap[activeChatUser.name] = newList
-                },
-                onBack = { showOneToOneChatSheet = false }
-            )
+                )
+            }
         }
     }
 
@@ -4185,11 +4162,23 @@ private fun triggerUserEntryAnimation(context: android.content.Context, userId: 
 }
 
 @Composable
-fun ChatBottomSheetContent(privateChats: List<PrivateChatItem>, selectedThemeIndex: Int, onChatClick: (PrivateChatItem) -> Unit) {
-    val currentTheme = roomThemes[selectedThemeIndex]
+fun ChatBottomSheetContent(
+    privateChats: List<PrivateChatItem>,
+    selectedThemeIndex: Int,
+    onChatClick: (PrivateChatItem) -> Unit,
+    onClose: () -> Unit = {}
+) {
+    val funkyColors = LocalFunkyColors.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val vaultStatus by com.example.crypto.VaultSecurityManager.vaultStatus.collectAsState()
+
+    LaunchedEffect(privateChats) {
+        val partnerIds = privateChats.map { it.id }.filter { it.isNotBlank() }.distinct()
+        if (partnerIds.isNotEmpty()) {
+            com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, partnerIds)
+        }
+    }
 
     if (vaultStatus == com.example.crypto.VaultStatus.LOCKED) {
         var password by remember { mutableStateOf("") }
@@ -4200,8 +4189,9 @@ fun ChatBottomSheetContent(privateChats: List<PrivateChatItem>, selectedThemeInd
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.85f)
-                .background(Brush.verticalGradient(listOf(currentTheme.startColor, currentTheme.endColor)))
+                .fillMaxHeight(0.82f)
+                .background(funkyColors.bg)
+                .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
@@ -4209,12 +4199,12 @@ fun ChatBottomSheetContent(privateChats: List<PrivateChatItem>, selectedThemeInd
             Box(
                 modifier = Modifier
                     .size(64.dp)
-                    .background(Color(0xFFFEF3C7), CircleShape),
+                    .background(funkyColors.soft, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 FunkyLockIcon(
-                    color = Color(0xFFD97706),
-                    modifier = Modifier.size(32.dp)
+                    color = funkyColors.mango,
+                    modifier = Modifier.size(30.dp)
                 )
             }
             Spacer(modifier = Modifier.height(16.dp))
@@ -4222,13 +4212,13 @@ fun ChatBottomSheetContent(privateChats: List<PrivateChatItem>, selectedThemeInd
                 text = "Unlock your chats",
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Bold,
-                color = if (currentTheme.isDark) Color.White else Color.Black
+                color = funkyColors.ink
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "Enter your Vault password to access direct conversations.",
+                text = "Enter your Vault password to access end-to-end encrypted conversations.",
                 fontSize = 13.sp,
-                color = if (currentTheme.isDark) Color.White.copy(alpha = 0.7f) else Color.Gray,
+                color = funkyColors.mute,
                 textAlign = TextAlign.Center
             )
             Spacer(modifier = Modifier.height(20.dp))
@@ -4238,7 +4228,7 @@ fun ChatBottomSheetContent(privateChats: List<PrivateChatItem>, selectedThemeInd
                     password = it
                     errorMessage = null
                 },
-                placeholder = { Text("Enter Vault Password") },
+                placeholder = { Text("Enter Vault Password", color = funkyColors.mute) },
                 singleLine = true,
                 visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {
@@ -4246,17 +4236,19 @@ fun ChatBottomSheetContent(privateChats: List<PrivateChatItem>, selectedThemeInd
                         SoftEyeIcon(
                             visible = passwordVisible,
                             size = 20.dp,
-                            tint = if (currentTheme.isDark) Color.White.copy(alpha = 0.6f) else Color.Gray
+                            tint = funkyColors.mute
                         )
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
                 colors = TextFieldDefaults.colors(
-                    focusedContainerColor = if (currentTheme.isDark) Color.Black.copy(alpha = 0.3f) else Color.White,
-                    unfocusedContainerColor = if (currentTheme.isDark) Color.Black.copy(alpha = 0.3f) else Color.White,
-                    focusedTextColor = if (currentTheme.isDark) Color.White else Color.Black,
-                    unfocusedTextColor = if (currentTheme.isDark) Color.White else Color.Black
+                    focusedContainerColor = funkyColors.surface,
+                    unfocusedContainerColor = funkyColors.surface,
+                    focusedTextColor = funkyColors.ink,
+                    unfocusedTextColor = funkyColors.ink,
+                    focusedIndicatorColor = funkyColors.mango,
+                    unfocusedIndicatorColor = funkyColors.line
                 )
             )
             errorMessage?.let { err ->
@@ -4284,14 +4276,15 @@ fun ChatBottomSheetContent(privateChats: List<PrivateChatItem>, selectedThemeInd
                     .height(50.dp),
                 shape = RoundedCornerShape(25.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (currentTheme.isDark) currentTheme.themeColor else Color(0xFFF59E0B)
+                    containerColor = funkyColors.mango,
+                    contentColor = funkyColors.onMango
                 ),
                 enabled = !isLoading
             ) {
                 if (isLoading) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White)
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = funkyColors.onMango)
                 } else {
-                    Text("Unlock", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.White)
+                    Text("Unlock", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
             }
         }
@@ -4300,163 +4293,201 @@ fun ChatBottomSheetContent(privateChats: List<PrivateChatItem>, selectedThemeInd
 
     var activeFilter by remember { mutableStateOf("All") }
     var searchQuery by remember { mutableStateOf("") }
-    
-    val filteredChats = privateChats.filter { 
-        when(activeFilter) {
-            "Unread" -> it.unreadCount > 0
-            "Online" -> it.isOnline
-            else -> true
-        }
-    }.filter { it.name.contains(searchQuery, ignoreCase = true) }
+
+    val filteredChats = remember(privateChats, activeFilter, searchQuery) {
+        privateChats.filter {
+            when (activeFilter) {
+                "Unread" -> it.unreadCount > 0
+                "Online" -> it.isOnline
+                else -> true
+            }
+        }.filter { it.name.contains(searchQuery.trim(), ignoreCase = true) }
+    }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .fillMaxHeight(0.85f)
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(currentTheme.startColor, currentTheme.endColor)
-                )
-            )
+            .fillMaxHeight(0.86f)
+            .background(funkyColors.bg)
+            .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
     ) {
-        // Title
-        Text(
-            text = "Chats",
-            fontSize = 28.sp,
-            fontWeight = FontWeight.Bold,
-            color = if (currentTheme.isDark) Color.White else Color.Black,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
-        )
-        
-        // Search Bar
-        TextField(
+        // Header matching ChatsTabContent
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = "Chats",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = funkyColors.ink
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    com.example.ui.components.SoftTinyLockIcon(
+                        size = 11.dp,
+                        tint = if (funkyColors.isDark) Color(0xFF4ADE80) else Color(0xFF15803D)
+                    )
+                    Text(
+                        text = "End-to-end encrypted",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = funkyColors.mute
+                    )
+                }
+            }
+
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .background(funkyColors.surface)
+                    .border(1.dp, funkyColors.line, CircleShape)
+            ) {
+                SoftCloseIcon(size = 16.dp, color = funkyColors.ink)
+            }
+        }
+
+        // Search Bar matching ChatsTabContent
+        OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 8.dp),
-            placeholder = { Text("Search chats or users", color = if (currentTheme.isDark) Color.White.copy(alpha = 0.5f) else Color.Gray) },
+                .padding(horizontal = 20.dp, vertical = 6.dp),
+            singleLine = true,
+            placeholder = { Text("Search chats or users", color = funkyColors.mute, fontSize = 14.sp) },
             leadingIcon = {
-                SoftSearchIcon(
-                    size = 18.dp,
-                    color = if (currentTheme.isDark) Color.White.copy(alpha = 0.6f) else Color.Gray
-                )
+                SoftSearchIcon(size = 18.dp, color = funkyColors.mute)
+            },
+            trailingIcon = {
+                if (searchQuery.isNotEmpty()) {
+                    IconButton(onClick = { searchQuery = "" }) {
+                        SoftCloseIcon(size = 14.dp, color = funkyColors.mute)
+                    }
+                }
             },
             colors = TextFieldDefaults.colors(
-                focusedContainerColor = if (currentTheme.isDark) Color.Black.copy(alpha = 0.25f) else Color(0xFFF9FAFB),
-                unfocusedContainerColor = if (currentTheme.isDark) Color.Black.copy(alpha = 0.25f) else Color(0xFFF9FAFB),
-                focusedIndicatorColor = Color.Transparent,
-                unfocusedIndicatorColor = Color.Transparent,
-                cursorColor = if (currentTheme.isDark) Color.White else Color.Black,
-                focusedTextColor = if (currentTheme.isDark) Color.White else Color.Black,
-                unfocusedTextColor = if (currentTheme.isDark) Color.White else Color.Black
+                focusedContainerColor = funkyColors.surface,
+                unfocusedContainerColor = funkyColors.surface,
+                focusedIndicatorColor = funkyColors.mango,
+                unfocusedIndicatorColor = funkyColors.line,
+                cursorColor = funkyColors.mango,
+                focusedTextColor = funkyColors.ink,
+                unfocusedTextColor = funkyColors.ink
             ),
             shape = RoundedCornerShape(100.dp)
         )
-        
-        // Filter Chips
+
+        // Filter Chips matching ChatsTabContent
         Row(
             modifier = Modifier
                 .padding(horizontal = 20.dp, vertical = 8.dp)
                 .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // All
+            val unreadTotal = privateChats.count { it.unreadCount > 0 }
+            listOf("All", "Unread", "Online").forEach { filter ->
+                val isSelected = activeFilter == filter
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(100.dp))
+                        .background(if (isSelected) funkyColors.mango else funkyColors.surface)
+                        .border(
+                            1.dp,
+                            if (isSelected) funkyColors.mango else funkyColors.line,
+                            RoundedCornerShape(100.dp)
+                        )
+                        .clickable { activeFilter = filter }
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (filter == "Online") {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .background(LiveGreen, CircleShape)
+                        )
+                    }
+                    Text(
+                        text = filter,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        color = if (isSelected) funkyColors.onMango else funkyColors.ink,
+                        fontSize = 13.5.sp
+                    )
+                    if (filter == "Unread" && unreadTotal > 0) {
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(if (isSelected) funkyColors.onMango.copy(alpha = 0.2f) else funkyColors.mango)
+                                .padding(horizontal = 6.dp, vertical = 1.dp)
+                        ) {
+                            Text(
+                                text = unreadTotal.toString(),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isSelected) funkyColors.onMango else funkyColors.onMango
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        if (filteredChats.isEmpty()) {
             Box(
                 modifier = Modifier
-                    .background(
-                        if (activeFilter == "All") (if (currentTheme.isDark) currentTheme.themeColor else ChillGoldIcon) else Color.Transparent,
-                        RoundedCornerShape(100.dp)
-                    )
-                    .border(
-                        if (activeFilter == "All") 0.dp else 1.dp,
-                        if (currentTheme.isDark) Color.White.copy(alpha = 0.2f) else Color(0xFFE5E5EA),
-                        RoundedCornerShape(100.dp)
-                    )
-                    .clickable { activeFilter = "All" }
-                    .padding(horizontal = 20.dp, vertical = 8.dp)
+                    .fillMaxSize()
+                    .padding(horizontal = 32.dp),
+                contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = "All",
-                    fontWeight = if (activeFilter == "All") FontWeight.Bold else FontWeight.Medium,
-                    color = if (activeFilter == "All") Color.White else (if (currentTheme.isDark) Color.White.copy(alpha = 0.7f) else Color.Black),
-                    fontSize = 14.sp
-                )
-            }
-            // Unread
-            Row(
-                modifier = Modifier
-                    .background(
-                        if (activeFilter == "Unread") (if (currentTheme.isDark) currentTheme.themeColor else ChillGoldIcon) else Color.Transparent,
-                        RoundedCornerShape(100.dp)
-                    )
-                    .border(
-                        if (activeFilter == "Unread") 0.dp else 1.dp,
-                        if (currentTheme.isDark) Color.White.copy(alpha = 0.2f) else Color(0xFFE5E5EA),
-                        RoundedCornerShape(100.dp)
-                    )
-                    .clickable { activeFilter = "Unread" }
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Unread",
-                    fontWeight = if (activeFilter == "Unread") FontWeight.Bold else FontWeight.Medium,
-                    color = if (activeFilter == "Unread") Color.White else (if (currentTheme.isDark) Color.White.copy(alpha = 0.7f) else Color.Black),
-                    fontSize = 14.sp
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Box(
-                    modifier = Modifier
-                        .background(
-                            if (activeFilter == "Unread") Color.White else (if (currentTheme.isDark) currentTheme.themeColor else ChillGoldIcon),
-                            CircleShape
-                        )
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                ) {
-                    val unreadTotal = privateChats.count { it.unreadCount > 0 }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(CircleShape)
+                            .background(funkyColors.soft),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        FunkyChatIcon(color = funkyColors.mango, isFilled = true, modifier = Modifier.size(26.dp))
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = unreadTotal.toString(),
-                        fontSize = 10.sp,
+                        text = if (searchQuery.isNotBlank()) "No matching chats" else "No conversations yet",
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (activeFilter == "Unread") (if (currentTheme.isDark) currentTheme.themeColor else Color.Black) else Color.White
+                        color = funkyColors.ink
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = if (searchQuery.isNotBlank()) {
+                            "No conversation matches '$searchQuery'"
+                        } else {
+                            "Tap any speaker or open People to start a private end-to-end encrypted chat."
+                        },
+                        fontSize = 13.sp,
+                        color = funkyColors.mute,
+                        textAlign = TextAlign.Center
                     )
                 }
             }
-            // Online
-            Row(
-                modifier = Modifier
-                    .background(
-                        if (activeFilter == "Online") (if (currentTheme.isDark) currentTheme.themeColor else ChillGoldIcon) else Color.Transparent,
-                        RoundedCornerShape(100.dp)
-                    )
-                    .border(
-                        if (activeFilter == "Online") 0.dp else 1.dp,
-                        if (currentTheme.isDark) Color.White.copy(alpha = 0.2f) else Color(0xFFE5E5EA),
-                        RoundedCornerShape(100.dp)
-                    )
-                    .clickable { activeFilter = "Online" }
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
+        } else {
+            androidx.compose.foundation.lazy.LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(top = 4.dp, bottom = 20.dp)
             ) {
-                Text(
-                    text = "Online",
-                    fontWeight = if (activeFilter == "Online") FontWeight.Bold else FontWeight.Medium,
-                    color = if (activeFilter == "Online") Color.White else (if (currentTheme.isDark) Color.White.copy(alpha = 0.7f) else Color.Black),
-                    fontSize = 14.sp
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Box(modifier = Modifier.size(8.dp).background(LiveGreen, CircleShape))
-            }
-        }
-        
-        Spacer(modifier = Modifier.height(10.dp))
-        
-        // LazyColumn for private chats
-        androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(filteredChats) { chat ->
-                PrivateChatItemRow(chat, selectedThemeIndex) {
-                    onChatClick(chat)
+                items(filteredChats, key = { it.id }) { chat ->
+                    PrivateChatItemRow(chat, selectedThemeIndex) {
+                        onChatClick(chat)
+                    }
                 }
             }
         }
@@ -4465,69 +4496,92 @@ fun ChatBottomSheetContent(privateChats: List<PrivateChatItem>, selectedThemeInd
 
 @Composable
 fun PrivateChatItemRow(chat: PrivateChatItem, selectedThemeIndex: Int, onClick: () -> Unit) {
-    val currentTheme = roomThemes[selectedThemeIndex]
-    Row(
+    val funkyColors = LocalFunkyColors.current
+    val e2eeColor = if (funkyColors.isDark) Color(0xFF4ADE80) else Color(0xFF15803D)
+    val e2eeBg = if (funkyColors.isDark) funkyColors.ok.copy(alpha = 0.16f) else Color(0xFFDCFCE7)
+
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() }
-            .padding(horizontal = 20.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(horizontal = 20.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .clickable { onClick() },
+        shape = RoundedCornerShape(20.dp),
+        color = funkyColors.surface,
+        border = BorderStroke(1.dp, funkyColors.line)
     ) {
-        com.example.ui.components.PresenceAvatar(
-            avatarUrl = chat.imageUrl,
-            size = 56.dp,
-            isOnline = chat.isOnline,
-            countryCode = chat.flagCode,
-            userId = chat.id,
-            showFlagBadge = true,
-            enableFrameAnimation = false
-        )
-        Spacer(modifier = Modifier.width(16.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = chat.name,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    color = if (currentTheme.isDark) Color.White else Color.Black
-                )
-                if (chat.isOnline) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            com.example.ui.components.PresenceAvatar(
+                avatarUrl = chat.imageUrl,
+                size = 52.dp,
+                isOnline = chat.isOnline,
+                countryCode = chat.flagCode,
+                userId = chat.id,
+                showFlagBadge = true,
+                enableFrameAnimation = false
+            )
+            Spacer(modifier = Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    com.example.store.DecoratedUserName(
+                        userId = chat.id,
+                        name = chat.name,
+                        fontSize = 15.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        defaultColor = funkyColors.ink,
+                        animate = false
+                    )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Box(modifier = Modifier.size(8.dp).background(LiveGreen, CircleShape))
-                } else {
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Box(modifier = Modifier.size(8.dp).background(if (currentTheme.isDark) Color.White.copy(alpha = 0.3f) else Color.LightGray, CircleShape))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(e2eeBg)
+                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            com.example.ui.components.SoftTinyLockIcon(size = 9.dp, tint = e2eeColor)
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Text(
+                                text = "E2EE",
+                                fontSize = 8.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = e2eeColor
+                            )
+                        }
+                    }
                 }
-            }
-            Spacer(modifier = Modifier.height(4.dp))
-            if (chat.isTyping) {
-                Text(chat.lastMessage, color = if (currentTheme.isDark) currentTheme.themeColor else ChillGoldIcon, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            } else {
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = chat.lastMessage,
-                    color = if (currentTheme.isDark) Color.White.copy(alpha = 0.6f) else Color.Gray,
-                    fontSize = 14.sp,
+                    color = funkyColors.mute,
+                    fontSize = 13.5.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
-        }
-        Column(horizontalAlignment = Alignment.End) {
-            Text(chat.time, fontSize = 12.sp, color = if (currentTheme.isDark) Color.White.copy(alpha = 0.5f) else Color.Gray)
-            Spacer(modifier = Modifier.height(6.dp))
-            if (chat.unreadCount > 0) {
-                Box(
-                    contentAlignment = Alignment.Center, 
-                    modifier = Modifier
-                        .size(20.dp)
-                        .background(if (currentTheme.isDark) currentTheme.themeColor else ChillGoldIcon, CircleShape)
-                ) {
-                    Text(
-                        text = chat.unreadCount.toString(),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
+            Spacer(modifier = Modifier.width(8.dp))
+            Column(horizontalAlignment = Alignment.End) {
+                Text(chat.time, fontSize = 11.5.sp, color = funkyColors.mute)
+                Spacer(modifier = Modifier.height(6.dp))
+                if (chat.unreadCount > 0) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(20.dp)
+                            .background(funkyColors.mango, CircleShape)
+                    ) {
+                        Text(
+                            text = chat.unreadCount.toString(),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = funkyColors.onMango
+                        )
+                    }
                 }
             }
         }
@@ -6557,442 +6611,6 @@ private fun NextStepReportRow(
             fontWeight = FontWeight.Medium,
             lineHeight = 16.sp
         )
-    }
-}
-
-@Composable
-fun OneToOneChatBottomSheetContent(
-    selectedThemeIndex: Int,
-    chatUser: PrivateChatItem,
-    messagesList: List<DirectMessage>,
-    isBlocked: Boolean = false,
-    onBlockToggleClick: (() -> Unit)? = null,
-    onSendMessage: (String) -> Unit,
-    onBack: () -> Unit
-) {
-    com.example.ui.components.SecureWindow(enabled = true)
-    val currentTheme = roomThemes[selectedThemeIndex]
-    val textColor = if (currentTheme.isDark) Color.White else Color.Black
-    val secondaryTextColor = if (currentTheme.isDark) Color.White.copy(alpha = 0.7f) else Color.Gray
-    var typedMsg by remember { mutableStateOf("") }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .fillMaxHeight(0.85f)
-            .background(
-                if (currentTheme.isDark) Color(0xFF111827) else Color(0xFFF9FAFB)
-            ),
-        verticalArrangement = Arrangement.SpaceBetween
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            // Header Row
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(if (currentTheme.isDark) Color(0xFF1F2937) else Color.White)
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clickable { onBack() },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CuteBackArrowIcon(modifier = Modifier.size(20.dp), tint = textColor)
-                    }
-                    Spacer(modifier = Modifier.width(4.dp))
-
-                    com.example.ui.components.PresenceAvatar(
-                        avatarUrl = chatUser.imageUrl,
-                        size = 40.dp,
-                        isOnline = chatUser.isOnline,
-                        countryCode = chatUser.flagCode,
-                        userId = chatUser.id,
-                        showFlagBadge = true,
-                        enableFrameAnimation = true
-                    )
-
-                    Spacer(modifier = Modifier.width(12.dp))
-
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(text = chatUser.name, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = textColor)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Box(modifier = Modifier.size(8.dp).background(LiveGreen, CircleShape))
-                        }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            SoftMoonIcon(size = 11.dp, color = secondaryTextColor)
-                            Text(text = "11:10 PM", fontSize = 11.sp, color = secondaryTextColor)
-                        }
-                    }
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    if (onBlockToggleClick != null) {
-                        Text(
-                            text = if (isBlocked) "Unblock" else "Block",
-                            color = Color(0xFFEF4444),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(100.dp))
-                                .clickable { onBlockToggleClick() }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
-                    Text(
-                        text = "invite",
-                        color = Color(0xFF00C4FF),
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
-                        modifier = Modifier
-                            .clickable { }
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-            }
-
-            // Status room bar
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(if (currentTheme.isDark) Color.White.copy(alpha = 0.05f) else Color(0xFFFEFBF0))
-                    .border(width = 1.dp, color = if (currentTheme.isDark) Color.White.copy(alpha = 0.1f) else Color(0xFFFEF3C7))
-                    .padding(horizontal = 20.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CuteWaveformIcon(modifier = Modifier.size(18.dp), tint = Color(0xFFFBBF24))
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = "${chatUser.name} is in this room",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = textColor
-                    )
-                }
-
-                Button(
-                    onClick = { },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (currentTheme.isDark) currentTheme.themeColor else Color(0xFFFEF3C7)
-                    ),
-                    shape = RoundedCornerShape(100.dp),
-                    border = BorderStroke(1.dp, Color(0xFFFBBF24)),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)
-                ) {
-                    Text(text = "Join Room", color = if (currentTheme.isDark) Color.White else Color(0xFF78350F), fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Text(text = "Today", fontSize = 11.sp, color = secondaryTextColor.copy(alpha = 0.8f))
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-            ) {
-                androidx.compose.foundation.lazy.LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    items(messagesList) { msg ->
-                        val alignEnd = msg.isSentByMe
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = if (alignEnd) Arrangement.End else Arrangement.Start
-                        ) {
-                            if (!alignEnd) {
-                                Box(modifier = Modifier.size(36.dp)) {
-                                    AsyncImage(
-                                        model = chatUser.imageUrl,
-                                        contentDescription = chatUser.name,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .clip(CircleShape)
-                                            .background(Color.LightGray)
-                                    )
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.BottomEnd)
-                                            .offset(x = 1.dp, y = 1.dp)
-                                            .size(14.dp)
-                                            .clip(CircleShape)
-                                            .background(Color.White)
-                                            .padding(0.5.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        CircleFlag(
-                                            countryCode = chatUser.flagCode,
-                                            modifier = Modifier.fillMaxSize().clip(CircleShape)
-                                        )
-                                    }
-                                }
-                                Spacer(modifier = Modifier.width(8.dp))
-                            }
-
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = if (alignEnd) Arrangement.End else Arrangement.Start
-                            ) {
-                                Column(
-                                    horizontalAlignment = if (alignEnd) Alignment.End else Alignment.Start
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(
-                                                RoundedCornerShape(
-                                                    topStart = 16.dp,
-                                                    topEnd = 16.dp,
-                                                    bottomStart = if (alignEnd) 16.dp else 4.dp,
-                                                    bottomEnd = if (alignEnd) 4.dp else 16.dp
-                                                )
-                                            )
-                                            .background(
-                                                if (alignEnd) {
-                                                    Color(0xFF00C4FF)
-                                                } else {
-                                                    Color.White
-                                                }
-                                            )
-                                            .border(
-                                                1.dp,
-                                                if (alignEnd) Color.Transparent else Color(0xFFE5E7EB),
-                                                RoundedCornerShape(
-                                                    topStart = 16.dp,
-                                                    topEnd = 16.dp,
-                                                    bottomStart = if (alignEnd) 16.dp else 4.dp,
-                                                    bottomEnd = if (alignEnd) 4.dp else 16.dp
-                                                )
-                                            )
-                                            .padding(horizontal = 14.dp, vertical = 10.dp)
-                                    ) {
-                                        Text(
-                                            text = msg.text,
-                                            fontSize = 14.sp,
-                                            color = if (alignEnd) Color.White else Color.Black
-                                        )
-                                    }
-
-                                    Spacer(modifier = Modifier.height(3.dp))
-                                    
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(text = msg.time, fontSize = 10.sp, color = secondaryTextColor)
-                                        if (alignEnd) {
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            FunkyDoubleCheckIcon(
-                                                color = Color(0xFF00C4FF),
-                                                modifier = Modifier.size(14.dp)
-                                            )
-                                        }
-                                    }
-                                }
-
-                                if (!alignEnd) {
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    // AI rewrite/support pill next to received bubble
-                                    Row(
-                                        modifier = Modifier
-                                            .background(Color.White, RoundedCornerShape(100.dp))
-                                            .border(1.dp, Color(0xFFE5E7EB), RoundedCornerShape(100.dp))
-                                            .clickable { }
-                                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text("AI", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00C4FF))
-                                        Spacer(modifier = Modifier.width(2.dp))
-                                        FunkyPlayIcon(color = Color.Gray, modifier = Modifier.size(8.dp))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Bottom input rows
-        if (isBlocked) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(if (currentTheme.isDark) Color(0xFF1F2937) else Color.White)
-                    .padding(horizontal = 20.dp, vertical = 16.dp)
-                    .navigationBarsPadding(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = com.example.repository.USER_BLOCKED_ERROR_MESSAGE,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = secondaryTextColor
-                )
-            }
-        } else {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(if (currentTheme.isDark) Color(0xFF1F2937) else Color.White)
-                .padding(bottom = 12.dp)
-        ) {
-            // [ EN v ] Translate... capsule
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
-                    .background(if (currentTheme.isDark) Color.Black.copy(alpha = 0.2f) else Color(0xFFF3F4F6), RoundedCornerShape(100.dp))
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Row(
-                        modifier = Modifier
-                            .background(if (currentTheme.isDark) Color.White.copy(alpha=0.1f) else Color.White, RoundedCornerShape(100.dp))
-                            .border(1.dp, Color.LightGray.copy(alpha = 0.5f), RoundedCornerShape(100.dp))
-                            .padding(horizontal = 8.dp, vertical = 3.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("EN", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = textColor)
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text("^", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
-                    }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(text = "Translate...", fontSize = 12.sp, color = secondaryTextColor)
-                }
-                SoftSearchIcon(size = 14.dp, color = Color.Gray)
-            }
-
-            // Input Field Row
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .background(
-                            if (currentTheme.isDark) Color.Black.copy(alpha = 0.3f) else Color(0xFFF3F4F6),
-                            RoundedCornerShape(100.dp)
-                        )
-                        .border(
-                            1.dp,
-                            if (currentTheme.isDark) Color.White.copy(alpha = 0.15f) else Color.Transparent,
-                            RoundedCornerShape(100.dp)
-                        )
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(24.dp)
-                            .clickable { },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        SoftMicIcon(size = 20.dp, color = secondaryTextColor)
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    androidx.compose.foundation.text.BasicTextField(
-                        value = typedMsg,
-                        onValueChange = { typedMsg = it },
-                        modifier = Modifier.weight(1f),
-                        textStyle = androidx.compose.ui.text.TextStyle(
-                            fontSize = 14.sp,
-                            color = textColor
-                        ),
-                        singleLine = true,
-                        decorationBox = { innerTextField ->
-                            Box(contentAlignment = Alignment.CenterStart) {
-                                if (typedMsg.isEmpty()) {
-                                    Text(text = "Message...", fontSize = 14.sp, color = secondaryTextColor)
-                                }
-                                innerTextField()
-                            }
-                        }
-                    )
-
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Box(
-                        modifier = Modifier
-                            .size(24.dp)
-                            .background(if (currentTheme.isDark) Color.White.copy(alpha=0.1f) else Color.White, CircleShape)
-                            .border(1.dp, Color.LightGray.copy(alpha=0.5f), CircleShape)
-                            .clickable { },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("AI", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00C4FF))
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(8.dp))
-
-                Box(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(CircleShape)
-                        .background(if (typedMsg.isNotBlank()) Color(0xFF00C4FF) else Color.LightGray)
-                        .clickable {
-                            if (typedMsg.isNotBlank()) {
-                                onSendMessage(typedMsg)
-                                typedMsg = ""
-                            }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    CuteSendIcon(modifier = Modifier.size(18.dp), tint = Color.White)
-                }
-            }
-
-            // 5 Colorful Quick Action Buttons
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(modifier = Modifier.size(28.dp).clickable {}, contentAlignment = Alignment.Center) {
-                    SoftImageIcon(size = 22.dp, color = Color.Gray)
-                }
-                Box(modifier = Modifier.size(28.dp).clickable {}, contentAlignment = Alignment.Center) {
-                    SoftFaceIcon(size = 22.dp, color = Color.Gray)
-                }
-                Box(modifier = Modifier.size(28.dp).clickable {}, contentAlignment = Alignment.Center) {
-                    SoftPlusIcon(size = 22.dp, color = Color.Gray)
-                }
-                Box(modifier = Modifier.size(28.dp).clickable {}, contentAlignment = Alignment.Center) {
-                    CustomGiftBoxIcon(tint = Color(0xFFEC4899), modifier = Modifier.size(22.dp))
-                }
-                Box(modifier = Modifier.size(28.dp).clickable {}, contentAlignment = Alignment.Center) {
-                    SoftHeartIcon(isLiked = true, size = 22.dp, color = Color(0xFFEC4899))
-                }
-            }
-        }
-        }
     }
 }
 
