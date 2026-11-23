@@ -18,7 +18,7 @@ import net.sqlcipher.database.SupportFactory
         LocalMessageTranslation::class,
         InboxFailureEntity::class
     ],
-    version = 9,
+    version = 10,
     exportSchema = false
 )
 abstract class EncryptedChatDatabase : RoomDatabase() {
@@ -37,6 +37,30 @@ abstract class EncryptedChatDatabase : RoomDatabase() {
 
         @Volatile
         private var currentUid: String? = null
+
+        private val MIGRATION_9_10 = object : androidx.room.migration.Migration(9, 10) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE dm_messages ADD COLUMN clientId TEXT")
+                db.execSQL("ALTER TABLE dm_messages ADD COLUMN status TEXT NOT NULL DEFAULT 'SENT'")
+                db.execSQL("ALTER TABLE dm_messages ADD COLUMN failReason TEXT")
+                db.execSQL("ALTER TABLE dm_messages ADD COLUMN retryCount INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE dm_messages ADD COLUMN nextRetryAt INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE dm_messages ADD COLUMN localMediaPath TEXT")
+                db.execSQL("ALTER TABLE dm_messages ADD COLUMN mediaMimeType TEXT")
+                db.execSQL("ALTER TABLE dm_messages ADD COLUMN mediaDurationSec INTEGER")
+                db.execSQL("ALTER TABLE dm_messages ADD COLUMN mediaCaption TEXT")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_dm_messages_clientId ON dm_messages(clientId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_dm_messages_status ON dm_messages(status)")
+
+                db.execSQL("ALTER TABLE group_messages ADD COLUMN clientId TEXT")
+                db.execSQL("ALTER TABLE group_messages ADD COLUMN status TEXT NOT NULL DEFAULT 'SENT'")
+                db.execSQL("ALTER TABLE group_messages ADD COLUMN failReason TEXT")
+                db.execSQL("ALTER TABLE group_messages ADD COLUMN retryCount INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE group_messages ADD COLUMN nextRetryAt INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_group_messages_clientId ON group_messages(clientId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_group_messages_status ON group_messages(status)")
+            }
+        }
 
         fun getInstance(context: Context, vaultKey: ByteArray, uid: String? = null): EncryptedChatDatabase {
             val effectiveUid = uid?.trim()?.takeIf { it.isNotBlank() }
@@ -89,6 +113,7 @@ abstract class EncryptedChatDatabase : RoomDatabase() {
                 com.example.ActiveUserManager.dbName(effectiveUid)
             )
                 .openHelperFactory(openHelperFactory)
+                .addMigrations(MIGRATION_9_10)
                 .fallbackToDestructiveMigration()
                 .build()
         }

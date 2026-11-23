@@ -214,7 +214,7 @@ fun PendingRoomInviteOverlay(
                                 } catch (e: Exception) {
                                     withContext(Dispatchers.Main) {
                                         RoomInviteOverlayManager.currentInvite = null
-                                        Toast.makeText(context, "Error joining room: ${e.message}", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, com.example.util.ErrorMapper.map(e), Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             }

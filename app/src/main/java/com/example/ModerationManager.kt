@@ -491,13 +491,14 @@ object ModerationManager {
             } else {
                 val errBody = response.errorBody()?.string() ?: response.message()
                 Log.e(TAG, "adminApplyModerationAction failed (${response.code()}): $errBody")
-                Result.failure(Exception(mapModerationError(errBody, "Failed (${response.code()}): $errBody")))
+                val fallback = com.example.util.ErrorMapper.mapHttp(response.code(), errBody)
+                Result.failure(Exception(mapModerationError(errBody, fallback)))
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "Exception in applyModerationAction", e)
-            Result.failure(Exception(mapModerationError(e.message, "Network error applying moderation action.")))
+            Result.failure(Exception(mapModerationError(e.message, com.example.util.ErrorMapper.map(e))))
         }
     }
 
@@ -511,7 +512,7 @@ object ModerationManager {
         if (!SupabaseSessionManager.isValidUuid(trimmedTarget)) {
             val err = "Target user ID '$trimmedTarget' is not a valid Supabase UUID."
             Log.e(TAG, err)
-            return@withContext Result.failure(IllegalArgumentException(err))
+            return@withContext Result.failure(IllegalArgumentException("Unable to revoke moderation for this user."))
         }
 
         try {
@@ -561,14 +562,15 @@ object ModerationManager {
                 } else {
                     val delErr = delResponse.errorBody()?.string() ?: delResponse.message()
                     Log.e(TAG, "Both RPC and delete fallback failed: $delErr")
-                    Result.failure(Exception("Failed to revoke: $errBody"))
+                    val fallback = com.example.util.ErrorMapper.mapHttp(delResponse.code(), delErr)
+                    Result.failure(Exception(mapModerationError(delErr, fallback)))
                 }
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "Exception in revokeModerationAction", e)
-            Result.failure(e)
+            Result.failure(Exception(com.example.util.ErrorMapper.map(e)))
         }
     }
 

@@ -11,6 +11,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.SpanStyle
@@ -19,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.StartupPrefsStore
 import com.example.ui.components.FunkyLockIcon
 import com.example.ui.components.SoftDocumentIcon
 import com.example.ui.components.SoftGroupIcon
@@ -26,6 +28,7 @@ import com.example.ui.components.SoftOpenInNewIcon
 import com.example.ui.components.SoftShieldIcon
 import com.example.ui.components.SoftTrashIcon
 import com.example.ui.theme.LocalFunkyColors
+import kotlinx.coroutines.launch
 
 @Composable
 fun PrivacyScreen(
@@ -33,9 +36,13 @@ fun PrivacyScreen(
     onBackClick: () -> Unit = {}
 ) {
     BackHandler { onBackClick() }
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
     val funkyColors = LocalFunkyColors.current
-    var isAgreed by remember { mutableStateOf(false) }
+    var isAgreed by remember {
+        mutableStateOf(StartupPrefsStore.getFastSnapshot(context).privacyAccepted)
+    }
     val targetUrl = "https://lost39.github.io/funkytalk/#privacy"
 
     Scaffold(
@@ -299,7 +306,10 @@ fun PrivacyScreen(
                     Button(
                         onClick = {
                             if (isAgreed) {
-                                onContinueClick()
+                                coroutineScope.launch {
+                                    StartupPrefsStore.markPrivacyAccepted(context)
+                                    onContinueClick()
+                                }
                             }
                         },
                         enabled = isAgreed,

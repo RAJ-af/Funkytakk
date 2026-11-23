@@ -1,15 +1,19 @@
 package com.example.repository
 
 import android.content.Context
+import android.net.Uri
 import android.util.Base64
 import android.util.Log
+import com.example.ActiveUserManager
 import com.example.AppwriteUploader
+import com.example.BuildConfig
 import com.example.CloudinaryUploader
 import com.example.CreateSignedUrlRequest
 import com.example.GetOrCreateDmConversationRequest
 import com.example.SendDmMessageRequest
 import com.example.SupabaseClient
 import com.example.SupabaseSessionManager
+import com.example.crypto.ChatTimingTracker
 import com.example.crypto.E2EEManager
 import com.example.crypto.E2EEMediaManager
 import com.example.crypto.VaultSecurityManager
@@ -17,17 +21,25 @@ import com.example.crypto.VaultStatus
 import com.example.db.EncryptedChatDatabase
 import com.example.db.LocalDmConversation
 import com.example.db.LocalDmMessage
+import com.example.db.LocalMessageStatus
 import com.example.realtime.RealtimeTableEvent
 import com.example.realtime.VoiceRoomRealtimeManager
+import com.example.ui.components.AppNetworkManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
+import java.io.IOException
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 class RecipientNotReadyException(val recipientName: String) : Exception(
     "$recipientName isn't ready for secure chat yet. This user has not opened the app or registered encryption keys yet."
@@ -35,7 +47,15 @@ class RecipientNotReadyException(val recipientName: String) : Exception(
 
 object EncryptedChatRepository {
     private const val TAG = "EncryptedChatRepo"
+    private const val KEY_CACHE_TTL_MS = 10 * 60 * 1000L
+    private const val MAX_AUTO_RETRIES = 3
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private data class CachedPublicKey(
+        val publicKey: String,
+        val keyVersion: Int,
+        val fetchedAt: Long = System.currentTimeMillis()
+    )
 
     @Volatile
     private var database: EncryptedChatDatabase? = null
@@ -50,11 +70,27 @@ object EncryptedChatRepository {
     private val _totalUnreadCount = MutableStateFlow(0)
     val totalUnreadCount: StateFlow<Int> = _totalUnreadCount.asStateFlow()
 
+    // Instant in-memory optimistic overlay so the bubble shows in the exact tap frame even on slow eMMC devices
+    private val _optimisticMessages = MutableStateFlow<List<LocalDmMessage>>(emptyList())
+    val optimisticMessages: StateFlow<List<LocalDmMessage>> = _optimisticMessages.asStateFlow()
+
+    private val _conversationIdAliases = MutableStateFlow<Map<String, String>>(emptyMap())
+    val conversationIdAliases: StateFlow<Map<String, String>> = _conversationIdAliases.asStateFlow()
+
     private val processedMessageIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private val publicKeyCache = ConcurrentHashMap<String, CachedPublicKey>()
+    private val resolvedUserIdCache = ConcurrentHashMap<String, String>()
+    private val verifiedServerConvIds = ConcurrentHashMap.newKeySet<String>()
+    private val offlineTempConvIds = ConcurrentHashMap.newKeySet<String>()
+    private val senderProfileCache = ConcurrentHashMap<String, Triple<String, String?, String?>>()
+    private val conversationSendMutexes = ConcurrentHashMap<String, Mutex>()
+    private val outboxResumeMutex = Mutex()
+    private val activeSendClientIds = ConcurrentHashMap.newKeySet<String>()
 
     private var conversationCollectJob: Job? = null
     private var realtimeListenerJob: Job? = null
     private var vaultObserverJob: Job? = null
+    private var networkObserverJob: Job? = null
 
     @Volatile
     private var isInitialized = false
@@ -62,6 +98,7 @@ object EncryptedChatRepository {
     fun init(context: Context) {
         val appContext = context.applicationContext
         VaultSecurityManager.init(appContext)
+        AppNetworkManager.startMonitoring(appContext)
         if (isInitialized) {
             if (VaultSecurityManager.vaultStatus.value == VaultStatus.UNLOCKED && database == null) {
                 VaultSecurityManager.getActiveVaultKey(appContext)?.let { openDatabase(appContext, it) }
@@ -88,13 +125,35 @@ object EncryptedChatRepository {
             }
         }
 
-        // Start listening to realtime events
+        // Start listening to realtime & network restoration events
         startRealtimeListener(appContext)
+        startNetworkObserver(appContext)
+    }
+
+    private fun startNetworkObserver(context: Context) {
+        networkObserverJob?.cancel()
+        networkObserverJob = scope.launch {
+            AppNetworkManager.networkRestoredEvents.collect {
+                Log.d(TAG, "Network restored; reconnecting realtime, draining DM inbox, and retrying outbox")
+                VoiceRoomRealtimeManager.reconnectNowIfNeeded()
+                launch { fetchAndProcessPendingInbox(context) }
+                launch { resumePendingOutbox(context) }
+            }
+        }
+    }
+
+    fun onAppResumed(context: Context) {
+        val appContext = context.applicationContext
+        scope.launch {
+            VoiceRoomRealtimeManager.reconnectNowIfNeeded()
+            fetchAndProcessPendingInbox(appContext)
+            resumePendingOutbox(appContext)
+        }
     }
 
     private fun openDatabase(context: Context, vaultKey: ByteArray) {
         try {
-            val uid = com.example.ActiveUserManager.getActiveUid(context) ?: return
+            val uid = ActiveUserManager.getActiveUid(context) ?: return
             database = EncryptedChatDatabase.getInstance(context, vaultKey, uid)
             Log.d(TAG, "SQLCipher EncryptedChatDatabase opened successfully for UID $uid.")
 
@@ -106,13 +165,14 @@ object EncryptedChatRepository {
                 }
             }
 
-            // Sync identity key & process mailbox
+            // Sync identity key, process mailbox, & resume persisted outbox
             scope.launch {
                 val myUserId = SupabaseSessionManager.getUserId(context)
                 if (!myUserId.isNullOrBlank()) {
-                    E2EEManager.ensureIdentityKeyInitialized(context)
+                    launch { E2EEManager.ensureIdentityKeyInitialized(context) }
                     VoiceRoomRealtimeManager.subscribeDmInbox(myUserId)
-                    fetchAndProcessPendingInbox(context)
+                    launch { fetchAndProcessPendingInbox(context) }
+                    launch { resumePendingOutbox(context, fromColdStart = true) }
                 }
             }
         } catch (e: Exception) {
@@ -126,12 +186,21 @@ object EncryptedChatRepository {
         database = null
         _conversations.value = emptyList()
         _totalUnreadCount.value = 0
+        _optimisticMessages.value = emptyList()
         EncryptedChatDatabase.closeInstance()
     }
 
     fun resetForLogout() {
         closeDatabase()
         processedMessageIds.clear()
+        publicKeyCache.clear()
+        resolvedUserIdCache.clear()
+        verifiedServerConvIds.clear()
+        offlineTempConvIds.clear()
+        senderProfileCache.clear()
+        conversationSendMutexes.clear()
+        activeSendClientIds.clear()
+        _conversationIdAliases.value = emptyMap()
     }
 
     private fun startRealtimeListener(context: Context) {
@@ -142,13 +211,13 @@ object EncryptedChatRepository {
                     is RealtimeTableEvent.DmMessageReceived -> {
                         val myUserId = SupabaseSessionManager.getUserId(context)
                         if (!myUserId.isNullOrBlank() && event.recipientId == myUserId) {
-                            Log.d(TAG, "New live DM message received for me! Processing...")
                             processIncomingMessageRecord(context, event.record)
                         }
                     }
                     is RealtimeTableEvent.Reconnected -> {
                         Log.d(TAG, "Realtime reconnected; checking pending DM mailbox...")
-                        fetchAndProcessPendingInbox(context)
+                        launch { fetchAndProcessPendingInbox(context) }
+                        launch { resumePendingOutbox(context) }
                     }
                     else -> {}
                 }
@@ -192,27 +261,35 @@ object EncryptedChatRepository {
             }
 
             Log.d(TAG, "Found $fetchedCount pending encrypted DM messages in mailbox")
-            for (msg in list) {
-                try {
-                    val ok = processIncomingDmMessage(
-                        context = context,
-                        token = token,
-                        msgId = msg.id,
-                        convId = msg.conversation_id,
-                        senderId = msg.sender_id,
-                        recipientId = msg.recipient_id,
-                        ciphertext = msg.ciphertext,
-                        messageType = msg.message_type ?: "text",
-                        storagePath = msg.storage_path,
-                        createdAtIso = msg.created_at
-                    )
-                    if (ok) savedCount++ else failedCount++
-                } catch (e: Exception) {
-                    failedCount++
-                    lastError = e.message
-                    Log.w(TAG, "Failed to decrypt and process message ${msg.id}: ${e.message}")
-                }
+            val semaphore = Semaphore(4)
+            val results = coroutineScope {
+                list.map { msg ->
+                    async(Dispatchers.IO) {
+                        semaphore.withPermit {
+                            try {
+                                processIncomingDmMessage(
+                                    context = context,
+                                    token = token,
+                                    msgId = msg.id,
+                                    convId = msg.conversation_id,
+                                    senderId = msg.sender_id,
+                                    recipientId = msg.recipient_id,
+                                    ciphertext = msg.ciphertext,
+                                    messageType = msg.message_type ?: "text",
+                                    storagePath = msg.storage_path,
+                                    createdAtIso = msg.created_at
+                                )
+                            } catch (e: Exception) {
+                                lastError = e.message
+                                Log.w(TAG, "Failed to decrypt and process message ${msg.id}: ${e.message}")
+                                false
+                            }
+                        }
+                    }
+                }.awaitAll()
             }
+            savedCount = results.count { it }
+            failedCount = results.count { !it }
         } catch (e: Exception) {
             lastError = e.message
             Log.w(TAG, "Error in fetchAndProcessPendingInbox: ${e.message}")
@@ -275,18 +352,20 @@ object EncryptedChatRepository {
 
         // Deduplication
         if (processedMessageIds.contains(msgId) || db.messageDao().messageExists(msgId)) {
-            Log.d(TAG, "Message $msgId already processed or exists in local DB; acknowledging server row")
             processedMessageIds.add(msgId)
-            deleteMessageFromServer(context, token, msgId)
-            db.inboxFailureDao().deleteFailure(msgId)
+            scope.launch(Dispatchers.IO) {
+                deleteMessageFromServer(context, token, msgId)
+                db.inboxFailureDao().deleteFailure(msgId)
+            }
             return true
         }
 
         val timestamp = parseTimestampToEpoch(createdAtIso)
+        val rxStartMs = ChatTimingTracker.nowMs()
 
-        // 1. Decrypt using Tink HybridDecrypt
+        // 1. Decrypt using Tink HybridDecrypt on Dispatchers.Default
         val decryptedText = try {
-            E2EEManager.decryptMessage(context, ciphertext)
+            E2EEManager.decryptMessageAsync(context, ciphertext)
         } catch (e: Exception) {
             Log.w(TAG, "Failed to decrypt DM message $msgId: ${e.message}")
             db.inboxFailureDao().insertFailure(
@@ -298,6 +377,8 @@ object EncryptedChatRepository {
             )
             return false
         }
+        val receiveLatencyMs = (ChatTimingTracker.nowMs() - rxStartMs).coerceAtLeast(0L)
+        ChatTimingTracker.logServerEchoOrReceive("DM", msgId, receiveLatencyMs, isEcho = false)
 
         // 2. Check Reaction
         val trimmed = decryptedText.trim()
@@ -765,7 +846,9 @@ object EncryptedChatRepository {
             return
         }
 
-        // Insert message
+        verifiedServerConvIds.add(conversationId)
+
+        // Insert message immediately into Room so it appears without waiting on profile network fetches
         val localMsg = LocalDmMessage(
             id = messageId,
             conversationId = conversationId,
@@ -773,7 +856,8 @@ object EncryptedChatRepository {
             recipientId = recipientId,
             text = plaintext,
             timestamp = timestamp,
-            isOutgoing = false
+            isOutgoing = false,
+            status = LocalMessageStatus.SENT
         )
         db.messageDao().insertMessage(localMsg)
 
@@ -782,28 +866,24 @@ object EncryptedChatRepository {
             partnerUserId = senderId
         )
 
-        // Find or create conversation
         val existingConv = db.conversationDao().getConversation(conversationId)
+        val cachedProfile = senderProfileCache[senderId]
         val needsProfileSync = existingConv == null ||
             existingConv.otherUserAvatar.isNullOrBlank() ||
             existingConv.otherUserFlag.isNullOrBlank() ||
             existingConv.otherUserName.isBlank() ||
             existingConv.otherUserName == "FunkyTalk User"
-        val profileInfo = if (needsProfileSync) {
-            fetchSenderProfileInfo(context, senderId)
-        } else {
-            null
-        }
+
         if (existingConv != null) {
-            if (profileInfo != null) {
+            if (cachedProfile != null) {
                 db.conversationDao().updateLastMessageAndProfile(
                     conversationId = conversationId,
                     text = plaintext,
                     time = timestamp,
                     unreadDelta = if (isChatOpen) 0 else 1,
-                    name = profileInfo.first.takeIf { it != "FunkyTalk User" },
-                    avatar = profileInfo.second ?: existingConv.otherUserAvatar,
-                    flag = profileInfo.third ?: existingConv.otherUserFlag
+                    name = cachedProfile.first.takeIf { it != "FunkyTalk User" },
+                    avatar = cachedProfile.second ?: existingConv.otherUserAvatar,
+                    flag = cachedProfile.third ?: existingConv.otherUserFlag
                 )
             } else {
                 db.conversationDao().updateLastMessage(
@@ -814,20 +894,37 @@ object EncryptedChatRepository {
                 )
             }
         } else {
-            // Fetch sender profile details if available
-            val senderName = profileInfo?.first ?: "FunkyTalk User"
             val newConv = LocalDmConversation(
                 id = conversationId,
                 otherUserId = senderId,
-                otherUserName = senderName,
-                otherUserAvatar = profileInfo?.second,
-                otherUserFlag = profileInfo?.third,
+                otherUserName = cachedProfile?.first ?: "FunkyTalk User",
+                otherUserAvatar = cachedProfile?.second,
+                otherUserFlag = cachedProfile?.third,
                 lastMessageText = plaintext,
                 lastMessageTime = timestamp,
                 unreadCount = if (isChatOpen) 0 else 1,
                 createdAt = timestamp
             )
             db.conversationDao().insertOrUpdate(newConv)
+        }
+
+        if (needsProfileSync && cachedProfile == null) {
+            scope.launch(Dispatchers.IO) {
+                val fetched = fetchSenderProfileInfo(context, senderId)
+                senderProfileCache[senderId] = fetched
+                val current = db.conversationDao().getConversation(conversationId)
+                if (current != null) {
+                    db.conversationDao().updateLastMessageAndProfile(
+                        conversationId = conversationId,
+                        text = current.lastMessageText,
+                        time = current.lastMessageTime,
+                        unreadDelta = 0,
+                        name = fetched.first.takeIf { it != "FunkyTalk User" },
+                        avatar = fetched.second ?: current.otherUserAvatar,
+                        flag = fetched.third ?: current.otherUserFlag
+                    )
+                }
+            }
         }
 
         // Trigger Android System Push Notification for incoming messages (de-duplicated with PushNotificationManager by conversationId)
@@ -884,8 +981,684 @@ object EncryptedChatRepository {
         }
     }
 
+    private suspend fun getRecipientPublicKeyCached(
+        context: Context,
+        token: String,
+        resolvedUserId: String,
+        displayName: String
+    ): Result<Pair<String, Int>> {
+        val now = System.currentTimeMillis()
+        val cached = publicKeyCache[resolvedUserId]
+        if (cached != null && (now - cached.fetchedAt) < KEY_CACHE_TTL_MS) {
+            return Result.success(cached.publicKey to cached.keyVersion)
+        }
+        val keyResp = SupabaseClient.api.getUserPublicKey(
+            apiKey = BuildConfig.SUPABASE_ANON_KEY,
+            auth = token,
+            userIdFilter = "eq.$resolvedUserId"
+        )
+        if (!keyResp.isSuccessful) {
+            return Result.failure(IOException("Public key lookup HTTP ${keyResp.code()}"))
+        }
+        val keyItem = keyResp.body()?.firstOrNull()
+        val pubKey = keyItem?.identity_public_key
+        if (pubKey.isNullOrBlank()) {
+            return Result.failure(RecipientNotReadyException(displayName))
+        }
+        publicKeyCache[resolvedUserId] = CachedPublicKey(pubKey, keyItem.key_version, now)
+        return Result.success(pubKey to keyItem.key_version)
+    }
+
+    private suspend fun resolveOrConfirmServerConversationId(
+        context: Context,
+        db: EncryptedChatDatabase,
+        token: String,
+        localConversationId: String,
+        resolvedUserId: String
+    ): Result<String> {
+        if (verifiedServerConvIds.contains(localConversationId)) {
+            return Result.success(localConversationId)
+        }
+        // Only treat an existing Room conversation ID as a server ID if it wasn't created offline.
+        if (!offlineTempConvIds.contains(localConversationId) && SupabaseSessionManager.isValidUuid(localConversationId)) {
+            // Confirm once via RPC if not yet verified in this session to handle offline-created DB rows across restarts
+            val rpcResp = SupabaseClient.api.getOrCreateDmConversation(
+                apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                auth = token,
+                body = GetOrCreateDmConversationRequest(p_other_user_id = resolvedUserId)
+            )
+            if (!rpcResp.isSuccessful) {
+                val errBody = runCatching { rpcResp.errorBody()?.string().orEmpty() }.getOrDefault("")
+                if (BlockRepository.isUserBlockedError(errBody)) {
+                    return Result.failure(UserBlockedException())
+                }
+                return Result.failure(IOException("Could not establish conversation HTTP ${rpcResp.code()}"))
+            }
+            val serverConvId = parseUuidResponse(rpcResp.body()?.string()?.trim().orEmpty())
+                ?: return Result.failure(IllegalStateException("Invalid conversation ID returned"))
+            verifiedServerConvIds.add(serverConvId)
+            if (serverConvId != localConversationId) {
+                migrateTempConversation(db, localConversationId, serverConvId)
+            }
+            return Result.success(serverConvId)
+        }
+
+        val rpcResp = SupabaseClient.api.getOrCreateDmConversation(
+            apiKey = BuildConfig.SUPABASE_ANON_KEY,
+            auth = token,
+            body = GetOrCreateDmConversationRequest(p_other_user_id = resolvedUserId)
+        )
+        if (!rpcResp.isSuccessful) {
+            val errBody = runCatching { rpcResp.errorBody()?.string().orEmpty() }.getOrDefault("")
+            if (BlockRepository.isUserBlockedError(errBody)) {
+                return Result.failure(UserBlockedException())
+            }
+            return Result.failure(IOException("Could not establish conversation HTTP ${rpcResp.code()}"))
+        }
+        val serverConvId = parseUuidResponse(rpcResp.body()?.string()?.trim().orEmpty())
+            ?: return Result.failure(IllegalStateException("Invalid conversation ID returned"))
+        verifiedServerConvIds.add(serverConvId)
+        offlineTempConvIds.remove(localConversationId)
+        if (serverConvId != localConversationId) {
+            migrateTempConversation(db, localConversationId, serverConvId)
+        }
+        return Result.success(serverConvId)
+    }
+
+    private suspend fun migrateTempConversation(
+        db: EncryptedChatDatabase,
+        oldConvId: String,
+        newConvId: String
+    ) {
+        db.messageDao().migrateConversationId(
+            oldConvId = oldConvId,
+            newConvId = newConvId,
+            conversationDao = db.conversationDao(),
+            reactionDao = db.dmMessageReactionDao()
+        )
+        _optimisticMessages.update { list ->
+            list.map { if (it.conversationId == oldConvId) it.copy(conversationId = newConvId) else it }
+        }
+        _conversationIdAliases.update { it + (oldConvId to newConvId) }
+    }
+
+    private fun isPermanentSendFailure(error: Throwable): Boolean {
+        if (error is UserBlockedException || error is RecipientNotReadyException) return true
+        val msg = error.message.orEmpty()
+        return msg.contains("HTTP 400") ||
+            msg.contains("HTTP 401") ||
+            msg.contains("HTTP 403") ||
+            msg.contains("HTTP 404") ||
+            msg.contains("HTTP 422") ||
+            msg.contains("code 400") ||
+            msg.contains("code 401") ||
+            msg.contains("code 403") ||
+            msg.contains("code 404") ||
+            msg.contains("code 422") ||
+            msg.contains("locked", ignoreCase = true) ||
+            msg.contains("not authenticated", ignoreCase = true)
+    }
+
+    private fun friendlyFailureReason(error: Throwable): String = when (error) {
+        is UserBlockedException -> "You can't send messages to this user"
+        is RecipientNotReadyException -> error.message ?: "Recipient encryption keys not ready"
+        is IOException -> "No internet connection"
+        else -> {
+            val raw = error.message.orEmpty()
+            when {
+                raw.contains("HTTP 401") || raw.contains("authenticated", ignoreCase = true) -> "Session expired — please tap Retry"
+                raw.contains("HTTP 403") || raw.contains("blocked", ignoreCase = true) -> "Action not permitted"
+                raw.contains("Unable to resolve host", ignoreCase = true) ||
+                    raw.contains("timeout", ignoreCase = true) ||
+                    raw.contains("network", ignoreCase = true) -> "Connection timed out"
+                else -> "Failed to send — tap to retry"
+            }
+        }
+    }
+
+    private fun removeOptimisticOverlay(clientId: String) {
+        _optimisticMessages.update { list -> list.filterNot { it.id == clientId || it.clientId == clientId } }
+    }
+
+    private suspend fun upsertConversationPreview(
+        context: Context,
+        db: EncryptedChatDatabase,
+        conversationId: String,
+        recipientUserId: String,
+        recipientName: String,
+        recipientAvatar: String?,
+        previewText: String,
+        messageType: String,
+        now: Long,
+        fetchProfileIfMissing: Boolean = true
+    ) {
+        val existingConv = db.conversationDao().getConversation(conversationId)
+        val cachedProfile = senderProfileCache[recipientUserId]
+        val partnerAvatar = recipientAvatar?.takeIf { it.isNotBlank() }
+            ?: existingConv?.otherUserAvatar?.takeIf { it.isNotBlank() }
+            ?: cachedProfile?.second
+        val partnerFlag = existingConv?.otherUserFlag?.takeIf { it.isNotBlank() }
+            ?: cachedProfile?.third
+        val updatedConv = if (existingConv != null) {
+            existingConv.copy(
+                lastMessageText = previewText,
+                lastMessageType = messageType,
+                lastMessageTime = maxOf(existingConv.lastMessageTime, now),
+                otherUserName = recipientName.ifBlank { existingConv.otherUserName },
+                otherUserAvatar = partnerAvatar,
+                otherUserFlag = partnerFlag ?: existingConv.otherUserFlag
+            )
+        } else {
+            LocalDmConversation(
+                id = conversationId,
+                otherUserId = recipientUserId,
+                otherUserName = recipientName.ifBlank { "FunkyTalk User" },
+                otherUserAvatar = partnerAvatar,
+                otherUserFlag = partnerFlag,
+                lastMessageText = previewText,
+                lastMessageType = messageType,
+                lastMessageTime = now,
+                unreadCount = 0,
+                createdAt = now
+            )
+        }
+        db.conversationDao().insertOrUpdate(updatedConv)
+        if (fetchProfileIfMissing && (partnerFlag.isNullOrBlank() || partnerAvatar.isNullOrBlank())) {
+            scope.launch(Dispatchers.IO) {
+                val info = fetchSenderProfileInfo(context, recipientUserId)
+                senderProfileCache[recipientUserId] = info
+                val curr = db.conversationDao().getConversation(conversationId)
+                if (curr != null) {
+                    db.conversationDao().updateLastMessageAndProfile(
+                        conversationId = conversationId,
+                        text = curr.lastMessageText,
+                        time = curr.lastMessageTime,
+                        unreadDelta = 0,
+                        name = info.first.takeIf { it != "FunkyTalk User" },
+                        avatar = curr.otherUserAvatar ?: info.second,
+                        flag = curr.otherUserFlag ?: info.third
+                    )
+                }
+            }
+        }
+    }
+
     /**
-     * Sends an encrypted 1:1 message to recipient.
+     * Optimistic instant enqueue for 1:1 DM text messages.
+     * Immediately updates the in-memory optimistic list synchronously for same-frame UI display,
+     * persists to Room as SENDING, and dispatches background encryption + network delivery with retries.
+     */
+    fun enqueueSendMessage(
+        context: Context,
+        conversationId: String,
+        recipientUserId: String,
+        recipientName: String,
+        recipientAvatar: String?,
+        text: String,
+        replyToText: String? = null,
+        replyToSender: String? = null,
+        tapElapsedMs: Long = ChatTimingTracker.nowMs()
+    ): String {
+        val appContext = context.applicationContext
+        val clientId = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+        val myUserId = SupabaseSessionManager.getUserId(appContext)
+            ?: ActiveUserManager.getActiveUid(appContext)
+            .orEmpty()
+        ChatTimingTracker.markTap(clientId, tapElapsedMs)
+
+        val optimisticMsg = LocalDmMessage(
+            id = clientId,
+            conversationId = conversationId,
+            senderId = myUserId,
+            recipientId = recipientUserId,
+            text = text,
+            messageType = "text",
+            timestamp = now,
+            isOutgoing = true,
+            replyToText = replyToText,
+            replyToSender = replyToSender,
+            clientId = clientId,
+            status = LocalMessageStatus.SENDING
+        )
+
+        // Synchronously publish into optimistic flow so UI renders in the exact same Compose frame
+        _optimisticMessages.update { it + optimisticMsg }
+
+        scope.launch(Dispatchers.IO) {
+            val db = database ?: run {
+                _optimisticMessages.update { list ->
+                    list.map { if (it.id == clientId) it.copy(status = LocalMessageStatus.FAILED, failReason = "Chat vault is locked") else it }
+                }
+                return@launch
+            }
+            db.messageDao().insertMessage(optimisticMsg)
+            removeOptimisticOverlay(clientId)
+            upsertConversationPreview(
+                context = appContext,
+                db = db,
+                conversationId = conversationId,
+                recipientUserId = recipientUserId,
+                recipientName = recipientName,
+                recipientAvatar = recipientAvatar,
+                previewText = text,
+                messageType = "text",
+                now = now
+            )
+            dispatchDmOutboxMessage(
+                context = appContext,
+                initialMessageId = clientId,
+                recipientNameHint = recipientName,
+                recipientAvatarHint = recipientAvatar,
+                allowAutoRetry = true
+            )
+        }
+        return clientId
+    }
+
+    /**
+     * Optimistic instant enqueue for 1:1 DM encrypted media (image or voice note).
+     * Writes the local decrypted media file + SENDING Room row immediately, then encrypts + uploads + sends in background.
+     */
+    fun enqueueSendMediaMessage(
+        context: Context,
+        conversationId: String,
+        recipientUserId: String,
+        recipientName: String,
+        recipientAvatar: String?,
+        rawBytes: ByteArray,
+        messageType: String,
+        mimeType: String,
+        durationSeconds: Int? = null,
+        replyToText: String? = null,
+        replyToSender: String? = null,
+        caption: String? = null,
+        tapElapsedMs: Long = ChatTimingTracker.nowMs()
+    ): String {
+        val appContext = context.applicationContext
+        val clientId = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+        val myUserId = SupabaseSessionManager.getUserId(appContext)
+            ?: ActiveUserManager.getActiveUid(appContext)
+            .orEmpty()
+        ChatTimingTracker.markTap(clientId, tapElapsedMs)
+
+        val cleanCaption = caption?.replace("\n", " ")?.replace("|", " ")?.trim()?.takeIf { it.isNotBlank() }
+        val localFile = saveLocalMediaFile(appContext, clientId, rawBytes, mimeType)
+        val localText = if (messageType == "image") {
+            if (cleanCaption != null) "[img]file://${localFile.absolutePath}|$cleanCaption" else "[img]file://${localFile.absolutePath}"
+        } else {
+            "[voice]file://${localFile.absolutePath}|${durationSeconds ?: 0}"
+        }
+        val previewText = if (messageType == "image") {
+            if (cleanCaption != null) "📷 $cleanCaption" else "📷 Photo"
+        } else {
+            "🎙️ Voice message"
+        }
+
+        val optimisticMsg = LocalDmMessage(
+            id = clientId,
+            conversationId = conversationId,
+            senderId = myUserId,
+            recipientId = recipientUserId,
+            text = localText,
+            messageType = messageType,
+            timestamp = now,
+            isOutgoing = true,
+            replyToText = replyToText,
+            replyToSender = replyToSender,
+            clientId = clientId,
+            status = LocalMessageStatus.SENDING,
+            localMediaPath = localFile.absolutePath,
+            mediaMimeType = mimeType,
+            mediaDurationSec = durationSeconds,
+            mediaCaption = cleanCaption
+        )
+
+        _optimisticMessages.update { it + optimisticMsg }
+
+        scope.launch(Dispatchers.IO) {
+            val db = database ?: run {
+                _optimisticMessages.update { list ->
+                    list.map { if (it.id == clientId) it.copy(status = LocalMessageStatus.FAILED, failReason = "Chat vault is locked") else it }
+                }
+                return@launch
+            }
+            db.messageDao().insertMessage(optimisticMsg)
+            removeOptimisticOverlay(clientId)
+            upsertConversationPreview(
+                context = appContext,
+                db = db,
+                conversationId = conversationId,
+                recipientUserId = recipientUserId,
+                recipientName = recipientName,
+                recipientAvatar = recipientAvatar,
+                previewText = previewText,
+                messageType = messageType,
+                now = now
+            )
+            dispatchDmOutboxMessage(
+                context = appContext,
+                initialMessageId = clientId,
+                recipientNameHint = recipientName,
+                recipientAvatarHint = recipientAvatar,
+                allowAutoRetry = true
+            )
+        }
+        return clientId
+    }
+
+    fun retryDmMessage(context: Context, messageId: String) {
+        val appContext = context.applicationContext
+        scope.launch(Dispatchers.IO) {
+            val db = database ?: return@launch
+            val existing = db.messageDao().getMessage(messageId) ?: return@launch
+            db.messageDao().updateMessageStatus(
+                id = messageId,
+                status = LocalMessageStatus.SENDING,
+                failReason = null,
+                retryCount = existing.retryCount,
+                nextRetryAt = 0L
+            )
+            dispatchDmOutboxMessage(
+                context = appContext,
+                initialMessageId = messageId,
+                recipientNameHint = null,
+                recipientAvatarHint = null,
+                allowAutoRetry = true
+            )
+        }
+    }
+
+    suspend fun deleteDmMessage(context: Context, messageId: String) = withContext(Dispatchers.IO) {
+        removeOptimisticOverlay(messageId)
+        val db = database ?: return@withContext
+        val existing = db.messageDao().getMessage(messageId)
+        if (existing != null) {
+            db.messageDao().deleteMessageAndRefreshConversation(
+                messageId = messageId,
+                conversationId = existing.conversationId,
+                conversationDao = db.conversationDao()
+            )
+        } else {
+            db.messageDao().deleteMessage(messageId)
+        }
+    }
+
+    suspend fun resumePendingOutbox(context: Context, fromColdStart: Boolean = false) = withContext(Dispatchers.IO) {
+        outboxResumeMutex.withLock {
+            val db = database ?: return@withLock
+            val pending = db.messageDao().getPendingOutgoingMessages()
+            if (pending.isEmpty()) return@withLock
+
+            val online = AppNetworkManager.checkConnection(context)
+            if (!online) {
+                if (fromColdStart) {
+                    pending.filter { it.status == LocalMessageStatus.SENDING }.forEach { msg ->
+                        db.messageDao().updateMessageStatus(
+                            id = msg.id,
+                            status = LocalMessageStatus.FAILED,
+                            failReason = "No internet connection",
+                            retryCount = msg.retryCount,
+                            nextRetryAt = 0L
+                        )
+                    }
+                }
+                return@withLock
+            }
+
+            for (msg in pending) {
+                if (activeSendClientIds.contains(msg.id)) continue
+                val conv = db.conversationDao().getConversation(msg.conversationId)
+                db.messageDao().updateMessageStatus(
+                    id = msg.id,
+                    status = LocalMessageStatus.SENDING,
+                    failReason = null,
+                    retryCount = msg.retryCount,
+                    nextRetryAt = 0L
+                )
+                dispatchDmOutboxMessage(
+                    context = context.applicationContext,
+                    initialMessageId = msg.id,
+                    recipientNameHint = conv?.otherUserName,
+                    recipientAvatarHint = conv?.otherUserAvatar,
+                    allowAutoRetry = false
+                )
+            }
+        }
+    }
+
+    private suspend fun dispatchDmOutboxMessage(
+        context: Context,
+        initialMessageId: String,
+        recipientNameHint: String?,
+        recipientAvatarHint: String?,
+        allowAutoRetry: Boolean
+    ): Result<LocalDmMessage> {
+        val db = database ?: return Result.failure(IllegalStateException("Chat vault is locked"))
+        val initialRow = db.messageDao().getMessage(initialMessageId)
+            ?: return Result.failure(IllegalStateException("Message deleted"))
+
+        if (!activeSendClientIds.add(initialRow.id)) {
+            return Result.success(initialRow)
+        }
+        val mutexKey = initialRow.recipientId.ifBlank { initialRow.conversationId }
+        val mutex = conversationSendMutexes.getOrPut(mutexKey) { Mutex() }
+
+        return try {
+            mutex.withLock {
+                var attempt = 0
+                val maxAttempts = if (allowAutoRetry) MAX_AUTO_RETRIES else 1
+                var lastErr: Throwable = IOException("Failed to send")
+
+                while (attempt < maxAttempts) {
+                    val currentRow = db.messageDao().getMessage(initialMessageId)
+                        ?: return@withLock Result.failure(IllegalStateException("Message deleted"))
+                    if (currentRow.status == LocalMessageStatus.SENT) {
+                        return@withLock Result.success(currentRow)
+                    }
+
+                    if (!AppNetworkManager.checkConnection(context)) {
+                        db.messageDao().updateMessageStatus(
+                            id = currentRow.id,
+                            status = LocalMessageStatus.FAILED,
+                            failReason = "No internet connection",
+                            retryCount = currentRow.retryCount,
+                            nextRetryAt = 0L
+                        )
+                        return@withLock Result.failure(IOException("No internet connection"))
+                    }
+
+                    val result = executeDmSendAttempt(context, db, currentRow, recipientNameHint)
+                    if (result.isSuccess) {
+                        val sentMsg = result.getOrThrow()
+                        db.messageDao().updateMessageStatus(
+                            id = sentMsg.id,
+                            status = LocalMessageStatus.SENT,
+                            failReason = null,
+                            retryCount = currentRow.retryCount,
+                            nextRetryAt = 0L
+                        )
+                        return@withLock Result.success(sentMsg.copy(status = LocalMessageStatus.SENT, failReason = null))
+                    }
+
+                    val err = result.exceptionOrNull() ?: IOException("Unknown error")
+                    lastErr = err
+                    if (isPermanentSendFailure(err)) {
+                        db.messageDao().updateMessageStatus(
+                            id = currentRow.id,
+                            status = LocalMessageStatus.FAILED,
+                            failReason = friendlyFailureReason(err),
+                            retryCount = currentRow.retryCount + 1,
+                            nextRetryAt = 0L
+                        )
+                        return@withLock Result.failure(err)
+                    }
+
+                    attempt++
+                    val nextRetryCount = currentRow.retryCount + 1
+                    val backoffMs = minOf(15_000L, 1200L * (1 shl (attempt - 1).coerceAtMost(3)))
+                    if (attempt < maxAttempts) {
+                        db.messageDao().updateMessageStatus(
+                            id = currentRow.id,
+                            status = LocalMessageStatus.SENDING,
+                            failReason = null,
+                            retryCount = nextRetryCount,
+                            nextRetryAt = System.currentTimeMillis() + backoffMs
+                        )
+                        delay(backoffMs)
+                    } else {
+                        db.messageDao().updateMessageStatus(
+                            id = currentRow.id,
+                            status = LocalMessageStatus.FAILED,
+                            failReason = friendlyFailureReason(err),
+                            retryCount = nextRetryCount,
+                            nextRetryAt = 0L
+                        )
+                    }
+                }
+                Result.failure(lastErr)
+            }
+        } finally {
+            activeSendClientIds.remove(initialMessageId)
+        }
+    }
+
+    private suspend fun executeDmSendAttempt(
+        context: Context,
+        db: EncryptedChatDatabase,
+        msg: LocalDmMessage,
+        recipientNameHint: String?
+    ): Result<LocalDmMessage> {
+        return try {
+            val myUserId = SupabaseSessionManager.ensureActiveSession(context)
+                ?: SupabaseSessionManager.getUserId(context)
+                ?: return Result.failure(IllegalStateException("User not authenticated"))
+            val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                ?: (SupabaseSessionManager.getAccessToken(context)?.let { "Bearer $it" })
+                ?: SupabaseSessionManager.getBearerToken(context)
+            if (token.isBlank()) {
+                return Result.failure(IllegalStateException("User not authenticated"))
+            }
+
+            val displayName = recipientNameHint?.ifBlank { null }
+                ?: db.conversationDao().getConversation(msg.conversationId)?.otherUserName?.ifBlank { null }
+                ?: "User"
+
+            if (msg.recipientId.isBlank() || msg.recipientId.startsWith("partner_mock")) {
+                return Result.failure(RecipientNotReadyException(displayName))
+            }
+
+            val resolvedUserId = resolveRecipientAuthUserId(context, msg.recipientId) ?: msg.recipientId
+            val keyPair = getRecipientPublicKeyCached(context, token, resolvedUserId, displayName).getOrElse {
+                return Result.failure(it)
+            }
+            val (recipientPublicKey, keyVersion) = keyPair
+
+            val serverConvId = resolveOrConfirmServerConversationId(
+                context = context,
+                db = db,
+                token = token,
+                localConversationId = msg.conversationId,
+                resolvedUserId = resolvedUserId
+            ).getOrElse { return Result.failure(it) }
+
+            val clientId = msg.clientId ?: msg.id
+            val isMedia = msg.messageType == "image" || msg.messageType == "voice"
+
+            var storagePathForRequest: String? = null
+            val encryptStartMs = ChatTimingTracker.nowMs()
+            val ciphertext = if (isMedia) {
+                val mediaPath = msg.localMediaPath
+                    ?: msg.text.removePrefix("[img]").removePrefix("[voice]")
+                        .substringBefore("|")
+                        .removePrefix("file://")
+                val localFile = File(mediaPath)
+                if (!localFile.exists()) {
+                    return Result.failure(IllegalStateException("Local media file missing"))
+                }
+                val rawBytes = withContext(Dispatchers.IO) { localFile.readBytes() }
+                val mimeType = msg.mediaMimeType
+                    ?: if (msg.messageType == "voice") "audio/aac" else "image/jpeg"
+
+                val (encryptedMediaBytes, keyBytes, nonceBytes) = withContext(Dispatchers.Default) {
+                    E2EEMediaManager.encryptMediaPayload(rawBytes)
+                }
+                val objectPath = "$serverConvId/$clientId.bin"
+                val reqBody = encryptedMediaBytes.toRequestBody("application/octet-stream".toMediaTypeOrNull())
+                val uploadRes = SupabaseClient.api.uploadDmMedia(
+                    auth = token,
+                    path = objectPath,
+                    body = reqBody
+                )
+                if (!uploadRes.isSuccessful && uploadRes.code() != 409) {
+                    return Result.failure(IOException("Storage upload HTTP ${uploadRes.code()}"))
+                }
+                storagePathForRequest = objectPath
+
+                val keyBase64 = Base64.encodeToString(keyBytes, Base64.NO_WRAP)
+                val nonceBase64 = Base64.encodeToString(nonceBytes, Base64.NO_WRAP)
+                val descriptorJson = JSONObject().apply {
+                    put("storage_path", objectPath)
+                    put("media_key", keyBase64)
+                    put("media_nonce", nonceBase64)
+                    put("mime_type", mimeType)
+                    msg.mediaDurationSec?.let { put("duration_seconds", it) }
+                    msg.mediaCaption?.takeIf { it.isNotBlank() }?.let { put("caption", it) }
+                }.toString()
+
+                E2EEManager.encryptMessageAsync(recipientPublicKey, descriptorJson)
+            } else {
+                E2EEManager.encryptMessageAsync(recipientPublicKey, msg.text)
+            }
+            val encryptMs = (ChatTimingTracker.nowMs() - encryptStartMs).coerceAtLeast(0L)
+            ChatTimingTracker.logEncrypt("DM", clientId, encryptMs, recipients = 1)
+
+            val sendStartMs = ChatTimingTracker.nowMs()
+            val sendResp = SupabaseClient.api.sendDmMessage(
+                apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                auth = token,
+                body = SendDmMessageRequest(
+                    id = clientId,
+                    conversation_id = serverConvId,
+                    sender_id = myUserId,
+                    recipient_id = resolvedUserId,
+                    ciphertext = ciphertext,
+                    nonce = "",
+                    key_version = keyVersion,
+                    message_type = msg.messageType,
+                    storage_path = storagePathForRequest
+                )
+            )
+            val sendMs = (ChatTimingTracker.nowMs() - sendStartMs).coerceAtLeast(0L)
+
+            if (sendResp.isSuccessful) {
+                ChatTimingTracker.logSendRequest("DM", clientId, sendMs, success = true)
+                return Result.success(msg.copy(conversationId = serverConvId, status = LocalMessageStatus.SENT, failReason = null))
+            }
+
+            val errBody = runCatching { sendResp.errorBody()?.string().orEmpty() }.getOrDefault("")
+            // Idempotent PK collision on retry -> earlier POST already delivered to server!
+            if (sendResp.code() == 409 || errBody.contains("23505") || errBody.contains("duplicate key", ignoreCase = true)) {
+                ChatTimingTracker.logSendRequest("DM", clientId, sendMs, success = true)
+                return Result.success(msg.copy(conversationId = serverConvId, status = LocalMessageStatus.SENT, failReason = null))
+            }
+
+            ChatTimingTracker.logSendRequest("DM", clientId, sendMs, success = false)
+            if (BlockRepository.isUserBlockedError(errBody)) {
+                return Result.failure(UserBlockedException())
+            }
+            if (sendResp.code() == 401 || sendResp.code() == 403) {
+                publicKeyCache.remove(resolvedUserId)
+            }
+            Result.failure(IllegalStateException("Failed to send message: HTTP ${sendResp.code()}"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Sends an encrypted 1:1 message to recipient (supports both non-chat-screen callers and direct awaiting callers).
      */
     suspend fun sendMessage(
         context: Context,
@@ -905,129 +1678,104 @@ object EncryptedChatRepository {
                 ?: (SupabaseSessionManager.getAccessToken(context)?.let { "Bearer $it" })
                 ?: SupabaseSessionManager.getBearerToken(context)
 
-            // 1. Fetch recipient's public key from Supabase user_public_keys
-            val displayName = recipientName.ifBlank { "Ye user" }
+            val displayName = recipientName.ifBlank { "User" }
             if (recipientUserId.isBlank() || recipientUserId.startsWith("partner_mock")) {
-                return@withContext Result.failure(
-                    RecipientNotReadyException(displayName)
-                )
+                return@withContext Result.failure(RecipientNotReadyException(displayName))
             }
 
             val resolvedUserId = resolveRecipientAuthUserId(context, recipientUserId) ?: recipientUserId
+            val (recipientPublicKey, keyVersion) = getRecipientPublicKeyCached(
+                context, token, resolvedUserId, displayName
+            ).getOrElse { return@withContext Result.failure(it) }
 
-            val keyResp = SupabaseClient.api.getUserPublicKey(
-                apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
-                auth = token,
-                userIdFilter = "eq.$resolvedUserId"
-            )
-            if (!keyResp.isSuccessful || keyResp.body().isNullOrEmpty()) {
-                Log.w(TAG, "Recipient $recipientUserId (resolved: $resolvedUserId) has no entry in user_public_keys (user hasn't opened app yet).")
-                return@withContext Result.failure(
-                    RecipientNotReadyException(displayName)
+            val existingConv = db.conversationDao().getConversationByOtherUser(resolvedUserId)
+            val localConvId = existingConv?.id ?: run {
+                val rpcResp = SupabaseClient.api.getOrCreateDmConversation(
+                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                    auth = token,
+                    body = GetOrCreateDmConversationRequest(p_other_user_id = resolvedUserId)
                 )
-            }
-            val keyItem = keyResp.body()!!.first()
-            val recipientPublicKey = keyItem.identity_public_key
-            if (recipientPublicKey.isNullOrBlank()) {
-                Log.w(TAG, "Recipient $recipientUserId (resolved: $resolvedUserId) public key is blank in user_public_keys.")
-                return@withContext Result.failure(
-                    RecipientNotReadyException(displayName)
-                )
-            }
-
-            // 2. Call RPC get_or_create_dm_conversation
-            val rpcResp = SupabaseClient.api.getOrCreateDmConversation(
-                apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
-                auth = token,
-                body = GetOrCreateDmConversationRequest(p_other_user_id = resolvedUserId)
-            )
-            if (!rpcResp.isSuccessful) {
-                val errBody = runCatching { rpcResp.errorBody()?.string().orEmpty() }.getOrDefault("")
-                if (BlockRepository.isUserBlockedError(errBody)) {
-                    return@withContext Result.failure(UserBlockedException())
+                if (!rpcResp.isSuccessful) {
+                    val errBody = runCatching { rpcResp.errorBody()?.string().orEmpty() }.getOrDefault("")
+                    if (BlockRepository.isUserBlockedError(errBody)) {
+                        return@withContext Result.failure(UserBlockedException())
+                    }
+                    return@withContext Result.failure(IllegalStateException("Could not establish conversation: ${rpcResp.message()}"))
                 }
-                return@withContext Result.failure(
-                    IllegalStateException("Could not establish conversation: ${rpcResp.message()}")
-                )
+                val parsed = parseUuidResponse(rpcResp.body()?.string()?.trim().orEmpty())
+                    ?: return@withContext Result.failure(IllegalStateException("Failed to get valid conversation ID"))
+                verifiedServerConvIds.add(parsed)
+                parsed
             }
-            val rawUuid = rpcResp.body()?.string()?.trim() ?: ""
-            val conversationId = parseUuidResponse(rawUuid)
-                ?: return@withContext Result.failure(IllegalStateException("Failed to get valid conversation ID"))
+            val serverConvId = resolveOrConfirmServerConversationId(
+                context = context,
+                db = db,
+                token = token,
+                localConversationId = localConvId,
+                resolvedUserId = resolvedUserId
+            ).getOrElse { return@withContext Result.failure(it) }
 
-            // 3. Encrypt message plaintext with Tink HPKE
-            val ciphertext = E2EEManager.encryptMessage(recipientPublicKey, text)
-
-            // 4. Insert into dm_messages (ephemeral server mailbox)
-            val sendResp = SupabaseClient.api.sendDmMessage(
-                apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
-                auth = token,
-                body = SendDmMessageRequest(
-                    conversation_id = conversationId,
-                    sender_id = myUserId,
-                    recipient_id = resolvedUserId,
-                    ciphertext = ciphertext,
-                    nonce = "",
-                    key_version = keyItem.key_version
-                )
-            )
-            if (!sendResp.isSuccessful) {
-                val errBody = runCatching { sendResp.errorBody()?.string().orEmpty() }.getOrDefault("")
-                if (BlockRepository.isUserBlockedError(errBody)) {
-                    return@withContext Result.failure(UserBlockedException())
-                }
-                return@withContext Result.failure(
-                    IllegalStateException("Failed to send message: code ${sendResp.code()}")
-                )
-            }
-
-            // 5. Save plaintext in local encrypted Room database
+            val clientId = UUID.randomUUID().toString()
             val now = System.currentTimeMillis()
-            val localMessageId = UUID.randomUUID().toString()
-            val localMessage = LocalDmMessage(
-                id = localMessageId,
-                conversationId = conversationId,
+            val optimistic = LocalDmMessage(
+                id = clientId,
+                conversationId = serverConvId,
                 senderId = myUserId,
-                recipientId = recipientUserId,
+                recipientId = resolvedUserId,
                 text = text,
                 timestamp = now,
                 isOutgoing = true,
                 replyToText = replyToText,
-                replyToSender = replyToSender
+                replyToSender = replyToSender,
+                clientId = clientId,
+                status = LocalMessageStatus.SENDING
             )
-            db.messageDao().insertMessage(localMessage)
+            db.messageDao().insertMessage(optimistic)
+            upsertConversationPreview(
+                context = context,
+                db = db,
+                conversationId = serverConvId,
+                recipientUserId = resolvedUserId,
+                recipientName = recipientName,
+                recipientAvatar = recipientAvatar,
+                previewText = text,
+                messageType = "text",
+                now = now
+            )
 
-            // 6. Update or insert conversation in local Room DB
-            val existingConv = db.conversationDao().getConversation(conversationId)
-            val partnerFlag = existingConv?.otherUserFlag?.takeIf { it.isNotBlank() }
-                ?: fetchSenderProfileInfo(context, resolvedUserId).third
-            val partnerAvatar = recipientAvatar?.takeIf { it.isNotBlank() }
-                ?: existingConv?.otherUserAvatar?.takeIf { it.isNotBlank() }
-                ?: fetchSenderProfileInfo(context, resolvedUserId).second
-            val updatedConv = if (existingConv != null) {
-                existingConv.copy(
-                    lastMessageText = text,
-                    lastMessageTime = now,
-                    otherUserName = recipientName.ifBlank { existingConv.otherUserName },
-                    otherUserAvatar = partnerAvatar,
-                    otherUserFlag = partnerFlag ?: existingConv.otherUserFlag
+            val encStart = ChatTimingTracker.nowMs()
+            val ciphertext = E2EEManager.encryptMessageAsync(recipientPublicKey, text)
+            ChatTimingTracker.logEncrypt("DM", clientId, (ChatTimingTracker.nowMs() - encStart).coerceAtLeast(0L))
+
+            val sendStart = ChatTimingTracker.nowMs()
+            val sendResp = SupabaseClient.api.sendDmMessage(
+                apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                auth = token,
+                body = SendDmMessageRequest(
+                    id = clientId,
+                    conversation_id = serverConvId,
+                    sender_id = myUserId,
+                    recipient_id = resolvedUserId,
+                    ciphertext = ciphertext,
+                    nonce = "",
+                    key_version = keyVersion
                 )
-            } else {
-                LocalDmConversation(
-                    id = conversationId,
-                    otherUserId = recipientUserId,
-                    otherUserName = recipientName,
-                    otherUserAvatar = partnerAvatar,
-                    otherUserFlag = partnerFlag,
-                    lastMessageText = text,
-                    lastMessageTime = now,
-                    unreadCount = 0,
-                    createdAt = now
-                )
+            )
+            val sendMs = (ChatTimingTracker.nowMs() - sendStart).coerceAtLeast(0L)
+            ChatTimingTracker.logSendRequest("DM", clientId, sendMs, sendResp.isSuccessful)
+
+            if (!sendResp.isSuccessful) {
+                val errBody = runCatching { sendResp.errorBody()?.string().orEmpty() }.getOrDefault("")
+                if (BlockRepository.isUserBlockedError(errBody)) {
+                    db.messageDao().updateMessageStatus(clientId, LocalMessageStatus.FAILED, "You can't send messages to this user", 1, 0L)
+                    return@withContext Result.failure(UserBlockedException())
+                }
+                db.messageDao().updateMessageStatus(clientId, LocalMessageStatus.FAILED, "Failed to send — tap to retry", 1, 0L)
+                return@withContext Result.failure(IllegalStateException("Failed to send message: code ${sendResp.code()}"))
             }
-            db.conversationDao().insertOrUpdate(updatedConv)
 
-            Log.d(TAG, "Sent message encrypted with Tink HPKE to user $recipientUserId, saved to local DB.")
-            Result.success(localMessage)
+            db.messageDao().updateMessageStatus(clientId, LocalMessageStatus.SENT, null, 0, 0L)
+            Result.success(optimistic.copy(status = LocalMessageStatus.SENT))
         } catch (e: Exception) {
             Log.e(TAG, "Error sending message", e)
             Result.failure(e)
@@ -1052,191 +1800,25 @@ object EncryptedChatRepository {
     ): Result<LocalDmMessage> = withContext(Dispatchers.IO) {
         try {
             val db = database ?: return@withContext Result.failure(IllegalStateException("Chat vault is locked"))
-            val myUserId = SupabaseSessionManager.ensureActiveSession(context)
-                ?: SupabaseSessionManager.getUserId(context)
-                ?: return@withContext Result.failure(IllegalStateException("User not authenticated"))
-            val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
-                ?: (SupabaseSessionManager.getAccessToken(context)?.let { "Bearer $it" })
-                ?: SupabaseSessionManager.getBearerToken(context)
-
-            val displayName = recipientName.ifBlank { "User" }
-            if (recipientUserId.isBlank() || recipientUserId.startsWith("partner_mock")) {
-                return@withContext Result.failure(RecipientNotReadyException(displayName))
-            }
-
-            val resolvedUserId = resolveRecipientAuthUserId(context, recipientUserId) ?: recipientUserId
-
-            // Step 1: Fetch recipient's public key from user_public_keys
-            val keyResp = SupabaseClient.api.getUserPublicKey(
-                apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
-                auth = token,
-                userIdFilter = "eq.$resolvedUserId"
-            )
-            if (!keyResp.isSuccessful || keyResp.body().isNullOrEmpty()) {
-                return@withContext Result.failure(RecipientNotReadyException(displayName))
-            }
-            val keyItem = keyResp.body()!!.first()
-            val recipientPublicKey = keyItem.identity_public_key
-            if (recipientPublicKey.isNullOrBlank()) {
-                return@withContext Result.failure(RecipientNotReadyException(displayName))
-            }
-
-            // Step 2: Establish conversation ID via RPC
-            val rpcResp = SupabaseClient.api.getOrCreateDmConversation(
-                apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
-                auth = token,
-                body = GetOrCreateDmConversationRequest(p_other_user_id = resolvedUserId)
-            )
-            if (!rpcResp.isSuccessful) {
-                val errBody = runCatching { rpcResp.errorBody()?.string().orEmpty() }.getOrDefault("")
-                if (BlockRepository.isUserBlockedError(errBody)) {
-                    return@withContext Result.failure(UserBlockedException())
-                }
-                return@withContext Result.failure(IllegalStateException("Could not establish conversation"))
-            }
-            val rawUuid = rpcResp.body()?.string()?.trim() ?: ""
-            val conversationId = parseUuidResponse(rawUuid)
-                ?: return@withContext Result.failure(IllegalStateException("Failed to get valid conversation ID"))
-
-            // Step 3: Generate client-side message_id UUID & storage paths
-            val messageId: String
-            val relativeStoragePath: String
-            val storagePath: String
-            try {
-                messageId = UUID.randomUUID().toString()
-                if (!SupabaseSessionManager.isValidUuid(conversationId) || !SupabaseSessionManager.isValidUuid(messageId)) {
-                    throw IllegalArgumentException("Invalid UUID in path construction: conversationId='$conversationId', messageId='$messageId'")
-                }
-                relativeStoragePath = "$conversationId/$messageId"
-                storagePath = "dm-media/$relativeStoragePath"
-            } catch (e: Exception) {
-                Log.e(TAG, "sendMediaMessage: Failed constructing storage path for conversationId='$conversationId'", e)
-                return@withContext Result.failure(IllegalStateException("Path construction error: ${e.message}", e))
-            }
-
-            // Step 4: Encrypt raw media bytes with random one-time AES-256-GCM key + 12-byte nonce
-            val (encryptedMediaBytes, keyBytes, nonceBytes) = E2EEMediaManager.encryptMediaPayload(rawBytes)
-
-            // Step 5: Upload encrypted ciphertext blob directly to Supabase storage bucket dm-media
-            val objectPath = "$conversationId/$messageId.bin"
-            Log.d(TAG, "sendMediaMessage: uploading encrypted media blob to dm-media (path='$objectPath', size=${encryptedMediaBytes.size})...")
-            val reqBody = encryptedMediaBytes.toRequestBody("application/octet-stream".toMediaTypeOrNull())
-            val res = SupabaseClient.api.uploadDmMedia(
-                auth = token,
-                path = objectPath,
-                body = reqBody
-            )
-            if (!res.isSuccessful) {
-                val errBody = res.errorBody()?.string().orEmpty()
-                Log.e(TAG, "sendMediaMessage: Supabase upload failed HTTP ${res.code()}: $errBody")
-                return@withContext Result.failure(IllegalStateException("Storage upload failed HTTP ${res.code()}"))
-            }
-            val finalResolvedPath = objectPath
-
-            // Step 6: Build JSON descriptor & encrypt it with Tink HPKE (recipient's identity public key)
-            val keyBase64 = Base64.encodeToString(keyBytes, Base64.NO_WRAP)
-            val nonceBase64 = Base64.encodeToString(nonceBytes, Base64.NO_WRAP)
-            val cleanCaption = caption?.replace("\n", " ")?.replace("|", " ")?.trim()?.takeIf { it.isNotBlank() }
-            val descriptorJson = JSONObject().apply {
-                put("storage_path", finalResolvedPath)
-                put("media_key", keyBase64)
-                put("media_nonce", nonceBase64)
-                put("mime_type", mimeType)
-                if (durationSeconds != null) {
-                    put("duration_seconds", durationSeconds)
-                }
-                if (cleanCaption != null) {
-                    put("caption", cleanCaption)
-                }
-            }.toString()
-
-            val encryptedDescriptor = E2EEManager.encryptMessage(recipientPublicKey, descriptorJson)
-
-            // Step 7: Insert into dm_messages row
-            Log.d(TAG, "sendMediaMessage: inserting dm_messages row (messageId=$messageId, type=$messageType, path=$finalResolvedPath)...")
-            val sendResp = SupabaseClient.api.sendDmMessage(
-                apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
-                auth = token,
-                body = SendDmMessageRequest(
-                    id = messageId,
-                    conversation_id = conversationId,
-                    sender_id = myUserId,
-                    recipient_id = resolvedUserId,
-                    ciphertext = encryptedDescriptor,
-                    nonce = "",
-                    key_version = keyItem.key_version,
-                    message_type = messageType,
-                    storage_path = finalResolvedPath
-                )
-            )
-            Log.d(TAG, "sendMediaMessage: insert dm_messages response code=${sendResp.code()}, isSuccessful=${sendResp.isSuccessful}")
-            if (!sendResp.isSuccessful) {
-                val errStr = sendResp.errorBody()?.string() ?: sendResp.message()
-                Log.e(TAG, "Failed to insert dm_messages row: code=${sendResp.code()} err=$errStr")
-                if (BlockRepository.isUserBlockedError(errStr)) {
-                    return@withContext Result.failure(UserBlockedException())
-                }
-                return@withContext Result.failure(IllegalStateException("Failed to send media message: code ${sendResp.code()} - $errStr"))
-            }
-
-            // Step 8: Save raw file locally in vault and record in local Room DB
-            val localFile = saveLocalMediaFile(context, messageId, rawBytes, mimeType)
-            val localText = if (messageType == "image") {
-                if (cleanCaption != null) "[img]file://${localFile.absolutePath}|$cleanCaption" else "[img]file://${localFile.absolutePath}"
-            } else {
-                "[voice]file://${localFile.absolutePath}|${durationSeconds ?: 0}"
-            }
-
-            val now = System.currentTimeMillis()
-            val localMessage = LocalDmMessage(
-                id = messageId,
-                conversationId = conversationId,
-                senderId = myUserId,
-                recipientId = resolvedUserId,
-                text = localText,
-                timestamp = now,
-                isOutgoing = true,
+            val existingConv = db.conversationDao().getConversationByOtherUser(recipientUserId)
+                ?: getOrCreateLocalConversation(context, recipientUserId, recipientName, recipientAvatar)
+            val clientId = enqueueSendMediaMessage(
+                context = context,
+                conversationId = existingConv.id,
+                recipientUserId = recipientUserId,
+                recipientName = recipientName,
+                recipientAvatar = recipientAvatar,
+                rawBytes = rawBytes,
+                messageType = messageType,
+                mimeType = mimeType,
+                durationSeconds = durationSeconds,
                 replyToText = replyToText,
-                replyToSender = replyToSender
+                replyToSender = replyToSender,
+                caption = caption
             )
-            db.messageDao().insertMessage(localMessage)
-
-            val existingConv = db.conversationDao().getConversation(conversationId)
-            val lastMsgPreview = if (messageType == "image") {
-                if (cleanCaption != null) "📷 $cleanCaption" else "📷 Photo"
-            } else {
-                "🎙️ Voice message"
-            }
-            val partnerFlag = existingConv?.otherUserFlag?.takeIf { it.isNotBlank() }
-                ?: fetchSenderProfileInfo(context, resolvedUserId).third
-            val partnerAvatar = recipientAvatar?.takeIf { it.isNotBlank() }
-                ?: existingConv?.otherUserAvatar?.takeIf { it.isNotBlank() }
-                ?: fetchSenderProfileInfo(context, resolvedUserId).second
-            val updatedConv = if (existingConv != null) {
-                existingConv.copy(
-                    lastMessageText = lastMsgPreview,
-                    lastMessageTime = now,
-                    otherUserName = recipientName.ifBlank { existingConv.otherUserName },
-                    otherUserAvatar = partnerAvatar,
-                    otherUserFlag = partnerFlag ?: existingConv.otherUserFlag
-                )
-            } else {
-                LocalDmConversation(
-                    id = conversationId,
-                    otherUserId = resolvedUserId,
-                    otherUserName = recipientName,
-                    otherUserAvatar = partnerAvatar,
-                    otherUserFlag = partnerFlag,
-                    lastMessageText = lastMsgPreview,
-                    lastMessageTime = now,
-                    unreadCount = 0,
-                    createdAt = now
-                )
-            }
-            db.conversationDao().insertOrUpdate(updatedConv)
-
-            Log.d(TAG, "Sent 2-layer E2EE encrypted media message ($messageType) to $resolvedUserId")
-            Result.success(localMessage)
+            val saved = db.messageDao().getMessage(clientId)
+                ?: return@withContext Result.failure(IllegalStateException("Queued"))
+            Result.success(saved)
         } catch (e: Exception) {
             Log.e(TAG, "Error sending media message", e)
             Result.failure(e)
@@ -1314,40 +1896,30 @@ object EncryptedChatRepository {
         if (inputIdOrName.isBlank() || inputIdOrName.startsWith("partner_mock") || inputIdOrName.startsWith("c_")) {
             return@withContext null
         }
+        resolvedUserIdCache[inputIdOrName]?.let { return@withContext it }
+
+        // Fast path: if already a valid UUID, treat directly as auth_user_id (key fetch will verify registration and cache it)
+        if (SupabaseSessionManager.isValidUuid(inputIdOrName)) {
+            resolvedUserIdCache[inputIdOrName] = inputIdOrName
+            return@withContext inputIdOrName
+        }
 
         // 1. Ensure active session and token
         SupabaseSessionManager.ensureActiveSession(context)
         val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
             ?: SupabaseSessionManager.getBearerToken(context)
 
-        // 2. If it's already a valid UUID, check if user_public_keys has a row directly
-        if (SupabaseSessionManager.isValidUuid(inputIdOrName)) {
-            try {
-                val keyResp = SupabaseClient.api.getUserPublicKey(
-                    apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
-                    auth = token,
-                    userIdFilter = "eq.$inputIdOrName"
-                )
-                if (keyResp.isSuccessful && !keyResp.body().isNullOrEmpty()) {
-                    Log.d(TAG, "resolveRecipientAuthUserId: $inputIdOrName is valid UUID with user_public_keys row")
-                    return@withContext inputIdOrName
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Direct check of user_public_keys for $inputIdOrName failed: ${e.message}")
-            }
-        }
-
-        // 3. Look up profile by auth_user_id or profile_name / username / email
+        // 2. Look up profile by auth_user_id or profile_name / username / email
         try {
             val profileRes = SupabaseClient.api.getProfile(
-                apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
+                apiKey = BuildConfig.SUPABASE_ANON_KEY,
                 auth = token,
                 authUserIdEq = "eq.$inputIdOrName"
             )
             if (profileRes.isSuccessful && !profileRes.body().isNullOrEmpty()) {
                 val p = profileRes.body()!!.first()
                 if (!p.auth_user_id.isNullOrBlank()) {
-                    Log.d(TAG, "resolveRecipientAuthUserId: matched $inputIdOrName to auth_user_id=${p.auth_user_id} via getProfile auth_user_id")
+                    resolvedUserIdCache[inputIdOrName] = p.auth_user_id
                     return@withContext p.auth_user_id
                 }
             }
@@ -1355,7 +1927,7 @@ object EncryptedChatRepository {
 
         try {
             val allProfilesRes = SupabaseClient.api.getAllProfiles(
-                apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
+                apiKey = BuildConfig.SUPABASE_ANON_KEY,
                 auth = token
             )
             if (allProfilesRes.isSuccessful && !allProfilesRes.body().isNullOrEmpty()) {
@@ -1366,15 +1938,11 @@ object EncryptedChatRepository {
                     p.email?.equals(inputIdOrName, ignoreCase = true) == true
                 }
                 if (match?.auth_user_id != null) {
-                    Log.d(TAG, "resolveRecipientAuthUserId: matched $inputIdOrName to auth_user_id=${match.auth_user_id} via getAllProfiles match")
+                    resolvedUserIdCache[inputIdOrName] = match.auth_user_id
                     return@withContext match.auth_user_id
                 }
             }
         } catch (_: Exception) {}
-
-        if (SupabaseSessionManager.isValidUuid(inputIdOrName)) {
-            return@withContext inputIdOrName
-        }
 
         return@withContext null
     }
@@ -1393,13 +1961,14 @@ object EncryptedChatRepository {
 
         // Establish conversation via RPC if online
         var convId = UUID.randomUUID().toString()
+        var isServerVerified = false
         var blockedByRpc = false
         try {
             SupabaseSessionManager.ensureActiveSession(context)
             val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
                 ?: SupabaseSessionManager.getBearerToken(context)
             val rpcResp = SupabaseClient.api.getOrCreateDmConversation(
-                apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
+                apiKey = BuildConfig.SUPABASE_ANON_KEY,
                 auth = token,
                 body = GetOrCreateDmConversationRequest(p_other_user_id = resolvedUserId)
             )
@@ -1408,6 +1977,7 @@ object EncryptedChatRepository {
                 val parsed = parseUuidResponse(raw)
                 if (!parsed.isNullOrBlank()) {
                     convId = parsed
+                    isServerVerified = true
                 }
             } else {
                 val errBody = runCatching { rpcResp.errorBody()?.string().orEmpty() }.getOrDefault("")
@@ -1420,6 +1990,11 @@ object EncryptedChatRepository {
         }
         if (blockedByRpc) {
             throw UserBlockedException()
+        }
+        if (isServerVerified) {
+            verifiedServerConvIds.add(convId)
+        } else {
+            offlineTempConvIds.add(convId)
         }
 
         val newConv = LocalDmConversation(
@@ -1455,7 +2030,7 @@ object EncryptedChatRepository {
                 userIdFilter = "eq.$resolvedUserId"
             )
 
-            Log.d(TAG, "checkRecipientKeyStatus response: code=${resp.code()}, body=${resp.body()}")
+            Log.d(TAG, "checkRecipientKeyStatus response: code=${resp.code()}, hasKey=${!resp.body().isNullOrEmpty()}")
 
             if (resp.isSuccessful && !resp.body().isNullOrEmpty()) {
                 val key = resp.body()!!.first().identity_public_key

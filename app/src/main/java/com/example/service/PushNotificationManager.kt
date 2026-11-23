@@ -793,9 +793,12 @@ object PushNotificationManager : DefaultLifecycleObserver {
         try { com.example.gifting.GiftManager.resetForLogout() } catch (_: Exception) {}
         try { com.example.ModerationManager.resetForLogout() } catch (_: Exception) {}
         try { com.example.realtime.VoiceRoomRealtimeManager.resetForLogout() } catch (_: Exception) {}
+        try { com.example.data.AppCacheStore.clearAll(appCtx) } catch (_: Exception) {}
+        try { com.example.data.StartupPrefsStore.clearSessionOnLogout(appCtx) } catch (_: Exception) {}
         try { coil.Coil.imageLoader(appCtx).memoryCache?.clear() } catch (_: Exception) {}
 
         scope.launch {
+            try { com.example.data.StartupPrefsStore.clearSessionOnLogoutSuspend(appCtx) } catch (_: Exception) {}
             try { coil.Coil.imageLoader(appCtx).diskCache?.clear() } catch (_: Exception) {}
             registrationMutex.withLock {
                 val tokenToUnregister = preCapturedPushToken ?: try {

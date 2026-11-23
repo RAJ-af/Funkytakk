@@ -141,11 +141,13 @@ object FramedAvatar {
                 val isBelow = asset.z.equals("below", ignoreCase = true)
                 val animateAsset = enableAnimation && asset.animated
                 val versionKey = "${asset.url}_v${asset.version}"
-                val memCacheKey = "${versionKey}_${if (animateAsset) (if (asset.loop) "loop" else "once") else "static"}"
+                val canvasPx = with(density) { canvas.roundToPx() }.coerceIn(64, 720)
+                val memCacheKey = "${versionKey}_${canvasPx}_${if (animateAsset) (if (asset.loop) "loop" else "once") else "static"}"
 
-                val imageRequest = remember(context, asset.url, asset.version, animateAsset, asset.loop) {
+                val imageRequest = remember(context, asset.url, asset.version, animateAsset, asset.loop, canvasPx) {
                     ImageRequest.Builder(context)
                         .data(asset.url)
+                        .size(canvasPx, canvasPx)
                         .memoryCacheKey(memCacheKey)
                         .diskCacheKey(versionKey)
                         .diskCachePolicy(CachePolicy.ENABLED)

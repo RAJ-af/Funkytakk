@@ -94,6 +94,45 @@ interface GroupMessageDao {
     @Query("UPDATE group_messages SET localMediaPath = :localPath WHERE id = :id")
     suspend fun updateLocalMediaPath(id: String, localPath: String)
 
+    @Query("SELECT * FROM group_messages WHERE groupId = :groupId ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getLatestGroupMessage(groupId: String): LocalGroupMessage?
+
+    @Query("SELECT * FROM group_messages WHERE isOutgoing = 1 AND status IN ('SENDING', 'FAILED') ORDER BY timestamp ASC")
+    suspend fun getPendingOutgoingMessages(): List<LocalGroupMessage>
+
+    @Query("SELECT * FROM group_messages WHERE clientId = :clientId LIMIT 1")
+    suspend fun getMessageByClientId(clientId: String): LocalGroupMessage?
+
+    @Query(
+        """
+        SELECT * FROM group_messages
+        WHERE groupId = :groupId
+          AND senderId = :senderId
+          AND isOutgoing = 1
+          AND messageType = :messageType
+          AND text = :text
+          AND timestamp >= :minTimestamp
+        ORDER BY CASE WHEN status IN ('SENDING', 'FAILED') THEN 0 ELSE 1 END, timestamp DESC
+        LIMIT 1
+        """
+    )
+    suspend fun findRecentOutgoingMatch(
+        groupId: String,
+        senderId: String,
+        messageType: String,
+        text: String,
+        minTimestamp: Long
+    ): LocalGroupMessage?
+
+    @Query("UPDATE group_messages SET status = :status, failReason = :failReason, retryCount = :retryCount, nextRetryAt = :nextRetryAt WHERE id = :id")
+    suspend fun updateMessageStatus(
+        id: String,
+        status: String,
+        failReason: String? = null,
+        retryCount: Int = 0,
+        nextRetryAt: Long = 0L
+    )
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessage(message: LocalGroupMessage)
 
@@ -117,6 +156,139 @@ interface GroupMessageDao {
 
     @Query("DELETE FROM group_messages")
     suspend fun deleteAllMessages()
+
+    @Transaction
+    suspend fun promoteOptimisticMessage(clientId: String, serverMessageId: String) {
+        val byClient = getMessageByClientId(clientId) ?: getMessageById(clientId)
+        val byServer = getMessageById(serverMessageId)
+        if (byServer != null) {
+            if (byClient != null && byClient.id != byServer.id) {
+                insertMessage(
+                    byServer.copy(
+                        clientId = byClient.clientId ?: clientId,
+                        status = LocalMessageStatus.SENT,
+                        failReason = null,
+                        nextRetryAt = 0L,
+                        localMediaPath = byServer.localMediaPath ?: byClient.localMediaPath,
+                        storagePath = byServer.storagePath ?: byClient.storagePath,
+                        mediaKey = byServer.mediaKey ?: byClient.mediaKey,
+                        mediaNonce = byServer.mediaNonce ?: byClient.mediaNonce,
+                        mimeType = byServer.mimeType ?: byClient.mimeType
+                    )
+                )
+                deleteMessage(byClient.id)
+            } else {
+                updateMessageStatus(serverMessageId, LocalMessageStatus.SENT, null, byServer.retryCount, 0L)
+            }
+            return
+        }
+        if (byClient != null) {
+            deleteMessage(byClient.id)
+            insertMessage(
+                byClient.copy(
+                    id = serverMessageId,
+                    clientId = byClient.clientId ?: clientId,
+                    status = LocalMessageStatus.SENT,
+                    failReason = null,
+                    nextRetryAt = 0L
+                )
+            )
+        }
+    }
+
+    /**
+     * Deduplicates incoming `isFromMe` group echoes against optimistic local rows.
+     * Returns `true` ONLY when a genuinely new message was inserted (e.g. sent from another device).
+     */
+    @Transaction
+    suspend fun reconcileIncomingFromMe(
+        incoming: LocalGroupMessage,
+        echoClientId: String?
+    ): Boolean {
+        val existingByServerId = getMessageById(incoming.id)
+        if (existingByServerId != null) {
+            if (existingByServerId.status != LocalMessageStatus.SENT) {
+                insertMessage(
+                    existingByServerId.copy(
+                        status = LocalMessageStatus.SENT,
+                        failReason = null,
+                        nextRetryAt = 0L,
+                        storagePath = existingByServerId.storagePath ?: incoming.storagePath,
+                        localMediaPath = existingByServerId.localMediaPath ?: incoming.localMediaPath
+                    )
+                )
+            }
+            return false
+        }
+
+        val cleanEchoId = echoClientId?.takeIf { it.isNotBlank() }
+        val existingOptimistic = (cleanEchoId?.let { getMessageByClientId(it) ?: getMessageById(it) })
+            ?: findRecentOutgoingMatch(
+                groupId = incoming.groupId,
+                senderId = incoming.senderId,
+                messageType = incoming.messageType,
+                text = incoming.text,
+                minTimestamp = System.currentTimeMillis() - 120_000L
+            )
+
+        if (existingOptimistic != null) {
+            deleteMessage(existingOptimistic.id)
+            insertMessage(
+                incoming.copy(
+                    clientId = existingOptimistic.clientId ?: existingOptimistic.id,
+                    timestamp = existingOptimistic.timestamp,
+                    localMediaPath = existingOptimistic.localMediaPath ?: incoming.localMediaPath,
+                    storagePath = incoming.storagePath ?: existingOptimistic.storagePath,
+                    mediaKey = incoming.mediaKey ?: existingOptimistic.mediaKey,
+                    mediaNonce = incoming.mediaNonce ?: existingOptimistic.mediaNonce,
+                    mimeType = incoming.mimeType ?: existingOptimistic.mimeType,
+                    status = LocalMessageStatus.SENT,
+                    failReason = null,
+                    retryCount = existingOptimistic.retryCount,
+                    nextRetryAt = 0L
+                )
+            )
+            return false
+        }
+
+        insertMessageIgnore(incoming)
+        return true
+    }
+
+    @Transaction
+    suspend fun deleteMessageAndRefreshGroup(
+        messageId: String,
+        groupId: String,
+        groupDao: GroupConversationDao
+    ) {
+        deleteMessage(messageId)
+        val latest = getLatestGroupMessage(groupId)
+        val group = groupDao.getGroup(groupId) ?: return
+        if (latest != null) {
+            val preview = when (latest.messageType) {
+                "image" -> "📷 Photo"
+                "voice" -> "🎤 Voice note"
+                else -> latest.text
+            }
+            groupDao.insertOrUpdate(
+                group.copy(
+                    lastMessageText = preview,
+                    lastMessageType = latest.messageType,
+                    lastMessageSenderName = latest.senderName,
+                    lastMessageTime = latest.timestamp
+                )
+            )
+        } else {
+            groupDao.insertOrUpdate(
+                group.copy(
+                    lastMessageText = "",
+                    lastMessageType = "text",
+                    lastMessageSenderName = "",
+                    lastMessageTime = group.createdAt
+                )
+            )
+        }
+    }
 }
 
 @Dao

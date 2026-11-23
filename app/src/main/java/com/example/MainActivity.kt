@@ -47,9 +47,13 @@ import com.example.ui.screens.*
 import com.example.ui.screens.chat.RestoreChatBackupScreen
 import com.example.ui.components.FloatingBubbleOverlay
 import com.example.ui.theme.MyApplicationTheme
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import androidx.compose.ui.zIndex
 
 class MainActivity : FragmentActivity() {
     private val authViewModel: AuthViewModel by viewModels()
@@ -96,10 +100,21 @@ class MainActivity : FragmentActivity() {
                 ) {
                     var currentScreen by rememberSaveable { mutableStateOf("splash") }
                     var minSplashElapsed by rememberSaveable { mutableStateOf(false) }
+                    var splashHardTimeoutReached by rememberSaveable { mutableStateOf(false) }
+                    var localStartupSnapshot by remember {
+                        mutableStateOf(com.example.data.StartupPrefsStore.getFastSnapshot(applicationContext))
+                    }
                     LaunchedEffect(Unit) {
-                        if (!minSplashElapsed) {
-                            kotlinx.coroutines.delay(950)
+                        launch {
+                            localStartupSnapshot = com.example.data.StartupPrefsStore.readSnapshot(applicationContext)
+                        }
+                        launch {
+                            kotlinx.coroutines.delay(320)
                             minSplashElapsed = true
+                        }
+                        launch {
+                            kotlinx.coroutines.delay(1500)
+                            splashHardTimeoutReached = true
                         }
                     }
 
@@ -143,14 +158,13 @@ class MainActivity : FragmentActivity() {
                         authViewModel.runPendingEraseLocalChatsIfNeeded(applicationContext)
                     }
 
-                    // Only initialize authenticated services once session is verified during splash/login
+                    // Initialize authenticated services in parallel once session / cached user is ready
                     LaunchedEffect(authState, sessionVerificationState) {
                         if (authViewModel.deletionReceipt.value != null) {
                             return@LaunchedEffect
                         }
                         if (authState is AuthState.Success &&
-                            sessionVerificationState !is SessionVerificationState.Failed &&
-                            SupabaseSessionManager.hasValidAuthenticatedSession(applicationContext)
+                            sessionVerificationState !is SessionVerificationState.Failed
                         ) {
                             val authedUid = SupabaseSessionManager.getUserId(applicationContext)
                                 ?: (authState as AuthState.Success).user.uid
@@ -158,21 +172,62 @@ class MainActivity : FragmentActivity() {
                             ChatPreferencesManager.init(applicationContext)
                             CloudAiManager.init(applicationContext)
                             com.example.crypto.VaultSecurityManager.init(applicationContext)
-                            com.example.repository.EncryptedChatRepository.init(applicationContext)
-                            com.example.repository.GroupChatRepository.init(applicationContext)
-                            com.example.repository.BlockRepository.init(applicationContext)
-                            com.example.repository.BlockRepository.refreshBlockedUsers(applicationContext)
                             TelemetryManager.onLogin(authedUid)
-                            authViewModel.refreshModerationStatus(applicationContext)
-                            authViewModel.checkAccountReview(applicationContext)
-                            authViewModel.checkDeletionStatus(applicationContext)
-                            com.example.SupportChatManager.init(applicationContext)
-                            com.example.repository.FeedbackRepository.refreshMyUpdatesCount(applicationContext)
+
+                            coroutineScope {
+                                listOf(
+                                    async {
+                                        com.example.util.StartupTimingTracker.measure("chat_repo_init") {
+                                            com.example.repository.EncryptedChatRepository.init(applicationContext)
+                                        }
+                                    },
+                                    async {
+                                        com.example.util.StartupTimingTracker.measure("group_repo_init") {
+                                            com.example.repository.GroupChatRepository.init(applicationContext)
+                                        }
+                                    },
+                                    async {
+                                        com.example.util.StartupTimingTracker.measure("block_refresh") {
+                                            com.example.repository.BlockRepository.init(applicationContext)
+                                            com.example.repository.BlockRepository.refreshBlockedUsers(applicationContext)
+                                        }
+                                    },
+                                    async {
+                                        com.example.util.StartupTimingTracker.measure("moderation_status") {
+                                            authViewModel.refreshModerationStatus(applicationContext)
+                                        }
+                                    },
+                                    async {
+                                        com.example.util.StartupTimingTracker.measure("account_review") {
+                                            authViewModel.checkAccountReview(applicationContext)
+                                        }
+                                    },
+                                    async {
+                                        com.example.util.StartupTimingTracker.measure("deletion_status") {
+                                            authViewModel.checkDeletionStatus(applicationContext)
+                                        }
+                                    },
+                                    async {
+                                        com.example.util.StartupTimingTracker.measure("support_init") {
+                                            com.example.SupportChatManager.init(applicationContext)
+                                        }
+                                    },
+                                    async {
+                                        com.example.util.StartupTimingTracker.measure("feedback_badge") {
+                                            com.example.repository.FeedbackRepository.refreshMyUpdatesCount(applicationContext)
+                                        }
+                                    }
+                                ).awaitAll()
+                            }
+                            com.example.util.StartupTimingTracker.logSlowestSummary()
                         }
                     }
 
                     LaunchedEffect(currentScreen) {
                         TelemetryManager.setCurrentScreen(currentScreen)
+                        if (currentScreen != "splash") {
+                            com.example.util.StartupTimingTracker.markFirstContentRendered()
+                        }
                     }
 
                     // Auto-open support chat when event emitted (open == true and unread > 0)
@@ -221,6 +276,7 @@ class MainActivity : FragmentActivity() {
                                     com.example.SupportChatManager.fetchSupportSession(applicationContext)
                                     authViewModel.checkDeletionStatus(applicationContext)
                                     com.example.service.PushNotificationManager.onUserLoggedIn(applicationContext)
+                                    com.example.repository.EncryptedChatRepository.onAppResumed(applicationContext)
                                     com.example.repository.GroupChatRepository.onAppResumed(applicationContext)
                                     com.example.ui.components.RoomInviteOverlayManager.checkAndShowPendingInvite(applicationContext)
                                     lifecycleOwner.lifecycleScope.launch {
@@ -291,11 +347,8 @@ class MainActivity : FragmentActivity() {
                         }
                     }
 
-                    LaunchedEffect(authState, sessionVerificationState, minSplashElapsed) {
-                        if (!minSplashElapsed && currentScreen == "splash") {
-                            return@LaunchedEffect
-                        }
-                        if (sessionVerificationState is SessionVerificationState.Verifying) {
+                    LaunchedEffect(authState, sessionVerificationState, minSplashElapsed, splashHardTimeoutReached, localStartupSnapshot) {
+                        if (!minSplashElapsed && currentScreen == "splash" && !splashHardTimeoutReached) {
                             return@LaunchedEffect
                         }
                         if (sessionVerificationState is SessionVerificationState.Failed) {
@@ -320,47 +373,50 @@ class MainActivity : FragmentActivity() {
                             if (!user.isEmailVerified) {
                                 currentScreen = "verify_email"
                             } else if (user.onboardingComplete) {
-                                val hasSkipped = com.example.util.ChatBackupPreferencesManager.hasSkippedRestore(applicationContext)
-                                val isVaultConfigured = com.example.crypto.VaultSecurityManager.isVaultConfigured(applicationContext)
-                                var isDatabaseEmpty = !isVaultConfigured
-
-                                if (isVaultConfigured) {
-                                    val activeKey = com.example.crypto.VaultSecurityManager.getActiveVaultKey()
-                                    if (activeKey != null) {
-                                        try {
-                                            val db = com.example.db.EncryptedChatDatabase.getInstance(applicationContext, activeKey)
-                                            isDatabaseEmpty = db.conversationDao().getAllConversationsList().isEmpty() &&
-                                                    db.groupConversationDao().getAllJoinedGroupsList().isEmpty()
-                                        } catch (_: Exception) {
-                                            isDatabaseEmpty = false
-                                        }
-                                    }
-                                }
-
-                                if (!hasSkipped && isDatabaseEmpty) {
-                                    currentScreen = "restore_chat_backup"
-                                } else {
-                                    currentScreen = "home"
-                                }
+                                val shouldShowRestore = com.example.data.StartupPrefsStore.shouldShowBackupRestore(applicationContext)
+                                currentScreen = if (shouldShowRestore) "restore_chat_backup" else "home"
                             } else {
-                                currentScreen = when {
-                                    user.username.isNullOrBlank() || user.displayName.isNullOrBlank() -> "onboarding_profile"
-                                    (user.age == null || user.age <= 0) && user.dob.isNullOrBlank() -> "onboarding_age"
-                                    user.gender.isNullOrBlank() -> "onboarding_gender"
-                                    user.country.isNullOrBlank() -> "onboarding_country"
-                                    user.nativeLanguage.isNullOrBlank() -> "onboarding_native_language"
-                                    user.learningLanguage.isNullOrBlank() -> "onboarding_learning_language"
-                                    else -> "onboarding_hobbies"
-                                }
+                                currentScreen = com.example.data.StartupPrefsStore.resolveOnboardingRoute(user)
                             }
 
-                            // Initialize E2EE identity keys, encrypted repository, cosmetics, and register push token right after login / startup
-                            com.example.crypto.E2EEManager.ensureIdentityKeyInitialized(applicationContext)
-                            com.example.repository.EncryptedChatRepository.init(applicationContext)
-                            com.example.service.PushNotificationManager.registerCurrentToken(applicationContext, force = true)
-                            com.example.store.CosmeticsManager.refreshMyCosmetics(applicationContext, user.uid)
-                        } else if (minSplashElapsed && currentScreen == "splash" && authState !is AuthState.Loading) {
-                            currentScreen = "welcome"
+                            // Run post-boot identity, push token, and cosmetic fetches in parallel off the main frame
+                            coroutineScope {
+                                listOf(
+                                    async {
+                                        com.example.util.StartupTimingTracker.measure("e2ee_init") {
+                                            com.example.crypto.E2EEManager.ensureIdentityKeyInitialized(applicationContext)
+                                        }
+                                    },
+                                    async {
+                                        com.example.util.StartupTimingTracker.measure("push_token_register") {
+                                            com.example.service.PushNotificationManager.registerCurrentToken(applicationContext, force = false)
+                                        }
+                                    },
+                                    async {
+                                        com.example.util.StartupTimingTracker.measure("cosmetics_me") {
+                                            com.example.store.CosmeticsManager.refreshMyCosmetics(applicationContext, user.uid)
+                                        }
+                                    },
+                                    async {
+                                        com.example.data.StartupPrefsStore.recordActiveUid(applicationContext, user.uid, user.onboardingComplete)
+                                    }
+                                ).awaitAll()
+                            }
+                        } else if (currentScreen == "splash" && (splashHardTimeoutReached || (minSplashElapsed && authState !is AuthState.Loading))) {
+                            val localUid = localStartupSnapshot.lastUid ?: SupabaseSessionManager.getUserId(applicationContext)
+                            if (localStartupSnapshot.onboardingDone &&
+                                !localUid.isNullOrBlank() &&
+                                SupabaseSessionManager.hasValidAuthenticatedSession(applicationContext)
+                            ) {
+                                val cachedProfile = com.example.data.StartupPrefsStore.buildLocalCachedUserProfile(applicationContext, localUid)
+                                if (cachedProfile.isEmailVerified && cachedProfile.onboardingComplete) {
+                                    currentScreen = "home"
+                                } else {
+                                    currentScreen = com.example.data.StartupPrefsStore.resolveUnauthenticatedRoute(localStartupSnapshot)
+                                }
+                            } else {
+                                currentScreen = com.example.data.StartupPrefsStore.resolveUnauthenticatedRoute(localStartupSnapshot)
+                            }
                         }
                     }
 
@@ -655,6 +711,12 @@ class MainActivity : FragmentActivity() {
                             )
                             "onboarding_chat_vault" -> OnboardingChatVaultScreen(
                                 onComplete = {
+                                    lifecycleScope.launch {
+                                        com.example.data.StartupPrefsStore.markOnboardingDone(
+                                            applicationContext,
+                                            SupabaseSessionManager.getUserId(applicationContext)
+                                        )
+                                    }
                                     currentScreen = "home"
                                 },
                                 onBack = {
@@ -842,6 +904,13 @@ class MainActivity : FragmentActivity() {
                             modifier = Modifier.testTag("security_reset_dialog")
                         )
                     }
+
+                    // Global Connectivity Banner (Offline / 2s Back online)
+                    com.example.ui.components.GlobalConnectivityBanner(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .zIndex(200f)
+                    )
 
                     // Global Loading HUD & No Internet Connection Dialogs
                     com.example.ui.components.AppLoadingHUDOverlay()

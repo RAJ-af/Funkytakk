@@ -47,8 +47,8 @@ object CloudinaryUploader {
     private const val MOMENT_TAG = "MomentUpload"
     private const val GENERIC_UPLOAD_FAILED = "Upload failed. Please try again."
 
-    private fun uploadErrorMessage(debugDetail: String): String =
-        if (BuildConfig.DEBUG) debugDetail else GENERIC_UPLOAD_FAILED
+    @Suppress("UNUSED_PARAMETER")
+    private fun uploadErrorMessage(debugDetail: String): String = GENERIC_UPLOAD_FAILED
 
     private const val MAX_PHOTO_BYTES = 10L * 1024L * 1024L
     private const val MAX_VIDEO_BYTES = 50L * 1024L * 1024L

@@ -216,14 +216,14 @@ fun VerifyAccountErrorScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Error 401 · Unauthorized coral badge
+                // Friendly Verification Needed coral badge
                 Surface(
                     shape = RoundedCornerShape(99.dp),
                     color = coralBg,
                     border = BorderStroke(2.dp, coralInk)
                 ) {
                     Text(
-                        text = "Error 401 · Unauthorized",
+                        text = "Verification Needed",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = coralInk,

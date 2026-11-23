@@ -29,6 +29,7 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -1527,19 +1528,72 @@ private fun ModernUnlockPasswordCard() {
     val funkyColors = LocalFunkyColors.current
     val isDark = funkyColors.isDark
     val activity = context as? FragmentActivity
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
+
+    val lockUiState by com.example.crypto.ChatLockManager.uiState.collectAsState()
+    LaunchedEffect(context) {
+        com.example.crypto.ChatLockManager.refreshState(context)
+    }
 
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
+    var showPasswordForm by remember { mutableStateOf(false) }
+    var unlockSuccessAnimating by remember { mutableStateOf(false) }
     var cooldownSeconds by remember { mutableIntStateOf(VaultSecurityManager.getRemainingCooldownSeconds(context)) }
     var showForgotOptionsDialog by remember { mutableStateOf(false) }
     var showRestoreBackupOverlay by remember { mutableStateOf(false) }
     var showResetDialog by remember { mutableStateOf(false) }
 
     val qaVaultPassword = remember { VaultSecurityManager.getQaTestVaultPassword() }
-    val hasBiometric = remember { VaultSecurityManager.isBiometricEnabled(context) }
+    val requiresPasswordOnly = lockUiState.requirement != com.example.crypto.UnlockRequirement.LEVEL_1_BIOMETRIC_OR_DEVICE_CREDENTIAL
+    val isPasswordMode = requiresPasswordOnly || showPasswordForm
+
+    val lockScale by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (unlockSuccessAnimating) 1.18f else 1f,
+        animationSpec = androidx.compose.animation.core.spring(
+            dampingRatio = 0.5f,
+            stiffness = 380f
+        ),
+        label = "chats_tab_lock_scale"
+    )
+
+    fun triggerUnlockAnimationAndCommit(keyToCommit: ByteArray?) {
+        if (unlockSuccessAnimating) return
+        unlockSuccessAnimating = true
+        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+        scope.launch {
+            delay(260L)
+            if (keyToCommit != null) {
+                com.example.crypto.ChatLockManager.finalizePreparedUnlock(context, keyToCommit)
+            }
+        }
+    }
+
+    fun launchLevel1Unlock() {
+        if (activity == null || unlockSuccessAnimating) return
+        errorMessage = null
+        com.example.crypto.ChatLockManager.launchLevel1Prompt(
+            activity = activity,
+            onSuccess = {
+                com.example.crypto.ChatLockManager.prepareLevel1Unlock(context)
+                    .onSuccess { key -> triggerUnlockAnimationAndCommit(key) }
+                    .onFailure { ex ->
+                        errorMessage = ex.message ?: "Please enter your vault password."
+                        showPasswordForm = true
+                    }
+            },
+            onUsePasswordFallback = {
+                showPasswordForm = true
+            },
+            onError = { msg ->
+                errorMessage = msg
+                showPasswordForm = true
+            }
+        )
+    }
 
     LaunchedEffect(cooldownSeconds) {
         if (cooldownSeconds > 0) {
@@ -1552,19 +1606,19 @@ private fun ModernUnlockPasswordCard() {
         }
     }
 
-    LaunchedEffect(hasBiometric) {
-        if (hasBiometric && activity != null) {
-            val cryptoObjResult = VaultSecurityManager.createBiometricDecryptCryptoObject(context)
-            cryptoObjResult.onSuccess { cryptoObj ->
-                promptBiometricUnlock(activity, cryptoObj) { /* Handled in callback */ }
-            }
+    LaunchedEffect(lockUiState.requirement) {
+        if (lockUiState.requirement == com.example.crypto.UnlockRequirement.LEVEL_1_BIOMETRIC_OR_DEVICE_CREDENTIAL &&
+            !showPasswordForm &&
+            activity != null
+        ) {
+            launchLevel1Unlock()
         }
     }
 
     fun submitCardUnlock() {
-        if (isLoading || cooldownSeconds > 0) return
+        if (isLoading || cooldownSeconds > 0 || unlockSuccessAnimating) return
         if (password.isBlank()) {
-            errorMessage = "Please enter your chat password."
+            errorMessage = "Please enter your vault password."
             return
         }
         isLoading = true
@@ -1574,6 +1628,7 @@ private fun ModernUnlockPasswordCard() {
             res.onSuccess {
                 cooldownSeconds = 0
                 com.example.util.ChatBackupPreferencesManager.setCachedVaultPassword(context, password)
+                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
             }
             res.onFailure { ex ->
                 if (ex is VaultCooldownException) {
@@ -1601,24 +1656,41 @@ private fun ModernUnlockPasswordCard() {
                 .padding(26.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Soft Badge with Custom Soft Lock Icon
-            SoftIconBadge(
-                badgeSize = 64.dp,
-                backgroundColor = if (isDark) Color(0xFF4F46E5).copy(alpha = 0.18f) else Color(0xFFEEF2FF),
-                borderColor = if (isDark) Color(0xFF6366F1).copy(alpha = 0.4f) else Color(0xFFC7D2FE)
-            ) {
-                SoftLockIcon(
-                    size = 32.dp,
-                    isUnlocked = false,
-                    gradientColors = listOf(Color(0xFF6366F1), Color(0xFF4338CA)),
-                    shackleColor = if (isDark) Color(0xFF94A3B8) else Color(0xFFCBD5E1)
-                )
+            Box(modifier = Modifier.graphicsLayer(scaleX = lockScale, scaleY = lockScale)) {
+                SoftIconBadge(
+                    badgeSize = 64.dp,
+                    backgroundColor = when {
+                        unlockSuccessAnimating -> Color(0xFFDCFCE7)
+                        isDark -> Color(0xFF4F46E5).copy(alpha = 0.18f)
+                        else -> Color(0xFFEEF2FF)
+                    },
+                    borderColor = when {
+                        unlockSuccessAnimating -> Color(0xFF86EFAC)
+                        isDark -> Color(0xFF6366F1).copy(alpha = 0.4f)
+                        else -> Color(0xFFC7D2FE)
+                    }
+                ) {
+                    SoftLockIcon(
+                        size = 32.dp,
+                        isUnlocked = unlockSuccessAnimating,
+                        gradientColors = if (unlockSuccessAnimating) {
+                            listOf(Color(0xFF22C55E), Color(0xFF16A34A))
+                        } else {
+                            listOf(Color(0xFF6366F1), Color(0xFF4338CA))
+                        },
+                        shackleColor = if (isDark) Color(0xFF94A3B8) else Color(0xFFCBD5E1)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = "Enter Password",
+                text = when {
+                    unlockSuccessAnimating -> "Unlocked"
+                    isPasswordMode -> "Enter Vault Password"
+                    else -> "Chats Locked"
+                },
                 fontSize = 22.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = funkyColors.ink,
@@ -1628,162 +1700,209 @@ private fun ModernUnlockPasswordCard() {
 
             Spacer(modifier = Modifier.height(6.dp))
 
+            val subtitleText = when {
+                !lockUiState.hasScreenLockOrBiometric ->
+                    "Set a screen lock on your phone for faster unlock."
+                lockUiState.biometricEnrollmentChanged ->
+                    "Your device biometrics changed. Please verify your vault password."
+                lockUiState.is14DayPasswordExpired ->
+                    "Your vault password is asked again every 14 days."
+                !lockUiState.hasRememberedKey ->
+                    "Verify your vault password once to remember this device."
+                isPasswordMode ->
+                    "Chats are locked for your privacy. Enter your vault password to view conversations."
+                else ->
+                    "Use your fingerprint, face, or device PIN to view conversations."
+            }
+
             Text(
-                text = "Chats are locked for your privacy. Enter your password to view conversations.",
+                text = subtitleText,
                 fontSize = 13.sp,
-                color = funkyColors.mute,
+                color = if (!lockUiState.hasScreenLockOrBiometric) Color(0xFFD97706) else funkyColors.mute,
                 textAlign = TextAlign.Center,
                 lineHeight = 18.sp
             )
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            OutlinedTextField(
-                value = password,
-                onValueChange = {
-                    password = it
-                    errorMessage = null
-                },
-                label = { Text("Chat Password") },
-                singleLine = true,
-                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                trailingIcon = {
-                    Box(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clickable { passwordVisible = !passwordVisible },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        SoftEyeIcon(
-                            visible = passwordVisible,
-                            size = 20.dp,
-                            tint = if (passwordVisible) funkyColors.mango else funkyColors.mute
-                        )
-                    }
-                },
-                textStyle = TextStyle(
-                    color = funkyColors.ink,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Normal
-                ),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = funkyColors.ink,
-                    unfocusedTextColor = funkyColors.ink,
-                    focusedBorderColor = funkyColors.mango,
-                    focusedLabelColor = funkyColors.mango,
-                    unfocusedLabelColor = funkyColors.mute,
-                    cursorColor = funkyColors.mango,
-                    unfocusedBorderColor = funkyColors.line
-                ),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { submitCardUnlock() }),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("chats_vault_password_input"),
-                shape = RoundedCornerShape(16.dp)
-            )
-
-            if (qaVaultPassword != null) {
-                TextButton(
-                    onClick = {
-                        password = qaVaultPassword
-                        errorMessage = null
-                    },
-                    modifier = Modifier
-                        .align(Alignment.End)
-                        .testTag("chats_vault_fill_qa_password_button")
-                ) {
-                    Text(
-                        text = "Use QA Test Password",
-                        fontSize = 12.sp,
-                        color = funkyColors.mango,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
-
-            val displayError = if (cooldownSeconds > 0) {
-                "Too many failed attempts. Try again in ${cooldownSeconds}s."
-            } else {
-                errorMessage
-            }
-
-            displayError?.let { err ->
-                Spacer(modifier = Modifier.height(10.dp))
-                Row(
+            if (!isPasswordMode) {
+                Button(
+                    onClick = { launchLevel1Unlock() },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(if (isDark) funkyColors.danger.copy(alpha = 0.14f) else Color(0xFFFEF2F2), RoundedCornerShape(10.dp))
-                        .border(1.dp, if (isDark) funkyColors.danger.copy(alpha = 0.4f) else Color(0xFFFEE2E2), RoundedCornerShape(10.dp))
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    SoftWarningIcon(size = 18.dp, color = funkyColors.danger)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = err,
-                        fontSize = 12.sp,
-                        color = funkyColors.danger,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // Primary Unlock Button
-            Button(
-                onClick = { submitCardUnlock() },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-                    .testTag("chats_vault_unlock_button"),
-                shape = RoundedCornerShape(50.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = funkyColors.mango),
-                enabled = !isLoading && cooldownSeconds == 0
-            ) {
-                if (isLoading) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = funkyColors.onMango, strokeWidth = 2.dp)
-                } else {
-                    Text(
-                        text = if (cooldownSeconds > 0) "Locked (${cooldownSeconds}s)" else "Unlock Chats",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = funkyColors.onMango
-                    )
-                }
-            }
-
-            if (hasBiometric && activity != null) {
-                Spacer(modifier = Modifier.height(12.dp))
-                OutlinedButton(
-                    onClick = {
-                        val cryptoObjResult = VaultSecurityManager.createBiometricDecryptCryptoObject(context)
-                        cryptoObjResult.onSuccess { cryptoObj ->
-                            promptBiometricUnlock(activity, cryptoObj) { success ->
-                                if (!success) {
-                                    errorMessage = "Biometric authentication cancelled or failed."
-                                }
-                            }
-                        }.onFailure { ex ->
-                            errorMessage = ex.message ?: "Biometric unlock unavailable."
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp)
+                        .height(52.dp)
                         .testTag("chats_vault_biometric_button"),
+                    shape = RoundedCornerShape(50.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = funkyColors.mango),
+                    enabled = !unlockSuccessAnimating
+                ) {
+                    SoftFingerprintIcon(size = 20.dp, color = funkyColors.onMango)
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "Unlock with Fingerprint or PIN",
+                        color = funkyColors.onMango,
+                        fontSize = 14.5.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedButton(
+                    onClick = { showPasswordForm = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("chats_vault_use_password_fallback_button"),
                     shape = RoundedCornerShape(50.dp),
                     border = BorderStroke(1.dp, funkyColors.line)
                 ) {
-                    SoftFingerprintIcon(size = 20.dp, color = funkyColors.ink)
-                    Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = "Unlock with Biometrics",
+                        text = "Use vault password",
                         color = funkyColors.ink,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold
                     )
+                }
+            } else {
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = {
+                        password = it
+                        errorMessage = null
+                    },
+                    label = { Text("Vault Password") },
+                    singleLine = true,
+                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clickable { passwordVisible = !passwordVisible },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            SoftEyeIcon(
+                                visible = passwordVisible,
+                                size = 20.dp,
+                                tint = if (passwordVisible) funkyColors.mango else funkyColors.mute
+                            )
+                        }
+                    },
+                    textStyle = TextStyle(
+                        color = funkyColors.ink,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Normal
+                    ),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = funkyColors.ink,
+                        unfocusedTextColor = funkyColors.ink,
+                        focusedBorderColor = funkyColors.mango,
+                        focusedLabelColor = funkyColors.mango,
+                        unfocusedLabelColor = funkyColors.mute,
+                        cursorColor = funkyColors.mango,
+                        unfocusedBorderColor = funkyColors.line
+                    ),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { submitCardUnlock() }),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("chats_vault_password_input"),
+                    shape = RoundedCornerShape(16.dp)
+                )
+
+                if (qaVaultPassword != null) {
+                    TextButton(
+                        onClick = {
+                            password = qaVaultPassword
+                            errorMessage = null
+                        },
+                        modifier = Modifier
+                            .align(Alignment.End)
+                            .testTag("chats_vault_fill_qa_password_button")
+                    ) {
+                        Text(
+                            text = "Use QA Test Password",
+                            fontSize = 12.sp,
+                            color = funkyColors.mango,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+
+                val displayError = if (cooldownSeconds > 0) {
+                    "Too many failed attempts. Try again in ${cooldownSeconds}s."
+                } else {
+                    errorMessage
+                }
+
+                displayError?.let { err ->
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(if (isDark) funkyColors.danger.copy(alpha = 0.14f) else Color(0xFFFEF2F2), RoundedCornerShape(10.dp))
+                            .border(1.dp, if (isDark) funkyColors.danger.copy(alpha = 0.4f) else Color(0xFFFEE2E2), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        SoftWarningIcon(size = 18.dp, color = funkyColors.danger)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = err,
+                            fontSize = 12.sp,
+                            color = funkyColors.danger,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Button(
+                    onClick = { submitCardUnlock() },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                        .testTag("chats_vault_unlock_button"),
+                    shape = RoundedCornerShape(50.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = funkyColors.mango),
+                    enabled = !isLoading && cooldownSeconds == 0 && !unlockSuccessAnimating
+                ) {
+                    if (isLoading) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), color = funkyColors.onMango, strokeWidth = 2.dp)
+                    } else {
+                        Text(
+                            text = if (cooldownSeconds > 0) "Locked (${cooldownSeconds}s)" else "Unlock Chats",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = funkyColors.onMango
+                        )
+                    }
+                }
+
+                if (!requiresPasswordOnly && activity != null) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedButton(
+                        onClick = {
+                            showPasswordForm = false
+                            launchLevel1Unlock()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp)
+                            .testTag("chats_vault_biometric_button"),
+                        shape = RoundedCornerShape(50.dp),
+                        border = BorderStroke(1.dp, funkyColors.line)
+                    ) {
+                        SoftFingerprintIcon(size = 20.dp, color = funkyColors.ink)
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "Use Fingerprint or PIN",
+                            color = funkyColors.ink,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
 

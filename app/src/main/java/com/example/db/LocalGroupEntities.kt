@@ -48,7 +48,9 @@ data class LocalGroupConversation(
     indices = [
         Index(value = ["groupId"]),
         Index(value = ["timestamp"]),
-        Index(value = ["expiresAt"])
+        Index(value = ["expiresAt"]),
+        Index(value = ["clientId"]),
+        Index(value = ["status"])
     ]
 )
 data class LocalGroupMessage(
@@ -74,7 +76,12 @@ data class LocalGroupMessage(
     val replyToMessageId: String? = null,
     val replyToSenderId: String? = null,
     val replyToSenderName: String? = null,
-    val replyToPreview: String? = null
+    val replyToPreview: String? = null,
+    val clientId: String? = null,
+    val status: String = LocalMessageStatus.SENT,
+    val failReason: String? = null,
+    val retryCount: Int = 0,
+    val nextRetryAt: Long = 0L
 )
 
 @Entity(

@@ -11,8 +11,10 @@ import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.example.service.PresenceManager
 import com.example.service.PushNotificationManager
+import com.example.util.StartupTimingTracker
 import com.google.firebase.FirebaseApp
 import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 
 class FunkyTalkApplication : Application(), ImageLoaderFactory {
     companion object {
@@ -33,6 +35,7 @@ class FunkyTalkApplication : Application(), ImageLoaderFactory {
     }
 
     override fun onCreate() {
+        StartupTimingTracker.markAppCreate()
         super.onCreate()
         _instance = this
         appContext = applicationContext
@@ -50,10 +53,14 @@ class FunkyTalkApplication : Application(), ImageLoaderFactory {
         TelemetryManager.init(this)
         PushNotificationManager.initialize(this)
         PresenceManager.initialize(this)
+        com.example.crypto.ChatLockManager.attachLifecycleObserver(this)
     }
 
     override fun newImageLoader(): ImageLoader {
         val okHttpClient = OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
             .addInterceptor { chain ->
                 val request = chain.request()
                 if (request.url.host.contains("appwrite.io")) {

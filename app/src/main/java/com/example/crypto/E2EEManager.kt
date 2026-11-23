@@ -1,9 +1,12 @@
 package com.example.crypto
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.Base64
 import android.util.Log
+import android.util.LruCache
 import com.example.ActiveUserManager
+import com.example.BuildConfig
 import com.example.LegacySecurityMigration
 import com.example.SupabaseClient
 import com.example.SupabaseSessionManager
@@ -25,6 +28,58 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.util.concurrent.ConcurrentHashMap
+
+/**
+ * Debug-only stage timing tracker for DM & Group message latency.
+ * Logs ONLY anonymized clientId prefix and durations in ms; never logs message content, keys, or tokens.
+ */
+object ChatTimingTracker {
+    private const val TAG = "ChatTiming"
+    private val tapTimestamps = ConcurrentHashMap<String, Long>()
+    private val bubbleReported = ConcurrentHashMap.newKeySet<String>()
+
+    fun nowMs(): Long = SystemClock.elapsedRealtime()
+
+    fun markTap(clientId: String, tapElapsedMs: Long = SystemClock.elapsedRealtime()) {
+        if (!BuildConfig.DEBUG || clientId.isBlank()) return
+        if (tapTimestamps.size > 256) tapTimestamps.clear()
+        tapTimestamps[clientId] = tapElapsedMs
+        bubbleReported.remove(clientId)
+    }
+
+    fun markBubbleShown(channel: String, clientId: String) {
+        if (!BuildConfig.DEBUG || clientId.isBlank()) return
+        val tapMs = tapTimestamps[clientId] ?: return
+        if (bubbleReported.add(clientId)) {
+            if (bubbleReported.size > 256) bubbleReported.clear()
+            val dt = (SystemClock.elapsedRealtime() - tapMs).coerceAtLeast(0L)
+            Log.d(TAG, "[$channel] id=${clientId.take(8)} tap_to_bubble_ms=$dt")
+        }
+    }
+
+    fun logEncrypt(channel: String, clientId: String, durationMs: Long, recipients: Int = 1) {
+        if (!BuildConfig.DEBUG) return
+        Log.d(TAG, "[$channel] id=${clientId.take(8)} encrypt_ms=$durationMs recipients=$recipients")
+    }
+
+    fun logSendRequest(channel: String, clientId: String, durationMs: Long, success: Boolean) {
+        if (!BuildConfig.DEBUG) return
+        val tapMs = tapTimestamps[clientId]
+        val totalMs = if (tapMs != null) (SystemClock.elapsedRealtime() - tapMs).coerceAtLeast(0L) else -1L
+        Log.d(TAG, "[$channel] id=${clientId.take(8)} send_request_ms=$durationMs total_to_ack_ms=$totalMs ok=$success")
+    }
+
+    fun logServerEchoOrReceive(channel: String, refId: String, receiveLatencyMs: Long, isEcho: Boolean) {
+        if (!BuildConfig.DEBUG) return
+        val tapMs = tapTimestamps.remove(refId)
+        val roundTripMs = if (tapMs != null) (SystemClock.elapsedRealtime() - tapMs).coerceAtLeast(0L) else -1L
+        Log.d(
+            TAG,
+            "[$channel] id=${refId.take(8)} ${if (isEcho) "server_echo_ms" else "realtime_receive_ms"}=$receiveLatencyMs roundtrip_ms=$roundTripMs"
+        )
+    }
+}
 
 object E2EEManager {
     private const val TAG = "E2EEManager"
@@ -43,7 +98,13 @@ object E2EEManager {
     private var cachedKeysetHandle: KeysetHandle? = null
 
     @Volatile
+    private var cachedHybridDecrypt: HybridDecrypt? = null
+
+    @Volatile
     private var cachedPublicKeyBase64: String? = null
+
+    private val syncedUids = ConcurrentHashMap.newKeySet<String>()
+    private val encryptPrimitiveCache = object : LruCache<String, HybridEncrypt>(64) {}
 
     init {
         try {
@@ -84,6 +145,7 @@ object E2EEManager {
         return synchronized(this) {
             if (cachedUid != uid) {
                 cachedKeysetHandle = null
+                cachedHybridDecrypt = null
                 cachedPublicKeyBase64 = null
                 cachedUid = uid
             }
@@ -100,10 +162,41 @@ object E2EEManager {
                     .build()
                 manager.keysetHandle.also {
                     cachedKeysetHandle = it
+                    cachedHybridDecrypt = null
                     cachedUid = uid
                 }
             }
         }
+    }
+
+    private fun getOrBuildHybridDecrypt(context: Context, uid: String): HybridDecrypt {
+        if (cachedUid == uid && cachedHybridDecrypt != null) {
+            return cachedHybridDecrypt!!
+        }
+        val handle = getOrBuildKeysetHandle(context, uid)
+        return synchronized(this) {
+            if (cachedUid == uid && cachedHybridDecrypt != null) {
+                cachedHybridDecrypt!!
+            } else {
+                handle.getPrimitive(HybridDecrypt::class.java).also {
+                    cachedHybridDecrypt = it
+                }
+            }
+        }
+    }
+
+    private fun getOrBuildHybridEncrypt(recipientPublicKeyBase64: String): HybridEncrypt {
+        ensureHybridRegistered()
+        synchronized(encryptPrimitiveCache) {
+            encryptPrimitiveCache.get(recipientPublicKeyBase64)?.let { return it }
+        }
+        val publicKeyBytes = Base64.decode(recipientPublicKeyBase64, Base64.DEFAULT)
+        val publicKeysetHandle = CleartextKeysetHandle.read(BinaryKeysetReader.withBytes(publicKeyBytes))
+        val primitive = publicKeysetHandle.getPrimitive(HybridEncrypt::class.java)
+        synchronized(encryptPrimitiveCache) {
+            encryptPrimitiveCache.put(recipientPublicKeyBase64, primitive)
+        }
+        return primitive
     }
 
     private fun exportPublicKeyBase64(keysetHandle: KeysetHandle): String {
@@ -117,9 +210,11 @@ object E2EEManager {
         synchronized(this) {
             if (cachedUid == uid) {
                 cachedKeysetHandle = null
+                cachedHybridDecrypt = null
                 cachedPublicKeyBase64 = null
                 cachedUid = null
             }
+            syncedUids.remove(uid)
         }
         LegacySecurityMigration.deleteSharedPrefsCompat(
             context.applicationContext,
@@ -141,12 +236,19 @@ object E2EEManager {
      * Exports and publishes the public keyset to Supabase user_public_keys.
      * Automatically recovers from `identity_key_in_use` (23505) by regenerating a fresh UID-scoped keypair.
      */
-    suspend fun ensureIdentityKeyInitialized(context: Context): String? = withContext(Dispatchers.IO) {
+    suspend fun ensureIdentityKeyInitialized(context: Context, forceSync: Boolean = false): String? = withContext(Dispatchers.IO) {
         try {
             val uid = ActiveUserManager.getActiveUid(context) ?: return@withContext null
             val keysetHandle = getOrBuildKeysetHandle(context, uid)
-            var publicKeyBase64 = exportPublicKeyBase64(keysetHandle)
-            cachedPublicKeyBase64 = publicKeyBase64
+            var publicKeyBase64 = if (cachedUid == uid && !cachedPublicKeyBase64.isNullOrBlank()) {
+                cachedPublicKeyBase64!!
+            } else {
+                exportPublicKeyBase64(keysetHandle).also { cachedPublicKeyBase64 = it }
+            }
+
+            if (!forceSync && syncedUids.contains(uid)) {
+                return@withContext publicKeyBase64
+            }
 
             val token = SupabaseSessionManager.getBearerToken(context)
             if (token.isNotBlank()) {
@@ -156,7 +258,7 @@ object E2EEManager {
 
                 val keyVersion = getKeyVersion(context, uid)
                 val resp = SupabaseClient.api.upsertUserPublicKey(
-                    apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
+                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
                     auth = token,
                     prefer = "resolution=merge-duplicates",
                     body = UpsertUserPublicKeyRequest(
@@ -168,6 +270,7 @@ object E2EEManager {
                 )
 
                 if (resp.isSuccessful) {
+                    syncedUids.add(uid)
                     Log.d(TAG, "Synced public key to Supabase user_public_keys for user $uid (v$keyVersion)")
                 } else {
                     val errBody = resp.errorBody()?.string().orEmpty()
@@ -186,7 +289,7 @@ object E2EEManager {
                         cachedPublicKeyBase64 = publicKeyBase64
 
                         val retryResp = SupabaseClient.api.upsertUserPublicKey(
-                            apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
+                            apiKey = BuildConfig.SUPABASE_ANON_KEY,
                             auth = token,
                             prefer = "resolution=merge-duplicates",
                             body = UpsertUserPublicKeyRequest(
@@ -197,12 +300,13 @@ object E2EEManager {
                             )
                         )
                         if (retryResp.isSuccessful) {
+                            syncedUids.add(uid)
                             Log.d(TAG, "Successfully synced regenerated public key for user $uid (v$nextVersion)")
                         } else {
                             Log.w(TAG, "Retry upsertUserPublicKey failed: code=${retryResp.code()} msg=${retryResp.message()}")
                         }
                     } else {
-                        Log.w(TAG, "Failed to upsert public key: code=${resp.code()} msg=${resp.message()} body=$errBody")
+                        Log.w(TAG, "Failed to upsert public key: code=${resp.code()} msg=${resp.message()}")
                     }
                 }
             }
@@ -218,24 +322,31 @@ object E2EEManager {
      * Encrypts plaintext using recipient's Tink HPKE public keyset.
      */
     fun encryptMessage(recipientPublicKeyBase64: String, plaintext: String): String {
-        val publicKeyBytes = Base64.decode(recipientPublicKeyBase64, Base64.DEFAULT)
-        val publicKeysetHandle = CleartextKeysetHandle.read(BinaryKeysetReader.withBytes(publicKeyBytes))
-        val hybridEncrypt = publicKeysetHandle.getPrimitive(HybridEncrypt::class.java)
+        val hybridEncrypt = getOrBuildHybridEncrypt(recipientPublicKeyBase64)
         val ciphertextBytes = hybridEncrypt.encrypt(plaintext.toByteArray(Charsets.UTF_8), CONTEXT_INFO)
         return Base64.encodeToString(ciphertextBytes, Base64.NO_WRAP)
     }
+
+    suspend fun encryptMessageAsync(recipientPublicKeyBase64: String, plaintext: String): String =
+        withContext(Dispatchers.Default) {
+            encryptMessage(recipientPublicKeyBase64, plaintext)
+        }
 
     /**
      * Decrypts Base64-encoded ciphertext using the active user's private keyset.
      */
     fun decryptMessage(context: Context, ciphertextBase64: String): String {
         val uid = ActiveUserManager.requireActiveUid(context)
-        val keysetHandle = getOrBuildKeysetHandle(context, uid)
-        val hybridDecrypt = keysetHandle.getPrimitive(HybridDecrypt::class.java)
+        val hybridDecrypt = getOrBuildHybridDecrypt(context, uid)
         val ciphertextBytes = Base64.decode(ciphertextBase64, Base64.DEFAULT)
         val decryptedBytes = hybridDecrypt.decrypt(ciphertextBytes, CONTEXT_INFO)
         return String(decryptedBytes, Charsets.UTF_8)
     }
+
+    suspend fun decryptMessageAsync(context: Context, ciphertextBase64: String): String =
+        withContext(Dispatchers.Default) {
+            decryptMessage(context, ciphertextBase64)
+        }
 
     fun getMyPublicKeyBase64(context: Context? = null): String? {
         val uid = ActiveUserManager.getActiveUid(context) ?: return null
@@ -248,8 +359,13 @@ object E2EEManager {
     fun resetForLogout() {
         synchronized(this) {
             cachedKeysetHandle = null
+            cachedHybridDecrypt = null
             cachedPublicKeyBase64 = null
             cachedUid = null
+            syncedUids.clear()
+        }
+        synchronized(encryptPrimitiveCache) {
+            encryptPrimitiveCache.evictAll()
         }
     }
 

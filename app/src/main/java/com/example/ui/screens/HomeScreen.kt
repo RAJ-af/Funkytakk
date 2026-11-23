@@ -121,7 +121,6 @@ fun HomeScreen(
     
     // Remote events / Amusements
     var showAmusementEventsDialog by remember { mutableStateOf(false) }
-    var activeEventsList by remember { mutableStateOf<List<SupabaseEvent>>(emptyList()) }
     var selectedAmusementEvent by remember { mutableStateOf<SupabaseEvent?>(null) }
 
     // Direct Chat active messages thread dialog
@@ -150,8 +149,12 @@ fun HomeScreen(
         )
     }
 
-    // Followed friends state loaded from Firestore in real-time
-    var activeFriends by remember { mutableStateOf<List<FollowedFriend>>(emptyList()) }
+    // Dynamic Rooms & Friends state hydrated synchronously from AppCacheStore (cache-first SWR)
+    val cachedHomeFeed = remember(currentUserProfile.uid) {
+        com.example.ui.screens.home.HomeFeedLoader.loadCached(context)
+    }
+    var activeFriends by remember { mutableStateOf<List<FollowedFriend>>(cachedHomeFeed?.friends.orEmpty()) }
+    var activeEventsList by remember { mutableStateOf<List<SupabaseEvent>>(cachedHomeFeed?.events.orEmpty()) }
     val blockedUserIds by com.example.repository.BlockRepository.blockedUserIds.collectAsState()
 
     val activeFriendsList = remember(activeFriends, supabaseProfiles, blockedUserIds) {
@@ -177,13 +180,22 @@ fun HomeScreen(
         mapped.sortedByDescending { it.isOnline }
     }
 
-    // Dynamic Rooms list state loaded from Supabase voice_rooms in real-time
-    var roomsList by remember { mutableStateOf<List<CustomRoom>>(emptyList()) }
+    var roomsList by remember { mutableStateOf<List<CustomRoom>>(cachedHomeFeed?.rooms.orEmpty()) }
     val visibleRoomsList = remember(roomsList, blockedUserIds) {
         roomsList.filterNot { blockedUserIds.contains(it.hostId) }
     }
+    var homeUiState by remember {
+        mutableStateOf<com.example.util.UiState<Unit>>(
+            if (cachedHomeFeed != null && (cachedHomeFeed.rooms.isNotEmpty() || cachedHomeFeed.friends.isNotEmpty())) {
+                com.example.util.UiState.Content(Unit, isRefreshing = true, isFromCache = true)
+            } else {
+                com.example.util.UiState.Loading
+            }
+        )
+    }
     var homeLoadError by remember { mutableStateOf<String?>(null) }
     var retryTrigger by remember { mutableIntStateOf(0) }
+    val isOnline by com.example.ui.components.AppNetworkManager.isOnline.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
 
     fun isNetworkOfflineError(t: Throwable): Boolean {
@@ -206,187 +218,36 @@ fun HomeScreen(
         VoiceRoomRealtimeManager.start()
 
         suspend fun refreshRoomsAndFriends() {
-            try {
-                // 1. Fetch voice rooms from Supabase (only active, live rooms) with authenticated bearer token
-                val authToken = SupabaseSessionManager.getBearerToken(context)
-                val roomsRes = SupabaseClient.api.getVoiceRooms(auth = authToken)
-                if (!roomsRes.isSuccessful) {
-                    Log.w("HomeScreen", "Voice rooms query returned HTTP ${roomsRes.code()}")
-                    if (roomsList.isEmpty()) {
-                        homeLoadError = "Temporarily unable to load rooms (${roomsRes.code()})."
-                    }
-                    return
+            if (roomsList.isEmpty() && homeUiState !is com.example.util.UiState.Content) {
+                homeUiState = com.example.util.UiState.Loading
+            }
+            com.example.ui.screens.home.HomeFeedLoader.fetchFresh(
+                context = context,
+                currentUserId = currentUserId,
+                supabaseProfiles = supabaseProfiles
+            ).onSuccess { fresh ->
+                roomsList = fresh.rooms
+                if (fresh.friends.isNotEmpty() || supabaseProfiles.isNotEmpty()) {
+                    activeFriends = fresh.friends
                 }
+                activeEventsList = fresh.events
                 homeLoadError = null
-                val supaRooms = (roomsRes.body() ?: emptyList()).filter {
-                    (it.is_live == true) && (it.status != "ended")
-                }
-
-                // 2. Fetch active events from Supabase events table (ordered by event_time asc)
-                try {
-                    val eventsRes = SupabaseClient.api.getActiveEvents()
-                    if (eventsRes.isSuccessful) {
-                        activeEventsList = eventsRes.body() ?: emptyList()
-                    }
-                } catch (e: kotlinx.coroutines.CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    if (!isNetworkOfflineError(e)) {
-                        Log.w("HomeScreen", "Error fetching active events: ${e.javaClass.simpleName}")
-                    }
-                }
-
-                // 3. Fetch participants only for currently visible live rooms (skip when empty)
-                val visibleRoomIds = supaRooms.mapNotNull { it.id?.takeIf { id -> id.isNotBlank() } }
-                val supaParticipants = if (visibleRoomIds.isNotEmpty()) {
-                    val roomIdFilter = "in.(${visibleRoomIds.joinToString(",")})"
-                    val participantsRes = SupabaseClient.api.getAllRoomParticipants(
-                        auth = authToken,
-                        roomIdIn = roomIdFilter
+                homeUiState = if (fresh.rooms.isEmpty()) {
+                    com.example.util.UiState.Empty(
+                        title = "No live rooms right now",
+                        subtitle = "Be the first to start a voice circle!",
+                        actionLabel = "Create Room"
                     )
-                    participantsRes.body() ?: emptyList()
                 } else {
-                    emptyList()
+                    com.example.util.UiState.Content(Unit, isRefreshing = false, isFromCache = false)
                 }
-                val liveParticipants = com.example.realtime.VoiceRoomRealtimeManager.getAllLiveParticipants()
-                val allParticipants = (supaParticipants + liveParticipants).distinctBy { "${it.room_id}_${it.user_id}" }
-
-                // 4. Derive real followed friends & presence from Supabase DB followers and room participants
-                val followedUserIds = try {
-                    val followersResp = SupabaseClient.api.getFollowers(
-                        auth = "Bearer ${BuildConfig.SUPABASE_ANON_KEY}",
-                        followerIdEq = "eq.$currentUserId"
-                    )
-                    if (followersResp.isSuccessful) {
-                        followersResp.body()?.map { it.following_id }?.toSet() ?: emptySet()
-                    } else emptySet()
-                } catch (e: kotlinx.coroutines.CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    if (!isNetworkOfflineError(e)) {
-                        Log.w("HomeScreen", "Could not fetch followed IDs: ${e.javaClass.simpleName}")
-                    }
-                    emptySet()
-                }
-
-                if (supabaseProfiles.isNotEmpty()) {
-                    val followedProfiles = supabaseProfiles.filter {
-                        it.uid != currentUserId && followedUserIds.contains(it.uid)
-                    }
-                    val targetProfiles = if (followedProfiles.isNotEmpty()) {
-                        followedProfiles
-                    } else {
-                        // User has not followed anyone yet: showcase community learners
-                        supabaseProfiles.filter { it.uid != currentUserId }.take(10)
-                    }
-
-                    val derivedFriends = targetProfiles.map { p ->
-                        val pId = p.uid
-                        val activePart = allParticipants.firstOrNull { it.user_id == pId || it.user_id == p.uid }
-                        val isOnline = activePart != null
-                        val isSpeaking = isOnline && (activePart.role == "speaker" || activePart.role == "host") && activePart.is_mic_enabled
-                        val statusText = when {
-                            !isOnline -> "Offline"
-                            activePart?.role == "speaker" || activePart?.role == "host" -> "Speaking"
-                            else -> "Listening"
-                        }
-                        FollowedFriend(
-                            id = pId,
-                            name = p.displayName ?: p.username ?: "Learner",
-                            avatarUrl = p.avatar ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
-                            flagCode = p.countryCode?.ifBlank { null } ?: "in",
-                            isSpeaking = isSpeaking,
-                            statusText = statusText,
-                            currentRoomId = activePart?.room_id ?: "",
-                            isOnline = isOnline
-                        )
-                    }
-                    activeFriends = derivedFriends
-                }
-
-                // 4. Map Supabase voice_rooms to CustomRoom
-                if (supaRooms.isNotEmpty()) {
-                    val mapped = supaRooms.mapIndexed { index, r ->
-                        val rId = r.id ?: "room_$index"
-                        val roomParts = allParticipants.filter { it.room_id == rId }
-                        val realSpeaking = if (roomParts.isNotEmpty()) {
-                            roomParts.count { it.role == "speaker" || it.role == "host" }.coerceAtLeast(1)
-                        } else {
-                            r.speaking_count ?: 1
-                        }
-                        val realListening = if (roomParts.isNotEmpty()) {
-                            roomParts.count { it.role == "listener" || (it.role != "speaker" && it.role != "host") }
-                        } else {
-                            r.listening_count ?: 0
-                        }
-
-                        val decidedTag = decideSupabaseRoomTag(
-                            room = r,
-                            allRooms = supaRooms,
-                            realSpeakingCount = realSpeaking,
-                            realListeningCount = realListening
-                        )
-                        val badgeColor = getBadgeColor(decidedTag)
-                        val overlayVal = when (index % 4) {
-                            0 -> Color(0x22FCD34D)
-                            1 -> Color(0x22D8B4FE)
-                            2 -> Color(0x22FDA4AF)
-                            else -> Color(0x223B82F6)
-                        }
-                        val gradBrush = Brush.linearGradient(listOf(Color(0xFFFFFBEB), Color(0xFFFEF3C7)))
-
-                        val rawAvatars = r.preview_avatars.orEmpty()
-                        val roomAvatars = if (rawAvatars.isNotEmpty()) {
-                            rawAvatars
-                        } else {
-                            supabaseProfiles.shuffled().take(3).mapNotNull { it.avatar }.ifEmpty {
-                                listOf("https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150")
-                            }
-                        }
-
-                        val hostProfile = supabaseProfiles.find { it.uid == r.host_id }
-                        val hostNatives = listOfNotNull(hostProfile?.nativeLanguage?.takeIf { it.isNotBlank() })
-                        val hostLearnings = (
-                            listOfNotNull(hostProfile?.learningLanguage?.takeIf { it.isNotBlank() }) +
-                                (hostProfile?.selectedLanguages ?: emptyList())
-                            ).distinct()
-
-                        CustomRoom(
-                            id = rId,
-                            title = r.title ?: "Voice Circle",
-                            subtitle = r.description ?: "Practice and speak together",
-                            language = r.language ?: "English",
-                            flagCode = LanguageData.resolveFlagCode(
-                                languageName = r.language,
-                                storedCode = r.language_code.orEmpty().ifBlank { r.country_code.orEmpty() }
-                            ),
-                            speakingCount = realSpeaking,
-                            listeningCount = realListening,
-                            tag = r.level_tag.orEmpty().ifBlank { r.tag.orEmpty() }.ifBlank { "All Levels" },
-                            bgGradient = gradBrush,
-                            imageUrl = r.banner_image_url.orEmpty().ifBlank { "drawable://img_anime_banner_sakura_station_1794610601752" },
-                            overlayColor = overlayVal,
-                            badgeText = decidedTag,
-                            badgeColor = badgeColor,
-                            avatars = roomAvatars,
-                            hostId = r.host_id ?: "",
-                            hostNativeLanguages = hostNatives,
-                            hostLearningLanguages = hostLearnings
-                        )
-                    }
-                    roomsList = mapped
+            }.onFailure { err ->
+                val friendly = com.example.util.ErrorMapper.map(err)
+                homeLoadError = friendly
+                if (roomsList.isEmpty()) {
+                    homeUiState = com.example.util.UiState.Error(friendly, canRetry = true)
                 } else {
-                    roomsList = emptyList()
-                }
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                if (isNetworkOfflineError(e)) {
-                    homeLoadError = "You're offline. Check your connection."
-                    Log.i("HomeScreen", "Offline loading home feed: ${e.javaClass.simpleName}")
-                } else {
-                    homeLoadError = "Unable to refresh rooms right now."
-                    Log.w("HomeScreen", "Supabase backend error refreshing home feed: ${e.javaClass.simpleName}")
+                    homeUiState = com.example.util.UiState.Content(Unit, isRefreshing = false, isFromCache = true)
                 }
             }
         }
@@ -686,18 +547,39 @@ fun HomeScreen(
                                 showAmusementEventsDialog = true
                             },
                             onOpenNotifications = onOpenNotifications,
-                            onCreateRoom = { showCreateRoomBottomSheet = true },
-                            onJoinWithCode = { showJoinCodeDialog = true },
+                            onCreateRoom = {
+                                if (!isOnline) {
+                                    Toast.makeText(context, com.example.util.ErrorMapper.MSG_OFFLINE, Toast.LENGTH_SHORT).show()
+                                } else {
+                                    showCreateRoomBottomSheet = true
+                                }
+                            },
+                            onJoinWithCode = {
+                                if (!isOnline) {
+                                    Toast.makeText(context, com.example.util.ErrorMapper.MSG_OFFLINE, Toast.LENGTH_SHORT).show()
+                                } else {
+                                    showJoinCodeDialog = true
+                                }
+                            },
                             onOpenFilter = { showFilterDialog = true },
                             onJoinRoom = { room ->
-                                Toast.makeText(context, "Welcome to ${room.title}! Connecting audio...", Toast.LENGTH_LONG).show()
-                                val myRole = if (room.hostId == currentUserId) "speaker" else "listener"
-                                viewModel.joinRoom(room.id, room.title, context, role = myRole, hostId = room.hostId)
-                                onRoomClick()
+                                if (!isOnline) {
+                                    Toast.makeText(context, com.example.util.ErrorMapper.MSG_OFFLINE, Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "Welcome to ${room.title}! Connecting audio...", Toast.LENGTH_LONG).show()
+                                    val myRole = if (room.hostId == currentUserId) "speaker" else "listener"
+                                    viewModel.joinRoom(room.id, room.title, context, role = myRole, hostId = room.hostId)
+                                    onRoomClick()
+                                }
                             },
+                            homeUiState = homeUiState,
+                            isOnline = isOnline,
                             homeLoadError = homeLoadError,
                             onRetryLoad = {
                                 homeLoadError = null
+                                if (roomsList.isEmpty()) {
+                                    homeUiState = com.example.util.UiState.Loading
+                                }
                                 retryTrigger++
                             }
                         )

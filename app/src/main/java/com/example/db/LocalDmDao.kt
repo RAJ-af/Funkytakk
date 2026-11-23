@@ -32,6 +32,9 @@ interface DmConversationDao {
     @Query("UPDATE dm_conversations SET lastMessageText = :text, lastMessageTime = :time, unreadCount = unreadCount + :unreadDelta, otherUserName = COALESCE(:name, otherUserName), otherUserAvatar = COALESCE(:avatar, otherUserAvatar), otherUserFlag = COALESCE(:flag, otherUserFlag) WHERE id = :conversationId")
     suspend fun updateLastMessageAndProfile(conversationId: String, text: String, time: Long, unreadDelta: Int, name: String?, avatar: String?, flag: String?)
 
+    @Query("UPDATE dm_conversations SET id = :newId WHERE id = :oldId")
+    suspend fun updateConversationId(oldId: String, newId: String)
+
     @Query("DELETE FROM dm_conversations WHERE id = :conversationId")
     suspend fun deleteConversation(conversationId: String)
 
@@ -46,6 +49,27 @@ interface DmMessageDao {
 
     @Query("SELECT * FROM dm_messages WHERE conversationId = :conversationId ORDER BY timestamp ASC")
     suspend fun getMessagesList(conversationId: String): List<LocalDmMessage>
+
+    @Query("SELECT * FROM dm_messages WHERE conversationId = :conversationId ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getLatestMessage(conversationId: String): LocalDmMessage?
+
+    @Query("SELECT * FROM dm_messages WHERE isOutgoing = 1 AND status IN ('SENDING', 'FAILED') ORDER BY timestamp ASC")
+    suspend fun getPendingOutgoingMessages(): List<LocalDmMessage>
+
+    @Query("SELECT * FROM dm_messages WHERE clientId = :clientId LIMIT 1")
+    suspend fun getMessageByClientId(clientId: String): LocalDmMessage?
+
+    @Query("UPDATE dm_messages SET status = :status, failReason = :failReason, retryCount = :retryCount, nextRetryAt = :nextRetryAt WHERE id = :id")
+    suspend fun updateMessageStatus(
+        id: String,
+        status: String,
+        failReason: String? = null,
+        retryCount: Int = 0,
+        nextRetryAt: Long = 0L
+    )
+
+    @Query("UPDATE dm_messages SET conversationId = :newConversationId WHERE conversationId = :oldConversationId")
+    suspend fun updateMessagesConversationId(oldConversationId: String, newConversationId: String)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessage(message: LocalDmMessage)
@@ -73,6 +97,67 @@ interface DmMessageDao {
 
     @Query("DELETE FROM dm_messages")
     suspend fun deleteAllMessages()
+
+    @Transaction
+    suspend fun deleteMessageAndRefreshConversation(
+        messageId: String,
+        conversationId: String,
+        conversationDao: DmConversationDao
+    ) {
+        deleteMessage(messageId)
+        val latest = getLatestMessage(conversationId)
+        val conv = conversationDao.getConversation(conversationId) ?: return
+        if (latest != null) {
+            val preview = when (latest.messageType) {
+                "image" -> "[Encrypted Photo]"
+                "voice" -> "[Encrypted Voice Note]"
+                else -> latest.text
+            }
+            conversationDao.insertOrUpdate(
+                conv.copy(
+                    lastMessageText = preview,
+                    lastMessageType = latest.messageType,
+                    lastMessageTime = latest.timestamp
+                )
+            )
+        } else {
+            conversationDao.insertOrUpdate(
+                conv.copy(
+                    lastMessageText = "",
+                    lastMessageType = "text",
+                    lastMessageTime = conv.createdAt
+                )
+            )
+        }
+    }
+
+    @Transaction
+    suspend fun migrateConversationId(
+        oldConvId: String,
+        newConvId: String,
+        conversationDao: DmConversationDao,
+        reactionDao: DmMessageReactionDao
+    ) {
+        if (oldConvId == newConvId || oldConvId.isBlank() || newConvId.isBlank()) return
+        val existingNew = conversationDao.getConversation(newConvId)
+        val oldConv = conversationDao.getConversation(oldConvId)
+        updateMessagesConversationId(oldConvId, newConvId)
+        reactionDao.updateConversationId(oldConvId, newConvId)
+        if (existingNew != null && oldConv != null) {
+            val mergedTime = maxOf(existingNew.lastMessageTime, oldConv.lastMessageTime)
+            val mergedText = if (oldConv.lastMessageTime >= existingNew.lastMessageTime) oldConv.lastMessageText else existingNew.lastMessageText
+            conversationDao.deleteConversation(oldConvId)
+            conversationDao.insertOrUpdate(
+                existingNew.copy(
+                    lastMessageText = mergedText,
+                    lastMessageTime = mergedTime,
+                    unreadCount = existingNew.unreadCount + oldConv.unreadCount
+                )
+            )
+        } else if (oldConv != null) {
+            conversationDao.updateConversationId(oldConvId, newConvId)
+        }
+    }
 }
 
 @Dao
@@ -103,6 +188,9 @@ interface DmMessageReactionDao {
 
     @Query("DELETE FROM dm_message_reactions WHERE conversation_id = :conversationId")
     suspend fun deleteReactionsForConversation(conversationId: String)
+
+    @Query("UPDATE dm_message_reactions SET conversation_id = :newConversationId WHERE conversation_id = :oldConversationId")
+    suspend fun updateConversationId(oldConversationId: String, newConversationId: String)
 
     @Query("DELETE FROM dm_message_reactions WHERE target_message_id NOT IN (SELECT id FROM dm_messages)")
     suspend fun deleteOrphanReactions()

@@ -203,80 +203,138 @@ fun DiscoverTabContent(
     var showFilterSettingsSheet by remember { mutableStateOf(false) }
     var selectedInterestTag by remember { mutableStateOf<String?>(null) }
 
-    // Dynamic state of partners with wave tracking
-    var partnersList by remember { mutableStateOf<List<DiscoverPartner>>(emptyList()) }
-    var isDatabaseLoading by remember { mutableStateOf(false) }
+    // Dynamic state of partners hydrated synchronously from AppCacheStore (cache-first SWR)
+    val isOnline by com.example.ui.components.AppNetworkManager.isOnline.collectAsState()
+    val cachedPartners = remember {
+        com.example.data.AppCacheStore.getSync<List<com.example.data.CachedDiscoverPartnerItem>>(
+            context = context,
+            key = "discover_partners_v1",
+            type = com.example.data.AppCacheStore.discoverPartnerListType()
+        )?.data?.map { item ->
+            DiscoverPartner(
+                id = item.id,
+                name = item.name,
+                username = item.username,
+                age = item.age,
+                isOnline = item.isOnline,
+                avatarUrl = item.avatarUrl,
+                coverUrl = item.coverUrl,
+                countryCode = item.countryCode,
+                nativeLang = item.nativeLang,
+                learningLang = item.learningLang,
+                bio = item.bio,
+                interests = item.interests,
+                vibe = item.vibe,
+                isWaved = item.isWaved,
+                nativeLangFull = item.nativeLangFull,
+                learningLangFull = item.learningLangFull,
+                city = item.city,
+                country = item.country
+            )
+        }.orEmpty()
+    }
+    var partnersList by remember { mutableStateOf<List<DiscoverPartner>>(cachedPartners) }
+    var isDatabaseLoading by remember { mutableStateOf(cachedPartners.isEmpty()) }
     var databaseError by remember { mutableStateOf<String?>(null) }
-    var refreshTrigger by remember { mutableStateOf(0) }
+    var refreshTrigger by remember { mutableIntStateOf(0) }
 
-    // Fetch discoverable profiles dynamically from Supabase
+    // Fetch discoverable profiles dynamically from Supabase under 10s timeout
     LaunchedEffect(activeCategoryFilter, selectedLanguageFilter, selectedInterestTag, refreshTrigger) {
-        isDatabaseLoading = true
+        if (partnersList.isEmpty()) isDatabaseLoading = true
         databaseError = null
         try {
-            val currentUserId = SupabaseSessionManager.getUserId(context).orEmpty()
-            val token = SupabaseSessionManager.getBearerToken(context)
-            val options = mutableMapOf<String, String>()
-            
-            // Sort by: is_online desc, last_seen desc
-            options["order"] = "is_online.desc,last_seen.desc"
-            options["limit"] = "50" // Paginate / don't fetch whole table
-            
-            // Exclude current user
-            if (currentUserId.isNotBlank()) {
-                options["auth_user_id"] = "neq.$currentUserId"
-            }
-            
-            if (activeCategoryFilter == "Online") {
-                options["is_online"] = "eq.true"
+            val loaded = com.example.util.withLoadingTimeout {
+                withContext(Dispatchers.IO) {
+                    val currentUserId = SupabaseSessionManager.getUserId(context).orEmpty()
+                    val options = mutableMapOf<String, String>()
+                    options["order"] = "is_online.desc,last_seen.desc"
+                    options["limit"] = "50"
+                    if (currentUserId.isNotBlank()) {
+                        options["auth_user_id"] = "neq.$currentUserId"
+                    }
+                    if (activeCategoryFilter == "Online") {
+                        options["is_online"] = "eq.true"
+                    }
+
+                    val response = com.example.util.StartupTimingTracker.measure("discover_profiles") {
+                        com.example.util.ErrorMapper.executeWithSingle401Retry(context) { auth ->
+                            SupabaseClient.api.getDiscoverableProfiles(
+                                apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
+                                auth = auth,
+                                options = options
+                            )
+                        }
+                    }.getOrElse { throw it }
+
+                    val profiles = response.body().orEmpty()
+                    profiles.map { p ->
+                        val rawNativeList = p.native_languages.orEmpty()
+                        val rawLearningList = p.learning_languages.orEmpty()
+                        DiscoverPartner(
+                            id = p.auth_user_id,
+                            name = p.profile_name ?: p.username ?: "Learner",
+                            username = p.username ?: "",
+                            age = p.age ?: 21,
+                            isOnline = p.is_online ?: false,
+                            avatarUrl = p.avatar_url ?: "",
+                            coverUrl = p.cover_url,
+                            countryCode = resolveCountryCode(p.country, p.country_code),
+                            nativeLang = formatLanguagesToCodes(rawNativeList),
+                            learningLang = formatLanguagesToCodes(rawLearningList),
+                            bio = p.bio ?: "",
+                            interests = p.hobbies ?: emptyList(),
+                            vibe = if (p.is_online == true) "Same Vibe" else "Chill",
+                            isWaved = false,
+                            nativeLangFull = rawNativeList.joinToString(", "),
+                            learningLangFull = rawLearningList.joinToString(", "),
+                            city = p.city ?: "",
+                            country = p.country ?: ""
+                        )
+                    }
+                }
             }
 
-            val response = withContext(Dispatchers.IO) {
-                SupabaseClient.api.getDiscoverableProfiles(
-                    apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
-                    auth = token,
-                    options = options
+            partnersList = loaded
+            if (activeCategoryFilter == "All" && selectedLanguageFilter == "All" && selectedInterestTag == null) {
+                com.example.data.AppCacheStore.put(
+                    context = context,
+                    key = "discover_partners_v1",
+                    value = loaded.map { p ->
+                        com.example.data.CachedDiscoverPartnerItem(
+                            id = p.id,
+                            name = p.name,
+                            username = p.username,
+                            age = p.age,
+                            isOnline = p.isOnline,
+                            avatarUrl = p.avatarUrl,
+                            coverUrl = p.coverUrl,
+                            countryCode = p.countryCode,
+                            nativeLang = p.nativeLang,
+                            learningLang = p.learningLang,
+                            bio = p.bio,
+                            interests = p.interests,
+                            vibe = p.vibe,
+                            isWaved = p.isWaved,
+                            nativeLangFull = p.nativeLangFull,
+                            learningLangFull = p.learningLangFull,
+                            city = p.city,
+                            country = p.country
+                        )
+                    },
+                    type = com.example.data.AppCacheStore.discoverPartnerListType()
                 )
             }
-
-            if (response.isSuccessful) {
-                val profiles = response.body().orEmpty()
-                partnersList = profiles.map { p ->
-                    val rawNativeList = p.native_languages.orEmpty()
-                    val rawLearningList = p.learning_languages.orEmpty()
-                    DiscoverPartner(
-                        id = p.auth_user_id,
-                        name = p.profile_name ?: p.username ?: "Anonymous",
-                        username = p.username ?: "",
-                        age = p.age ?: 21,
-                        isOnline = p.is_online ?: false,
-                        avatarUrl = p.avatar_url ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500",
-                        coverUrl = p.cover_url,
-                        countryCode = resolveCountryCode(p.country, p.country_code),
-                        nativeLang = formatLanguagesToCodes(rawNativeList),
-                        learningLang = formatLanguagesToCodes(rawLearningList),
-                        bio = p.bio ?: "Excited to practice languages and make new friends!",
-                        interests = p.hobbies ?: emptyList(),
-                        vibe = if (p.is_online == true) "Same Vibe" else "Chill",
-                        isWaved = false,
-                        nativeLangFull = rawNativeList.joinToString(", "),
-                        learningLangFull = rawLearningList.joinToString(", "),
-                        city = p.city ?: "",
-                        country = p.country ?: ""
-                    )
-                }
-                val partnerIds = partnersList.map { it.id }.filter { it.isNotBlank() }.distinct()
-                if (partnerIds.isNotEmpty()) {
-                    com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, partnerIds)
-                }
-            } else {
-                val errBody = response.errorBody()?.string()
-                Log.e("DiscoverTab", "Failed to fetch discoverable profiles: $errBody")
-                databaseError = "Failed to load profiles: ${response.message()}"
+            val partnerIds = loaded.map { it.id }.filter { it.isNotBlank() }.distinct()
+            if (partnerIds.isNotEmpty()) {
+                com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, partnerIds)
             }
-        } catch (e: Exception) {
-            Log.e("DiscoverTab", "Error loading discoverable profiles", e)
-            databaseError = e.localizedMessage ?: "Unknown error occurred"
+        } catch (ce: kotlinx.coroutines.CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            Log.e("DiscoverTab", "Error loading discoverable profiles", t)
+            if (partnersList.isEmpty()) {
+                databaseError = com.example.util.ErrorMapper.map(t)
+            }
         } finally {
             isDatabaseLoading = false
         }
@@ -527,23 +585,34 @@ fun DiscoverTabContent(
                     }
                 )
 
-                // Quick Lounge Action Button
+                // Quick Lounge Action Button (requires internet)
                 Box(
                     modifier = Modifier
+                        .heightIn(min = 48.dp)
                         .clip(RoundedCornerShape(20.dp))
-                        .background(funkyColors.soft)
-                        .border(1.dp, funkyColors.mango.copy(alpha = 0.45f), RoundedCornerShape(20.dp))
-                        .clickable { onCreateRoom() }
-                        .padding(horizontal = 14.dp, vertical = 7.dp)
+                        .background(if (isOnline) funkyColors.soft else funkyColors.soft.copy(alpha = 0.5f))
+                        .border(1.dp, if (isOnline) funkyColors.mango.copy(alpha = 0.45f) else funkyColors.line, RoundedCornerShape(20.dp))
+                        .clickable {
+                            if (!isOnline) {
+                                Toast.makeText(context, com.example.util.ErrorMapper.MSG_OFFLINE, Toast.LENGTH_SHORT).show()
+                            } else {
+                                onCreateRoom()
+                            }
+                        }
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                    contentAlignment = Alignment.Center
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        FunkyMicIcon(color = funkyColors.mango, modifier = Modifier.size(14.dp))
+                        FunkyMicIcon(
+                            color = if (isOnline) funkyColors.mango else funkyColors.mute,
+                            modifier = Modifier.size(14.dp)
+                        )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = "Start Lounge",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (isDark) funkyColors.mango else Color(0xFFB45309)
+                            color = if (!isOnline) funkyColors.mute else if (isDark) funkyColors.mango else Color(0xFFB45309)
                         )
                     }
                 }
@@ -557,42 +626,19 @@ fun DiscoverTabContent(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 contentPadding = PaddingValues(top = 6.dp, bottom = 28.dp)
             ) {
-                if (isDatabaseLoading) {
+                if (isDatabaseLoading && partnersList.isEmpty()) {
                     item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 80.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(
-                                color = funkyColors.mango
-                            )
-                        }
+                        com.example.ui.components.DiscoverSkeleton()
                     }
-                } else if (databaseError != null) {
+                } else if (databaseError != null && partnersList.isEmpty()) {
                     item {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 60.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text(
-                                text = "Failed to load partners: $databaseError",
-                                color = funkyColors.danger,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Spacer(modifier = Modifier.height(14.dp))
-                            Button(
-                                onClick = { refreshTrigger++ },
-                                colors = ButtonDefaults.buttonColors(containerColor = funkyColors.mango),
-                                shape = RoundedCornerShape(18.dp)
-                            ) {
-                                Text("Retry Connection", color = funkyColors.onMango, fontWeight = FontWeight.Bold)
-                            }
-                        }
+                        com.example.ui.components.FriendlyErrorRetryCard(
+                            message = databaseError ?: com.example.util.ErrorMapper.MSG_GENERIC,
+                            onRetry = { refreshTrigger++ },
+                            isOnline = isOnline,
+                            testTagPrefix = "discover",
+                            modifier = Modifier.padding(vertical = 20.dp)
+                        )
                     }
                 } else if (filteredPartners.isEmpty()) {
                     item {
@@ -648,7 +694,9 @@ fun DiscoverTabContent(
                             partner = partner,
                             onCardClick = { showFullProfileScreenWithFeed = partner },
                             onWaveClick = {
-                                if (!partner.isWaved) {
+                                if (!isOnline) {
+                                    Toast.makeText(context, com.example.util.ErrorMapper.MSG_OFFLINE, Toast.LENGTH_SHORT).show()
+                                } else if (!partner.isWaved) {
                                     waveDialogUser = partner
                                 } else {
                                     Toast.makeText(context, "Already waved to ${partner.name}!", Toast.LENGTH_SHORT).show()
@@ -746,6 +794,10 @@ fun DiscoverTabContent(
             confirmButton = {
                 Button(
                     onClick = {
+                        if (!isOnline) {
+                            Toast.makeText(context, com.example.util.ErrorMapper.MSG_OFFLINE, Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
                         if (blockedUserIds.contains(targetUser.id)) {
                             Toast.makeText(context, com.example.repository.USER_BLOCKED_ERROR_MESSAGE, Toast.LENGTH_SHORT).show()
                             waveDialogUser = null
@@ -761,6 +813,7 @@ fun DiscoverTabContent(
                         waveDialogUser = null
                         waveCustomMessage = ""
                     },
+                    enabled = isOnline,
                     colors = ButtonDefaults.buttonColors(containerColor = funkyColors.mango),
                     shape = RoundedCornerShape(16.dp)
                 ) {

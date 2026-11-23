@@ -113,10 +113,49 @@ object AppNetworkManager {
     private val _isOnline = MutableStateFlow(true)
     val isOnline = _isOnline.asStateFlow()
 
+    private val _bannerState = MutableStateFlow(ConnectivityBannerState.Hidden)
+    val bannerState = _bannerState.asStateFlow()
+
     private val _showNoInternetDialog = MutableStateFlow(false)
     val showNoInternetDialog = _showNoInternetDialog.asStateFlow()
 
+    private val _networkRestoredEvents = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 8)
+    val networkRestoredEvents: kotlinx.coroutines.flow.SharedFlow<Unit> = _networkRestoredEvents
+
+    private val activeNetworks = java.util.concurrent.ConcurrentHashMap.newKeySet<Network>()
+    private val managerScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default
+    )
+
+    @Volatile
+    private var backOnlineHideJob: kotlinx.coroutines.Job? = null
+
+    @Volatile
     private var isMonitoringStarted = false
+
+    private fun updateConnectivityState(online: Boolean) {
+        val previouslyOnline = _isOnline.value
+        _isOnline.value = online
+        if (!online) {
+            backOnlineHideJob?.cancel()
+            _bannerState.value = ConnectivityBannerState.Offline
+        } else {
+            _showNoInternetDialog.value = false
+            if (!previouslyOnline) {
+                _networkRestoredEvents.tryEmit(Unit)
+                backOnlineHideJob?.cancel()
+                _bannerState.value = ConnectivityBannerState.BackOnline
+                backOnlineHideJob = managerScope.launch {
+                    kotlinx.coroutines.delay(2_000L)
+                    if (_isOnline.value && _bannerState.value == ConnectivityBannerState.BackOnline) {
+                        _bannerState.value = ConnectivityBannerState.Hidden
+                    }
+                }
+            } else if (_bannerState.value == ConnectivityBannerState.Offline) {
+                _bannerState.value = ConnectivityBannerState.Hidden
+            }
+        }
+    }
 
     fun startMonitoring(context: Context) {
         if (isMonitoringStarted) return
@@ -126,6 +165,7 @@ object AppNetworkManager {
         if (cm != null) {
             val isCurrentlyOnline = checkConnection(context)
             _isOnline.value = isCurrentlyOnline
+            _bannerState.value = if (isCurrentlyOnline) ConnectivityBannerState.Hidden else ConnectivityBannerState.Offline
 
             val request = NetworkRequest.Builder()
                 .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
@@ -134,12 +174,31 @@ object AppNetworkManager {
             try {
                 cm.registerNetworkCallback(request, object : ConnectivityManager.NetworkCallback() {
                     override fun onAvailable(network: Network) {
-                        _isOnline.value = true
-                        _showNoInternetDialog.value = false
+                        activeNetworks.add(network)
+                        updateConnectivityState(true)
+                    }
+
+                    override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+                        val hasInternet = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                        if (hasInternet) {
+                            activeNetworks.add(network)
+                            updateConnectivityState(true)
+                        } else {
+                            activeNetworks.remove(network)
+                            val stillOnline = activeNetworks.isNotEmpty() || querySystemOnline(cm)
+                            updateConnectivityState(stillOnline)
+                        }
                     }
 
                     override fun onLost(network: Network) {
-                        _isOnline.value = false
+                        activeNetworks.remove(network)
+                        val stillOnline = activeNetworks.isNotEmpty() || querySystemOnline(cm)
+                        updateConnectivityState(stillOnline)
+                    }
+
+                    override fun onUnavailable() {
+                        val stillOnline = activeNetworks.isNotEmpty() || querySystemOnline(cm)
+                        updateConnectivityState(stillOnline)
                     }
                 })
             } catch (_: Exception) {
@@ -148,13 +207,17 @@ object AppNetworkManager {
         }
     }
 
+    private fun querySystemOnline(cm: ConnectivityManager): Boolean {
+        val activeNetwork = cm.activeNetwork ?: return false
+        val capabilities = cm.getNetworkCapabilities(activeNetwork) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
     fun checkConnection(context: Context): Boolean {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
             ?: return true
-        val activeNetwork = cm.activeNetwork ?: return false
-        val capabilities = cm.getNetworkCapabilities(activeNetwork) ?: return false
-        val online = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-        _isOnline.value = online
+        val online = querySystemOnline(cm)
+        updateConnectivityState(online)
         return online
     }
 

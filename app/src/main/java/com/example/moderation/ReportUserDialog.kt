@@ -870,7 +870,7 @@ private fun executeReportSubmit(
         } catch (e: Exception) {
             Log.e(TAG, "Exception during report submit execution: ${e.message}", e)
             onStateChange(ReportSubmitState.IDLE)
-            onError(e.localizedMessage ?: "Could not send, try again.")
+            onError(com.example.util.ErrorMapper.map(e))
         }
     }
 }

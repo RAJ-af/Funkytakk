@@ -138,8 +138,12 @@ object VoiceRoomRealtimeManager {
 
     private val subscribedRoomChannels = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val subscribedGroupIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val joinedTopicsForCurrentSocket = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     @Volatile
     private var subscribedGroupRecipientId: String? = null
+    @Volatile
+    private var subscribedDmRecipientId: String? = null
+    private var networkObserverJob: Job? = null
 
     private val userSnippets = java.util.concurrent.ConcurrentHashMap<String, UserSnippet>()
 
@@ -237,12 +241,31 @@ object VoiceRoomRealtimeManager {
     }
 
     fun start() {
+        ensureNetworkObserver()
         if (isConnected || webSocket != null) return
         connect()
     }
 
+    private fun ensureNetworkObserver() {
+        if (networkObserverJob?.isActive == true) return
+        networkObserverJob = scope.launch {
+            com.example.ui.components.AppNetworkManager.networkRestoredEvents.collect {
+                reconnectNowIfNeeded()
+            }
+        }
+    }
+
+    fun reconnectNowIfNeeded() {
+        if (!isConnected && webSocket == null) {
+            reconnectJob?.cancel()
+            reconnectJob = null
+            connect()
+        }
+    }
+
     private fun connect() {
         try {
+            joinedTopicsForCurrentSocket.clear()
             val host = BuildConfig.SUPABASE_URL.replace("https://", "").replace("http://", "").trimEnd('/')
             val tokenParam = currentAuthToken?.let { "&token=$it" } ?: ""
             val wsUrl = "wss://$host/realtime/v1/websocket?apikey=${BuildConfig.SUPABASE_ANON_KEY}$tokenParam&vsn=1.0.0"
@@ -255,6 +278,7 @@ object VoiceRoomRealtimeManager {
                 override fun onOpen(ws: WebSocket, response: Response) {
                     Log.d(TAG, "Connected to Supabase Realtime WebSocket")
                     isConnected = true
+                    joinedTopicsForCurrentSocket.clear()
                     subscribeToTopics(ws)
                     startHeartbeat(ws)
                     _events.tryEmit(RealtimeTableEvent.Reconnected())
@@ -441,27 +465,11 @@ object VoiceRoomRealtimeManager {
         }
         ws.send(joinSupportConversations.toString())
 
-        // Subscribe to dm_messages table changes
-        val joinDmMessages = JSONObject().apply {
-            put("topic", "realtime:public:dm_messages")
-            put("event", "phx_join")
-            put("payload", JSONObject().apply {
-                if (!token.isNullOrBlank()) {
-                    put("access_token", token)
-                }
-                put("config", JSONObject().apply {
-                    put("postgres_changes", org.json.JSONArray().apply {
-                        put(JSONObject().apply {
-                            put("event", "*")
-                            put("schema", "public")
-                            put("table", "dm_messages")
-                        })
-                    })
-                })
-            })
-            put("ref", refCounter.getAndIncrement().toString())
+        // Subscribe to filtered DM inbox if registered (avoids duplicate unfiltered dm_messages events)
+        val dmRecipient = subscribedDmRecipientId
+        if (!dmRecipient.isNullOrBlank()) {
+            subscribeDmInbox(dmRecipient)
         }
-        ws.send(joinDmMessages.toString())
 
         // Subscribe to group_events, group_members, and group_conversations changes
         listOf("group_events", "group_members", "group_conversations").forEach { tbl ->
@@ -834,10 +842,12 @@ object VoiceRoomRealtimeManager {
         if (recipientId.isBlank()) return
         subscribedGroupRecipientId = recipientId
         val ws = webSocket ?: return
+        val topic = "realtime:public:group_message_recipients:recipient_id=eq.$recipientId"
+        if (!joinedTopicsForCurrentSocket.add(topic)) return
         try {
             val token = currentAuthToken
             val joinMsg = JSONObject().apply {
-                put("topic", "realtime:public:group_message_recipients:recipient_id=eq.$recipientId")
+                put("topic", topic)
                 put("event", "phx_join")
                 put("payload", JSONObject().apply {
                     if (!token.isNullOrBlank()) {
@@ -859,6 +869,7 @@ object VoiceRoomRealtimeManager {
             ws.send(joinMsg.toString())
             Log.d(TAG, "Subscribed to postgres_changes group_message_recipients for recipient:$recipientId")
         } catch (e: Exception) {
+            joinedTopicsForCurrentSocket.remove(topic)
             Log.w(TAG, "Error sending join for group_message_recipients recipient channel $recipientId: ${e.message}")
         }
     }
@@ -869,68 +880,74 @@ object VoiceRoomRealtimeManager {
         val ws = webSocket ?: return
         try {
             val token = currentAuthToken
-            // 1. group_events for groupId
-            val joinEvents = JSONObject().apply {
-                put("topic", "realtime:public:group_events:group_id=eq.$groupId")
-                put("event", "phx_join")
-                put("payload", JSONObject().apply {
-                    if (!token.isNullOrBlank()) put("access_token", token)
-                    put("config", JSONObject().apply {
-                        put("postgres_changes", org.json.JSONArray().apply {
-                            put(JSONObject().apply {
-                                put("event", "INSERT")
-                                put("schema", "public")
-                                put("table", "group_events")
-                                put("filter", "group_id=eq.$groupId")
+            val eventsTopic = "realtime:public:group_events:group_id=eq.$groupId"
+            if (joinedTopicsForCurrentSocket.add(eventsTopic)) {
+                val joinEvents = JSONObject().apply {
+                    put("topic", eventsTopic)
+                    put("event", "phx_join")
+                    put("payload", JSONObject().apply {
+                        if (!token.isNullOrBlank()) put("access_token", token)
+                        put("config", JSONObject().apply {
+                            put("postgres_changes", org.json.JSONArray().apply {
+                                put(JSONObject().apply {
+                                    put("event", "INSERT")
+                                    put("schema", "public")
+                                    put("table", "group_events")
+                                    put("filter", "group_id=eq.$groupId")
+                                })
                             })
                         })
                     })
-                })
-                put("ref", refCounter.getAndIncrement().toString())
+                    put("ref", refCounter.getAndIncrement().toString())
+                }
+                ws.send(joinEvents.toString())
             }
-            ws.send(joinEvents.toString())
 
-            // 2. group_members for groupId
-            val joinMembers = JSONObject().apply {
-                put("topic", "realtime:public:group_members:group_id=eq.$groupId")
-                put("event", "phx_join")
-                put("payload", JSONObject().apply {
-                    if (!token.isNullOrBlank()) put("access_token", token)
-                    put("config", JSONObject().apply {
-                        put("postgres_changes", org.json.JSONArray().apply {
-                            put(JSONObject().apply {
-                                put("event", "*")
-                                put("schema", "public")
-                                put("table", "group_members")
-                                put("filter", "group_id=eq.$groupId")
+            val membersTopic = "realtime:public:group_members:group_id=eq.$groupId"
+            if (joinedTopicsForCurrentSocket.add(membersTopic)) {
+                val joinMembers = JSONObject().apply {
+                    put("topic", membersTopic)
+                    put("event", "phx_join")
+                    put("payload", JSONObject().apply {
+                        if (!token.isNullOrBlank()) put("access_token", token)
+                        put("config", JSONObject().apply {
+                            put("postgres_changes", org.json.JSONArray().apply {
+                                put(JSONObject().apply {
+                                    put("event", "*")
+                                    put("schema", "public")
+                                    put("table", "group_members")
+                                    put("filter", "group_id=eq.$groupId")
+                                })
                             })
                         })
                     })
-                })
-                put("ref", refCounter.getAndIncrement().toString())
+                    put("ref", refCounter.getAndIncrement().toString())
+                }
+                ws.send(joinMembers.toString())
             }
-            ws.send(joinMembers.toString())
 
-            // 3. group_conversations for groupId
-            val joinConv = JSONObject().apply {
-                put("topic", "realtime:public:group_conversations:id=eq.$groupId")
-                put("event", "phx_join")
-                put("payload", JSONObject().apply {
-                    if (!token.isNullOrBlank()) put("access_token", token)
-                    put("config", JSONObject().apply {
-                        put("postgres_changes", org.json.JSONArray().apply {
-                            put(JSONObject().apply {
-                                put("event", "*")
-                                put("schema", "public")
-                                put("table", "group_conversations")
-                                put("filter", "id=eq.$groupId")
+            val convTopic = "realtime:public:group_conversations:id=eq.$groupId"
+            if (joinedTopicsForCurrentSocket.add(convTopic)) {
+                val joinConv = JSONObject().apply {
+                    put("topic", convTopic)
+                    put("event", "phx_join")
+                    put("payload", JSONObject().apply {
+                        if (!token.isNullOrBlank()) put("access_token", token)
+                        put("config", JSONObject().apply {
+                            put("postgres_changes", org.json.JSONArray().apply {
+                                put(JSONObject().apply {
+                                    put("event", "*")
+                                    put("schema", "public")
+                                    put("table", "group_conversations")
+                                    put("filter", "id=eq.$groupId")
+                                })
                             })
                         })
                     })
-                })
-                put("ref", refCounter.getAndIncrement().toString())
+                    put("ref", refCounter.getAndIncrement().toString())
+                }
+                ws.send(joinConv.toString())
             }
-            ws.send(joinConv.toString())
         } catch (e: Exception) {
             Log.w(TAG, "Error subscribing to group realtime for $groupId: ${e.message}")
         }
@@ -938,11 +955,14 @@ object VoiceRoomRealtimeManager {
 
     fun subscribeDmInbox(recipientId: String) {
         if (recipientId.isBlank()) return
+        subscribedDmRecipientId = recipientId
         val ws = webSocket ?: return
+        val topic = "realtime:public:dm_messages:recipient_id=eq.$recipientId"
+        if (!joinedTopicsForCurrentSocket.add(topic)) return
         try {
             val token = currentAuthToken
             val joinMsg = JSONObject().apply {
-                put("topic", "realtime:public:dm_messages:recipient_id=eq.$recipientId")
+                put("topic", topic)
                 put("event", "phx_join")
                 put("payload", JSONObject().apply {
                     if (!token.isNullOrBlank()) {
@@ -964,6 +984,7 @@ object VoiceRoomRealtimeManager {
             ws.send(joinMsg.toString())
             Log.d(TAG, "Subscribed to postgres_changes dm_messages for recipient:$recipientId")
         } catch (e: Exception) {
+            joinedTopicsForCurrentSocket.remove(topic)
             Log.w(TAG, "Error sending join for dm_messages recipient channel $recipientId: ${e.message}")
         }
     }
@@ -1515,6 +1536,7 @@ object VoiceRoomRealtimeManager {
         heartbeatJob?.cancel()
         heartbeatJob = null
         webSocket = null
+        joinedTopicsForCurrentSocket.clear()
     }
 
     private fun scheduleReconnect() {
@@ -1542,6 +1564,7 @@ object VoiceRoomRealtimeManager {
         heartbeatJob = null
         val ws = webSocket
         webSocket = null
+        joinedTopicsForCurrentSocket.clear()
         try {
             ws?.close(1000, "logout")
         } catch (_: Exception) {}
@@ -1549,6 +1572,7 @@ object VoiceRoomRealtimeManager {
         subscribedRoomChannels.clear()
         subscribedGroupIds.clear()
         subscribedGroupRecipientId = null
+        subscribedDmRecipientId = null
         userSnippets.clear()
         _roomLiveParticipants.value = emptyMap()
     }

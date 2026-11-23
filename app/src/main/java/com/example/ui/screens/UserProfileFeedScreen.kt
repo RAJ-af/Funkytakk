@@ -491,7 +491,7 @@ fun UserProfileFeedScreen(
             } catch (e: Exception) {
                 isFollowing = previousState
                 followersCount = previousCount
-                Toast.makeText(context, "Network error: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, com.example.util.ErrorMapper.map(e), Toast.LENGTH_SHORT).show()
             } finally {
                 isFollowLoading = false
             }

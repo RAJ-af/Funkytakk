@@ -102,26 +102,9 @@ object AppwriteUploader {
                 } else {
                     val statusCode = response.code()
                     val errBody = response.errorBody()?.string().orEmpty()
-                    val parsedMsg = try {
-                        val json = JSONObject(errBody)
-                        json.optString("error", "").ifBlank {
-                            json.optString("message", "").ifBlank {
-                                json.optString("detail", errBody)
-                            }
-                        }
-                    } catch (_: Exception) {
-                        errBody.ifBlank { response.message() }
-                    }
+                    val userMessage = com.example.util.ErrorMapper.mapHttp(statusCode, errBody)
 
-                    val userMessage = when (statusCode) {
-                        401 -> "Session expired or unauthenticated. Please log in again."
-                        403 -> "Account suspended or unauthorized to perform this upload."
-                        400 -> if (parsedMsg.isNotBlank()) "Invalid upload request: $parsedMsg" else "Invalid upload request."
-                        502 -> "Appwrite Storage service temporarily unavailable. Please try again."
-                        else -> if (parsedMsg.isNotBlank()) "Upload error: $parsedMsg" else "Upload failed with status $statusCode"
-                    }
-
-                    Log.e(TAG, "upload-to-appwrite failed with code $statusCode: $errBody")
+                    Log.e(TAG, "upload-to-appwrite failed with code $statusCode")
 
                     // Don't retry client errors (400, 401, 403) or if maxRetries reached
                     if (statusCode in 400..499 || attempts > maxRetries) {
@@ -130,10 +113,12 @@ object AppwriteUploader {
                     // Transient 5xx retry: only retry once
                     continue
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Exception during upload-to-appwrite (attempt $attempts)", e)
                 if (attempts > maxRetries) {
-                    return UploadResult.Error(e.localizedMessage ?: "Network error during upload", 0)
+                    return UploadResult.Error(com.example.util.ErrorMapper.map(e), 0)
                 }
             }
         }

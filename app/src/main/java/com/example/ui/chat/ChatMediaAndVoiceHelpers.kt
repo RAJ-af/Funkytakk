@@ -184,7 +184,14 @@ class VoicePlaybackController(
                 withContext(Dispatchers.Main) {
                     _isLoading.value = false
                     _currentPlayingId.value = null
-                    onError("Voice playback failed: ${e.message}")
+                    val mapped = com.example.util.ErrorMapper.map(e)
+                    onError(
+                        if (mapped == com.example.util.ErrorMapper.MSG_GENERIC) {
+                            "Could not play voice note. Please try again."
+                        } else {
+                            mapped
+                        }
+                    )
                 }
             }
         }
@@ -374,7 +381,7 @@ class LiveVoiceRecorder(
         } catch (e: Exception) {
             Log.e("VoiceRecorder", "Failed to start recording", e)
             isRecording = false
-            Toast.makeText(context, "Cannot access microphone: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Microphone is unavailable. Check permission and try again.", Toast.LENGTH_SHORT).show()
         }
     }
 

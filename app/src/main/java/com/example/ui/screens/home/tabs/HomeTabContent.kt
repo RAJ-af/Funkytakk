@@ -20,10 +20,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.UserProfile
+import com.example.ui.components.FriendlyErrorRetryCard
+import com.example.ui.components.HomeFeedSkeleton
 import com.example.ui.screens.home.components.*
 import com.example.ui.screens.home.models.CustomRoom
 import com.example.ui.screens.home.models.FollowedFriend
 import com.example.ui.theme.LocalFunkyColors
+import com.example.util.UiState
 
 @Composable
 fun HomeTabContent(
@@ -45,6 +48,8 @@ fun HomeTabContent(
     onJoinWithCode: () -> Unit,
     onOpenFilter: () -> Unit,
     onJoinRoom: (CustomRoom) -> Unit,
+    homeUiState: UiState<Unit> = UiState.Content(Unit),
+    isOnline: Boolean = true,
     homeLoadError: String? = null,
     onRetryLoad: () -> Unit = {}
 ) {
@@ -63,6 +68,7 @@ fun HomeTabContent(
         item {
             HomeHeader(
                 hasActiveEvents = hasActiveEvents,
+                isOnline = isOnline,
                 onOpenEvents = onOpenEvents,
                 onOpenNotifications = onOpenNotifications,
                 onCreateRoom = onCreateRoom,
@@ -78,10 +84,12 @@ fun HomeTabContent(
         }
 
         // 2.5 FOLLOWED FRIENDS STORIES WITH LIVE WAVEFORM SPEAKING OVERLAYS
-        item {
-            ActiveFriendsRow(
-                activeFriendsList = activeFriendsList
-            )
+        if (activeFriendsList.isNotEmpty()) {
+            item {
+                ActiveFriendsRow(
+                    activeFriendsList = activeFriendsList
+                )
+            }
         }
 
         // 3. SEARCH & FILTER ROW
@@ -102,7 +110,7 @@ fun HomeTabContent(
             )
         }
 
-        if (!homeLoadError.isNullOrBlank()) {
+        if (!homeLoadError.isNullOrBlank() && roomsList.isNotEmpty()) {
             item {
                 Surface(
                     shape = RoundedCornerShape(16.dp),
@@ -141,10 +149,13 @@ fun HomeTabContent(
                         Spacer(modifier = Modifier.width(10.dp))
                         Button(
                             onClick = onRetryLoad,
+                            enabled = isOnline,
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = funkyColors.mango,
-                                contentColor = funkyColors.onMango
+                                contentColor = funkyColors.onMango,
+                                disabledContainerColor = funkyColors.soft,
+                                disabledContentColor = funkyColors.mute
                             ),
                             modifier = Modifier
                                 .heightIn(min = 48.dp)
@@ -208,37 +219,80 @@ fun HomeTabContent(
             }
         )
 
-        if (filteredRooms.isEmpty()) {
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(40.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.ic_search_off),
-                            contentDescription = null,
-                            modifier = Modifier.size(48.dp),
-                            tint = funkyColors.mute.copy(alpha = 0.65f)
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = "No matching rooms found",
-                            fontWeight = FontWeight.SemiBold,
-                            color = funkyColors.mute
-                        )
+        when {
+            homeUiState is UiState.Loading && roomsList.isEmpty() -> {
+                item {
+                    HomeFeedSkeleton(modifier = Modifier.testTag("home_feed_skeleton"))
+                }
+            }
+            homeUiState is UiState.Error && roomsList.isEmpty() -> {
+                item {
+                    FriendlyErrorRetryCard(
+                        message = homeUiState.message,
+                        onRetry = onRetryLoad,
+                        isOnline = isOnline,
+                        testTagPrefix = "home",
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp)
+                    )
+                }
+            }
+            filteredRooms.isEmpty() -> {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(40.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_search_off),
+                                contentDescription = null,
+                                modifier = Modifier.size(48.dp),
+                                tint = funkyColors.mute.copy(alpha = 0.65f)
+                            )
+                            Text(
+                                text = if (roomsList.isEmpty()) "No live rooms right now" else "No matching rooms found",
+                                fontWeight = FontWeight.SemiBold,
+                                color = funkyColors.ink
+                            )
+                            if (roomsList.isEmpty()) {
+                                Text(
+                                    text = if (isOnline) "Be the first to start a voice circle!" else "Connect to the internet to join or create live rooms.",
+                                    fontSize = 13.sp,
+                                    color = funkyColors.mute
+                                )
+                                Button(
+                                    onClick = onCreateRoom,
+                                    enabled = isOnline,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = funkyColors.mango,
+                                        contentColor = funkyColors.onMango,
+                                        disabledContainerColor = funkyColors.soft,
+                                        disabledContentColor = funkyColors.mute
+                                    ),
+                                    modifier = Modifier
+                                        .heightIn(min = 48.dp)
+                                        .testTag("home_empty_create_room_button")
+                                ) {
+                                    Text("Create Room", fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
                     }
                 }
             }
-        } else {
-            itemsIndexed(filteredRooms) { index, room ->
-                LiveVoiceRoomCard(
-                    room = room,
-                    index = index,
-                    onJoin = { onJoinRoom(room) }
-                )
+            else -> {
+                itemsIndexed(filteredRooms) { index, room ->
+                    LiveVoiceRoomCard(
+                        room = room,
+                        index = index,
+                        onJoin = { onJoinRoom(room) }
+                    )
+                }
             }
         }
     }

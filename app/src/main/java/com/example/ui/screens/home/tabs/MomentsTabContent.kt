@@ -73,9 +73,34 @@ fun MomentsTabContent(
         }
     }
 
+    val isOnline by com.example.ui.components.AppNetworkManager.isOnline.collectAsState()
     var selectedTab by remember { mutableIntStateOf(0) } // 0: trending, 1: my_language
-    val trendingFeed = remember { MomentTabFeedState("trending") }
-    val myLangFeed = remember { MomentTabFeedState("my_language") }
+    val trendingFeed = remember {
+        MomentTabFeedState("trending").apply {
+            val cached = com.example.data.AppCacheStore.getSync<List<MomentDto>>(
+                context = context,
+                key = "moments_feed_trending",
+                type = com.example.data.AppCacheStore.momentListType()
+            )?.data
+            if (!cached.isNullOrEmpty()) {
+                items.addAll(cached)
+                nextOffset = cached.size
+            }
+        }
+    }
+    val myLangFeed = remember {
+        MomentTabFeedState("my_language").apply {
+            val cached = com.example.data.AppCacheStore.getSync<List<MomentDto>>(
+                context = context,
+                key = "moments_feed_my_language",
+                type = com.example.data.AppCacheStore.momentListType()
+            )?.data
+            if (!cached.isNullOrEmpty()) {
+                items.addAll(cached)
+                nextOffset = cached.size
+            }
+        }
+    }
     val activeFeed = if (selectedTab == 0) trendingFeed else myLangFeed
     val blockedUserIds by com.example.repository.BlockRepository.blockedUserIds.collectAsState()
 
@@ -126,6 +151,10 @@ fun MomentsTabContent(
     }
 
     fun performToggleLike(moment: MomentDto) {
+        if (!isOnline) {
+            Toast.makeText(context, com.example.util.ErrorMapper.MSG_OFFLINE, Toast.LENGTH_SHORT).show()
+            return
+        }
         val prevLiked = moment.liked_by_me
         val prevCount = moment.likes_count
         val nextLiked = !prevLiked
@@ -168,12 +197,14 @@ fun MomentsTabContent(
         }
 
         val offset = if (reset) 0 else feed.nextOffset
-        val result = MomentsRepository.getMomentsFeed(
-            context = context,
-            tab = feed.tabKey,
-            limit = 20,
-            offset = offset
-        )
+        val result = com.example.util.StartupTimingTracker.measure("moments_${feed.tabKey}") {
+            MomentsRepository.getMomentsFeed(
+                context = context,
+                tab = feed.tabKey,
+                limit = 20,
+                offset = offset
+            )
+        }
 
         result.onSuccess { page ->
             val authorIds = page.map { it.author.id }.filter { it.isNotBlank() }.distinct()
@@ -186,6 +217,12 @@ fun MomentsTabContent(
                 feed.items.clear()
                 feed.items.addAll(page)
                 feed.nextOffset = page.size
+                com.example.data.AppCacheStore.put(
+                    context = context,
+                    key = "moments_feed_${feed.tabKey}",
+                    value = page,
+                    type = com.example.data.AppCacheStore.momentListType()
+                )
             } else {
                 val existingIds = feed.items.map { it.id }.toHashSet()
                 val unique = page.filter { it.id !in existingIds }
@@ -196,7 +233,7 @@ fun MomentsTabContent(
             feed.hasLoadedOnce = true
             feed.errorMessage = null
         }.onFailure { err ->
-            val msg = err.message ?: "Something went wrong. Try again"
+            val msg = com.example.util.ErrorMapper.map(err)
             feed.errorMessage = msg
             if (feed.items.isNotEmpty()) {
                 Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
@@ -264,77 +301,94 @@ fun MomentsTabContent(
         ) {
             when {
                 activeFeed.isInitialLoading && visibleFeedItems.isEmpty() -> {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(color = funkyColors.mango)
-                    }
+                    com.example.ui.components.MomentsSkeleton()
                 }
 
                 visibleFeedItems.isEmpty() -> {
                     val isErrorState = !activeFeed.errorMessage.isNullOrBlank()
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 32.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                    if (isErrorState) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 24.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(64.dp)
-                                    .clip(CircleShape)
-                                    .background(funkyColors.soft)
-                                    .border(1.dp, funkyColors.line, CircleShape),
-                                contentAlignment = Alignment.Center
+                            com.example.ui.components.FriendlyErrorRetryCard(
+                                message = activeFeed.errorMessage!!,
+                                onRetry = {
+                                    coroutineScope.launch { loadFeedPage(activeFeed, reset = true) }
+                                },
+                                isOnline = isOnline,
+                                testTagPrefix = "moments"
+                            )
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 32.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Icon(
-                                    painter = painterResource(id = R.drawable.ic_sparkle),
-                                    contentDescription = null,
-                                    tint = funkyColors.mango,
-                                    modifier = Modifier.size(28.dp)
-                                )
-                            }
-                            Text(
-                                text = when {
-                                    isErrorState -> activeFeed.errorMessage!!
-                                    selectedTab == 1 -> "No posts in your languages yet"
-                                    else -> "No moments yet. Be the first to post!"
-                                },
-                                color = funkyColors.ink,
-                                fontSize = 17.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = if (isErrorState) {
-                                    "Could not load the feed right now."
-                                } else {
-                                    "Pull down to refresh or share your own language moment."
-                                },
-                                color = funkyColors.mute,
-                                fontSize = 13.sp
-                            )
-                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                OutlinedButton(
-                                    onClick = {
-                                        coroutineScope.launch { loadFeedPage(activeFeed, reset = true) }
-                                    },
-                                    border = BorderStroke(1.dp, funkyColors.line)
+                                Box(
+                                    modifier = Modifier
+                                        .size(64.dp)
+                                        .clip(CircleShape)
+                                        .background(funkyColors.soft)
+                                        .border(1.dp, funkyColors.line, CircleShape),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Text(if (isErrorState) "Retry" else "Refresh", color = funkyColors.ink)
-                                }
-                                Button(
-                                    onClick = { showCreatePostSheet = true },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = funkyColors.mango,
-                                        contentColor = funkyColors.onMango
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ic_sparkle),
+                                        contentDescription = null,
+                                        tint = funkyColors.mango,
+                                        modifier = Modifier.size(28.dp)
                                     )
-                                ) {
-                                    Text("Create Moment", fontWeight = FontWeight.Bold)
+                                }
+                                Text(
+                                    text = if (selectedTab == 1) "No posts in your languages yet" else "No moments yet. Be the first to post!",
+                                    color = funkyColors.ink,
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Pull down to refresh or share your own language moment.",
+                                    color = funkyColors.mute,
+                                    fontSize = 13.sp
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            coroutineScope.launch { loadFeedPage(activeFeed, reset = true) }
+                                        },
+                                        enabled = isOnline,
+                                        border = BorderStroke(1.dp, funkyColors.line),
+                                        modifier = Modifier.heightIn(min = 48.dp)
+                                    ) {
+                                        Text("Refresh", color = funkyColors.ink)
+                                    }
+                                    Button(
+                                        onClick = {
+                                            if (!isOnline) {
+                                                Toast.makeText(context, com.example.util.ErrorMapper.MSG_OFFLINE, Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                showCreatePostSheet = true
+                                            }
+                                        },
+                                        enabled = isOnline,
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = funkyColors.mango,
+                                            contentColor = funkyColors.onMango,
+                                            disabledContainerColor = funkyColors.soft,
+                                            disabledContentColor = funkyColors.mute
+                                        ),
+                                        modifier = Modifier.heightIn(min = 48.dp)
+                                    ) {
+                                        Text("Create Moment", fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
                         }
@@ -451,9 +505,15 @@ fun MomentsTabContent(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     IconButton(
-                        onClick = { showCreatePostSheet = true },
+                        onClick = {
+                            if (!isOnline) {
+                                Toast.makeText(context, com.example.util.ErrorMapper.MSG_OFFLINE, Toast.LENGTH_SHORT).show()
+                            } else {
+                                showCreatePostSheet = true
+                            }
+                        },
                         modifier = Modifier
-                            .size(40.dp)
+                            .size(48.dp)
                             .clip(CircleShape)
                             .background(headerBtnBg)
                             .then(
@@ -526,7 +586,11 @@ fun MomentsTabContent(
                                 },
                                 onClick = {
                                     showTopMenu = false
-                                    showCreatePostSheet = true
+                                    if (!isOnline) {
+                                        Toast.makeText(context, com.example.util.ErrorMapper.MSG_OFFLINE, Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        showCreatePostSheet = true
+                                    }
                                 }
                             )
                             DropdownMenuItem(

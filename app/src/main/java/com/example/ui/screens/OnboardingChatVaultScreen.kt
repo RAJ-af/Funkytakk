@@ -338,7 +338,7 @@ fun OnboardingChatVaultScreen(
                             }
                         }.onFailure { ex ->
                             isLoading = false
-                            errorMessage = ex.message ?: "Failed to setup vault"
+                            errorMessage = com.example.util.ErrorMapper.map(ex)
                         }
                     }
                 },

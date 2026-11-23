@@ -595,29 +595,29 @@ fun OnboardingAgeScreen(
     val listStateDay = rememberLazyListState(initialFirstVisibleItemIndex = days.indexOf(selectedDay).coerceAtLeast(0))
     val listStateYear = rememberLazyListState(initialFirstVisibleItemIndex = yearsRange.indexOf(selectedYear).coerceAtLeast(0))
 
-    LaunchedEffect(listStateMonth.firstVisibleItemIndex) {
-        if (listStateMonth.isScrollInProgress) {
-            val index = listStateMonth.firstVisibleItemIndex
-            if (index in months.indices) {
-                selectedMonthIndex = index
+    LaunchedEffect(listStateMonth) {
+        snapshotFlow { listStateMonth.firstVisibleItemIndex }
+            .collect { index ->
+                if (index in months.indices) {
+                    selectedMonthIndex = index
+                }
             }
-        }
     }
-    LaunchedEffect(listStateDay.firstVisibleItemIndex) {
-        if (listStateDay.isScrollInProgress) {
-            val index = listStateDay.firstVisibleItemIndex
-            if (index in days.indices) {
-                selectedDay = days[index]
+    LaunchedEffect(listStateDay) {
+        snapshotFlow { listStateDay.firstVisibleItemIndex }
+            .collect { index ->
+                if (index in days.indices) {
+                    selectedDay = days[index]
+                }
             }
-        }
     }
-    LaunchedEffect(listStateYear.firstVisibleItemIndex) {
-        if (listStateYear.isScrollInProgress) {
-            val index = listStateYear.firstVisibleItemIndex
-            if (index in yearsRange.indices) {
-                selectedYear = yearsRange[index]
+    LaunchedEffect(listStateYear) {
+        snapshotFlow { listStateYear.firstVisibleItemIndex }
+            .collect { index ->
+                if (index in yearsRange.indices) {
+                    selectedYear = yearsRange[index]
+                }
             }
-        }
     }
 
     // Calculated age indicator check

@@ -100,7 +100,7 @@ fun AuthScreen(
                 "Not available"
             }
         } catch (e: Exception) {
-            "Error extracting SHA-1: ${e.localizedMessage}"
+            "Not available"
         }
     }
 
@@ -136,27 +136,28 @@ fun AuthScreen(
             }
             val friendlyMsg = when (e.statusCode) {
                 CommonStatusCodes.DEVELOPER_ERROR -> { // Code 10
-                    "Google Developer Error (Code 10): SHA-1 mismatch! Tap info on screen."
+                    "Google sign-in configuration needs attention. Try email login."
                 }
                 CommonStatusCodes.SIGN_IN_REQUIRED -> {
-                    "Google sign-in needed! Pick your account to roll."
+                    "Pick your Google account to continue."
                 }
                 CommonStatusCodes.NETWORK_ERROR -> {
-                    "Network's ghosting us! Check your connection, bestie."
+                    com.example.util.ErrorMapper.MSG_OFFLINE
                 }
                 CommonStatusCodes.CANCELED -> {
-                    "Sign-in cancelled! Whenever you're ready, tap continue."
+                    "Sign-in cancelled."
                 }
                 else -> {
-                    "Google Sign-In hit a glitch (${e.statusCode}): ${e.localizedMessage ?: "Try again bestie!"}"
+                    com.example.util.ErrorMapper.MSG_GENERIC
                 }
             }
             Toast.makeText(context, friendlyMsg, Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
-            Toast.makeText(context, "Sign-In tripped: ${e.localizedMessage ?: "Try email login bestie!"}", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, com.example.util.ErrorMapper.map(e), Toast.LENGTH_LONG).show()
         }
     }
 
+    val isOnline by com.example.ui.components.AppNetworkManager.isOnline.collectAsState()
     val authState by viewModel.authState.collectAsState()
     val isLoading = authState is AuthState.Loading
 
@@ -201,7 +202,9 @@ fun AuthScreen(
             passwordError = null
         }
 
-        if (!hasError && !isLoading) {
+        if (!isOnline) {
+            Toast.makeText(context, com.example.util.ErrorMapper.MSG_OFFLINE, Toast.LENGTH_SHORT).show()
+        } else if (!hasError && !isLoading) {
             if (isSignUpMode) {
                 viewModel.signUpWithEmail(
                     email = trimmedEmail,
@@ -225,6 +228,11 @@ fun AuthScreen(
     LaunchedEffect(authState) {
         if (authState is AuthState.Loading) {
             com.example.ui.components.AppLoadingManager.show(if (isSignUpMode) "Creating your account..." else "Logging in...")
+            kotlinx.coroutines.delay(com.example.util.DEFAULT_SCREEN_LOAD_TIMEOUT_MS)
+            if (viewModel.authState.value is AuthState.Loading) {
+                com.example.ui.components.AppLoadingManager.hide()
+                viewModel.setTimeoutError(com.example.util.ErrorMapper.MSG_OFFLINE)
+            }
         } else {
             com.example.ui.components.AppLoadingManager.hide()
         }
@@ -696,8 +704,16 @@ fun AuthScreen(
                     }
                 }
 
-                // Error alert state (AccountCollision uses the dedicated modal dialog below)
-                if (authState is AuthState.Error) {
+                // Error / offline alert state (AccountCollision uses the dedicated modal dialog below)
+                if (!isOnline) {
+                    Text(
+                        text = "No internet connection. Connect to continue.",
+                        color = Color(0xFFD32F2F),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 6.dp)
+                    )
+                } else if (authState is AuthState.Error) {
                     Text(
                         text = (authState as AuthState.Error).message,
                         color = Color(0xFFD32F2F),
@@ -712,7 +728,7 @@ fun AuthScreen(
                 // 4. CTA BUTTON: "Continue ->" in warm yellow pill
                 Button(
                     onClick = { submitAuth() },
-                    enabled = !isLoading,
+                    enabled = !isLoading && isOnline,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(60.dp)
@@ -782,6 +798,10 @@ fun AuthScreen(
             // 6. CONTINUE WITH GOOGLE BUTTON
             Button(
                 onClick = {
+                    if (!isOnline) {
+                        Toast.makeText(context, com.example.util.ErrorMapper.MSG_OFFLINE, Toast.LENGTH_SHORT).show()
+                        return@Button
+                    }
                     if (isRealGoogleAuthAvailable) {
                         try {
                             val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
@@ -793,12 +813,13 @@ fun AuthScreen(
                                 googleSignInLauncher.launch(googleSignInClient.signInIntent)
                             }
                         } catch (e: Exception) {
-                            Toast.makeText(context, "Google Sign-In hit a bump: ${e.message}", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, com.example.util.ErrorMapper.map(e), Toast.LENGTH_SHORT).show()
                         }
                     } else {
-                        Toast.makeText(context, "Google Sign-In is still setting up! Hop in with Email login for now, bestie.", Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, "Google Sign-In is unavailable right now. Try Email login.", Toast.LENGTH_LONG).show()
                     }
                 },
+                enabled = !isLoading && isOnline,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(58.dp)

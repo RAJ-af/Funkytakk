@@ -22,11 +22,19 @@ data class LocalDmConversation(
     val createdAt: Long = System.currentTimeMillis()
 )
 
+object LocalMessageStatus {
+    const val SENDING = "SENDING"
+    const val SENT = "SENT"
+    const val FAILED = "FAILED"
+}
+
 @Entity(
     tableName = "dm_messages",
     indices = [
         Index(value = ["conversationId"]),
-        Index(value = ["timestamp"])
+        Index(value = ["timestamp"]),
+        Index(value = ["clientId"]),
+        Index(value = ["status"])
     ]
 )
 data class LocalDmMessage(
@@ -40,7 +48,16 @@ data class LocalDmMessage(
     val timestamp: Long = System.currentTimeMillis(),
     val isOutgoing: Boolean,
     val replyToText: String? = null,
-    val replyToSender: String? = null
+    val replyToSender: String? = null,
+    val clientId: String? = null,
+    val status: String = LocalMessageStatus.SENT,
+    val failReason: String? = null,
+    val retryCount: Int = 0,
+    val nextRetryAt: Long = 0L,
+    val localMediaPath: String? = null,
+    val mediaMimeType: String? = null,
+    val mediaDurationSec: Int? = null,
+    val mediaCaption: String? = null
 )
 
 @Entity(

@@ -249,7 +249,7 @@ object AdminSupportManager {
             } catch (e: Exception) {
                 Log.e(TAG, "Exception sending admin support message", e)
                 withContext(Dispatchers.Main) {
-                    onError?.invoke(e.localizedMessage ?: "Error sending message")
+                    onError?.invoke(com.example.util.ErrorMapper.map(e))
                 }
             } finally {
                 _isSending.value = false
@@ -302,7 +302,7 @@ object AdminSupportManager {
             } catch (e: Exception) {
                 Log.e(TAG, "Exception closing support chat", e)
                 withContext(Dispatchers.Main) {
-                    onError?.invoke(e.localizedMessage ?: "Error closing chat")
+                    onError?.invoke(com.example.util.ErrorMapper.map(e))
                 }
             }
         }
@@ -337,7 +337,7 @@ object AdminSupportManager {
             rawErr.contains("empty_message", ignoreCase = true) -> "Message text cannot be empty."
             rawErr.contains("invalid_open_hours", ignoreCase = true) -> "Invalid chat open duration specified."
             rawErr.contains("target_user_not_found", ignoreCase = true) -> "Target user account not found."
-            else -> rawErr
+            else -> com.example.util.ErrorMapper.mapHttp(0, rawErr)
         }
     }
 

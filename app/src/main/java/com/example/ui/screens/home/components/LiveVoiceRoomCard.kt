@@ -147,10 +147,23 @@ fun LiveVoiceRoomCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        val avatarContext = androidx.compose.ui.platform.LocalContext.current
+                        val avatarSizePx = with(androidx.compose.ui.platform.LocalDensity.current) { 28.dp.roundToPx() }.coerceIn(48, 128)
                         room.avatars.take(3).forEachIndexed { idx, url ->
+                            val req = androidx.compose.runtime.remember(url, avatarSizePx) {
+                                coil.request.ImageRequest.Builder(avatarContext)
+                                    .data(url)
+                                    .size(avatarSizePx, avatarSizePx)
+                                    .scale(coil.size.Scale.FILL)
+                                    .memoryCacheKey("room_avatar_${url}_$avatarSizePx")
+                                    .diskCacheKey(url)
+                                    .placeholder(R.drawable.male_avatar_1781324792347)
+                                    .error(R.drawable.male_avatar_1781324792347)
+                                    .build()
+                            }
                             AsyncImage(
-                                model = url,
-                                contentDescription = null,
+                                model = req,
+                                contentDescription = "Participant avatar",
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
                                     .offset(x = (-(idx * 10)).dp)

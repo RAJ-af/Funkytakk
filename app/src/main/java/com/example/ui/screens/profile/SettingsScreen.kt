@@ -415,6 +415,166 @@ fun SettingsScreen(
                     }
                 }
 
+                // Privacy > Chat lock
+                val chatLockUiState by com.example.crypto.ChatLockManager.uiState.collectAsState()
+                LaunchedEffect(Unit) {
+                    com.example.crypto.ChatLockManager.refreshState(context)
+                }
+
+                SettingsGroupCard {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                com.example.crypto.ChatLockManager.setChatLockEnabled(
+                                    context,
+                                    !chatLockUiState.isChatLockEnabled
+                                )
+                            }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFFEEF2FF)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            com.example.ui.components.SoftLockIcon(
+                                size = 20.dp,
+                                isUnlocked = !chatLockUiState.isChatLockEnabled,
+                                gradientColors = listOf(Color(0xFF6366F1), Color(0xFF4338CA)),
+                                shackleColor = Color(0xFF818CF8)
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Lock chats",
+                                fontSize = 14.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = funkyColors.ink
+                            )
+                            Text(
+                                text = "Your vault password is asked again every 14 days.",
+                                fontSize = 11.5.sp,
+                                color = funkyColors.mute,
+                                lineHeight = 16.sp
+                            )
+                        }
+                        Switch(
+                            checked = chatLockUiState.isChatLockEnabled,
+                            onCheckedChange = {
+                                com.example.crypto.ChatLockManager.setChatLockEnabled(context, it)
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = funkyColors.onMango,
+                                checkedTrackColor = funkyColors.mango,
+                                uncheckedThumbColor = funkyColors.mute,
+                                uncheckedTrackColor = funkyColors.soft
+                            ),
+                            modifier = Modifier.testTag("settings_chat_lock_switch")
+                        )
+                    }
+
+                    if (!chatLockUiState.hasScreenLockOrBiometric) {
+                        HorizontalDivider(color = funkyColors.line, modifier = Modifier.padding(horizontal = 16.dp))
+                        Text(
+                            text = "Set a screen lock on your phone for faster unlock.",
+                            fontSize = 11.5.sp,
+                            color = Color(0xFFD97706),
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                        )
+                    }
+
+                    if (chatLockUiState.isChatLockEnabled) {
+                        HorizontalDivider(color = funkyColors.line, modifier = Modifier.padding(horizontal = 16.dp))
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "Ask again",
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = funkyColors.mute,
+                                modifier = Modifier.padding(bottom = 4.dp)
+                            )
+                            com.example.crypto.LockAskAgainMode.entries.forEach { mode ->
+                                val selected = chatLockUiState.askAgainMode == mode
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(if (selected) funkyColors.soft else Color.Transparent)
+                                        .clickable {
+                                            com.example.crypto.ChatLockManager.setAskAgainMode(context, mode)
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 10.dp)
+                                        .testTag("settings_chat_lock_timeout_${mode.prefValue}"),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    RadioButton(
+                                        selected = selected,
+                                        onClick = {
+                                            com.example.crypto.ChatLockManager.setAskAgainMode(context, mode)
+                                        },
+                                        colors = RadioButtonDefaults.colors(
+                                            selectedColor = funkyColors.mango,
+                                            unselectedColor = funkyColors.mute
+                                        )
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = mode.label,
+                                        fontSize = 13.5.sp,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                        color = funkyColors.ink
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (BuildConfig.DEBUG) {
+                        HorizontalDivider(color = funkyColors.line, modifier = Modifier.padding(horizontal = 16.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    val simulated = com.example.crypto.ChatLockManager.debugSimulate14DaysElapsed(context)
+                                    Toast.makeText(
+                                        context,
+                                        if (simulated) "Simulated 14-day expiry. Reopen Chats to test vault password check."
+                                        else "Sign in to simulate 14-day expiry.",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                                .testTag("settings_chat_lock_debug_14d_button"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Simulate 14-day vault expiry (Debug)",
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFFB45309)
+                            )
+                            Text(
+                                text = if (chatLockUiState.is14DayPasswordExpired) "Expired" else "Trigger",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = funkyColors.mango
+                            )
+                        }
+                    }
+                }
+
                 // ---------------------------------------------------------
                 // 4. SAFETY & SUPPORT
                 // ---------------------------------------------------------

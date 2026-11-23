@@ -32,6 +32,7 @@ import com.example.ui.theme.LocalFunkyColors
 @Composable
 fun HomeHeader(
     hasActiveEvents: Boolean = false,
+    isOnline: Boolean = true,
     onOpenEvents: () -> Unit,
     onOpenNotifications: () -> Unit = {},
     onCreateRoom: () -> Unit,
@@ -83,7 +84,7 @@ fun HomeHeader(
             // Notification Bell with unread badge count
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
                     .background(funkyColors.surface)
                     .border(1.dp, funkyColors.line, CircleShape)
@@ -101,7 +102,7 @@ fun HomeHeader(
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .offset(x = (-2).dp, y = 2.dp)
+                            .offset(x = (-4).dp, y = 4.dp)
                             .clip(CircleShape)
                             .background(funkyColors.mango)
                             .padding(horizontal = 4.dp, vertical = 1.dp)
@@ -121,7 +122,7 @@ fun HomeHeader(
             // Amusements/Events icon with badge dot
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
                     .background(funkyColors.surface)
                     .border(1.dp, funkyColors.line, CircleShape)
@@ -140,26 +141,30 @@ fun HomeHeader(
                         modifier = Modifier
                             .size(8.dp)
                             .align(Alignment.TopEnd)
-                            .offset(x = (-7).dp, y = 7.dp)
+                            .offset(x = (-9).dp, y = 9.dp)
                             .clip(CircleShape)
                             .background(funkyColors.mango)
                     )
                 }
             }
 
-            // Join with Code button
+            // Join with Code button (requires internet)
             Button(
                 onClick = onJoinWithCode,
-                colors = ButtonDefaults.buttonColors(containerColor = funkyColors.surface),
+                enabled = isOnline,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = funkyColors.surface,
+                    disabledContainerColor = funkyColors.soft
+                ),
                 shape = RoundedCornerShape(100.dp),
                 border = BorderStroke(1.dp, funkyColors.line),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                 modifier = Modifier
-                    .height(40.dp)
+                    .height(48.dp)
                     .testTag("home_join_code_button")
             ) {
                 FunkyLockIcon(
-                    color = funkyColors.ink,
+                    color = if (isOnline) funkyColors.ink else funkyColors.mute,
                     modifier = Modifier.size(14.dp)
                 )
                 Spacer(modifier = Modifier.width(5.dp))
@@ -167,22 +172,25 @@ fun HomeHeader(
                     text = "Code",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
-                    color = funkyColors.ink
+                    color = if (isOnline) funkyColors.ink else funkyColors.mute
                 )
             }
 
-            // Create Room circular button
+            // Create Room circular button (requires internet)
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
-                    .background(funkyColors.mango)
-                    .clickable { onCreateRoom() }
+                    .background(if (isOnline) funkyColors.mango else funkyColors.soft)
+                    .then(
+                        if (!isOnline) Modifier.border(1.dp, funkyColors.line, CircleShape) else Modifier
+                    )
+                    .clickable(enabled = isOnline) { onCreateRoom() }
                     .testTag("home_create_room_button"),
                 contentAlignment = Alignment.Center
             ) {
                 FunkyHomeIcon(
-                    color = funkyColors.onMango,
+                    color = if (isOnline) funkyColors.onMango else funkyColors.mute,
                     modifier = Modifier.size(20.dp),
                     strokeWidth = 2.0f
                 )

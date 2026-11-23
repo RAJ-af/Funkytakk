@@ -128,6 +128,26 @@ object VaultSecurityManager {
         return !isUnlocked()
     }
 
+    internal fun getInMemoryVaultKey(): ByteArray? = activeVaultKey
+
+    internal fun commitUnlockedVaultKey(
+        context: Context,
+        vaultKey: ByteArray,
+        uid: String,
+        markActive: Boolean = true
+    ) {
+        activeVaultKey = vaultKey
+        activeKeyUid = uid
+        _vaultStatus.value = VaultStatus.UNLOCKED
+        if (markActive) {
+            ChatLockManager.markUnlockedTimestamp(context, uid)
+        }
+    }
+
+    /**
+     * Strictly returns the unlocked in-memory vault key during foreground chat usage,
+     * never silently bypassing [ChatLockManager] lock policies.
+     */
     fun getActiveVaultKey(context: Context? = null): ByteArray? {
         val currentUid = resolveUid(context)
         if (activeVaultKey != null) {
@@ -136,22 +156,24 @@ object VaultSecurityManager {
             }
             lock()
         }
-        if (context != null && currentUid != null) {
-            val restored = BackupCrypto.loadVaultKeyFromKeystore(context, currentUid)
-            if (restored != null) {
-                activeVaultKey = restored
-                activeKeyUid = currentUid
-                _vaultStatus.value = VaultStatus.UNLOCKED
-                return activeVaultKey
-            }
-        }
         return null
+    }
+
+    /**
+     * Used exclusively by unattended background WorkManager backup jobs (`DriveBackupEngine`)
+     * so scheduled backups can run when the foreground vault is locked.
+     */
+    fun getVaultKeyForBackgroundBackup(context: Context): ByteArray? {
+        getActiveVaultKey(context)?.let { return it }
+        val uid = resolveUid(context) ?: return null
+        return BackupCrypto.loadVaultKeyFromKeystore(context, uid)
     }
 
     fun init(context: Context) {
         val uid = resolveUid(context)
         if (uid == null) {
             lock()
+            ChatLockManager.refreshState(context, null)
             return
         }
         if (activeKeyUid != null && activeKeyUid != uid) {
@@ -162,10 +184,24 @@ object VaultSecurityManager {
             activeVaultKey = null
             activeKeyUid = null
             _vaultStatus.value = VaultStatus.NOT_CONFIGURED
+            ChatLockManager.refreshState(context, uid)
         } else if (activeVaultKey != null && activeKeyUid == uid) {
-            _vaultStatus.value = VaultStatus.UNLOCKED
+            if (ChatLockManager.is14DayPasswordExpired(context, uid)) {
+                lock()
+            } else {
+                _vaultStatus.value = VaultStatus.UNLOCKED
+            }
+            ChatLockManager.refreshState(context, uid)
         } else {
-            _vaultStatus.value = VaultStatus.LOCKED
+            val silentKey = ChatLockManager.trySilentUnlockOnStartOrInit(context, uid)
+            if (silentKey != null) {
+                activeVaultKey = silentKey
+                activeKeyUid = uid
+                _vaultStatus.value = VaultStatus.UNLOCKED
+            } else {
+                _vaultStatus.value = VaultStatus.LOCKED
+            }
+            ChatLockManager.refreshState(context, uid)
         }
     }
 
@@ -201,6 +237,7 @@ object VaultSecurityManager {
             activeKeyUid = uid
             _vaultStatus.value = VaultStatus.UNLOCKED
             BackupCrypto.saveVaultKeyToKeystore(context, vaultKey, uid)
+            ChatLockManager.onPasswordVerified(context, uid, vaultKey)
             if (BuildConfig.DEBUG) {
                 Log.d(TAG, "Vault configured and unlocked.")
             }
@@ -250,6 +287,7 @@ object VaultSecurityManager {
             activeKeyUid = uid
             _vaultStatus.value = VaultStatus.UNLOCKED
             BackupCrypto.saveVaultKeyToKeystore(context, unwrappedKey, uid)
+            ChatLockManager.onPasswordVerified(context, uid, unwrappedKey)
             if (BuildConfig.DEBUG) {
                 Log.d(TAG, "Vault unlocked successfully with password.")
             }
@@ -346,6 +384,8 @@ object VaultSecurityManager {
             activeVaultKey = unwrapped
             activeKeyUid = uid
             _vaultStatus.value = VaultStatus.UNLOCKED
+            ChatLockManager.markUnlockedTimestamp(context, uid)
+            ChatLockManager.refreshState(context, uid)
             if (BuildConfig.DEBUG) {
                 Log.d(TAG, "Vault unlocked with biometric prompt.")
             }
@@ -406,6 +446,7 @@ object VaultSecurityManager {
         }
         EncryptedChatDatabase.deleteDatabaseForUid(context, uid)
         BackupCrypto.wipeForUid(context, uid)
+        ChatLockManager.wipeForUid(context, uid)
         try {
             ActiveUserManager.mediaDir(context, uid).deleteRecursively()
             ActiveUserManager.restoredMediaDir(context, uid).deleteRecursively()

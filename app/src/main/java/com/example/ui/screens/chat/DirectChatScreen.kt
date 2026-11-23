@@ -30,10 +30,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -46,9 +48,11 @@ import com.example.ChatPreferencesManager
 import com.example.CloudAiManager
 import com.example.SupabaseClient
 import com.example.SupabaseSessionManager
+import com.example.crypto.ChatTimingTracker
 import com.example.db.LocalDmConversation
 import com.example.db.LocalDmMessage
 import com.example.db.LocalDmMessageReaction
+import com.example.db.LocalMessageStatus
 import com.example.moderation.ReportUserDialog
 import com.example.repository.BlockRepository
 import com.example.repository.EncryptedChatRepository
@@ -63,6 +67,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.*
+
+private fun mapDmStatus(msg: LocalDmMessage): MessageStatus? {
+    if (!msg.isOutgoing) return null
+    return when (msg.status) {
+        LocalMessageStatus.SENDING -> MessageStatus.Sending
+        LocalMessageStatus.FAILED -> MessageStatus.Failed
+        else -> MessageStatus.Sent
+    }
+}
 
 sealed interface DmTimelineItem {
     val id: String
@@ -82,7 +95,7 @@ sealed interface DmTimelineItem {
         val isFirstInGroup: Boolean,
         val isLastInGroup: Boolean,
     ) : DmTimelineItem {
-        override val id: String = message.id
+        override val id: String = message.clientId?.takeIf { it.isNotBlank() } ?: message.id
     }
 
     data class MediaAlbumItem(
@@ -93,7 +106,7 @@ sealed interface DmTimelineItem {
         val isFirstInGroup: Boolean,
         val isLastInGroup: Boolean
     ) : DmTimelineItem {
-        override val id: String = "album_${messages.first().id}"
+        override val id: String = "album_${messages.first().clientId?.takeIf { it.isNotBlank() } ?: messages.first().id}"
     }
 }
 
@@ -117,6 +130,7 @@ fun DirectChatScreen(
 ) {
     com.example.ui.components.SecureWindow(enabled = true)
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     val coroutineScope = rememberCoroutineScope()
     val clipboardManager = LocalClipboardManager.current
 
@@ -130,8 +144,17 @@ fun DirectChatScreen(
     val chatTextScale by ChatPreferencesManager.chatTextScale.collectAsState()
     val isAiConsentGranted by CloudAiManager.isCloudAiEnabled.collectAsState()
 
-    var conversationId by remember { mutableStateOf("") }
+    var conversationId by remember(partnerUserId) {
+        mutableStateOf(
+            EncryptedChatRepository.conversations.value
+                .firstOrNull { it.otherUserId == partnerUserId }
+                ?.id
+                .orEmpty()
+        )
+    }
     var rawMessages by remember { mutableStateOf<List<LocalDmMessage>>(emptyList()) }
+    val optimisticMessagesAll by EncryptedChatRepository.optimisticMessages.collectAsState()
+    val conversationAliases by EncryptedChatRepository.conversationIdAliases.collectAsState()
     var rawReactions by remember { mutableStateOf<List<LocalDmMessageReaction>>(emptyList()) }
     var currentUserId by remember { mutableStateOf("") }
 
@@ -139,6 +162,7 @@ fun DirectChatScreen(
     var isEmojiPickerOpen by remember { mutableStateOf(false) }
     var replyingToMessage by remember { mutableStateOf<LocalDmMessage?>(null) }
     var selectedMessageForMenu by remember { mutableStateOf<LocalDmMessage?>(null) }
+    var failedMessageForSheet by remember { mutableStateOf<LocalDmMessage?>(null) }
     var isSelectionMode by remember { mutableStateOf(false) }
     val selectedMessageIds = remember { mutableStateListOf<String>() }
 
@@ -315,8 +339,15 @@ fun DirectChatScreen(
         }
     }
 
-    LaunchedEffect(conversationId) {
-        if (conversationId.isNotBlank()) {
+    LaunchedEffect(conversationAliases, conversationId) {
+        val mapped = conversationAliases[conversationId]
+        if (!mapped.isNullOrBlank() && mapped != conversationId) {
+            conversationId = mapped
+        }
+    }
+
+    LaunchedEffect(conversationId, vaultStatus) {
+        if (conversationId.isNotBlank() && vaultStatus == com.example.crypto.VaultStatus.UNLOCKED) {
             launch {
                 EncryptedChatRepository.getMessagesFlow(conversationId).collect { msgs ->
                     rawMessages = msgs
@@ -330,6 +361,36 @@ fun DirectChatScreen(
         }
     }
 
+    val mergedMessages = remember(rawMessages, optimisticMessagesAll, conversationId, partnerUserId, conversationAliases) {
+        val existingKeys = HashSet<String>(rawMessages.size * 2)
+        rawMessages.forEach { m ->
+            existingKeys.add(m.id)
+            m.clientId?.takeIf { it.isNotBlank() }?.let { existingKeys.add(it) }
+        }
+        val extraOptimistic = optimisticMessagesAll.filter { opt ->
+            val optKey = opt.clientId?.takeIf { it.isNotBlank() } ?: opt.id
+            val matchesConv = (conversationId.isNotBlank() && (opt.conversationId == conversationId || conversationAliases[opt.conversationId] == conversationId)) ||
+                (partnerUserId.isNotBlank() && opt.recipientId == partnerUserId)
+            matchesConv && !existingKeys.contains(opt.id) && !existingKeys.contains(optKey)
+        }
+        if (extraOptimistic.isEmpty()) {
+            rawMessages
+        } else {
+            (rawMessages + extraOptimistic).sortedBy { it.timestamp }
+        }
+    }
+
+    val seenBubbleKeys = remember(partnerUserId) { HashSet<String>() }
+    var hasInitialHistoryLoaded by remember(partnerUserId) { mutableStateOf(false) }
+    LaunchedEffect(mergedMessages.size) {
+        if (!hasInitialHistoryLoaded && mergedMessages.isNotEmpty()) {
+            mergedMessages.forEach { m ->
+                seenBubbleKeys.add(m.clientId?.takeIf { it.isNotBlank() } ?: m.id)
+            }
+            hasInitialHistoryLoaded = true
+        }
+    }
+
     ProvideChatTheme(
         preset = chatPreset,
         darkTheme = false,
@@ -337,8 +398,8 @@ fun DirectChatScreen(
     ) {
         val colors = LocalChatColors.current
 
-        val timelineItems = remember(rawMessages, rawReactions, currentUserId) {
-            val sorted = rawMessages.sortedBy { it.timestamp }
+        val timelineItems = remember(mergedMessages, rawReactions, currentUserId) {
+            val sorted = mergedMessages.sortedBy { it.timestamp }
             val items = mutableListOf<DmTimelineItem>()
             items.add(DmTimelineItem.SecurityHeader("Messages and calls are end-to-end encrypted. No one outside of this chat can read or listen to them."))
 
@@ -453,8 +514,8 @@ fun DirectChatScreen(
             }
         }
 
-        val allMediaItems = remember(rawMessages, partnerName) {
-            rawMessages.sortedBy { it.timestamp }
+        val allMediaItems = remember(mergedMessages, partnerName) {
+            mergedMessages.sortedBy { it.timestamp }
                 .filter { isDmImageText(it.text) }
                 .map { msg ->
                     val node = parseDmPhotoNode(msg.id, msg.text, msg.timestamp, msg.isOutgoing)
@@ -469,13 +530,15 @@ fun DirectChatScreen(
                 }
         }
 
-        val unreadCount = remember(rawMessages) {
-            rawMessages.count { !it.isOutgoing }
+        val unreadCount = remember(mergedMessages) {
+            mergedMessages.count { !it.isOutgoing }
         }
 
         BackHandler {
             if (isEmojiPickerOpen) {
                 isEmojiPickerOpen = false
+            } else if (failedMessageForSheet != null) {
+                failedMessageForSheet = null
             } else if (isSelectionMode) {
                 isSelectionMode = false
                 selectedMessageIds.clear()
@@ -503,7 +566,7 @@ fun DirectChatScreen(
                         onAction = { actionId ->
                             when (actionId) {
                                 "copy" -> {
-                                    val joined = rawMessages.filter { it.id in selectedMessageIds }.joinToString("\n") { it.text }
+                                    val joined = mergedMessages.filter { it.id in selectedMessageIds }.joinToString("\n") { it.text }
                                     clipboardManager.setText(AnnotatedString(joined))
                                     Toast.makeText(context, "Copied ${selectedMessageIds.size} messages", Toast.LENGTH_SHORT).show()
                                 }
@@ -511,9 +574,10 @@ fun DirectChatScreen(
                                     Toast.makeText(context, "Forward ${selectedMessageIds.size} messages", Toast.LENGTH_SHORT).show()
                                 }
                                 "delete" -> {
+                                    val toDelete = selectedMessageIds.toList()
                                     coroutineScope.launch {
-                                        selectedMessageIds.forEach { id ->
-                                            EncryptedChatRepository.deleteConversationLocally(conversationId)
+                                        toDelete.forEach { id ->
+                                            EncryptedChatRepository.deleteDmMessage(context, id)
                                         }
                                         Toast.makeText(context, "Deleted messages", Toast.LENGTH_SHORT).show()
                                     }
@@ -706,29 +770,27 @@ fun DirectChatScreen(
                             if (inputText.isNotBlank()) {
                                 val reply = replyingToMessage
                                 val textToSend = inputText
+                                val tapMs = ChatTimingTracker.nowMs()
                                 ensureVaultUnlocked {
                                     inputText = ""
                                     replyingToMessage = null
                                     isEmojiPickerOpen = false
-                                    coroutineScope.launch {
-                                        val res = EncryptedChatRepository.sendMessage(
-                                            context = context,
-                                            recipientUserId = partnerUserId,
-                                            recipientName = partnerName,
-                                            recipientAvatar = partnerAvatarUrl,
-                                            text = textToSend,
-                                            replyToText = reply?.text,
-                                            replyToSender = if (reply != null) {
-                                                if (reply.isOutgoing) "You" else partnerName
-                                            } else null
-                                        )
-                                        if (res.isFailure) {
-                                            Toast.makeText(
-                                                context,
-                                                res.exceptionOrNull()?.message ?: "Could not send message.",
-                                                Toast.LENGTH_SHORT
-                                            ).show()
-                                        } else if (timelineItems.isNotEmpty()) {
+                                    val activeConvId = conversationId.ifBlank { "dm_pending_$partnerUserId" }
+                                    EncryptedChatRepository.enqueueSendMessage(
+                                        context = context,
+                                        conversationId = activeConvId,
+                                        recipientUserId = partnerUserId,
+                                        recipientName = partnerName,
+                                        recipientAvatar = partnerAvatarUrl,
+                                        text = textToSend,
+                                        replyToText = reply?.text,
+                                        replyToSender = if (reply != null) {
+                                            if (reply.isOutgoing) "You" else partnerName
+                                        } else null,
+                                        tapElapsedMs = tapMs
+                                    )
+                                    if (timelineItems.isNotEmpty()) {
+                                        coroutineScope.launch {
                                             listState.animateScrollToItem(timelineItems.size - 1)
                                         }
                                     }
@@ -767,23 +829,26 @@ fun DirectChatScreen(
                                     onSend = {
                                         val result = voiceRecorder.stop()
                                         if (result != null && result.bytes.isNotEmpty()) {
-                                            coroutineScope.launch {
-                                                val sendRes = EncryptedChatRepository.sendMediaMessage(
+                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            val tapMs = ChatTimingTracker.nowMs()
+                                            ensureVaultUnlocked {
+                                                val activeConvId = conversationId.ifBlank { "dm_pending_$partnerUserId" }
+                                                EncryptedChatRepository.enqueueSendMediaMessage(
                                                     context = context,
+                                                    conversationId = activeConvId,
                                                     recipientUserId = partnerUserId,
                                                     recipientName = partnerName,
                                                     recipientAvatar = partnerAvatarUrl,
                                                     rawBytes = result.bytes,
                                                     messageType = "voice",
                                                     mimeType = "audio/aac",
-                                                    durationSeconds = (result.durationMs / 1000).toInt().coerceAtLeast(1)
+                                                    durationSeconds = (result.durationMs / 1000).toInt().coerceAtLeast(1),
+                                                    tapElapsedMs = tapMs
                                                 )
-                                                if (sendRes.isFailure) {
-                                                    val err = sendRes.exceptionOrNull()
-                                                    if (err is UserBlockedException) isChatBlocked = true
-                                                    Toast.makeText(context, err?.message ?: "Could not send voice note.", Toast.LENGTH_SHORT).show()
-                                                } else if (timelineItems.isNotEmpty()) {
-                                                    listState.animateScrollToItem(timelineItems.size - 1)
+                                                if (timelineItems.isNotEmpty()) {
+                                                    coroutineScope.launch {
+                                                        listState.animateScrollToItem(timelineItems.size - 1)
+                                                    }
                                                 }
                                             }
                                         }
@@ -808,21 +873,26 @@ fun DirectChatScreen(
                                     } else {
                                         val result = voiceRecorder.stop()
                                         if (result != null && result.bytes.isNotEmpty()) {
-                                            coroutineScope.launch {
-                                                val sendRes = EncryptedChatRepository.sendMediaMessage(
+                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            val tapMs = ChatTimingTracker.nowMs()
+                                            ensureVaultUnlocked {
+                                                val activeConvId = conversationId.ifBlank { "dm_pending_$partnerUserId" }
+                                                EncryptedChatRepository.enqueueSendMediaMessage(
                                                     context = context,
+                                                    conversationId = activeConvId,
                                                     recipientUserId = partnerUserId,
                                                     recipientName = partnerName,
                                                     recipientAvatar = partnerAvatarUrl,
                                                     rawBytes = result.bytes,
                                                     messageType = "voice",
                                                     mimeType = "audio/aac",
-                                                    durationSeconds = (result.durationMs / 1000).toInt().coerceAtLeast(1)
+                                                    durationSeconds = (result.durationMs / 1000).toInt().coerceAtLeast(1),
+                                                    tapElapsedMs = tapMs
                                                 )
-                                                if (sendRes.isFailure) {
-                                                    val err = sendRes.exceptionOrNull()
-                                                    if (err is UserBlockedException) isChatBlocked = true
-                                                    Toast.makeText(context, err?.message ?: "Could not send voice note.", Toast.LENGTH_SHORT).show()
+                                                if (timelineItems.isNotEmpty()) {
+                                                    coroutineScope.launch {
+                                                        listState.animateScrollToItem(timelineItems.size - 1)
+                                                    }
                                                 }
                                             }
                                         }
@@ -893,8 +963,27 @@ fun DirectChatScreen(
                                 val isOutgoing = firstMsg.isOutgoing
                                 val flashAlpha = flashAnimatables[firstMsg.id]?.value ?: 0f
                                 val isSelected = item.messages.any { selectedMessageIds.contains(it.id) }
-                                val status = if (isOutgoing) MessageStatus.Read else null
+                                val failedMsgInAlbum = item.messages.firstOrNull { it.status == LocalMessageStatus.FAILED }
+                                val status = if (!isOutgoing) {
+                                    null
+                                } else {
+                                    when {
+                                        failedMsgInAlbum != null -> MessageStatus.Failed
+                                        item.messages.any { it.status == LocalMessageStatus.SENDING } -> MessageStatus.Sending
+                                        else -> MessageStatus.Sent
+                                    }
+                                }
+                                val itemKey = firstMsg.clientId?.takeIf { it.isNotBlank() } ?: firstMsg.id
+                                val isNewItem = remember(itemKey) { hasInitialHistoryLoaded && seenBubbleKeys.add(itemKey) }
+                                SideEffect {
+                                    if (BuildConfig.DEBUG && isOutgoing) {
+                                        item.messages.forEach { m ->
+                                            ChatTimingTracker.markBubbleShown("DM", m.clientId ?: m.id)
+                                        }
+                                    }
+                                }
 
+                                AnimatedBubbleEntrance(animateEntrance = isNewItem, outgoing = isOutgoing) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -996,10 +1085,15 @@ fun DirectChatScreen(
                                                     }
                                                 } else null,
                                                 onPhotoClick = { _, photo ->
+                                                    val clickedMsg = item.messages.find { it.id == photo.id } ?: firstMsg
                                                     if (isSelectionMode) {
                                                         val clickedId = photo.id
                                                         if (selectedMessageIds.contains(clickedId)) selectedMessageIds.remove(clickedId)
                                                         else selectedMessageIds.add(clickedId)
+                                                    } else if (clickedMsg.status == LocalMessageStatus.FAILED) {
+                                                        failedMessageForSheet = clickedMsg
+                                                    } else if (failedMsgInAlbum != null) {
+                                                        failedMessageForSheet = failedMsgInAlbum
                                                     } else {
                                                         val idx = allMediaItems.indexOfFirst { it.id == photo.id }
                                                         if (idx >= 0) activeMediaViewerIndex = idx
@@ -1026,20 +1120,25 @@ fun DirectChatScreen(
                                         }
                                     }
                                 }
+                                }
                             }
                             is DmTimelineItem.MessageItem -> {
                                 val msg = item.message
                                 val isOutgoing = msg.isOutgoing
                                 val flashAlpha = flashAnimatables[msg.id]?.value ?: 0f
                                 val isSelected = selectedMessageIds.contains(msg.id)
-
-                                val status = when {
-                                    !isOutgoing -> null
-                                    else -> MessageStatus.Read
+                                val status = mapDmStatus(msg)
+                                val itemKey = msg.clientId?.takeIf { it.isNotBlank() } ?: msg.id
+                                val isNewItem = remember(itemKey) { hasInitialHistoryLoaded && seenBubbleKeys.add(itemKey) }
+                                SideEffect {
+                                    if (BuildConfig.DEBUG && isOutgoing) {
+                                        ChatTimingTracker.markBubbleShown("DM", msg.clientId ?: msg.id)
+                                    }
                                 }
 
                                 val isOnlyEmojis = emojiOnlyCount(msg.text.trim())
 
+                                AnimatedBubbleEntrance(animateEntrance = isNewItem, outgoing = isOutgoing) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -1097,7 +1196,7 @@ fun DirectChatScreen(
                                         }
 
                                         val bubbleModifier = Modifier
-                                            .pointerInput(msg.id) {
+                                            .pointerInput(msg.id, msg.status, isSelectionMode) {
                                                 detectTapGestures(
                                                     onLongPress = {
                                                         if (!isSelectionMode) {
@@ -1108,6 +1207,8 @@ fun DirectChatScreen(
                                                         if (isSelectionMode) {
                                                             if (isSelected) selectedMessageIds.remove(msg.id)
                                                             else selectedMessageIds.add(msg.id)
+                                                        } else if (msg.status == LocalMessageStatus.FAILED) {
+                                                            failedMessageForSheet = msg
                                                         }
                                                     }
                                                 )
@@ -1243,56 +1344,61 @@ fun DirectChatScreen(
                                                             time = formatChatTime(msg.timestamp),
                                                             outgoing = isOutgoing,
                                                             status = status,
-                                                            onLongPress = {
-                                                                if (!isSelectionMode) {
-                                                                    selectedMessageForMenu = msg
-                                                                }
-                                                            },
-                                                            onWordClick = { word ->
-                                                                activeWordLookup = WordLookupState(
-                                                                    word = word,
-                                                                    fullSentence = rawText,
-                                                                    isLoading = true
-                                                                )
-                                                                coroutineScope.launch {
-                                                                    val res = CloudAiManager.translateMessage(context, "word_${word.hashCode()}", word, "English")
-                                                                    res.onSuccess { aiResult ->
-                                                                        activeWordLookup = activeWordLookup?.copy(
-                                                                            translation = aiResult.text,
-                                                                            isLoading = false
-                                                                        )
-                                                                    }.onFailure {
-                                                                        activeWordLookup = activeWordLookup?.copy(
-                                                                            translation = "Could not translate word",
-                                                                            isLoading = false
-                                                                        )
-                                                                    }
-                                                                }
-                                                            }
+                                                    onLongPress = {
+                                                        if (!isSelectionMode) {
+                                                            selectedMessageForMenu = msg
+                                                        }
+                                                    },
+                                                    onWordClick = { word ->
+                                                        if (msg.status == LocalMessageStatus.FAILED) {
+                                                            failedMessageForSheet = msg
+                                                            return@MessageText
+                                                        }
+                                                        activeWordLookup = WordLookupState(
+                                                            word = word,
+                                                            fullSentence = rawText,
+                                                            isLoading = true
                                                         )
+                                                        coroutineScope.launch {
+                                                            val res = CloudAiManager.translateMessage(context, "word_${word.hashCode()}", word, "English")
+                                                            res.onSuccess { aiResult ->
+                                                                activeWordLookup = activeWordLookup?.copy(
+                                                                    translation = aiResult.text,
+                                                                    isLoading = false
+                                                                )
+                                                            }.onFailure {
+                                                                activeWordLookup = activeWordLookup?.copy(
+                                                                    translation = "Could not translate word",
+                                                                    isLoading = false
+                                                                )
+                                                            }
+                                                        }
                                                     }
-                                                }
+                                                )
                                             }
-                                        }
-
-                                        // Reaction Row
-                                        if (item.reactions.isNotEmpty()) {
-                                            ReactionRow(
-                                                reactions = item.reactions,
-                                                onClick = { emoji ->
-                                                    coroutineScope.launch {
-                                                        EncryptedChatRepository.sendDmReaction(context, conversationId, partnerUserId, msg.id, emoji)
-                                                    }
-                                                },
-                                                modifier = Modifier.padding(top = 2.dp)
-                                            )
                                         }
                                     }
                                 }
+
+                                // Reaction Row
+                                if (item.reactions.isNotEmpty()) {
+                                    ReactionRow(
+                                        reactions = item.reactions,
+                                        onClick = { emoji ->
+                                            coroutineScope.launch {
+                                                EncryptedChatRepository.sendDmReaction(context, conversationId, partnerUserId, msg.id, emoji)
+                                            }
+                                        },
+                                        modifier = Modifier.padding(top = 2.dp)
+                                    )
+                                }
+                            }
+                        }
+                        }
+                    }
                             }
                         }
                     }
-                }
 
                 // Scroll to bottom button
                 if (listState.canScrollForward) {
@@ -1367,7 +1473,7 @@ fun DirectChatScreen(
                         }
                         "delete" -> {
                             coroutineScope.launch {
-                                EncryptedChatRepository.deleteConversationLocally(conversationId)
+                                EncryptedChatRepository.deleteDmMessage(context, selectedMsg.id)
                                 Toast.makeText(context, "Message deleted", Toast.LENGTH_SHORT).show()
                             }
                         }
@@ -1375,6 +1481,26 @@ fun DirectChatScreen(
                     selectedMessageForMenu = null
                 },
                 onDismiss = { selectedMessageForMenu = null }
+            )
+        }
+
+        // Failed message Retry / Delete sheet
+        if (failedMessageForSheet != null) {
+            val failedTarget = failedMessageForSheet!!
+            FailedMessageActionSheet(
+                failReason = failedTarget.failReason,
+                onRetry = {
+                    failedMessageForSheet = null
+                    EncryptedChatRepository.retryDmMessage(context, failedTarget.id)
+                },
+                onDelete = {
+                    failedMessageForSheet = null
+                    coroutineScope.launch {
+                        EncryptedChatRepository.deleteDmMessage(context, failedTarget.id)
+                        Toast.makeText(context, "Message deleted", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onDismiss = { failedMessageForSheet = null }
             )
         }
 
@@ -1396,16 +1522,19 @@ fun DirectChatScreen(
                 },
                 onSend = { urisToSend, captionText ->
                     val replySnapshot = replyingToMessage
+                    val tapMs = ChatTimingTracker.nowMs()
                     pendingPhotoUris = emptyList()
                     replyingToMessage = null
                     ensureVaultUnlocked {
-                        coroutineScope.launch {
+                        val activeConvId = conversationId.ifBlank { "dm_pending_$partnerUserId" }
+                        coroutineScope.launch(Dispatchers.IO) {
                             urisToSend.forEachIndexed { idx, uri ->
                                 try {
                                     val bytes = readChatImageBytes(context, uri)
                                     if (bytes != null && bytes.isNotEmpty()) {
-                                        val sendRes = EncryptedChatRepository.sendMediaMessage(
+                                        EncryptedChatRepository.enqueueSendMediaMessage(
                                             context = context,
+                                            conversationId = activeConvId,
                                             recipientUserId = partnerUserId,
                                             recipientName = partnerName,
                                             recipientAvatar = partnerAvatarUrl,
@@ -1416,21 +1545,15 @@ fun DirectChatScreen(
                                             replyToSender = if (idx == 0 && replySnapshot != null) {
                                                 if (replySnapshot.isOutgoing) "You" else partnerName
                                             } else null,
-                                            caption = if (idx == 0) captionText.takeIf { it.isNotBlank() } else null
+                                            caption = if (idx == 0) captionText.takeIf { it.isNotBlank() } else null,
+                                            tapElapsedMs = tapMs
                                         )
-                                        if (sendRes.isFailure) {
-                                            val err = sendRes.exceptionOrNull()
-                                            if (err is UserBlockedException) isChatBlocked = true
-                                            Toast.makeText(context, err?.message ?: "Could not send photo.", Toast.LENGTH_SHORT).show()
-                                            return@launch
-                                        }
                                     }
                                 } catch (e: Exception) {
-                                    Toast.makeText(context, "Error sending photo: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    withContext(Dispatchers.Main) {
+                                        Toast.makeText(context, "Error preparing photo: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
-                            }
-                            if (timelineItems.isNotEmpty()) {
-                                listState.animateScrollToItem(timelineItems.size - 1)
                             }
                         }
                     }
@@ -1502,8 +1625,8 @@ fun DirectChatScreen(
 
         // Report User Dialog
         if (showReportUserDialog) {
-            val last20ProofMessages = remember(rawMessages) {
-                rawMessages.takeLast(20).map { msg ->
+            val last20ProofMessages = remember(mergedMessages) {
+                mergedMessages.takeLast(20).map { msg ->
                     val type = when {
                         msg.text.startsWith("[img]") || msg.text.startsWith("[imgs]") -> "image"
                         msg.text.startsWith("[voice]") -> "voice"
@@ -1534,11 +1657,14 @@ fun DirectChatScreen(
             )
         }
 
-        if (showVaultGateDialog) {
+        if (showVaultGateDialog || vaultStatus != com.example.crypto.VaultStatus.UNLOCKED) {
             VaultManagementDialogs(
                 onDismissRequest = {
                     showVaultGateDialog = false
                     pendingVaultAction = null
+                    if (com.example.crypto.VaultSecurityManager.isVaultLocked()) {
+                        onBack()
+                    }
                 }
             )
         }

@@ -611,3 +611,59 @@ fun ChatIconBlock(modifier: Modifier = Modifier.size(22.dp), tint: Color = Color
     }
 }
 
+@Composable
+fun ChatIconFailedBadge(
+    modifier: Modifier = Modifier.size(16.dp),
+    badgeColor: Color = Color(0xFFDC2626),
+    symbolColor: Color = Color.White
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val r = minOf(w, h) * 0.46f
+        drawCircle(color = badgeColor, radius = r, center = Offset(w * 0.5f, h * 0.5f))
+        val sw = (minOf(w, h) * 0.14f).coerceAtLeast(1.5.dp.toPx())
+        drawLine(
+            color = symbolColor,
+            start = Offset(w * 0.5f, h * 0.27f),
+            end = Offset(w * 0.5f, h * 0.55f),
+            strokeWidth = sw,
+            cap = StrokeCap.Round
+        )
+        drawCircle(
+            color = symbolColor,
+            radius = sw * 0.58f,
+            center = Offset(w * 0.5f, h * 0.72f)
+        )
+    }
+}
+
+@Composable
+fun ChatIconRetry(
+    modifier: Modifier = Modifier.size(20.dp),
+    tint: Color = Color(0xFF1B1B1B)
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val sw = 1.9.dp.toPx()
+        val inset = w * 0.18f
+        drawArc(
+            color = tint,
+            startAngle = -35f,
+            sweepAngle = 290f,
+            useCenter = false,
+            topLeft = Offset(inset, inset),
+            size = Size(w - inset * 2f, h - inset * 2f),
+            style = Stroke(width = sw, cap = StrokeCap.Round)
+        )
+        val arrow = Path().apply {
+            moveTo(w * 0.64f, h * 0.16f)
+            lineTo(w * 0.84f, h * 0.28f)
+            lineTo(w * 0.68f, h * 0.42f)
+        }
+        drawPath(arrow, tint, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+

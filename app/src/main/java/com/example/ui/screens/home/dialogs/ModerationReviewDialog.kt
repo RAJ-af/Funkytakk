@@ -201,10 +201,10 @@ class ReportAudioPlayerState(
                             currentPositionMs = 0
                         }
 
-                        mp.setOnErrorListener { _, what, extra ->
+                        mp.setOnErrorListener { _, _, _ ->
                             isBuffering = false
                             isPlaying = false
-                            playbackError = "Playback error ($what, $extra)"
+                            playbackError = "Could not play audio clip. Please try again."
                             try {
                                 localAudioFile.delete()
                             } catch (_: Exception) {}
@@ -215,7 +215,7 @@ class ReportAudioPlayerState(
                     } catch (e: Exception) {
                         isBuffering = false
                         isPlaying = false
-                        playbackError = e.localizedMessage ?: "Player failed"
+                        playbackError = com.example.util.ErrorMapper.map(e)
                         try {
                             localAudioFile.delete()
                         } catch (_: Exception) {}
@@ -225,7 +225,7 @@ class ReportAudioPlayerState(
                 withContext(Dispatchers.Main) {
                     isBuffering = false
                     isPlaying = false
-                    playbackError = e.localizedMessage ?: "Download failed"
+                    playbackError = com.example.util.ErrorMapper.map(e)
                 }
             }
         }
@@ -355,7 +355,7 @@ fun ModerationReviewDialog(
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     activePenaltiesList = emptyList()
-                    errorMessage = "Network error: ${e.localizedMessage ?: "Unable to fetch data"}"
+                    errorMessage = com.example.util.ErrorMapper.map(e)
                     isLoading = false
                 }
             }
@@ -973,7 +973,7 @@ fun RevokeModerationConfirmDialog(
                                     ModerationManager.fetchMyModerationStatus(context)
                                     onRevoked()
                                 }.onFailure { e ->
-                                    Toast.makeText(context, "Revoke Failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context, com.example.util.ErrorMapper.map(e), Toast.LENGTH_LONG).show()
                                 }
                             }
                         },
@@ -1379,7 +1379,7 @@ private fun AdminModerationActionDialog(
                                     Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                                     onActionApplied()
                                 }.onFailure { e ->
-                                    Toast.makeText(context, "Enforcement Failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context, com.example.util.ErrorMapper.map(e), Toast.LENGTH_LONG).show()
                                 }
                             }
                         },

@@ -271,50 +271,58 @@ object MomentsRepository {
         call: suspend (token: String) -> Response<T>
     ): Result<T> = withContext(Dispatchers.IO) {
         try {
-            val uid = SupabaseSessionManager.ensureActiveSession(context)
-            var token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
-            if (uid.isNullOrBlank() || token.isNullOrBlank()) {
-                return@withContext Result.failure(
-                    MomentRpcException("not_authenticated", mapMomentError("not_authenticated"))
-                )
-            }
-
-            var response = call(token)
-            if (response.code() == 401) {
-                val refreshedUid = SupabaseSessionManager.forceRefreshSession(context)
-                val refreshedToken = SupabaseSessionManager.getAuthenticatedBearerToken(context)
-                if (!refreshedUid.isNullOrBlank() && !refreshedToken.isNullOrBlank()) {
-                    token = refreshedToken
-                    response = call(token)
-                }
-            }
-
-            if (response.isSuccessful) {
-                val body = response.body()
-                if (body != null) {
-                    Result.success(body)
-                } else {
-                    Result.failure(MomentRpcException("empty_response", mapMomentError(null)))
-                }
-            } else {
-                val errStr = response.errorBody()?.string()
-                val raw = extractRawError(response.code(), errStr)
-                Log.w(TAG, "RPC error code=${response.code()} raw=$raw")
-                TelemetryManager.recordRpcFailure("moments_rpc", response.code(), raw)
-                Result.failure(
-                    MomentRpcException(
-                        rawCode = raw,
-                        message = mapMomentError(raw),
-                        isNotFound = isNotFoundErrorCode(raw)
+            com.example.util.withLoadingTimeout {
+                val uid = SupabaseSessionManager.ensureActiveSession(context)
+                var token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                if (uid.isNullOrBlank() || token.isNullOrBlank()) {
+                    return@withLoadingTimeout Result.failure(
+                        MomentRpcException("not_authenticated", com.example.util.ErrorMapper.MSG_UNAUTHORIZED)
                     )
-                )
+                }
+
+                var response = call(token)
+                if (response.code() == 401) {
+                    val refreshedUid = SupabaseSessionManager.forceRefreshSession(context)
+                    val refreshedToken = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                    if (!refreshedUid.isNullOrBlank() && !refreshedToken.isNullOrBlank()) {
+                        token = refreshedToken
+                        response = call(token)
+                    }
+                }
+
+                if (response.isSuccessful) {
+                    val body = response.body()
+                    if (body != null) {
+                        Result.success(body)
+                    } else {
+                        Result.failure(MomentRpcException("empty_response", com.example.util.ErrorMapper.MSG_GENERIC))
+                    }
+                } else {
+                    val errStr = response.errorBody()?.string()
+                    val raw = extractRawError(response.code(), errStr)
+                    Log.w(TAG, "RPC error code=${response.code()} raw=$raw")
+                    TelemetryManager.recordRpcFailure("moments_rpc", response.code(), raw)
+                    val domainMapped = mapMomentError(raw)
+                    val resolvedMessage = if (domainMapped == "Something went wrong. Try again") {
+                        com.example.util.ErrorMapper.mapHttp(response.code(), errStr)
+                    } else {
+                        domainMapped
+                    }
+                    Result.failure(
+                        MomentRpcException(
+                            rawCode = raw,
+                            message = resolvedMessage,
+                            isNotFound = isNotFoundErrorCode(raw)
+                        )
+                    )
+                }
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "RPC exception: ${e.message}", e)
             TelemetryManager.recordRpcFailure("moments_rpc", null, e.message)
-            Result.failure(MomentRpcException("network_error", mapMomentError(e.message)))
+            Result.failure(MomentRpcException("network_error", com.example.util.ErrorMapper.map(e)))
         }
     }
 
@@ -325,54 +333,62 @@ object MomentsRepository {
         parser: (rawBody: String) -> T
     ): Result<T> = withContext(Dispatchers.IO) {
         try {
-            val uid = SupabaseSessionManager.ensureActiveSession(context)
-            var token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
-            if (uid.isNullOrBlank() || token.isNullOrBlank()) {
-                return@withContext Result.failure(
-                    MomentRpcException("not_authenticated", mapMomentError("not_authenticated"))
-                )
-            }
-
-            var response = call(token)
-            if (response.code() == 401) {
-                val refreshedUid = SupabaseSessionManager.forceRefreshSession(context)
-                val refreshedToken = SupabaseSessionManager.getAuthenticatedBearerToken(context)
-                if (!refreshedUid.isNullOrBlank() && !refreshedToken.isNullOrBlank()) {
-                    token = refreshedToken
-                    response = call(token)
+            com.example.util.withLoadingTimeout {
+                val uid = SupabaseSessionManager.ensureActiveSession(context)
+                var token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                if (uid.isNullOrBlank() || token.isNullOrBlank()) {
+                    return@withLoadingTimeout Result.failure(
+                        MomentRpcException("not_authenticated", com.example.util.ErrorMapper.MSG_UNAUTHORIZED)
+                    )
                 }
-            }
 
-            if (response.isSuccessful) {
-                val rawBody = response.body()?.string() ?: ""
-                try {
-                    Result.success(parser(rawBody))
-                } catch (e: Exception) {
-                    Log.e(logTag, "JSON decode failed: ${e.javaClass.simpleName}: ${e.message} raw=$rawBody", e)
-                    TelemetryManager.recordMediaDecodeFailure(logTag, e)
+                var response = call(token)
+                if (response.code() == 401) {
+                    val refreshedUid = SupabaseSessionManager.forceRefreshSession(context)
+                    val refreshedToken = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                    if (!refreshedUid.isNullOrBlank() && !refreshedToken.isNullOrBlank()) {
+                        token = refreshedToken
+                        response = call(token)
+                    }
+                }
+
+                if (response.isSuccessful) {
+                    val rawBody = response.body()?.string() ?: ""
+                    try {
+                        Result.success(parser(rawBody))
+                    } catch (e: Exception) {
+                        Log.e(logTag, "JSON decode failed: ${e.javaClass.simpleName}: ${e.message} raw=$rawBody", e)
+                        TelemetryManager.recordMediaDecodeFailure(logTag, e)
+                        Result.failure(
+                            MomentRpcException("decode_error", com.example.util.ErrorMapper.MSG_GENERIC)
+                        )
+                    }
+                } else {
+                    val errStr = response.errorBody()?.string()
+                    val raw = extractRawError(response.code(), errStr)
+                    Log.w(logTag, "RPC error code=${response.code()} raw=$raw")
+                    TelemetryManager.recordRpcFailure(logTag, response.code(), raw)
+                    val domainMapped = mapMomentError(raw)
+                    val resolvedMessage = if (domainMapped == "Something went wrong. Try again") {
+                        com.example.util.ErrorMapper.mapHttp(response.code(), errStr)
+                    } else {
+                        domainMapped
+                    }
                     Result.failure(
-                        MomentRpcException("decode_error", mapMomentError(null))
+                        MomentRpcException(
+                            rawCode = raw,
+                            message = resolvedMessage,
+                            isNotFound = isNotFoundErrorCode(raw)
+                        )
                     )
                 }
-            } else {
-                val errStr = response.errorBody()?.string()
-                val raw = extractRawError(response.code(), errStr)
-                Log.w(logTag, "RPC error code=${response.code()} raw=$raw")
-                TelemetryManager.recordRpcFailure(logTag, response.code(), raw)
-                Result.failure(
-                    MomentRpcException(
-                        rawCode = raw,
-                        message = mapMomentError(raw),
-                        isNotFound = isNotFoundErrorCode(raw)
-                    )
-                )
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.e(logTag, "RPC exception: ${e.javaClass.simpleName}: ${e.message}", e)
             TelemetryManager.recordRpcFailure(logTag, null, e.message)
-            Result.failure(MomentRpcException("network_error", mapMomentError(e.message)))
+            Result.failure(MomentRpcException("network_error", com.example.util.ErrorMapper.map(e)))
         }
     }
 
@@ -500,10 +516,10 @@ object MomentsRepository {
             )
             val uploaded = uploadRes.getOrElse { err ->
                 val isValidation = (err as? com.example.MomentUploadException)?.isValidationError == true
-                val msg = when {
-                    isValidation -> err.message ?: "Upload failed. Please try again."
-                    com.example.BuildConfig.DEBUG -> err.message ?: "Upload failed (${err.javaClass.simpleName}: unknown error)"
-                    else -> "Upload failed. Please try again."
+                val msg = if (isValidation) {
+                    err.message ?: "Upload failed. Please try again."
+                } else {
+                    com.example.util.ErrorMapper.map(err)
                 }
                 TelemetryManager.logMomentPostFailed(if (isVideo) "video_upload_failed" else "photo_upload_failed")
                 return@withContext Result.failure(

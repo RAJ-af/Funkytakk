@@ -344,13 +344,10 @@ fun CreatePostScreen(
                 result.onSuccess { dto ->
                     createdMoment = dto
                 }.onFailure { err ->
-                    val msg = if (com.example.BuildConfig.DEBUG) {
-                        err.message ?: "Upload failed (${err.javaClass.simpleName}: unknown error)"
+                    val msg = if (err is com.example.MomentUploadException && err.isValidationError) {
+                        err.message
                     } else {
-                        err.message?.takeUnless {
-                            it.contains("Exception", ignoreCase = true) ||
-                                it.contains("upload failed (", ignoreCase = true)
-                        } ?: "Upload failed. Please try again."
+                        com.example.util.ErrorMapper.map(err)
                     }
                     snackbarHostState.currentSnackbarData?.dismiss()
                     snackbarHostState.showSnackbar(
@@ -362,11 +359,7 @@ fun CreatePostScreen(
                 snackbarHostState.currentSnackbarData?.dismiss()
                 snackbarHostState.showSnackbar("Upload cancelled")
             } catch (t: Throwable) {
-                val msg = if (com.example.BuildConfig.DEBUG) {
-                    "Upload failed (${t.javaClass.simpleName}: ${t.message ?: "unknown error"})"
-                } else {
-                    "Upload failed. Please try again."
-                }
+                val msg = com.example.util.ErrorMapper.map(t)
                 snackbarHostState.currentSnackbarData?.dismiss()
                 snackbarHostState.showSnackbar(
                     message = msg,

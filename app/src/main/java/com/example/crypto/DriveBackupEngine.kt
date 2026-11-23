@@ -112,8 +112,7 @@ object DriveBackupEngine {
             val firebaseUid = FirebaseAuth.getInstance().currentUser?.uid
                 ?: throw IllegalStateException("User not logged in.")
 
-            val activeVaultKey = VaultSecurityManager.getActiveVaultKey(context)
-                ?: BackupCrypto.loadVaultKeyFromKeystore(context)
+            val activeVaultKey = VaultSecurityManager.getVaultKeyForBackgroundBackup(context)
                 ?: throw IllegalStateException("Vault is locked. Password required.")
 
             onProgress?.invoke(5, "Checking Google Drive storage...")
@@ -473,7 +472,7 @@ object DriveBackupEngine {
         }
 
         BackupCrypto.saveMasterKeyToKeystore(context, masterKey)
-        val vaultKey = VaultSecurityManager.getActiveVaultKey(context)
+        val vaultKey = VaultSecurityManager.getVaultKeyForBackgroundBackup(context)
         if (vaultKey != null) {
             BackupCrypto.saveVaultKeyToKeystore(context, vaultKey)
         }

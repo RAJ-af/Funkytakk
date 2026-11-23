@@ -5,6 +5,7 @@ import android.util.Base64
 import android.util.Log
 import android.widget.Toast
 import com.example.*
+import com.example.crypto.ChatTimingTracker
 import com.example.crypto.E2EEManager
 import com.example.crypto.E2EEMediaManager
 import com.example.crypto.VaultSecurityManager
@@ -13,17 +14,25 @@ import com.example.db.EncryptedChatDatabase
 import com.example.db.LocalGroupConversation
 import com.example.db.LocalGroupMessage
 import com.example.db.LocalMessageReaction
+import com.example.db.LocalMessageStatus
 import com.example.realtime.RealtimeTableEvent
 import com.example.realtime.VoiceRoomRealtimeManager
+import com.example.ui.components.AppNetworkManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 data class GroupOverviewData(
     val groupId: String,
@@ -78,6 +87,9 @@ data class SendGroupMessageOutcome(
 
 object GroupChatRepository {
     private const val TAG = "GroupChatRepo"
+    private const val MEMBER_CACHE_TTL_MS = 2 * 60 * 1000L
+    private const val KEY_CACHE_TTL_MS = 10 * 60 * 1000L
+    private const val MAX_AUTO_RETRIES = 3
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     @Volatile
@@ -92,6 +104,10 @@ object GroupChatRepository {
 
     private val _allMyGroups = MutableStateFlow<List<LocalGroupConversation>>(emptyList())
     val allMyGroups: StateFlow<List<LocalGroupConversation>> = _allMyGroups.asStateFlow()
+
+    // Instant in-memory optimistic overlay so outgoing group messages render in the tap frame
+    private val _optimisticGroupMessages = MutableStateFlow<List<LocalGroupMessage>>(emptyList())
+    val optimisticGroupMessages: StateFlow<List<LocalGroupMessage>> = _optimisticGroupMessages.asStateFlow()
 
     // Deep-link invite code state (funkytalk://group/<code> or https://<host>/g/<code>)
     private val _pendingInviteCode = MutableStateFlow<String?>(null)
@@ -122,10 +138,13 @@ object GroupChatRepository {
     }
 
     fun onAppResumed(context: Context) {
+        val appContext = context.applicationContext
         scope.launch {
-            syncUserGroups(context)
-            fetchAndProcessPendingGroupMessages(context)
-            activeOpenGroupId?.let { syncMissedGroupEvents(context, it) }
+            VoiceRoomRealtimeManager.reconnectNowIfNeeded()
+            launch { syncUserGroups(appContext) }
+            launch { fetchAndProcessPendingGroupMessages(appContext) }
+            launch { resumePendingGroupOutbox(appContext) }
+            activeOpenGroupId?.let { syncMissedGroupEvents(appContext, it) }
         }
     }
 
@@ -137,6 +156,11 @@ object GroupChatRepository {
 
     private val processedRecipientIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     private val processedEventIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private val groupMemberIdsCache = ConcurrentHashMap<String, Pair<Long, List<String>>>()
+    private val publicKeyCache = ConcurrentHashMap<String, Pair<Long, String>>()
+    private val groupSendMutexes = ConcurrentHashMap<String, Mutex>()
+    private val activeGroupSendIds = ConcurrentHashMap.newKeySet<String>()
+    private val outboxResumeMutex = Mutex()
 
     private var groupCollectJob: Job? = null
     private var inviteCollectJob: Job? = null
@@ -144,6 +168,7 @@ object GroupChatRepository {
     private var realtimeListenerJob: Job? = null
     private var expiryCleanupJob: Job? = null
     private var vaultObserverJob: Job? = null
+    private var networkObserverJob: Job? = null
 
     @Volatile
     private var isInitialized = false
@@ -193,6 +218,7 @@ object GroupChatRepository {
 
     fun init(context: Context) {
         val appContext = context.applicationContext
+        AppNetworkManager.startMonitoring(appContext)
         if (isInitialized) {
             if (VaultSecurityManager.vaultStatus.value == VaultStatus.UNLOCKED && database == null) {
                 VaultSecurityManager.getActiveVaultKey(appContext)?.let { openDatabase(appContext, it) }
@@ -219,7 +245,21 @@ object GroupChatRepository {
         }
 
         startRealtimeListener(appContext)
+        startNetworkObserver(appContext)
         startDisappearingExpiryWorker()
+    }
+
+    private fun startNetworkObserver(context: Context) {
+        networkObserverJob?.cancel()
+        networkObserverJob = scope.launch {
+            AppNetworkManager.networkRestoredEvents.collect {
+                Log.d(TAG, "Network restored; reconnecting realtime, draining group inbox, and retrying group outbox")
+                VoiceRoomRealtimeManager.reconnectNowIfNeeded()
+                launch { syncUserGroups(context) }
+                launch { fetchAndProcessPendingGroupMessages(context) }
+                launch { resumePendingGroupOutbox(context) }
+            }
+        }
     }
 
     private fun startDisappearingExpiryWorker() {
@@ -271,9 +311,11 @@ object GroupChatRepository {
             scope.launch {
                 val myUserId = SupabaseSessionManager.getUserId(context)
                 if (!myUserId.isNullOrBlank()) {
+                    launch { E2EEManager.ensureIdentityKeyInitialized(context) }
                     VoiceRoomRealtimeManager.subscribeGroupInbox(myUserId)
-                    syncUserGroups(context)
-                    fetchAndProcessPendingGroupMessages(context)
+                    launch { syncUserGroups(context) }
+                    launch { fetchAndProcessPendingGroupMessages(context) }
+                    launch { resumePendingGroupOutbox(context, fromColdStart = true) }
                 }
             }
         } catch (e: Exception) {
@@ -293,6 +335,7 @@ object GroupChatRepository {
         _joinedGroups.value = emptyList()
         _pendingInvites.value = emptyList()
         _allMyGroups.value = emptyList()
+        _optimisticGroupMessages.value = emptyList()
     }
 
     fun resetForLogout() {
@@ -301,6 +344,10 @@ object GroupChatRepository {
         _pendingInviteCode.value = null
         processedRecipientIds.clear()
         processedEventIds.clear()
+        groupMemberIdsCache.clear()
+        publicKeyCache.clear()
+        groupSendMutexes.clear()
+        activeGroupSendIds.clear()
         userProfileCache.clear()
     }
 
@@ -333,11 +380,13 @@ object GroupChatRepository {
                         }
                     }
                     is RealtimeTableEvent.GroupEventInserted -> {
+                        event.groupId?.takeIf { it.isNotBlank() }?.let { groupMemberIdsCache.remove(it) }
                         handleRealtimeGroupEvent(context, event)
                     }
                     is RealtimeTableEvent.GroupMemberChanged -> {
                         val gid = event.groupId
                         if (!gid.isNullOrBlank()) {
+                            groupMemberIdsCache.remove(gid)
                             syncUserGroups(context)
                             getGroupOverview(context, gid)
                             _liveGroupUpdates.tryEmit(gid)
@@ -363,8 +412,9 @@ object GroupChatRepository {
                         }
                     }
                     is RealtimeTableEvent.Reconnected -> {
-                        syncUserGroups(context)
-                        fetchAndProcessPendingGroupMessages(context)
+                        launch { syncUserGroups(context) }
+                        launch { fetchAndProcessPendingGroupMessages(context) }
+                        launch { resumePendingGroupOutbox(context) }
                         activeOpenGroupId?.let { openGid ->
                             syncMissedGroupEvents(context, openGid)
                             getGroupOverview(context, openGid)
@@ -1258,6 +1308,7 @@ object GroupChatRepository {
             )
 
             if (resp.isSuccessful) {
+                groupMemberIdsCache.remove(cleanGroupId)
                 getGroupOverview(context, cleanGroupId)
                 _liveGroupUpdates.tryEmit(cleanGroupId)
                 Result.success(Unit)
@@ -1289,6 +1340,7 @@ object GroupChatRepository {
             )
 
             if (resp.isSuccessful) {
+                groupMemberIdsCache.remove(cleanGroupId)
                 getGroupOverview(context, cleanGroupId)
                 _liveGroupUpdates.tryEmit(cleanGroupId)
                 Result.success(Unit)
@@ -1780,17 +1832,608 @@ object GroupChatRepository {
     }
 
     // ========================================================================
-    // 5. MESSAGING (E2EE Fan-out, Single-Event Realtime, Disappearing Messages)
+    // 5. MESSAGING (Optimistic Outbox, E2EE Fan-out, Parallel Decrypt)
     // ========================================================================
 
+    private fun removeOptimisticGroupOverlay(clientId: String) {
+        _optimisticGroupMessages.update { list -> list.filterNot { it.id == clientId || it.clientId == clientId } }
+    }
+
+    private fun saveLocalGroupMediaFile(context: Context, messageId: String, rawBytes: ByteArray, messageType: String): File {
+        val ext = if (messageType == "voice") "m4a" else "jpg"
+        val uid = ActiveUserManager.getActiveUid(context) ?: "default"
+        val localDir = ActiveUserManager.mediaDir(context, uid).apply { mkdirs() }
+        val localFile = File(localDir, "group_$messageId.$ext")
+        localFile.writeBytes(rawBytes)
+        return localFile
+    }
+
     /**
-     * Sending a group message:
-     * 1. Call get_group_members, take status='joined' members.
-     * 2. Fetch each one's public key from user_public_keys (including self).
-     * 3. Encrypt per recipient (same scheme as DMs). Mentions & reply metadata go INSIDE the encrypted payload!
-     * 4. Skip members without a public key and warn the sender.
-     * 5. Call send_group_message(p_group_id, p_message_type ['text'|'image'|'voice'], p_recipients).
+     * Fast member-ID fetch for send fan-out: avoids scanning global profile tables and uses a short TTL cache.
      */
+    private suspend fun getJoinedMemberIdsForSend(
+        token: String,
+        groupId: String,
+        myUserId: String
+    ): Result<List<String>> {
+        val now = System.currentTimeMillis()
+        val cached = groupMemberIdsCache[groupId]
+        if (cached != null && (now - cached.first) < MEMBER_CACHE_TTL_MS) {
+            return Result.success((cached.second + myUserId).distinct().filter { it.isNotBlank() })
+        }
+
+        val resp = SupabaseClient.api.getGroupMembersRpc(
+            apiKey = BuildConfig.SUPABASE_ANON_KEY,
+            auth = token,
+            body = GroupIdRequest(p_group_id = groupId)
+        )
+        if (!resp.isSuccessful) {
+            val err = resp.errorBody()?.string()
+            return Result.failure(Exception(mapGroupError(err, "Failed to load group members")))
+        }
+        val rawMembers = resp.body().orEmpty()
+        rawMembers.forEach { m ->
+            val displayName = m.profile_name?.takeIf { it.isNotBlank() } ?: m.username?.takeIf { it.isNotBlank() }
+            if (!displayName.isNullOrBlank()) {
+                userProfileCache[m.user_id] = displayName to m.avatar_url
+            }
+        }
+        val ids = (rawMembers
+            .filter { it.status.trim().equals("joined", ignoreCase = true) }
+            .map { it.user_id } + myUserId)
+            .filter { it.isNotBlank() }
+            .distinct()
+        groupMemberIdsCache[groupId] = now to ids
+        return Result.success(ids)
+    }
+
+    /**
+     * Fetches recipient public keys in parallel, honoring a 10-minute in-memory TTL cache.
+     */
+    private suspend fun fetchMemberPublicKeysParallel(
+        token: String,
+        memberUserIds: List<String>
+    ): Map<String, String> = coroutineScope {
+        val now = System.currentTimeMillis()
+        val result = HashMap<String, String>(memberUserIds.size)
+        val missing = mutableListOf<String>()
+
+        for (uid in memberUserIds) {
+            val cached = publicKeyCache[uid]
+            if (cached != null && (now - cached.first) < KEY_CACHE_TTL_MS && cached.second.isNotBlank()) {
+                result[uid] = cached.second
+            } else {
+                missing.add(uid)
+            }
+        }
+
+        if (missing.isNotEmpty()) {
+            val fetchedPairs = missing.map { uid ->
+                async(Dispatchers.IO) {
+                    try {
+                        val keyResp = SupabaseClient.api.getUserPublicKey(
+                            apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                            auth = token,
+                            userIdFilter = "eq.$uid"
+                        )
+                        val pubKey = keyResp.body()?.firstOrNull()?.identity_public_key
+                        if (!pubKey.isNullOrBlank()) {
+                            publicKeyCache[uid] = System.currentTimeMillis() to pubKey
+                            uid to pubKey
+                        } else {
+                            null
+                        }
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+            }.awaitAll()
+            fetchedPairs.filterNotNull().forEach { (uid, key) -> result[uid] = key }
+        }
+        result
+    }
+
+    /**
+     * Optimistic instant enqueue for group text messages.
+     */
+    fun enqueueSendGroupMessage(
+        context: Context,
+        groupId: String,
+        text: String,
+        mentionedUserIds: List<String> = emptyList(),
+        replyToMessage: LocalGroupMessage? = null,
+        tapElapsedMs: Long = ChatTimingTracker.nowMs()
+    ): String {
+        val appContext = context.applicationContext
+        val cleanGroupId = groupId.trim().replace("\"", "")
+        val clientId = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+        val myUserId = SupabaseSessionManager.getUserId(appContext)
+            ?: ActiveUserManager.getActiveUid(appContext)
+            .orEmpty()
+        ChatTimingTracker.markTap(clientId, tapElapsedMs)
+
+        val firebaseUser = runCatching { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser }.getOrNull()
+        val myName = firebaseUser?.displayName ?: "You"
+        val myAvatar = firebaseUser?.photoUrl?.toString()
+        val cleanMentions = mentionedUserIds.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+        val disSec = _joinedGroups.value.firstOrNull { it.id == cleanGroupId }?.disappearingSeconds ?: 0
+        val expiresAt = if (disSec > 0) now + disSec * 1000L else null
+
+        val optimisticMsg = LocalGroupMessage(
+            id = clientId,
+            groupId = cleanGroupId,
+            senderId = myUserId,
+            senderName = myName,
+            senderAvatar = myAvatar,
+            text = text,
+            messageType = "text",
+            timestamp = now,
+            expiresAt = expiresAt,
+            isOutgoing = true,
+            mentionsJson = JSONArray(cleanMentions).toString(),
+            isMentioned = false,
+            replyToMessageId = replyToMessage?.id,
+            replyToSenderId = replyToMessage?.senderId,
+            replyToSenderName = replyToMessage?.senderName,
+            replyToPreview = replyToMessage?.text?.take(120),
+            clientId = clientId,
+            status = LocalMessageStatus.SENDING
+        )
+
+        _optimisticGroupMessages.update { it + optimisticMsg }
+
+        scope.launch(Dispatchers.IO) {
+            val db = database ?: run {
+                _optimisticGroupMessages.update { list ->
+                    list.map { if (it.id == clientId) it.copy(status = LocalMessageStatus.FAILED, failReason = "Chat vault is locked") else it }
+                }
+                return@launch
+            }
+            val groupDisSec = db.groupConversationDao().getGroup(cleanGroupId)?.disappearingSeconds ?: disSec
+            val persisted = if (groupDisSec > 0 && expiresAt == null) {
+                optimisticMsg.copy(expiresAt = now + groupDisSec * 1000L)
+            } else {
+                optimisticMsg
+            }
+            db.groupMessageDao().insertMessage(persisted)
+            removeOptimisticGroupOverlay(clientId)
+            db.groupConversationDao().updateLastMessage(
+                groupId = cleanGroupId,
+                text = text,
+                senderName = "You",
+                time = now,
+                unreadDelta = 0
+            )
+            dispatchGroupOutboxMessage(appContext, clientId, allowAutoRetry = true)
+        }
+        return clientId
+    }
+
+    /**
+     * Optimistic instant enqueue for encrypted group photo or voice messages.
+     */
+    fun enqueueSendGroupMediaMessage(
+        context: Context,
+        groupId: String,
+        rawBytes: ByteArray,
+        mimeType: String = "image/jpeg",
+        messageType: String = "image",
+        caption: String? = null,
+        replyToMessage: LocalGroupMessage? = null,
+        tapElapsedMs: Long = ChatTimingTracker.nowMs()
+    ): String {
+        val appContext = context.applicationContext
+        val cleanGroupId = groupId.trim().replace("\"", "")
+        val clientId = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+        val effectiveType = if (messageType == "voice") "voice" else "image"
+        val cleanCaption = caption?.replace("\n", " ")?.trim()?.takeIf { it.isNotBlank() }
+        val displayLabel = when {
+            effectiveType == "voice" -> "Voice message"
+            cleanCaption != null -> cleanCaption
+            else -> "Photo"
+        }
+        val myUserId = SupabaseSessionManager.getUserId(appContext)
+            ?: ActiveUserManager.getActiveUid(appContext)
+            .orEmpty()
+        ChatTimingTracker.markTap(clientId, tapElapsedMs)
+
+        val firebaseUser = runCatching { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser }.getOrNull()
+        val myName = firebaseUser?.displayName ?: "You"
+        val myAvatar = firebaseUser?.photoUrl?.toString()
+        val disSec = _joinedGroups.value.firstOrNull { it.id == cleanGroupId }?.disappearingSeconds ?: 0
+        val expiresAt = if (disSec > 0) now + disSec * 1000L else null
+
+        val optimisticMsg = LocalGroupMessage(
+            id = clientId,
+            groupId = cleanGroupId,
+            senderId = myUserId,
+            senderName = myName,
+            senderAvatar = myAvatar,
+            text = displayLabel,
+            messageType = effectiveType,
+            localMediaPath = null,
+            mimeType = mimeType,
+            timestamp = now,
+            expiresAt = expiresAt,
+            isOutgoing = true,
+            replyToMessageId = replyToMessage?.id,
+            replyToSenderId = replyToMessage?.senderId,
+            replyToSenderName = replyToMessage?.senderName,
+            replyToPreview = replyToMessage?.text?.take(120),
+            clientId = clientId,
+            status = LocalMessageStatus.SENDING
+        )
+
+        _optimisticGroupMessages.update { it + optimisticMsg }
+
+        scope.launch(Dispatchers.IO) {
+            val localFile = runCatching { saveLocalGroupMediaFile(appContext, clientId, rawBytes, effectiveType) }.getOrNull()
+            val db = database ?: run {
+                _optimisticGroupMessages.update { list ->
+                    list.map {
+                        if (it.id == clientId) it.copy(
+                            localMediaPath = localFile?.absolutePath,
+                            status = LocalMessageStatus.FAILED,
+                            failReason = "Chat vault is locked"
+                        ) else it
+                    }
+                }
+                return@launch
+            }
+            val groupDisSec = db.groupConversationDao().getGroup(cleanGroupId)?.disappearingSeconds ?: disSec
+            val persisted = optimisticMsg.copy(
+                localMediaPath = localFile?.absolutePath,
+                expiresAt = if (groupDisSec > 0) now + groupDisSec * 1000L else expiresAt
+            )
+            db.groupMessageDao().insertMessage(persisted)
+            removeOptimisticGroupOverlay(clientId)
+            db.groupConversationDao().updateLastMessage(
+                groupId = cleanGroupId,
+                text = displayLabel,
+                senderName = "You",
+                time = now,
+                unreadDelta = 0
+            )
+            dispatchGroupOutboxMessage(appContext, clientId, allowAutoRetry = true)
+        }
+        return clientId
+    }
+
+    fun retryGroupMessage(context: Context, messageId: String) {
+        val appContext = context.applicationContext
+        scope.launch(Dispatchers.IO) {
+            val db = database ?: return@launch
+            val existing = db.groupMessageDao().getMessageById(messageId)
+                ?: db.groupMessageDao().getMessageByClientId(messageId)
+                ?: return@launch
+            db.groupMessageDao().updateMessageStatus(
+                id = existing.id,
+                status = LocalMessageStatus.SENDING,
+                failReason = null,
+                retryCount = existing.retryCount,
+                nextRetryAt = 0L
+            )
+            dispatchGroupOutboxMessage(appContext, existing.id, allowAutoRetry = true)
+        }
+    }
+
+    suspend fun deleteGroupMessage(context: Context, messageId: String) = withContext(Dispatchers.IO) {
+        removeOptimisticGroupOverlay(messageId)
+        val db = database ?: return@withContext
+        val existing = db.groupMessageDao().getMessageById(messageId)
+            ?: db.groupMessageDao().getMessageByClientId(messageId)
+        if (existing != null) {
+            db.groupMessageDao().deleteMessageAndRefreshGroup(
+                messageId = existing.id,
+                groupId = existing.groupId,
+                groupDao = db.groupConversationDao()
+            )
+        } else {
+            db.groupMessageDao().deleteMessage(messageId)
+        }
+    }
+
+    suspend fun resumePendingGroupOutbox(context: Context, fromColdStart: Boolean = false) = withContext(Dispatchers.IO) {
+        outboxResumeMutex.withLock {
+            val db = database ?: return@withLock
+            val pending = db.groupMessageDao().getPendingOutgoingMessages()
+            if (pending.isEmpty()) return@withLock
+
+            val online = AppNetworkManager.checkConnection(context)
+            if (!online) {
+                if (fromColdStart) {
+                    pending.filter { it.status == LocalMessageStatus.SENDING }.forEach { msg ->
+                        db.groupMessageDao().updateMessageStatus(
+                            id = msg.id,
+                            status = LocalMessageStatus.FAILED,
+                            failReason = "No internet connection",
+                            retryCount = msg.retryCount,
+                            nextRetryAt = 0L
+                        )
+                    }
+                }
+                return@withLock
+            }
+
+            for (msg in pending) {
+                val trackId = msg.clientId?.takeIf { it.isNotBlank() } ?: msg.id
+                if (activeGroupSendIds.contains(trackId)) continue
+                db.groupMessageDao().updateMessageStatus(
+                    id = msg.id,
+                    status = LocalMessageStatus.SENDING,
+                    failReason = null,
+                    retryCount = msg.retryCount,
+                    nextRetryAt = 0L
+                )
+                dispatchGroupOutboxMessage(context.applicationContext, msg.id, allowAutoRetry = false)
+            }
+        }
+    }
+
+    private fun isPermanentGroupSendFailure(err: Throwable): Boolean {
+        val msg = err.message?.lowercase().orEmpty()
+        return msg.contains("no longer a member") ||
+            msg.contains("not_a_member") ||
+            msg.contains("only admins can send") ||
+            msg.contains("only_admins_can_send") ||
+            msg.contains("blocked") ||
+            msg.contains("not logged in") ||
+            msg.contains("not authenticated") ||
+            msg.contains("http 401") ||
+            msg.contains("http 403") ||
+            msg.contains("missing media") ||
+            msg.contains("no member public keys")
+    }
+
+    private suspend fun dispatchGroupOutboxMessage(
+        context: Context,
+        messageId: String,
+        allowAutoRetry: Boolean
+    ): Result<SendGroupMessageOutcome> {
+        val db = database ?: return Result.failure(IllegalStateException("Chat vault is locked"))
+        val initialRow = db.groupMessageDao().getMessageById(messageId)
+            ?: db.groupMessageDao().getMessageByClientId(messageId)
+            ?: return Result.failure(IllegalStateException("Message deleted"))
+
+        val clientId = initialRow.clientId?.takeIf { it.isNotBlank() } ?: initialRow.id
+        if (!activeGroupSendIds.add(clientId)) {
+            return Result.success(SendGroupMessageOutcome(messageId = initialRow.id, skippedCount = 0))
+        }
+        val mutex = groupSendMutexes.getOrPut(initialRow.groupId) { Mutex() }
+
+        return try {
+            mutex.withLock {
+                var attempt = 0
+                val maxAttempts = if (allowAutoRetry) MAX_AUTO_RETRIES else 1
+                var lastErr: Throwable = IOException("Failed to send group message")
+
+                while (attempt < maxAttempts) {
+                    val currentRow = db.groupMessageDao().getMessageByClientId(clientId)
+                        ?: db.groupMessageDao().getMessageById(messageId)
+                        ?: return@withLock Result.failure(IllegalStateException("Message deleted"))
+                    if (currentRow.status == LocalMessageStatus.SENT) {
+                        return@withLock Result.success(SendGroupMessageOutcome(messageId = currentRow.id, skippedCount = 0))
+                    }
+
+                    if (!AppNetworkManager.checkConnection(context)) {
+                        db.groupMessageDao().updateMessageStatus(
+                            id = currentRow.id,
+                            status = LocalMessageStatus.FAILED,
+                            failReason = "No internet connection",
+                            retryCount = currentRow.retryCount,
+                            nextRetryAt = 0L
+                        )
+                        return@withLock Result.failure(IOException("No internet connection"))
+                    }
+
+                    val attemptRes = executeGroupSendAttempt(context, db, currentRow, clientId)
+                    if (attemptRes.isSuccess) {
+                        val outcome = attemptRes.getOrThrow()
+                        db.groupMessageDao().promoteOptimisticMessage(clientId, outcome.messageId)
+                        return@withLock Result.success(outcome)
+                    }
+
+                    val err = attemptRes.exceptionOrNull() ?: IOException("Unknown error")
+                    lastErr = err
+                    if (isPermanentGroupSendFailure(err)) {
+                        db.groupMessageDao().updateMessageStatus(
+                            id = currentRow.id,
+                            status = LocalMessageStatus.FAILED,
+                            failReason = mapGroupError(err.message, "Message could not be sent"),
+                            retryCount = currentRow.retryCount + 1,
+                            nextRetryAt = 0L
+                        )
+                        return@withLock Result.failure(err)
+                    }
+
+                    attempt++
+                    val nextRetryCount = currentRow.retryCount + 1
+                    val backoffMs = minOf(15_000L, 1200L * (1 shl (attempt - 1).coerceAtMost(3)))
+                    if (attempt < maxAttempts) {
+                        db.groupMessageDao().updateMessageStatus(
+                            id = currentRow.id,
+                            status = LocalMessageStatus.SENDING,
+                            failReason = null,
+                            retryCount = nextRetryCount,
+                            nextRetryAt = System.currentTimeMillis() + backoffMs
+                        )
+                        delay(backoffMs)
+                    } else {
+                        db.groupMessageDao().updateMessageStatus(
+                            id = currentRow.id,
+                            status = LocalMessageStatus.FAILED,
+                            failReason = mapGroupError(err.message, "Message could not be sent"),
+                            retryCount = nextRetryCount,
+                            nextRetryAt = 0L
+                        )
+                    }
+                }
+                Result.failure(lastErr)
+            }
+        } finally {
+            activeGroupSendIds.remove(clientId)
+        }
+    }
+
+    private suspend fun executeGroupSendAttempt(
+        context: Context,
+        db: EncryptedChatDatabase,
+        msg: LocalGroupMessage,
+        clientId: String
+    ): Result<SendGroupMessageOutcome> {
+        return try {
+            val activeUid = SupabaseSessionManager.ensureActiveSession(context)
+            val myUserId = activeUid ?: SupabaseSessionManager.getUserId(context)
+                ?: return Result.failure(Exception("Not logged in"))
+            val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                ?: return Result.failure(Exception("Not authenticated"))
+
+            val cleanGroupId = msg.groupId.trim().replace("\"", "")
+            E2EEManager.ensureIdentityKeyInitialized(context)
+
+            val isMedia = msg.messageType == "image" || msg.messageType == "voice"
+            var resolvedStoragePath = msg.storagePath
+            var keyB64 = msg.mediaKey
+            var nonceB64 = msg.mediaNonce
+            val mimeType = msg.mimeType ?: if (msg.messageType == "voice") "audio/aac" else "image/jpeg"
+
+            if (isMedia && (resolvedStoragePath.isNullOrBlank() || keyB64.isNullOrBlank() || nonceB64.isNullOrBlank())) {
+                val localPath = msg.localMediaPath
+                    ?: return Result.failure(Exception("Missing media file on device"))
+                val file = File(localPath)
+                if (!file.exists()) {
+                    return Result.failure(Exception("Missing media file on device"))
+                }
+                val rawBytes = withContext(Dispatchers.IO) { file.readBytes() }
+                val encResult = withContext(Dispatchers.Default) {
+                    E2EEMediaManager.encryptMediaPayload(rawBytes)
+                }
+                val uploadResult = AppwriteUploader.uploadWithToken(
+                    token = token,
+                    fileBytes = encResult.ciphertextBytes,
+                    filename = "$clientId.bin",
+                    mimeType = "application/octet-stream",
+                    purpose = "group-media",
+                    folderSuffix = cleanGroupId,
+                    maxRetries = 1
+                )
+                val mediaUrl = when (uploadResult) {
+                    is AppwriteUploader.UploadResult.Success -> uploadResult.url
+                    is AppwriteUploader.UploadResult.Error -> return Result.failure(Exception(uploadResult.message))
+                }
+                resolvedStoragePath = mediaUrl
+                keyB64 = Base64.encodeToString(encResult.keyBytes, Base64.NO_WRAP)
+                nonceB64 = Base64.encodeToString(encResult.nonceBytes, Base64.NO_WRAP)
+                db.groupMessageDao().insertMessage(
+                    msg.copy(
+                        storagePath = resolvedStoragePath,
+                        mediaKey = keyB64,
+                        mediaNonce = nonceB64
+                    )
+                )
+            }
+
+            // 1. Fetch joined member IDs (cached with short TTL; skips full profile directory queries)
+            val memberIds = getJoinedMemberIdsForSend(token, cleanGroupId, myUserId).getOrElse {
+                return Result.failure(it)
+            }
+
+            // 2. Build plaintext envelope (unchanged E2EE format)
+            val payloadToEncrypt = if (isMedia) {
+                val cleanCaption = msg.text.takeIf {
+                    msg.messageType == "image" && !it.equals("Photo", ignoreCase = true)
+                }?.replace("\n", " ")?.trim()?.takeIf { it.isNotBlank() }
+                JSONObject().apply {
+                    put("storage_path", resolvedStoragePath.orEmpty())
+                    put("media_key", keyB64.orEmpty())
+                    put("media_nonce", nonceB64.orEmpty())
+                    put("mime_type", mimeType)
+                    put("message_type", msg.messageType)
+                    if (cleanCaption != null) put("caption", cleanCaption)
+                }.toString()
+            } else {
+                val cleanMentions = parseMentionsJson(msg.mentionsJson)
+                if (cleanMentions.isNotEmpty() || !msg.replyToMessageId.isNullOrBlank()) {
+                    JSONObject().apply {
+                        put("__e2ee_v2", true)
+                        put("text", msg.text)
+                        put("mentions", JSONArray(cleanMentions))
+                        if (!msg.replyToMessageId.isNullOrBlank()) {
+                            put("reply_to_id", msg.replyToMessageId)
+                            put("reply_to_sender_id", msg.replyToSenderId.orEmpty())
+                            put("reply_to_sender_name", msg.replyToSenderName.orEmpty())
+                            put("reply_to_text", msg.replyToPreview.orEmpty())
+                        }
+                    }.toString()
+                } else {
+                    msg.text
+                }
+            }
+
+            // 3. Fetch missing public keys in parallel, then fan-out HPKE encrypt on Dispatchers.Default
+            val pubKeys = fetchMemberPublicKeysParallel(token, memberIds)
+            var skippedNoKeyCount = 0
+            for (uid in memberIds) {
+                if (pubKeys[uid].isNullOrBlank() && uid != myUserId) {
+                    skippedNoKeyCount++
+                }
+            }
+
+            val encStartMs = ChatTimingTracker.nowMs()
+            val recipientsPayload = withContext(Dispatchers.Default) {
+                memberIds.mapNotNull { uid ->
+                    val pubKey = pubKeys[uid]
+                    if (pubKey.isNullOrBlank()) null
+                    else {
+                        val ciphertext = E2EEManager.encryptMessage(pubKey, payloadToEncrypt)
+                        GroupRecipientPayload(
+                            recipient_id = uid,
+                            ciphertext = ciphertext,
+                            nonce = if (uid == myUserId) clientId else UUID.randomUUID().toString(),
+                            storage_path = resolvedStoragePath
+                        )
+                    }
+                }
+            }
+            val encryptDurationMs = (ChatTimingTracker.nowMs() - encStartMs).coerceAtLeast(0L)
+            ChatTimingTracker.logEncrypt("GROUP", clientId, encryptDurationMs, recipientsPayload.size)
+
+            if (recipientsPayload.isEmpty()) {
+                return Result.failure(Exception("Could not encrypt message: no member public keys registered"))
+            }
+
+            // 4. Call send_group_message RPC (exact existing RPC contract)
+            val sendStartMs = ChatTimingTracker.nowMs()
+            val sendResp = SupabaseClient.api.sendGroupMessage(
+                apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                auth = token,
+                body = SendGroupMessageRequest(
+                    p_group_id = cleanGroupId,
+                    p_message_type = if (msg.messageType == "voice") "voice" else if (msg.messageType == "image") "image" else msg.messageType,
+                    p_recipients = recipientsPayload
+                )
+            )
+            val sendDurationMs = (ChatTimingTracker.nowMs() - sendStartMs).coerceAtLeast(0L)
+
+            if (!sendResp.isSuccessful) {
+                ChatTimingTracker.logSendRequest("GROUP", clientId, sendDurationMs, success = false)
+                val err = sendResp.errorBody()?.string()
+                return Result.failure(Exception(mapGroupError(err, "Failed to send group message")))
+            }
+
+            val rawResp = sendResp.body()?.string()?.trim().orEmpty()
+            val serverMessageId = parseGroupId(rawResp) ?: clientId
+            ChatTimingTracker.logSendRequest("GROUP", clientId, sendDurationMs, success = true)
+
+            Result.success(SendGroupMessageOutcome(messageId = serverMessageId, skippedCount = skippedNoKeyCount))
+        } catch (e: Exception) {
+            Log.w(TAG, "Group send attempt failed: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
     suspend fun sendGroupMessage(
         context: Context,
         groupId: String,
@@ -1800,314 +2443,60 @@ object GroupChatRepository {
         mentionedUserIds: List<String> = emptyList(),
         replyToMessage: LocalGroupMessage? = null
     ): Result<SendGroupMessageOutcome> = withContext(Dispatchers.IO) {
-        try {
-            val activeUid = SupabaseSessionManager.ensureActiveSession(context)
-            val myUserId = activeUid ?: SupabaseSessionManager.getUserId(context)
-                ?: return@withContext Result.failure(Exception("Not logged in"))
-            val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
-                ?: return@withContext Result.failure(Exception("Not authenticated"))
-
-            val cleanGroupId = groupId.trim().replace("\"", "")
-
-            // Ensure our own identity key is registered
-            E2EEManager.ensureIdentityKeyInitialized(context)
-
-            // 1. Fetch group members via get_group_members RPC
-            val membersRes = getGroupMembersResult(context, cleanGroupId)
-            if (membersRes.isFailure) {
-                return@withContext Result.failure(membersRes.exceptionOrNull() ?: Exception("Failed to load group members"))
-            }
-
-            val allMembers = membersRes.getOrNull().orEmpty()
-            val joinedMembers = allMembers.filter { it.status.trim().equals("joined", ignoreCase = true) }
-            val memberUserIds = (joinedMembers.map { it.user_id }.toSet() + myUserId).filter { it.isNotBlank() }
-
-            val cleanMentions = mentionedUserIds.map { it.trim() }.filter { it.isNotBlank() }.distinct()
-            val payloadToEncrypt = if (cleanMentions.isNotEmpty() || replyToMessage != null) {
-                JSONObject().apply {
-                    put("__e2ee_v2", true)
-                    put("text", text)
-                    put("mentions", JSONArray(cleanMentions))
-                    if (replyToMessage != null) {
-                        put("reply_to_id", replyToMessage.id)
-                        put("reply_to_sender_id", replyToMessage.senderId)
-                        put("reply_to_sender_name", replyToMessage.senderName)
-                        put("reply_to_text", replyToMessage.text.take(120))
-                    }
-                }.toString()
-            } else {
-                text
-            }
-
-            // 2. Fetch public keys for each joined member and encrypt per recipient
-            val recipientsPayload = mutableListOf<GroupRecipientPayload>()
-            var skippedNoKeyCount = 0
-
-            for (uid in memberUserIds) {
-                val keyResp = SupabaseClient.api.getUserPublicKey(
-                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
-                    auth = token,
-                    userIdFilter = "eq.$uid"
-                )
-                val pubKey = keyResp.body()?.firstOrNull()?.identity_public_key
-
-                if (!pubKey.isNullOrBlank()) {
-                    val ciphertext = E2EEManager.encryptMessage(pubKey, payloadToEncrypt)
-                    recipientsPayload.add(
-                        GroupRecipientPayload(
-                            recipient_id = uid,
-                            ciphertext = ciphertext,
-                            nonce = UUID.randomUUID().toString(),
-                            storage_path = storagePath
-                        )
-                    )
-                } else {
-                    if (uid != myUserId) {
-                        skippedNoKeyCount++
-                    }
-                    Log.w(TAG, "Recipient user '$uid' does not have a registered identity_public_key; skipping")
-                }
-            }
-
-            if (recipientsPayload.isEmpty()) {
-                return@withContext Result.failure(Exception("Could not encrypt message: no member public keys registered"))
-            }
-
-            // 3. Call send_group_message RPC
-            val sendResp = SupabaseClient.api.sendGroupMessage(
-                apiKey = BuildConfig.SUPABASE_ANON_KEY,
-                auth = token,
-                body = SendGroupMessageRequest(
-                    p_group_id = cleanGroupId,
-                    p_message_type = messageType,
-                    p_recipients = recipientsPayload
-                )
-            )
-
-            if (!sendResp.isSuccessful) {
-                val err = sendResp.errorBody()?.string()
-                return@withContext Result.failure(Exception(mapGroupError(err, "Failed to send group message")))
-            }
-
-            val rawResp = sendResp.body()?.string()?.trim().orEmpty()
-            val serverMessageId = parseGroupId(rawResp) ?: UUID.randomUUID().toString()
-
-            // 4. Save local copy with disappearing expiry if enabled
-            val firebaseUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
-            val myName = firebaseUser?.displayName ?: "You"
-            val myAvatar = firebaseUser?.photoUrl?.toString()
-            val now = System.currentTimeMillis()
-            val group = database?.groupConversationDao()?.getGroup(cleanGroupId)
-            val disSec = group?.disappearingSeconds ?: 0
-            val expiresAt = if (disSec > 0) now + disSec * 1000L else null
-
-            val localMsg = LocalGroupMessage(
-                id = serverMessageId,
-                groupId = cleanGroupId,
-                senderId = myUserId,
-                senderName = myName,
-                senderAvatar = myAvatar,
-                text = text,
-                messageType = messageType,
-                storagePath = storagePath,
-                timestamp = now,
-                expiresAt = expiresAt,
-                isOutgoing = true,
-                mentionsJson = JSONArray(cleanMentions).toString(),
-                isMentioned = false,
-                replyToMessageId = replyToMessage?.id,
-                replyToSenderId = replyToMessage?.senderId,
-                replyToSenderName = replyToMessage?.senderName,
-                replyToPreview = replyToMessage?.text?.take(120)
-            )
-            database?.groupMessageDao()?.insertMessage(localMsg)
-            database?.groupConversationDao()?.updateLastMessage(
-                groupId = cleanGroupId,
-                text = text,
-                senderName = "You",
-                time = now,
-                unreadDelta = 0
-            )
-
-            Result.success(SendGroupMessageOutcome(messageId = serverMessageId, skippedCount = skippedNoKeyCount))
-        } catch (e: Exception) {
-            Log.e(TAG, "Exception sending group message", e)
-            Result.failure(Exception(mapGroupError(e.message, "Failed to send message")))
+        val cleanGroupId = groupId.trim().replace("\"", "")
+        val clientId = enqueueSendGroupMessage(
+            context = context,
+            groupId = cleanGroupId,
+            text = text,
+            mentionedUserIds = mentionedUserIds,
+            replyToMessage = replyToMessage
+        )
+        // Wait briefly for room row if needed, then await completion via outbox helper
+        repeat(10) {
+            if (database?.groupMessageDao()?.getMessageByClientId(clientId) != null) return@repeat
+            delay(10)
+        }
+        val row = database?.groupMessageDao()?.getMessageByClientId(clientId)
+        if (row?.status == LocalMessageStatus.SENT) {
+            Result.success(SendGroupMessageOutcome(messageId = row.id, skippedCount = 0))
+        } else {
+            dispatchGroupOutboxMessage(context.applicationContext, clientId, allowAutoRetry = false)
         }
     }
 
-    /**
-     * Sends a 2-layer E2EE media message ('image' or 'voice') to the group.
-     */
     suspend fun sendGroupMediaMessage(
         context: Context,
         groupId: String,
         rawBytes: ByteArray,
         mimeType: String = "image/jpeg",
-        messageType: String = "image", // "image" or "voice"
+        messageType: String = "image",
         caption: String? = null
     ): Result<SendGroupMessageOutcome> = withContext(Dispatchers.IO) {
-        try {
-            val activeUid = SupabaseSessionManager.ensureActiveSession(context)
-            val myUserId = activeUid ?: SupabaseSessionManager.getUserId(context)
-                ?: return@withContext Result.failure(Exception("Not logged in"))
-            val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
-                ?: return@withContext Result.failure(Exception("Not authenticated"))
-
-            val cleanGroupId = groupId.trim().replace("\"", "")
-            val messageId = UUID.randomUUID().toString()
-
-            E2EEManager.ensureIdentityKeyInitialized(context)
-
-            // 1. Layer 1: Encrypt raw media bytes with one-time AES-256-GCM key + 12-byte nonce
-            val encResult = E2EEMediaManager.encryptMediaPayload(rawBytes)
-
-            // 2. Upload encrypted ciphertext blob to Appwrite Storage via upload-to-appwrite proxy
-            val uploadResult = AppwriteUploader.uploadWithToken(
-                token = token,
-                fileBytes = encResult.ciphertextBytes,
-                filename = "$messageId.bin",
-                mimeType = "application/octet-stream",
-                purpose = "group-media",
-                folderSuffix = cleanGroupId,
-                maxRetries = 1
-            )
-
-            val mediaUrl = when (uploadResult) {
-                is AppwriteUploader.UploadResult.Success -> uploadResult.url
-                is AppwriteUploader.UploadResult.Error -> {
-                    return@withContext Result.failure(Exception(uploadResult.message))
-                }
-            }
-
-            val keyB64 = Base64.encodeToString(encResult.keyBytes, Base64.NO_WRAP)
-            val nonceB64 = Base64.encodeToString(encResult.nonceBytes, Base64.NO_WRAP)
-
-            // 3. Layer 2: Prepare media descriptor JSON
-            val cleanCaption = caption?.replace("\n", " ")?.trim()?.takeIf { it.isNotBlank() }
-            val descriptorJson = JSONObject().apply {
-                put("storage_path", mediaUrl)
-                put("media_key", keyB64)
-                put("media_nonce", nonceB64)
-                put("mime_type", mimeType)
-                put("message_type", messageType)
-                if (cleanCaption != null) {
-                    put("caption", cleanCaption)
-                }
-            }.toString()
-
-            // Save local decrypted copy immediately
-            val ext = if (messageType == "voice") "m4a" else "jpg"
-            val localMediaUid = ActiveUserManager.requireActiveUid(context)
-            val localDir = ActiveUserManager.mediaDir(context, localMediaUid).apply { mkdirs() }
-            val localFile = File(localDir, "group_$messageId.$ext")
-            localFile.writeBytes(rawBytes)
-
-            // 4. Fetch joined members via get_group_members RPC and encrypt per recipient
-            val membersList = getGroupMembers(context, cleanGroupId)
-            val joinedMembers = membersList.filter { it.status.trim().equals("joined", ignoreCase = true) }
-            val memberUserIds = (joinedMembers.map { it.user_id }.toSet() + myUserId).filter { it.isNotBlank() }
-
-            val recipientsPayload = mutableListOf<GroupRecipientPayload>()
-            var skippedNoKeyCount = 0
-
-            for (uid in memberUserIds) {
-                val keyResp = SupabaseClient.api.getUserPublicKey(
-                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
-                    auth = token,
-                    userIdFilter = "eq.$uid"
-                )
-                val pubKey = keyResp.body()?.firstOrNull()?.identity_public_key
-                if (!pubKey.isNullOrBlank()) {
-                    val ciphertext = E2EEManager.encryptMessage(pubKey, descriptorJson)
-                    recipientsPayload.add(
-                        GroupRecipientPayload(
-                            recipient_id = uid,
-                            ciphertext = ciphertext,
-                            nonce = UUID.randomUUID().toString(),
-                            storage_path = mediaUrl
-                        )
-                    )
-                } else {
-                    if (uid != myUserId) skippedNoKeyCount++
-                }
-            }
-
-            if (recipientsPayload.isEmpty()) {
-                return@withContext Result.failure(Exception("Could not encrypt media message: no member public keys registered"))
-            }
-
-            val effectiveType = if (messageType == "voice") "voice" else "image"
-
-            // 5. Call send_group_message RPC
-            val sendResp = SupabaseClient.api.sendGroupMessage(
-                apiKey = BuildConfig.SUPABASE_ANON_KEY,
-                auth = token,
-                body = SendGroupMessageRequest(
-                    p_group_id = cleanGroupId,
-                    p_message_type = effectiveType,
-                    p_recipients = recipientsPayload
-                )
-            )
-
-            if (!sendResp.isSuccessful) {
-                val err = sendResp.errorBody()?.string()
-                return@withContext Result.failure(Exception(mapGroupError(err, "Failed to send group media message")))
-            }
-
-            val rawResp = sendResp.body()?.string()?.trim().orEmpty()
-            val serverMessageId = parseGroupId(rawResp) ?: messageId
-
-            val firebaseUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
-            val myName = firebaseUser?.displayName ?: "You"
-            val myAvatar = firebaseUser?.photoUrl?.toString()
-            val now = System.currentTimeMillis()
-            val group = database?.groupConversationDao()?.getGroup(cleanGroupId)
-            val disSec = group?.disappearingSeconds ?: 0
-            val expiresAt = if (disSec > 0) now + disSec * 1000L else null
-            val displayLabel = when {
-                effectiveType == "voice" -> "Voice message"
-                cleanCaption != null -> cleanCaption
-                else -> "Photo"
-            }
-
-            val localMsg = LocalGroupMessage(
-                id = serverMessageId,
-                groupId = cleanGroupId,
-                senderId = myUserId,
-                senderName = myName,
-                senderAvatar = myAvatar,
-                text = displayLabel,
-                messageType = effectiveType,
-                storagePath = mediaUrl,
-                localMediaPath = localFile.absolutePath,
-                mediaKey = keyB64,
-                mediaNonce = nonceB64,
-                mimeType = mimeType,
-                timestamp = now,
-                expiresAt = expiresAt,
-                isOutgoing = true
-            )
-            database?.groupMessageDao()?.insertMessage(localMsg)
-            database?.groupConversationDao()?.updateLastMessage(
-                groupId = cleanGroupId,
-                text = displayLabel,
-                senderName = "You",
-                time = now,
-                unreadDelta = 0
-            )
-
-            Result.success(SendGroupMessageOutcome(messageId = serverMessageId, skippedCount = skippedNoKeyCount))
-        } catch (e: Exception) {
-            Log.e(TAG, "Exception sending group media message", e)
-            Result.failure(Exception(mapGroupError(e.message, "Failed to send media message")))
+        val cleanGroupId = groupId.trim().replace("\"", "")
+        val clientId = enqueueSendGroupMediaMessage(
+            context = context,
+            groupId = cleanGroupId,
+            rawBytes = rawBytes,
+            mimeType = mimeType,
+            messageType = messageType,
+            caption = caption
+        )
+        repeat(10) {
+            if (database?.groupMessageDao()?.getMessageByClientId(clientId) != null) return@repeat
+            delay(10)
+        }
+        val row = database?.groupMessageDao()?.getMessageByClientId(clientId)
+        if (row?.status == LocalMessageStatus.SENT) {
+            Result.success(SendGroupMessageOutcome(messageId = row.id, skippedCount = 0))
+        } else {
+            dispatchGroupOutboxMessage(context.applicationContext, clientId, allowAutoRetry = false)
         }
     }
 
     /**
      * Drains pending rows from group_message_recipients (recipient_id = my uid).
-     * Each row carries group_id, sender_id and message_type, so one event is enough to decrypt.
-     * Saves to local DB, then deletes the inbox row.
+     * Decrypts rows concurrently on background threads, inserts immediately without blocking on profile sync,
+     * deduplicates echoes against optimistic rows, and deletes inbox rows asynchronously.
      */
     suspend fun drainPendingGroupMessages(context: Context) = fetchAndProcessPendingGroupMessages(context)
 
@@ -2142,16 +2531,24 @@ object GroupChatRepository {
             }
 
             Log.d(TAG, "Draining $fetchedCount pending group_message_recipients rows")
-            for (row in pendingList) {
-                try {
-                    val ok = processSingleRecipientRow(context, token, myUserId, row)
-                    if (ok) savedCount++ else failedCount++
-                } catch (e: Exception) {
-                    failedCount++
-                    lastError = e.message
-                    Log.w(TAG, "Exception processing group recipient row ${row.id}: ${e.message}")
-                }
+            val semaphore = Semaphore(4)
+            val outcomes = coroutineScope {
+                pendingList.map { row ->
+                    async(Dispatchers.IO) {
+                        semaphore.withPermit {
+                            try {
+                                processSingleRecipientRow(context, token, myUserId, row)
+                            } catch (e: Exception) {
+                                lastError = e.message
+                                Log.w(TAG, "Exception processing group recipient row ${row.id}: ${e.message}")
+                                false
+                            }
+                        }
+                    }
+                }.awaitAll()
             }
+            savedCount = outcomes.count { it }
+            failedCount = outcomes.count { !it }
         } catch (e: Exception) {
             lastError = e.message
             Log.e(TAG, "Error in fetchAndProcessPendingGroupMessages", e)
@@ -2173,15 +2570,15 @@ object GroupChatRepository {
         val msgId = row.message_id.ifBlank { rowId }
 
         if (rowId.isNotBlank() && processedRecipientIds.contains(rowId)) {
-            Log.d(TAG, "[GroupInbox] id=$rowId, message_type=$rowMessageType, group_id=$groupId, result=saved, error=already processed")
-            deleteRecipientRow(token, rowId)
-            database?.inboxFailureDao()?.deleteFailure(rowId)
+            scope.launch(Dispatchers.IO) {
+                deleteRecipientRow(token, rowId)
+                database?.inboxFailureDao()?.deleteFailure(rowId)
+            }
             return true
         }
 
         if (groupId.isBlank()) {
-            Log.w(TAG, "[GroupInbox] id=$rowId, message_type=$rowMessageType, group_id=blank, result=other, error=Group ID is blank")
-            deleteRecipientRow(token, rowId)
+            scope.launch(Dispatchers.IO) { deleteRecipientRow(token, rowId) }
             return true
         }
 
@@ -2191,25 +2588,22 @@ object GroupChatRepository {
             return false
         }
 
-        // Deduplication: if message already exists locally
         val isFromMe = senderId == myUserId
-        if (db.groupMessageDao().messageExists(msgId)) {
-            Log.d(TAG, "[GroupInbox] id=$rowId, message_type=$rowMessageType, group_id=$groupId, result=saved, error=message exists locally")
+        if (!isFromMe && db.groupMessageDao().messageExists(msgId)) {
             processedRecipientIds.add(rowId)
-            deleteRecipientRow(token, rowId)
-            db.inboxFailureDao().deleteFailure(rowId)
+            scope.launch(Dispatchers.IO) {
+                deleteRecipientRow(token, rowId)
+                db.inboxFailureDao().deleteFailure(rowId)
+            }
             return true
         }
 
         // Auto-fetch unknown groups using get_my_groups RPC
         var localGroup = db.groupConversationDao().getGroup(groupId)
         if (localGroup == null) {
-            Log.d(TAG, "[GroupInbox] Group $groupId not found locally; auto-fetching user groups via get_my_groups")
             syncUserGroups(context)
             localGroup = db.groupConversationDao().getGroup(groupId)
             if (localGroup == null) {
-                val errMsg = "Group $groupId not found after sync"
-                Log.w(TAG, "[GroupInbox] id=$rowId, message_type=$rowMessageType, group_id=$groupId, result=unknown_group, error=$errMsg")
                 db.inboxFailureDao().insertFailure(
                     com.example.db.InboxFailureEntity(
                         messageId = rowId,
@@ -2221,9 +2615,10 @@ object GroupChatRepository {
             }
         }
 
-        // Decrypt ciphertext
+        // Decrypt ciphertext on Dispatchers.Default
+        val rxStartMs = ChatTimingTracker.nowMs()
         val plaintext = try {
-            E2EEManager.decryptMessage(context, row.ciphertext)
+            E2EEManager.decryptMessageAsync(context, row.ciphertext)
         } catch (e: Exception) {
             val errMsg = e.message ?: "Decryption failed"
             Log.w(TAG, "[GroupInbox] id=$rowId, message_type=$rowMessageType, group_id=$groupId, result=decrypt_failed, error=$errMsg")
@@ -2236,6 +2631,13 @@ object GroupChatRepository {
             )
             return false
         }
+        val rxLatencyMs = (ChatTimingTracker.nowMs() - rxStartMs).coerceAtLeast(0L)
+        ChatTimingTracker.logServerEchoOrReceive(
+            channel = "GROUP",
+            refId = row.nonce.ifBlank { msgId },
+            receiveLatencyMs = rxLatencyMs,
+            isEcho = isFromMe
+        )
 
         val autoDownload = localGroup.mediaAutoDownload
         val disSec = localGroup.disappearingSeconds
@@ -2291,10 +2693,11 @@ object GroupChatRepository {
                     }
                 }
             }
-            Log.d(TAG, "[GroupInbox] id=$rowId, message_type=reaction, group_id=$groupId, result=saved, error=none")
             processedRecipientIds.add(rowId)
-            deleteRecipientRow(token, rowId)
-            db.inboxFailureDao().deleteFailure(rowId)
+            scope.launch(Dispatchers.IO) {
+                deleteRecipientRow(token, rowId)
+                db.inboxFailureDao().deleteFailure(rowId)
+            }
             return true
         }
 
@@ -2327,8 +2730,10 @@ object GroupChatRepository {
             replyToPreview = jsonEnvelope.optString("reply_to_text").takeIf { it.isNotBlank() && it != "null" }
         }
 
-        val senderName = if (isFromMe) "You" else resolveSenderName(context, token, senderId, groupId)
-        val senderAvatar = if (isFromMe) null else resolveSenderAvatar(context, token, senderId)
+        // Fast non-blocking cached/local lookup so bubble appears immediately
+        val cachedProfile = if (isFromMe) ("You" to null) else resolveSenderCachedOrLocal(context, senderId, groupId)
+        val senderName = cachedProfile.first
+        val senderAvatar = cachedProfile.second
 
         val isReplyToMe = !isFromMe && (
             replyToSenderId == myUserId ||
@@ -2358,26 +2763,44 @@ object GroupChatRepository {
                 replyToMessageId = replyToId,
                 replyToSenderId = replyToSenderId,
                 replyToSenderName = replyToSenderName,
-                replyToPreview = replyToPreview
+                replyToPreview = replyToPreview,
+                clientId = row.nonce.takeIf { it.isNotBlank() } ?: msgId,
+                status = LocalMessageStatus.SENT
             )
-
-            // Step 1: Save local message record FIRST
-            db.groupMessageDao().insertMessage(localMsg)
 
             val isGroupOpen = com.example.service.PushNotificationManager.isChatOpenInForeground(groupId = groupId) || activeOpenGroupId == groupId
-            db.groupConversationDao().updateLastMessage(
-                groupId = groupId,
-                text = displayText,
-                senderName = senderName,
-                time = now,
-                unreadDelta = if (isFromMe || isGroupOpen) 0 else 1
-            )
-            if (isMentioned && !isGroupOpen) {
-                db.groupConversationDao().setHasUnreadMention(groupId, true)
+
+            // Step 1: Save/reconcile local message record IMMEDIATELY before any profile network calls
+            val shouldUpdateUnreadOrNotify: Boolean
+            if (isFromMe) {
+                val insertedNew = db.groupMessageDao().reconcileIncomingFromMe(localMsg, echoClientId = row.nonce)
+                shouldUpdateUnreadOrNotify = false
+                if (insertedNew) {
+                    db.groupConversationDao().updateLastMessage(
+                        groupId = groupId,
+                        text = displayText,
+                        senderName = senderName,
+                        time = now,
+                        unreadDelta = 0
+                    )
+                }
+            } else {
+                db.groupMessageDao().insertMessage(localMsg)
+                shouldUpdateUnreadOrNotify = true
+                db.groupConversationDao().updateLastMessage(
+                    groupId = groupId,
+                    text = displayText,
+                    senderName = senderName,
+                    time = now,
+                    unreadDelta = if (isGroupOpen) 0 else 1
+                )
+                if (isMentioned && !isGroupOpen) {
+                    db.groupConversationDao().setHasUnreadMention(groupId, true)
+                }
             }
 
             // Notifications
-            if (!isFromMe && !isGroupOpen) {
+            if (shouldUpdateUnreadOrNotify && !isGroupOpen) {
                 val freshGroup = db.groupConversationDao().getGroup(groupId) ?: localGroup
                 val mutedUntil = freshGroup.mutedUntil ?: 0L
                 val isMuted = mutedUntil > System.currentTimeMillis()
@@ -2403,12 +2826,31 @@ object GroupChatRepository {
                 }
             }
 
-            // Step 2: Acknowledge server row ONLY AFTER successful local save
+            // Step 2: Acknowledge server row asynchronously AFTER local Room persistence
             processedRecipientIds.add(rowId)
-            deleteRecipientRow(token, rowId)
-            db.inboxFailureDao().deleteFailure(rowId)
+            scope.launch(Dispatchers.IO) {
+                deleteRecipientRow(token, rowId)
+                db.inboxFailureDao().deleteFailure(rowId)
+            }
 
-            Log.d(TAG, "[GroupInbox] id=$rowId, message_type=$resolvedType, group_id=$groupId, result=saved, error=none")
+            // Async profile enrichment if name wasn't cached locally
+            if (!isFromMe && (senderName == "A member" || senderAvatar.isNullOrBlank())) {
+                scope.launch(Dispatchers.IO) {
+                    val fetchedName = resolveSenderName(context, token, senderId, groupId)
+                    val fetchedAvatar = resolveSenderAvatar(context, token, senderId)
+                    if (fetchedName != senderName || fetchedAvatar != senderAvatar) {
+                        val latest = db.groupMessageDao().getMessageById(msgId)
+                        if (latest != null) {
+                            db.groupMessageDao().insertMessage(
+                                latest.copy(
+                                    senderName = fetchedName,
+                                    senderAvatar = fetchedAvatar ?: latest.senderAvatar
+                                )
+                            )
+                        }
+                    }
+                }
+            }
 
             // Step 3: Trigger background media download if media key exists
             if (autoDownload && !savedKey.isNullOrBlank() && !savedNonce.isNullOrBlank() && !savedStoragePath.isNullOrBlank()) {
@@ -2440,6 +2882,33 @@ object GroupChatRepository {
             )
             return false
         }
+    }
+
+    private suspend fun resolveSenderCachedOrLocal(
+        context: Context,
+        senderId: String,
+        groupId: String
+    ): Pair<String, String?> {
+        if (senderId.isBlank()) return "A member" to null
+        val myUserId = SupabaseSessionManager.getUserId(context)
+        if (!myUserId.isNullOrBlank() && senderId == myUserId) return "You" to null
+        userProfileCache[senderId]?.let { if (it.first.isNotBlank()) return it }
+        try {
+            val dmConv = database?.conversationDao()?.getConversationByOtherUser(senderId)
+            if (dmConv != null && dmConv.otherUserName.isNotBlank()) {
+                val pair = dmConv.otherUserName to dmConv.otherUserAvatar
+                userProfileCache[senderId] = pair
+                return pair
+            }
+            val pastMsg = database?.groupMessageDao()?.getGroupMessagesList(groupId)
+                ?.lastOrNull { it.senderId == senderId && it.senderName.isNotBlank() && it.senderName != "A member" && it.senderName != "Member" }
+            if (pastMsg != null) {
+                val pair = pastMsg.senderName to pastMsg.senderAvatar
+                userProfileCache[senderId] = pair
+                return pair
+            }
+        } catch (_: Exception) {}
+        return "A member" to null
     }
 
     suspend fun downloadGroupMessageMediaOnDemand(
@@ -2533,7 +3002,7 @@ object GroupChatRepository {
         } catch (_: Exception) {}
     }
 
-    private val userProfileCache = java.util.concurrent.ConcurrentHashMap<String, Pair<String, String?>>()
+    private val userProfileCache = ConcurrentHashMap<String, Pair<String, String?>>()
 
     private suspend fun resolveSenderName(
         context: Context,

@@ -174,6 +174,10 @@ class AuthViewModel : ViewModel() {
     private val _profileEditLimits = MutableStateFlow<Map<String, ProfileFieldLimitDto>>(emptyMap())
     val profileEditLimits: StateFlow<Map<String, ProfileFieldLimitDto>> = _profileEditLimits.asStateFlow()
 
+    fun setTimeoutError(message: String) {
+        _authState.value = AuthState.Error(message)
+    }
+
     fun formatIsoToLocalDate(iso: String?): String {
         val instant = parseSupabaseTimestamp(iso) ?: return iso?.trim().orEmpty().take(10)
         return try {
@@ -958,7 +962,7 @@ class AuthViewModel : ViewModel() {
                             if (errBodyStr.contains("seats_full", ignoreCase = true)) {
                                 "All speaker seats are full (max 4 speakers)."
                             } else {
-                                "Failed to fetch room token (code $errCode)."
+                                com.example.util.ErrorMapper.mapHttp(errCode)
                             }
                         }
                     }
@@ -970,7 +974,7 @@ class AuthViewModel : ViewModel() {
             } catch (e: Exception) {
                 Log.e("AuthViewModel", "Error fetching room token", e)
                 withContext(Dispatchers.Main) {
-                    onResult?.invoke(false, null, e.localizedMessage ?: "Error fetching room token")
+                    onResult?.invoke(false, null, com.example.util.ErrorMapper.map(e))
                 }
             }
         }
@@ -996,11 +1000,11 @@ class AuthViewModel : ViewModel() {
                         onResult?.invoke(true, "Speaker invitation sent!")
                     }
                 } else {
-                    val errStr = res.errorBody()?.string() ?: res.message()
+                    val errStr = res.errorBody()?.string() ?: ""
                     val msg = if (errStr.contains("seats_full", ignoreCase = true)) {
                         "All speaker seats are full (max 4 speakers)."
                     } else {
-                        "Failed to send invite: $errStr"
+                        com.example.util.ErrorMapper.mapHttp(res.code(), errStr)
                     }
                     withContext(Dispatchers.Main) {
                         onResult?.invoke(false, msg)
@@ -1009,7 +1013,7 @@ class AuthViewModel : ViewModel() {
             } catch (e: Exception) {
                 Log.e("AuthViewModel", "Error in inviteToSpeakerSeat", e)
                 withContext(Dispatchers.Main) {
-                    onResult?.invoke(false, e.localizedMessage ?: "Failed to send invitation")
+                    onResult?.invoke(false, com.example.util.ErrorMapper.map(e))
                 }
             }
         }
@@ -1044,11 +1048,11 @@ class AuthViewModel : ViewModel() {
                         }
                     }
                 } else {
-                    val errStr = res.errorBody()?.string() ?: res.message()
+                    val errStr = res.errorBody()?.string() ?: ""
                     val msg = if (errStr.contains("seats_full", ignoreCase = true)) {
                         "All speaker seats are full (max 4 speakers)."
                     } else {
-                        "Failed to respond to invite: $errStr"
+                        com.example.util.ErrorMapper.mapHttp(res.code(), errStr)
                     }
                     withContext(Dispatchers.Main) {
                         onResult?.invoke(false, msg)
@@ -1057,7 +1061,7 @@ class AuthViewModel : ViewModel() {
             } catch (e: Exception) {
                 Log.e("AuthViewModel", "Error in respondToSpeakerInvite", e)
                 withContext(Dispatchers.Main) {
-                    onResult?.invoke(false, e.localizedMessage ?: "Error responding to invite")
+                    onResult?.invoke(false, com.example.util.ErrorMapper.map(e))
                 }
             }
         }
@@ -1100,15 +1104,15 @@ class AuthViewModel : ViewModel() {
                         }
                     }
                 } else {
-                    val errStr = res.errorBody()?.string() ?: res.message()
+                    val errStr = res.errorBody()?.string() ?: ""
                     withContext(Dispatchers.Main) {
-                        onResult?.invoke(false, "Failed to demote speaker: $errStr")
+                        onResult?.invoke(false, com.example.util.ErrorMapper.mapHttp(res.code(), errStr))
                     }
                 }
             } catch (e: Exception) {
                 Log.e("AuthViewModel", "Error in demoteSpeaker", e)
                 withContext(Dispatchers.Main) {
-                    onResult?.invoke(false, e.localizedMessage ?: "Error demoting speaker")
+                    onResult?.invoke(false, com.example.util.ErrorMapper.map(e))
                 }
             }
         }
@@ -1842,14 +1846,91 @@ class AuthViewModel : ViewModel() {
         }
 
         if (context != null) {
+            val isGoogleAccount = authUser.providerData.any { it.providerId == "google.com" }
+            val hasLocalSession = SupabaseSessionManager.hasValidAuthenticatedSession(context)
+            val cachedUid = SupabaseSessionManager.getUserId(context)
+                ?: com.example.data.StartupPrefsStore.getFastSnapshot(context).lastUid
+                ?: authUser.uid
+            val cachedLocalProfile = com.example.data.StartupPrefsStore.buildLocalCachedUserProfile(
+                context = context,
+                userId = cachedUid,
+                fallbackEmail = authUser.email ?: ""
+            )
+            val hasLocalProfileData = cachedLocalProfile.onboardingComplete || !cachedLocalProfile.username.isNullOrBlank()
+
+            // Local-first startup: never make splash wait on network when local session or profile exists
+            if (hasLocalSession || hasLocalProfileData) {
+                val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
+                val initialVerified = if (isGoogleAccount) {
+                    prefs.edit().putBoolean("custom_email_verified_${cachedUid}", true).apply()
+                    true
+                } else {
+                    cachedLocalProfile.isEmailVerified
+                }
+                _sessionVerificationState.value = SessionVerificationState.Verified
+                TelemetryManager.onLogin(cachedUid)
+                _authState.value = AuthState.Success(cachedLocalProfile.copy(isEmailVerified = initialVerified))
+                startSessionListener(context, cachedUid)
+
+                // Revalidate session and profile silently in the background (SWR)
+                viewModelScope.launch {
+                    val verifiedUid = com.example.util.StartupTimingTracker.measure("verify_firebase_token") {
+                        if (hasLocalSession) {
+                            SupabaseSessionManager.getUserId(context)
+                        } else {
+                            SupabaseSessionManager.ensureActiveSession(context)
+                                ?: if (!com.example.repository.DeviceSessionRepository.isRevocationInProgress() &&
+                                    firebaseAuth?.currentUser != null &&
+                                    com.example.ui.components.AppNetworkManager.checkConnection(context)
+                                ) {
+                                    SupabaseSessionManager.forceRefreshSession(context)
+                                } else {
+                                    null
+                                }
+                        }
+                    }
+
+                    if (com.example.repository.DeviceSessionRepository.isRevocationInProgress() ||
+                        firebaseAuth?.currentUser == null
+                    ) {
+                        _sessionVerificationState.value = SessionVerificationState.Idle
+                        _authState.value = AuthState.Idle
+                        return@launch
+                    }
+
+                    val online = com.example.ui.components.AppNetworkManager.isOnline.value
+                    if (verifiedUid.isNullOrBlank()) {
+                        if (online && !hasLocalSession) {
+                            Log.w("AuthViewModel", "Background boot session verification rejected")
+                            _sessionVerificationState.value = SessionVerificationState.Failed(com.example.util.ErrorMapper.MSG_UNAUTHORIZED)
+                            _authState.value = AuthState.Error(com.example.util.ErrorMapper.MSG_UNAUTHORIZED)
+                        }
+                        return@launch
+                    }
+
+                    loadUserProfileFromSpOrFirestore(
+                        context = context,
+                        userId = verifiedUid,
+                        emitCachedImmediately = true
+                    ) { refreshed ->
+                        if (!isGoogleAccount && online) {
+                            viewModelScope.launch {
+                                val realVerify = performRemoteVerificationStatusCheck(context, verifiedUid, false)
+                                if (realVerify != refreshed.isEmailVerified) {
+                                    prefs.edit().putBoolean("custom_email_verified_${verifiedUid}", realVerify).apply()
+                                    _authState.value = AuthState.Success(refreshed.copy(isEmailVerified = realVerify))
+                                }
+                            }
+                        }
+                    }
+                }
+                return
+            }
+
             _sessionVerificationState.value = SessionVerificationState.Verifying
             _authState.value = AuthState.Loading
             viewModelScope.launch {
-                val isGoogleAccount = authUser.providerData.any { it.providerId == "google.com" }
-                val hasLocalSession = SupabaseSessionManager.hasValidAuthenticatedSession(context)
-                val verifiedUid = if (hasLocalSession) {
-                    SupabaseSessionManager.getUserId(context)
-                } else {
+                val verifiedUid = com.example.util.StartupTimingTracker.measure("verify_firebase_token") {
                     SupabaseSessionManager.ensureActiveSession(context)
                         ?: if (!com.example.repository.DeviceSessionRepository.isRevocationInProgress() &&
                             firebaseAuth?.currentUser != null
@@ -1869,9 +1950,9 @@ class AuthViewModel : ViewModel() {
                 }
 
                 if (verifiedUid.isNullOrBlank()) {
-                    Log.w("AuthViewModel", "Boot session verification failed (401/unverified)")
-                    _sessionVerificationState.value = SessionVerificationState.Failed("Session could not be verified")
-                    _authState.value = AuthState.Error("Error 401 · Unauthorized")
+                    Log.w("AuthViewModel", "Boot session verification failed")
+                    _sessionVerificationState.value = SessionVerificationState.Failed(com.example.util.ErrorMapper.MSG_UNAUTHORIZED)
+                    _authState.value = AuthState.Error(com.example.util.ErrorMapper.MSG_UNAUTHORIZED)
                     return@launch
                 }
 
@@ -1884,28 +1965,21 @@ class AuthViewModel : ViewModel() {
                     if (isGoogleAccount) {
                         prefs.edit().putBoolean("custom_email_verified_${effectiveUid}", true).apply()
                     }
-                    loadUserProfileFromSpOrFirestore(context, effectiveUid) { finalProfile ->
+                    loadUserProfileFromSpOrFirestore(context, effectiveUid, emitCachedImmediately = true) { finalProfile ->
                         val initialVerified = isCustomVerified
                         TelemetryManager.onLogin(effectiveUid)
                         _authState.value = AuthState.Success(
-                            finalProfile.copy(
-                                isEmailVerified = initialVerified
-                            )
+                            finalProfile.copy(isEmailVerified = initialVerified)
                         )
-
-                        // Start real-time session tracking on boot for secure single active device enforcement
                         startSessionListener(context, effectiveUid)
 
-                        // Concurrent secure validation & auto-detection on boot (only for password accounts)
                         if (!isGoogleAccount) {
                             viewModelScope.launch {
                                 val realVerify = performRemoteVerificationStatusCheck(context, effectiveUid, false)
                                 if (realVerify != initialVerified) {
                                     prefs.edit().putBoolean("custom_email_verified_${effectiveUid}", realVerify).apply()
                                     _authState.value = AuthState.Success(
-                                        finalProfile.copy(
-                                            isEmailVerified = realVerify
-                                        )
+                                        finalProfile.copy(isEmailVerified = realVerify)
                                     )
                                 }
                             }
@@ -2130,7 +2204,7 @@ class AuthViewModel : ViewModel() {
                             }
                             .addOnFailureListener { e ->
                                 cleanupOrphanedSignupUser()
-                                _authState.value = AuthState.Error("Failed to fetch Firebase token: ${e.localizedMessage}")
+                                _authState.value = AuthState.Error(com.example.util.ErrorMapper.mapFirebaseAuthError(e))
                             }
                     } else {
                         _authState.value = AuthState.Error("Account creation error. Please try again.")
@@ -2147,12 +2221,8 @@ class AuthViewModel : ViewModel() {
                             email = cleanEmail,
                             message = "An account with this email address already exists. Only one account is permitted per email address."
                         )
-                    } else if (errorCode == "ERROR_INVALID_EMAIL" || errorCode == "invalid-email") {
-                        _authState.value = AuthState.Error("Please enter a valid email address.")
-                    } else if (errorCode == "ERROR_WEAK_PASSWORD" || errorCode == "weak-password") {
-                        _authState.value = AuthState.Error("Password is too weak. Please use a stronger password.")
                     } else {
-                        _authState.value = AuthState.Error(e.localizedMessage ?: "Sign up failed. Please try again.")
+                        _authState.value = AuthState.Error(com.example.util.ErrorMapper.mapFirebaseAuthError(e))
                     }
                 }
         } else {
@@ -2279,33 +2349,14 @@ class AuthViewModel : ViewModel() {
                                 }
                             }
                             .addOnFailureListener { e ->
-                                _authState.value = AuthState.Error("Failed to fetch token: ${e.localizedMessage}")
+                                _authState.value = AuthState.Error(com.example.util.ErrorMapper.mapFirebaseAuthError(e))
                             }
                     } else {
                         _authState.value = AuthState.Error("Unable to find user account. Please try again.")
                     }
                 }
                 .addOnFailureListener { e ->
-                    val errorCode = (e as? com.google.firebase.auth.FirebaseAuthException)?.errorCode
-                    val isUserNotFound = errorCode == "ERROR_USER_NOT_FOUND" ||
-                                         errorCode == "user-not-found" ||
-                                         e.message?.contains("no user record", ignoreCase = true) == true
-                    
-                    val isWrongPassword = errorCode == "ERROR_WRONG_PASSWORD" ||
-                                          errorCode == "wrong-password" ||
-                                          e.message?.contains("password is invalid", ignoreCase = true) == true
-                    
-                    if (isUserNotFound) {
-                        _authState.value = AuthState.Error("No account found with this email. Tap Sign Up below.")
-                    } else if (isWrongPassword) {
-                        _authState.value = AuthState.Error("Wrong password. Double check or tap 'Forgot password?'.")
-                    } else if (errorCode == "invalid-credential" || errorCode == "INVALID_LOGIN_CREDENTIALS") {
-                        _authState.value = AuthState.Error("Incorrect password or credentials. Please try again.")
-                    } else if (errorCode == "ERROR_INVALID_EMAIL" || errorCode == "invalid-email") {
-                        _authState.value = AuthState.Error("Please enter a valid email address.")
-                    } else {
-                        _authState.value = AuthState.Error(e.localizedMessage ?: "Login failed. Please try again.")
-                    }
+                    _authState.value = AuthState.Error(com.example.util.ErrorMapper.mapFirebaseAuthError(e))
                 }
         } else {
             _authState.value = AuthState.Error("Auth service is not ready. Please try again in a moment.")
@@ -2475,8 +2526,9 @@ class AuthViewModel : ViewModel() {
                 onSuccess()
             }
             ?.addOnFailureListener { e ->
-                _authState.value = AuthState.Error(e.localizedMessage ?: "Failed to send reset link.")
-                Toast.makeText(context, "Error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                val friendly = com.example.util.ErrorMapper.mapFirebaseAuthError(e)
+                _authState.value = AuthState.Error(friendly)
+                Toast.makeText(context, friendly, Toast.LENGTH_LONG).show()
             }
     }
 
@@ -2606,8 +2658,8 @@ class AuthViewModel : ViewModel() {
             }
             context.startActivity(intent)
         } catch (e: Exception) {
-            Log.e("AuthViewModel", "Error opening verification link in browser: ${e.message}", e)
-            Toast.makeText(context, "Could not open browser: ${e.message}", Toast.LENGTH_SHORT).show()
+            Log.e("AuthViewModel", "Error opening verification link in browser", e)
+            Toast.makeText(context, "Could not open your browser. Please check your email app.", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -2772,7 +2824,7 @@ class AuthViewModel : ViewModel() {
                             message = "An account with this email address already exists. Only one account is permitted per email address."
                         )
                     } else {
-                        _authState.value = AuthState.Error(e.localizedMessage ?: "Google sign in failed")
+                        _authState.value = AuthState.Error(com.example.util.ErrorMapper.mapFirebaseAuthError(e))
                     }
                 }
         } else {
@@ -3000,7 +3052,7 @@ class AuthViewModel : ViewModel() {
                     }
                 } catch (e: Exception) {
                     Log.e("AuthViewModel", "Error reading avatar file bytes in step 1", e)
-                    onError("Failed to read selected avatar photo: ${e.message}")
+                    onError("Could not read selected photo. Please pick another.")
                     return@launch
                 }
 
@@ -3138,7 +3190,7 @@ class AuthViewModel : ViewModel() {
                             }
                         } catch (e: Exception) {
                             Log.e("AuthViewModel", "Error reading avatar file bytes", e)
-                            onError?.invoke("Failed to read selected avatar photo: ${e.message}")
+                            onError?.invoke("Could not read selected photo. Please pick another.")
                             return@launch
                         }
 
@@ -3169,7 +3221,7 @@ class AuthViewModel : ViewModel() {
                             }
                             is AppwriteUploader.UploadResult.Error -> {
                                 Log.e("AuthViewModel", "Failed to upload avatar: ${uploadResult.message}")
-                                onError?.invoke("Failed to upload avatar: ${uploadResult.message}")
+                                onError?.invoke(uploadResult.message)
                                 return@launch
                             }
                         }
@@ -3191,7 +3243,7 @@ class AuthViewModel : ViewModel() {
                             }
                         } catch (e: Exception) {
                             Log.e("AuthViewModel", "Error reading cover file bytes", e)
-                            onError?.invoke("Failed to read selected cover photo: ${e.message}")
+                            onError?.invoke("Could not read selected cover photo. Please pick another.")
                             return@launch
                         }
 
@@ -3417,6 +3469,7 @@ class AuthViewModel : ViewModel() {
         context: Context,
         userId: String,
         explicitAccessToken: String? = null,
+        emitCachedImmediately: Boolean = false,
         onComplete: (UserProfile) -> Unit = {}
     ) {
         val prefs = context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
@@ -3481,6 +3534,13 @@ class AuthViewModel : ViewModel() {
             onboardingComplete = isOnboardingComplete || currentProfile.onboardingComplete
         )
 
+        val canUseCached = emitCachedImmediately &&
+            (mergedProfile.onboardingComplete || !mergedProfile.username.isNullOrBlank())
+        if (canUseCached) {
+            _authState.value = AuthState.Success(mergedProfile)
+            onComplete(mergedProfile)
+        }
+
         viewModelScope.launch {
             try {
                 var bearerToken = if (!explicitAccessToken.isNullOrBlank()) {
@@ -3491,10 +3551,12 @@ class AuthViewModel : ViewModel() {
                 }
                 val supaUid = SupabaseSessionManager.getUserId(context)
                 val queryUid = if (supaUid != null && SupabaseSessionManager.isValidUuid(supaUid)) supaUid else userId
-                var response = SupabaseClient.api.getProfile(
-                    auth = bearerToken,
-                    authUserIdEq = "eq.$queryUid"
-                )
+                var response = com.example.util.StartupTimingTracker.measure("get_profile") {
+                    SupabaseClient.api.getProfile(
+                        auth = bearerToken,
+                        authUserIdEq = "eq.$queryUid"
+                    )
+                }
                 if (response.code() == 401) {
                     SupabaseSessionManager.forceRefreshSession(context)
                     bearerToken = SupabaseSessionManager.getAuthenticatedBearerToken(context)
@@ -3546,6 +3608,7 @@ class AuthViewModel : ViewModel() {
                             putBoolean("profile_onboarding_complete_${userId}", supaComplete)
                             apply()
                         }
+                        com.example.data.StartupPrefsStore.recordActiveUid(context, userId, supaComplete)
 
                         val finalProfile = mergedProfile.copy(
                             isEmailVerified = resolvedVerified,
@@ -3565,16 +3628,20 @@ class AuthViewModel : ViewModel() {
                             onboardingComplete = supaComplete
                         )
                         _authState.value = AuthState.Success(finalProfile)
-                        onComplete(finalProfile)
+                        if (!canUseCached) {
+                            onComplete(finalProfile)
+                        }
                         return@launch
                     }
                 }
             } catch (e: Exception) {
-                Log.e("AuthViewModel", "Failed to load profile from Supabase: ${e.message}", e)
+                Log.e("AuthViewModel", "Failed to load profile from Supabase: ${e.javaClass.simpleName}", e)
             }
 
-            _authState.value = AuthState.Success(mergedProfile)
-            onComplete(mergedProfile)
+            if (!canUseCached) {
+                _authState.value = AuthState.Success(mergedProfile)
+                onComplete(mergedProfile)
+            }
         }
     }
 
@@ -3807,11 +3874,11 @@ class AuthViewModel : ViewModel() {
                 } else {
                     val errBody = response.errorBody()?.string()?.trim().orEmpty()
                     Log.e("AuthViewModel", "getMyDeletionStatus error ${response.code()}: $errBody")
-                    _deletionStatus.value = DeletionStatusState.Failed("Unable to verify account status (${response.code()})")
+                    _deletionStatus.value = DeletionStatusState.Failed(com.example.util.ErrorMapper.mapHttp(response.code(), errBody))
                 }
             } catch (e: Exception) {
                 Log.e("AuthViewModel", "checkDeletionStatus exception", e)
-                _deletionStatus.value = DeletionStatusState.Failed(e.message ?: "Network error checking deletion status")
+                _deletionStatus.value = DeletionStatusState.Failed(com.example.util.ErrorMapper.map(e))
             }
         }
     }
@@ -3839,21 +3906,20 @@ class AuthViewModel : ViewModel() {
                             }
                             onResult(true, null)
                         } else {
-                            val err = json.optString("error", "Failed to cancel deletion")
+                            val err = com.example.util.ErrorMapper.map(Exception(json.optString("error", "")))
                             onResult(false, err)
                         }
                     }
                 } else {
                     val errBody = response.errorBody()?.string()?.trim().orEmpty()
-                    val err = parseErrorJson(errBody) ?: "Server returned ${response.code()}"
                     withContext(Dispatchers.Main) {
-                        onResult(false, err)
+                        onResult(false, com.example.util.ErrorMapper.mapHttp(response.code(), errBody))
                     }
                 }
             } catch (e: Exception) {
                 Log.e("AuthViewModel", "cancelAccountDeletion exception", e)
                 withContext(Dispatchers.Main) {
-                    onResult(false, e.message ?: "Failed to cancel account deletion")
+                    onResult(false, com.example.util.ErrorMapper.map(e))
                 }
             }
         }
@@ -3954,7 +4020,7 @@ class AuthViewModel : ViewModel() {
                                 onError("Confirmation required")
                             }
                             else -> {
-                                onError(errCode ?: "Server error (${response.code()}). Please try again.")
+                                onError(com.example.util.ErrorMapper.mapHttp(response.code(), rawErr))
                             }
                         }
                     }
@@ -3962,7 +4028,7 @@ class AuthViewModel : ViewModel() {
             } catch (e: Exception) {
                 Log.d("AuthViewModel", "requestAccountDeletion exception: ${e.javaClass.simpleName}")
                 withContext(Dispatchers.Main) {
-                    onError(e.message ?: "Network error requesting account deletion")
+                    onError(com.example.util.ErrorMapper.map(e))
                 }
             }
         }

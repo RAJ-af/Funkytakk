@@ -1,6 +1,8 @@
 package com.example.ui.chat
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -34,6 +36,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -50,9 +54,11 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -73,7 +79,7 @@ import kotlin.math.max
 // ---------------------------------------------------------------------------
 
 enum class GroupPosition { Single, First, Middle, Last }
-enum class MessageStatus { Sending, Sent, Delivered, Read }
+enum class MessageStatus { Sending, Sent, Delivered, Read, Failed }
 
 fun bubbleShape(outgoing: Boolean, position: GroupPosition): RoundedCornerShape {
     val big = ChatDimens.BubbleBig
@@ -104,7 +110,39 @@ fun messageDescription(sender: String?, time: String, body: String, status: Mess
         MessageStatus.Sent -> append(", sent")
         MessageStatus.Delivered -> append(", delivered")
         MessageStatus.Read -> append(", read")
+        MessageStatus.Failed -> append(", failed to send")
         null -> Unit
+    }
+}
+
+@Composable
+fun AnimatedBubbleEntrance(
+    animateEntrance: Boolean,
+    outgoing: Boolean,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    val reduceMotion = LocalReduceMotion.current
+    if (!animateEntrance || reduceMotion) {
+        Box(modifier = modifier) { content() }
+        return
+    }
+    val progress = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        progress.animateTo(1f, animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing))
+    }
+    val density = LocalDensity.current
+    val slideXPx = with(density) { (if (outgoing) 10.dp else (-10).dp).toPx() }
+    val slideYPx = with(density) { 12.dp.toPx() }
+    Box(
+        modifier = modifier.graphicsLayer {
+            val p = progress.value
+            alpha = p
+            translationX = (1f - p) * slideXPx
+            translationY = (1f - p) * slideYPx
+        }
+    ) {
+        content()
     }
 }
 
@@ -282,22 +320,65 @@ fun MessageMeta(
     onMedia: Boolean = false,
 ) {
     val c = LocalChatColors.current
+    val reduceMotion = LocalReduceMotion.current
     val base = when {
         onMedia -> Color.White
         outgoing -> c.textSecondaryOut
         else -> c.textSecondary
     }
     val tick = if (onMedia) Color.White else if (status == MessageStatus.Read) c.tickRead else base
+
+    var sawSending by remember { mutableStateOf(status == MessageStatus.Sending) }
+    val tickScale = remember { Animatable(1f) }
+    LaunchedEffect(status, reduceMotion) {
+        if (status == MessageStatus.Sending) {
+            sawSending = true
+        } else if (sawSending && (status == MessageStatus.Sent || status == MessageStatus.Delivered || status == MessageStatus.Read)) {
+            sawSending = false
+            if (!reduceMotion) {
+                tickScale.snapTo(0.72f)
+                tickScale.animateTo(1.24f, tween(95))
+                tickScale.animateTo(1.0f, tween(115))
+            } else {
+                tickScale.snapTo(1f)
+            }
+        } else if (status == MessageStatus.Failed) {
+            sawSending = false
+        }
+    }
+
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         if (edited) Text("edited", color = base, fontSize = 11f.chatSp())
-        Text(time, color = base, fontSize = 11f.chatSp())
+        Text(time, color = if (status == MessageStatus.Failed && !onMedia) c.danger else base, fontSize = 11f.chatSp())
         when (status) {
-            MessageStatus.Sending -> CircularProgressIndicator(Modifier.size(10.dp), color = base, strokeWidth = 1.2.dp)
-            else -> Unit
+            MessageStatus.Sending -> ChatIconClock(
+                modifier = Modifier
+                    .size(12.dp)
+                    .semantics { contentDescription = "Sending" },
+                tint = base
+            )
+            MessageStatus.Sent -> TickMark(
+                double = false,
+                color = tick,
+                modifier = Modifier.scale(tickScale.value)
+            )
+            MessageStatus.Delivered, MessageStatus.Read -> TickMark(
+                double = true,
+                color = tick,
+                modifier = Modifier.scale(tickScale.value)
+            )
+            MessageStatus.Failed -> ChatIconFailedBadge(
+                modifier = Modifier
+                    .size(14.dp)
+                    .semantics { contentDescription = "Message failed to send" },
+                badgeColor = c.danger,
+                symbolColor = Color.White
+            )
+            null -> Unit
         }
     }
 }

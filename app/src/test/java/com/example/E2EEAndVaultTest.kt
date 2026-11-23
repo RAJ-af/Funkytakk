@@ -122,7 +122,7 @@ class E2EEAndVaultTest {
         // Verify message is graceful and explains why (user hasn't opened app/generated keys)
         assertNotNull(exception.message)
         assertTrue(exception.message!!.contains(recipientName))
-        assertTrue(exception.message!!.contains("abhi secure chat ke liye ready nahi hai"))
+        assertTrue(exception.message!!.contains("isn't ready for secure chat yet"))
         assertEquals(recipientName, exception.recipientName)
     }
 }

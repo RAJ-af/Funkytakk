@@ -79,8 +79,16 @@ import com.example.ui.screens.home.models.GraySubtitle
 import com.example.ui.theme.GoldAccent
 import com.example.ui.screens.profile.SettingsScreen
 import com.example.ui.screens.store.CoinStoreScreen
+import com.example.data.SelfProfileCachePayload
+import com.example.ui.components.AppNetworkManager
+import com.example.ui.components.FriendlyErrorRetryCard
+import com.example.ui.components.ProfileSkeleton
+import com.example.ui.components.ShimmerBox
 import com.example.ui.theme.LocalFunkyColors
+import com.example.util.ErrorMapper
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
 
@@ -144,62 +152,188 @@ fun ProfileTabContent(
     }
 
     val userId = currentUserProfile.uid
+    val isNetworkOnline by AppNetworkManager.isOnline.collectAsState()
     val prefs = remember { context.getSharedPreferences("funky_talk_prefs", android.content.Context.MODE_PRIVATE) }
-    val supaUid = remember { com.example.SupabaseSessionManager.getUserId(context) ?: userId }
-    val savedBio = remember { prefs.getString("profile_bio_${userId}", null) }
-    val savedCity = remember { prefs.getString("profile_city_${userId}", null) }
-    val savedAge = remember { prefs.getInt("profile_age_${userId}", 0).takeIf { it > 0 } }
-    val savedNativeLang = remember {
+    val supaUid = remember(userId) { com.example.SupabaseSessionManager.getUserId(context) ?: userId }
+    val cachedSelfProfile = remember(userId) { SelfProfileLoader.loadCached(context) }
+    val cachedPayload = cachedSelfProfile?.payload
+    var existingPayload by remember(userId) { mutableStateOf<SelfProfileCachePayload?>(cachedPayload) }
+
+    val savedBio = remember(userId) { prefs.getString("profile_bio_${userId}", null) }
+    val savedCity = remember(userId) { prefs.getString("profile_city_${userId}", null) }
+    val savedAge = remember(userId) { prefs.getInt("profile_age_${userId}", 0).takeIf { it > 0 } }
+    val savedNativeLang = remember(userId, supaUid) {
         prefs.getString("profile_native_lang_${userId}", null)
             ?: (if (supaUid != userId) prefs.getString("profile_native_lang_${supaUid}", null) else null)
     }
-    val savedLearningLang = remember {
+    val savedLearningLang = remember(userId, supaUid) {
         prefs.getString("profile_learning_lang_${userId}", null)
             ?: (if (supaUid != userId) prefs.getString("profile_learning_lang_${supaUid}", null) else null)
     }
-    val savedCover = remember {
+    val savedCover = remember(userId, supaUid) {
         prefs.getString("profile_cover_${userId}", null)
             ?: (if (supaUid != userId) prefs.getString("profile_cover_${supaUid}", null) else null)
     }
 
-    var currentProfileName by remember(currentUserProfile.displayName) { mutableStateOf(currentUserProfile.displayName?.ifBlank { "pikaa" } ?: "pikaa") }
-    var currentUsername by remember(currentUserProfile.username) { mutableStateOf(currentUserProfile.username?.ifBlank { "pikaa" } ?: "pikaa") }
-    var currentAvatarUrl by remember(currentUserProfile.avatar) { mutableStateOf(currentUserProfile.avatar.orEmpty()) }
-    var currentCoverUrl by remember(currentUserProfile.coverUrl) {
-        mutableStateOf(currentUserProfile.coverUrl?.ifBlank { null } ?: savedCover.orEmpty())
+    var currentProfileName by remember(userId) {
+        mutableStateOf(
+            cachedPayload?.displayName?.takeIf { it.isNotBlank() }
+                ?: currentUserProfile.displayName?.takeIf { it.isNotBlank() }
+                ?: currentUserProfile.username?.takeIf { it.isNotBlank() }
+                ?: "FunkyTalk User"
+        )
     }
-    var currentBio by remember(currentUserProfile.bio) { mutableStateOf(currentUserProfile.bio ?: savedBio ?: "I love music, sunset and good conversations! Always open to meet new people and learn about different cultures. Let's be friends! 💛") }
-    var currentCountry by remember(currentUserProfile.country) { mutableStateOf(currentUserProfile.country?.ifBlank { "South Korea" } ?: "South Korea") }
-    var currentCountryCode by remember(currentUserProfile.countryCode) { mutableStateOf(currentUserProfile.countryCode?.ifBlank { "kr" } ?: "kr") }
-    var currentCity by remember(currentUserProfile.city) { mutableStateOf(currentUserProfile.city ?: savedCity ?: "") }
-    var currentAge by remember(currentUserProfile.age) { mutableStateOf(currentUserProfile.age ?: savedAge ?: 19) }
-    var currentGender by remember(currentUserProfile.gender) { mutableStateOf(currentUserProfile.gender?.ifBlank { "Female" } ?: "Female") }
-    var currentNativeLanguage by remember(currentUserProfile.nativeLanguage) {
-        mutableStateOf(currentUserProfile.nativeLanguage?.ifBlank { null } ?: savedNativeLang.orEmpty())
+    var currentUsername by remember(userId) {
+        mutableStateOf(
+            cachedPayload?.username?.takeIf { it.isNotBlank() }
+                ?: currentUserProfile.username?.takeIf { it.isNotBlank() }
+                ?: "user"
+        )
     }
-    var currentLearningLanguage by remember(currentUserProfile.learningLanguage) {
-        mutableStateOf(currentUserProfile.learningLanguage?.ifBlank { null } ?: savedLearningLang.orEmpty())
+    var currentAvatarUrl by remember(userId) {
+        mutableStateOf(
+            cachedPayload?.avatarUrl?.takeIf { it.isNotBlank() }
+                ?: currentUserProfile.avatar.orEmpty()
+        )
     }
-    var isVerified by remember { mutableStateOf(false) }
-    var isOnline by remember { mutableStateOf(true) }
-    var postsCount by remember { mutableStateOf(0) }
-    var followersCount by remember { mutableStateOf(0) }
-    var followingCount by remember { mutableStateOf(0) }
-    var currentJoinedText by remember { mutableStateOf("Joined recently") }
+    var currentCoverUrl by remember(userId) {
+        mutableStateOf(
+            cachedPayload?.coverUrl?.takeIf { it.isNotBlank() }
+                ?: currentUserProfile.coverUrl?.takeIf { it.isNotBlank() }
+                ?: savedCover.orEmpty()
+        )
+    }
+    var currentBio by remember(userId) {
+        mutableStateOf(
+            cachedPayload?.bio?.takeIf { it.isNotBlank() }
+                ?: currentUserProfile.bio?.takeIf { it.isNotBlank() }
+                ?: savedBio.orEmpty()
+        )
+    }
+    var currentCountry by remember(userId) {
+        mutableStateOf(
+            cachedPayload?.country?.takeIf { it.isNotBlank() }
+                ?: currentUserProfile.country.orEmpty()
+        )
+    }
+    var currentCountryCode by remember(userId) {
+        mutableStateOf(
+            cachedPayload?.countryCode?.takeIf { it.isNotBlank() }
+                ?: currentUserProfile.countryCode.orEmpty()
+        )
+    }
+    var currentCity by remember(userId) {
+        mutableStateOf(
+            cachedPayload?.city?.takeIf { it.isNotBlank() }
+                ?: currentUserProfile.city
+                ?: savedCity.orEmpty()
+        )
+    }
+    var currentAge by remember(userId) {
+        mutableStateOf(
+            cachedPayload?.age?.takeIf { it > 0 }
+                ?: currentUserProfile.age?.takeIf { it > 0 }
+                ?: savedAge
+                ?: 0
+        )
+    }
+    var currentGender by remember(userId) {
+        mutableStateOf(
+            cachedPayload?.gender?.takeIf { it.isNotBlank() }
+                ?: currentUserProfile.gender.orEmpty()
+        )
+    }
+    var currentNativeLanguage by remember(userId) {
+        mutableStateOf(
+            cachedPayload?.nativeLanguage?.takeIf { it.isNotBlank() }
+                ?: currentUserProfile.nativeLanguage?.takeIf { it.isNotBlank() }
+                ?: savedNativeLang.orEmpty()
+        )
+    }
+    var currentLearningLanguage by remember(userId) {
+        mutableStateOf(
+            cachedPayload?.learningLanguage?.takeIf { it.isNotBlank() }
+                ?: currentUserProfile.learningLanguage?.takeIf { it.isNotBlank() }
+                ?: savedLearningLang.orEmpty()
+        )
+    }
+    var isVerified by remember(userId) {
+        mutableStateOf(cachedPayload?.isVerified ?: currentUserProfile.isEmailVerified)
+    }
+    var isOnline by remember(userId) { mutableStateOf(cachedPayload?.isOnline ?: true) }
+    var postsCount by remember(userId) { mutableStateOf(cachedPayload?.postsCount ?: 0) }
+    var followersCount by remember(userId) { mutableStateOf(cachedPayload?.followersCount ?: 0) }
+    var followingCount by remember(userId) { mutableStateOf(cachedPayload?.followingCount ?: 0) }
+    var currentJoinedText by remember(userId) {
+        mutableStateOf(cachedPayload?.joinedText ?: "Joined recently")
+    }
+
+    var hasProfileContent by remember(userId) {
+        mutableStateOf(
+            cachedPayload != null ||
+                (!currentUserProfile.displayName.isNullOrBlank() && currentUserProfile.uid != "guest")
+        )
+    }
+    var isProfileLoading by remember(userId) { mutableStateOf(!hasProfileContent) }
+    var profileError by remember(userId) { mutableStateOf<String?>(null) }
+    var profileRetryTrigger by remember { mutableIntStateOf(0) }
 
     val supportUnread by com.example.SupportChatManager.unreadCount.collectAsState()
     val feedbackUpdates by com.example.repository.FeedbackRepository.myUpdatesCount.collectAsState()
     val helpTotalBadge = supportUnread + feedbackUpdates
 
-    val momentsList = remember { mutableStateListOf<FeedPost>() }
+    val momentsList = remember(userId) {
+        mutableStateListOf<FeedPost>().apply {
+            cachedSelfProfile?.posts?.let(::addAll)
+        }
+    }
     var isMomentsLoading by remember { mutableStateOf(false) }
 
     val walletBalance by GiftManager.walletBalance.collectAsState()
-    val giftsReceived = remember { mutableStateListOf<GiftTransactionItem>() }
-    val userBadges = remember { mutableStateListOf<com.example.ProfileBadge>() }
+    val giftsReceived = remember(userId) {
+        mutableStateListOf<GiftTransactionItem>().apply {
+            cachedPayload?.gifts?.let(::addAll)
+        }
+    }
+    val userBadges = remember(userId) {
+        mutableStateListOf<com.example.ProfileBadge>().apply {
+            cachedPayload?.badges?.let(::addAll)
+        }
+    }
     var isGiftsLoading by remember { mutableStateOf(false) }
 
     val coroutineScope = rememberCoroutineScope()
+
+    val applyFetchResult: (SelfProfileFetchResult) -> Unit = { res ->
+        val p = res.payload
+        existingPayload = p
+        currentProfileName = p.displayName
+        currentUsername = p.username
+        currentAvatarUrl = p.avatarUrl
+        currentCoverUrl = p.coverUrl
+        currentBio = p.bio
+        currentCountry = p.country
+        currentCountryCode = p.countryCode
+        currentCity = p.city
+        currentAge = p.age
+        currentGender = p.gender
+        currentNativeLanguage = p.nativeLanguage
+        currentLearningLanguage = p.learningLanguage
+        isVerified = p.isVerified
+        isOnline = p.isOnline
+        currentJoinedText = p.joinedText
+        postsCount = p.postsCount
+        followersCount = p.followersCount
+        followingCount = p.followingCount
+        userBadges.clear()
+        userBadges.addAll(p.badges)
+        giftsReceived.clear()
+        giftsReceived.addAll(p.gifts)
+        momentsList.clear()
+        momentsList.addAll(res.posts)
+        hasProfileContent = true
+        profileError = null
+    }
 
     // Keep locally-held state synced when currentUserProfile prop updates from parent
     LaunchedEffect(currentUserProfile.avatar) {
@@ -225,16 +359,16 @@ fun ProfileTabContent(
 
     val refreshUserMoments: suspend () -> Unit = {
         try {
-            isMomentsLoading = true
-            MomentsRepository.getUserMoments(context, userId = null, limit = 20, offset = 0)
-                .onSuccess { moments ->
-                    momentsList.clear()
-                    momentsList.addAll(moments.map { it.toFeedPost() })
-                    postsCount = momentsList.size
-                }
-                .onFailure { err ->
-                    android.util.Log.e("ProfileTabContent", "Error loading moments: ${err.message}")
-                }
+            if (momentsList.isEmpty()) isMomentsLoading = true
+            com.example.util.withLoadingTimeout {
+                MomentsRepository.getUserMoments(context, userId = null, limit = 20, offset = 0)
+            }.onSuccess { moments ->
+                momentsList.clear()
+                momentsList.addAll(moments.map { it.toFeedPost() })
+                postsCount = momentsList.size
+            }.onFailure { err ->
+                android.util.Log.e("ProfileTabContent", "Error loading moments: ${ErrorMapper.map(err)}")
+            }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -251,183 +385,78 @@ fun ProfileTabContent(
     }
 
     val refreshProfileData: suspend () -> Unit = {
-        val supaUid = com.example.SupabaseSessionManager.getUserId(context) ?: userId
-        val effectiveUid = supaUid.takeIf { com.example.SupabaseSessionManager.isValidUuid(it) }
-            ?: (if (com.example.SupabaseSessionManager.isValidUuid(userId)) userId else supaUid)
-        val token = com.example.SupabaseSessionManager.getAuthenticatedBearerToken(context)
-            ?: com.example.SupabaseSessionManager.getBearerToken(context)
-            ?: "Bearer ${com.example.BuildConfig.SUPABASE_ANON_KEY}"
-
-        var remoteProfileLoaded = false
-        try {
-            val res = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                com.example.SupabaseClient.api.getProfile(
-                    apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
-                    auth = token,
-                    authUserIdEq = "eq.$effectiveUid"
-                )
+        SelfProfileLoader.fetchParallel(
+            context = context,
+            userId = userId,
+            fallbackProfile = currentUserProfile,
+            existingPayload = existingPayload
+        ).onSuccess { res ->
+            applyFetchResult(res)
+        }.onFailure { err ->
+            if (!hasProfileContent) {
+                profileError = ErrorMapper.map(err)
             }
-            if (res.isSuccessful) {
-                val p = res.body()?.firstOrNull()
-                if (p != null) {
-                    remoteProfileLoaded = true
-                    if (!p.profile_name.isNullOrBlank()) currentProfileName = p.profile_name
-                    if (!p.username.isNullOrBlank()) currentUsername = p.username
-                    currentAvatarUrl = p.avatar_url.orEmpty()
-                    currentCoverUrl = p.cover_url.orEmpty()
-                    if (!p.bio.isNullOrBlank()) currentBio = p.bio
-                    if (p.age != null && p.age > 0) currentAge = p.age
-                    if (!p.gender.isNullOrBlank()) currentGender = p.gender
-                    if (!p.country.isNullOrBlank()) currentCountry = p.country
-                    if (!p.city.isNullOrBlank()) currentCity = p.city
-                    currentCountryCode = resolveCountryCode(p.country, p.country_code)
-                    if (!p.native_languages.isNullOrEmpty()) {
-                        currentNativeLanguage = p.native_languages.joinToString(", ")
-                    }
-                    if (!p.learning_languages.isNullOrEmpty()) {
-                        currentLearningLanguage = p.learning_languages.joinToString(", ")
-                    }
-
-                    // Sync remote profile into SharedPreferences to avoid stale local cache
-                    val prefsEditor = context.getSharedPreferences("funky_talk_prefs", android.content.Context.MODE_PRIVATE).edit()
-                    p.avatar_url?.let {
-                        prefsEditor.putString("profile_avatar_${userId}", it)
-                        if (supaUid != userId) prefsEditor.putString("profile_avatar_${supaUid}", it)
-                    } ?: run {
-                        prefsEditor.remove("profile_avatar_${userId}")
-                        if (supaUid != userId) prefsEditor.remove("profile_avatar_${supaUid}")
-                    }
-                    p.cover_url?.let {
-                        prefsEditor.putString("profile_cover_${userId}", it)
-                        if (supaUid != userId) prefsEditor.putString("profile_cover_${supaUid}", it)
-                    } ?: run {
-                        prefsEditor.remove("profile_cover_${userId}")
-                        if (supaUid != userId) prefsEditor.remove("profile_cover_${supaUid}")
-                    }
-                    prefsEditor.apply()
-                }
-            }
-        } catch (e: Exception) {
-            android.util.Log.w("ProfileTabContent", "Error re-fetching profile from Supabase", e)
-        }
-
-        // Secondary fallback to SharedPreferences ONLY if remote fetch did not succeed
-        if (!remoteProfileLoaded) {
-            val p = context.getSharedPreferences("funky_talk_prefs", android.content.Context.MODE_PRIVATE)
-            val updatedAvatar = p.getString("profile_avatar_${userId}", null)
-                ?: p.getString("profile_avatar_${supaUid}", null)
-            if (!updatedAvatar.isNullOrBlank() && currentAvatarUrl.isBlank()) currentAvatarUrl = updatedAvatar
-            val updatedCover = p.getString("profile_cover_${userId}", null)
-                ?: p.getString("profile_cover_${supaUid}", null)
-            if (!updatedCover.isNullOrBlank() && currentCoverUrl.isBlank()) currentCoverUrl = updatedCover
         }
     }
 
-    LaunchedEffect(userId) {
-        isAdmin = ModerationManager.checkIsAdmin(context)
-        if (userId.isBlank()) return@LaunchedEffect
-
-        // Refresh coin wallet, catalog & feedback badge
-        GiftManager.refreshWallet(context)
-        GiftManager.fetchCatalog(context)
-        com.example.repository.FeedbackRepository.refreshMyUpdatesCount(context)
-
-        // Load live profile data immediately
-        refreshProfileData()
-        val effectiveCosmeticsUid = com.example.SupabaseSessionManager.getUserId(context)
-            ?.takeIf { it.isNotBlank() } ?: userId
-        com.example.store.CosmeticsManager.refreshMyCosmetics(context, effectiveCosmeticsUid)
-        com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, listOf(effectiveCosmeticsUid))
-
-        // Load profile badges
-        try {
-            val badges = com.example.BadgeManager.getBadgesForUser(userId)
-            userBadges.clear()
-            userBadges.addAll(badges)
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            android.util.Log.e("ProfileTabContent", "Error loading badges", e)
+    LaunchedEffect(userId, profileRetryTrigger) {
+        if (userId.isBlank()) {
+            isProfileLoading = false
+            return@LaunchedEffect
+        }
+        if (!hasProfileContent) {
+            isProfileLoading = true
+            profileError = null
         }
         try {
-            isGiftsLoading = true
-            val gifts = GiftManager.fetchGiftsReceived(context, userId)
-            giftsReceived.clear()
-            giftsReceived.addAll(gifts)
+            coroutineScope {
+                val adminJob = async {
+                    runCatching { ModerationManager.checkIsAdmin(context) }.getOrDefault(false)
+                }
+                val walletJob = async { runCatching { GiftManager.refreshWallet(context) } }
+                val catalogJob = async { runCatching { GiftManager.fetchCatalog(context) } }
+                val feedbackJob = async {
+                    runCatching { com.example.repository.FeedbackRepository.refreshMyUpdatesCount(context) }
+                }
+                val cosmeticsJob = async {
+                    val effectiveCosmeticsUid = SupabaseSessionManager.getUserId(context)
+                        ?.takeIf { it.isNotBlank() } ?: userId
+                    runCatching {
+                        com.example.store.CosmeticsManager.refreshMyCosmetics(context, effectiveCosmeticsUid)
+                        com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, listOf(effectiveCosmeticsUid))
+                    }
+                }
+                val profileJob = async {
+                    SelfProfileLoader.fetchParallel(
+                        context = context,
+                        userId = userId,
+                        fallbackProfile = currentUserProfile,
+                        existingPayload = existingPayload
+                    )
+                }
+
+                isAdmin = adminJob.await()
+                profileJob.await()
+                    .onSuccess { applyFetchResult(it) }
+                    .onFailure { err ->
+                        if (!hasProfileContent) {
+                            profileError = ErrorMapper.map(err)
+                        }
+                    }
+                walletJob.await()
+                catalogJob.await()
+                feedbackJob.await()
+                cosmeticsJob.await()
+            }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
-        } catch (e: Exception) {
-            android.util.Log.e("ProfileTabContent", "Error loading gifts", e)
+        } catch (t: Throwable) {
+            if (!hasProfileContent) {
+                profileError = ErrorMapper.map(t)
+            }
         } finally {
-            isGiftsLoading = false
+            isProfileLoading = false
         }
-
-        val token = com.example.SupabaseSessionManager.getAuthenticatedBearerToken(context)
-            ?: com.example.SupabaseSessionManager.getBearerToken(context)
-            ?: "Bearer ${com.example.BuildConfig.SUPABASE_ANON_KEY}"
-
-        try {
-            val profileResp = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                com.example.SupabaseClient.api.getDiscoverableProfiles(
-                    apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
-                    auth = token,
-                    options = mapOf("auth_user_id" to "eq.$userId")
-                )
-            }
-            if (profileResp.isSuccessful) {
-                val p = profileResp.body()?.firstOrNull()
-                if (p != null) {
-                    currentProfileName = p.profile_name ?: p.username ?: currentProfileName
-                    currentUsername = p.username ?: p.profile_name?.lowercase()?.replace(" ", "") ?: currentUsername
-                    p.avatar_url?.let { if (it.isNotBlank()) currentAvatarUrl = it }
-                    p.bio?.let { if (it.isNotBlank()) currentBio = it }
-                    p.country?.let { currentCountry = it }
-                    p.city?.let { if (it.isNotBlank()) currentCity = it }
-                    currentCountryCode = resolveCountryCode(p.country, p.country_code)
-                    p.age?.let { currentAge = it }
-                    p.gender?.let { currentGender = it }
-                    isOnline = p.is_online ?: true
-                    isVerified = p.is_verified ?: false
-                    currentJoinedText = formatJoinedDate(p.created_at)
-                }
-            }
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            android.util.Log.e("ProfileTabContent", "Error loading profile data", e)
-        }
-
-        try {
-            withContext(kotlinx.coroutines.Dispatchers.IO) {
-                val followerCountResp = com.example.SupabaseClient.api.countFollowers(
-                    apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
-                    auth = token,
-                    followingIdEq = "eq.$userId"
-                )
-                if (followerCountResp.isSuccessful) {
-                    val cr = followerCountResp.headers()["Content-Range"]
-                    followersCount = cr?.substringAfter("/")?.toIntOrNull()
-                        ?: followerCountResp.body()?.size ?: 0
-                }
-
-                val followingCountResp = com.example.SupabaseClient.api.countFollowing(
-                    apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
-                    auth = token,
-                    followerIdEq = "eq.$userId"
-                )
-                if (followingCountResp.isSuccessful) {
-                    val cr = followingCountResp.headers()["Content-Range"]
-                    followingCount = cr?.substringAfter("/")?.toIntOrNull()
-                        ?: followingCountResp.body()?.size ?: 0
-                }
-            }
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            android.util.Log.e("ProfileTabContent", "Error loading stats counts", e)
-        }
-
-        refreshUserMoments()
     }
 
     val profileDisplayName = currentProfileName
@@ -444,11 +473,11 @@ fun ProfileTabContent(
             }
             currentCity.isNotBlank() -> currentCity
             profileCountry.isNotBlank() -> profileCountry
-            else -> "Seoul, South Korea"
+            else -> "Location not set"
         }
     }
-    val profileAge = currentAge.toString()
-    val profileGender = currentGender
+    val profileAge = if (currentAge > 0) currentAge.toString() else "Not set"
+    val profileGender = currentGender.ifBlank { "Not set" }
 
     // Multi-language parsing (supports up to 3 stacked flags)
     val parsedNative = remember(currentNativeLanguage, profileCountryCode) {
@@ -470,7 +499,7 @@ fun ProfileTabContent(
         else listOf("Music", "Photography", "Travel", "K-Drama", "Food", "Movies", "Gaming", "Yoga")
     }
 
-    val profileBio = currentBio
+    val profileBio = currentBio.ifBlank { "No bio added yet." }
 
     val displayedPosts by remember {
         derivedStateOf {
@@ -487,6 +516,23 @@ fun ProfileTabContent(
             .fillMaxSize()
             .background(funkyColors.bg)
     ) {
+        if (isProfileLoading && !hasProfileContent) {
+            ProfileSkeleton()
+        } else if (profileError != null && !hasProfileContent) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                FriendlyErrorRetryCard(
+                    message = profileError!!,
+                    onRetry = { profileRetryTrigger++ },
+                    isOnline = isNetworkOnline,
+                    testTagPrefix = "profile"
+                )
+            }
+        } else {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -568,7 +614,7 @@ fun ProfileTabContent(
                         // Share Button
                         Box(
                             modifier = Modifier
-                                .size(38.dp)
+                                .size(48.dp)
                                 .shadow(elevation = 3.dp, shape = CircleShape)
                                 .background(funkyColors.surface, CircleShape)
                                 .clickable {
@@ -582,7 +628,7 @@ fun ProfileTabContent(
                         // Three Dots Menu Button (opens full-screen SettingsScreen)
                         Box(
                             modifier = Modifier
-                                .size(38.dp)
+                                .size(48.dp)
                                 .shadow(elevation = 3.dp, shape = CircleShape)
                                 .background(funkyColors.surface, CircleShape)
                                 .clickable { showSettingsScreen = true }
@@ -663,7 +709,7 @@ fun ProfileTabContent(
 
                     // Handle
                     Text(
-                        text = "@${profileUsername}_07",
+                        text = "@${profileUsername.ifBlank { "user" }}",
                         fontSize = 13.sp,
                         color = funkyColors.mute,
                         fontWeight = FontWeight.Medium
@@ -767,10 +813,21 @@ fun ProfileTabContent(
                         Box(
                             modifier = Modifier
                                 .weight(1f)
-                                .height(46.dp)
-                                .background(funkyColors.mango, RoundedCornerShape(100.dp))
+                                .height(48.dp)
+                                .background(
+                                    if (isNetworkOnline) funkyColors.mango else funkyColors.soft,
+                                    RoundedCornerShape(100.dp)
+                                )
                                 .clickable {
-                                    Toast.makeText(context, "Sent a friendly wave!", Toast.LENGTH_SHORT).show()
+                                    if (!isNetworkOnline) {
+                                        Toast.makeText(
+                                            context,
+                                            "You're offline. Connect to the internet to say hi.",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    } else {
+                                        Toast.makeText(context, "Sent a friendly wave!", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                                 .testTag("profile_say_hi_button"),
                             contentAlignment = Alignment.Center
@@ -779,12 +836,15 @@ fun ProfileTabContent(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                ProfileWavingHandIcon(modifier = Modifier.size(18.dp), color = funkyColors.onMango)
+                                ProfileWavingHandIcon(
+                                    modifier = Modifier.size(18.dp),
+                                    color = if (isNetworkOnline) funkyColors.onMango else funkyColors.mute
+                                )
                                 Text(
                                     text = "Say Hi",
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.ExtraBold,
-                                    color = funkyColors.onMango
+                                    color = if (isNetworkOnline) funkyColors.onMango else funkyColors.mute
                                 )
                             }
                         }
@@ -793,7 +853,7 @@ fun ProfileTabContent(
                         Box(
                             modifier = Modifier
                                 .weight(1f)
-                                .height(46.dp)
+                                .height(48.dp)
                                 .background(funkyColors.surface, RoundedCornerShape(100.dp))
                                 .border(
                                     width = 1.dp,
@@ -1182,7 +1242,17 @@ fun ProfileTabContent(
                                     .border(BorderStroke(1.dp, funkyColors.mango.copy(alpha = 0.5f)), RoundedCornerShape(14.dp))
                                     .then(
                                         if (appFlags.coinStoreEnabled) {
-                                            Modifier.clickable { showCoinStoreScreen = true }
+                                            Modifier.clickable {
+                                                if (!isNetworkOnline) {
+                                                    Toast.makeText(
+                                                        context,
+                                                        "No internet connection. Connect to open the Coin Store.",
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
+                                                } else {
+                                                    showCoinStoreScreen = true
+                                                }
+                                            }
                                         } else {
                                             Modifier
                                         }
@@ -1247,11 +1317,12 @@ fun ProfileTabContent(
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 5.dp)
                     ) {
                         if (isGiftsLoading && giftsReceived.isEmpty()) {
-                            Box(
-                                modifier = Modifier.fillMaxWidth().height(60.dp),
-                                contentAlignment = Alignment.Center
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                CircularProgressIndicator(modifier = Modifier.size(22.dp), color = funkyColors.mango)
+                                ShimmerBox(modifier = Modifier.weight(1f).height(56.dp), shape = RoundedCornerShape(12.dp))
+                                ShimmerBox(modifier = Modifier.weight(1f).height(56.dp), shape = RoundedCornerShape(12.dp))
                             }
                         } else if (giftsReceived.isEmpty()) {
                             Column(
@@ -1431,16 +1502,20 @@ fun ProfileTabContent(
 
                 if (isMomentsLoading && displayedPosts.isEmpty()) {
                     item {
-                        Box(
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(160.dp),
-                            contentAlignment = Alignment.Center
+                                .padding(horizontal = 2.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
-                            CircularProgressIndicator(
-                                color = funkyColors.mango,
-                                modifier = Modifier.size(32.dp)
-                            )
+                            repeat(3) {
+                                ShimmerBox(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .aspectRatio(1f),
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                            }
                         }
                     }
                 } else if (displayedPosts.isEmpty()) {
@@ -1590,6 +1665,7 @@ fun ProfileTabContent(
                 }
                 }
             }
+        }
         }
 
         // Full Screen Moments v2 Feed Viewer when a feed post is clicked

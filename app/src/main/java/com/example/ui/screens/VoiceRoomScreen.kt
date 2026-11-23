@@ -1772,7 +1772,7 @@ fun VoiceRoomScreen(
                 } catch (e: Exception) {
                     android.util.Log.e("VoiceRoomScreen", "Screenshot upload failed", e)
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "Upload error: ${e.localizedMessage ?: "Unknown error"}", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, com.example.util.ErrorMapper.map(e), Toast.LENGTH_SHORT).show()
                     }
                 } finally {
                     isUploadingScreenshot = false
@@ -1861,7 +1861,7 @@ fun VoiceRoomScreen(
                 } catch (e: Exception) {
                     android.util.Log.e("VoiceRoomScreen", "Clip upload failed", e)
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "Upload error: ${e.localizedMessage ?: "Unknown error"}", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, com.example.util.ErrorMapper.map(e), Toast.LENGTH_SHORT).show()
                     }
                 } finally {
                     isUploadingClip = false
@@ -3335,7 +3335,7 @@ fun VoiceRoomScreen(
                                                 Toast.makeText(context, "$targetUserName has been removed from room.", Toast.LENGTH_SHORT).show()
                                             }
                                             else -> {
-                                                Toast.makeText(context, "Action failed: ${res.code()}", Toast.LENGTH_SHORT).show()
+                                                Toast.makeText(context, com.example.util.ErrorMapper.mapHttp(res.code()), Toast.LENGTH_SHORT).show()
                                             }
                                         }
                                     }
@@ -3362,11 +3362,11 @@ fun VoiceRoomScreen(
                                                 Toast.makeText(context, "$targetUserName has been removed from room.", Toast.LENGTH_SHORT).show()
                                             }
                                             else -> {
-                                                Toast.makeText(context, "Error: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                                                Toast.makeText(context, com.example.util.ErrorMapper.map(e), Toast.LENGTH_SHORT).show()
                                             }
                                         }
                                     } catch (e2: Exception) {
-                                        Toast.makeText(context, "Failed: ${e2.localizedMessage}", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, com.example.util.ErrorMapper.map(e2), Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             }
@@ -3879,11 +3879,7 @@ fun VoiceRoomScreen(
                                 Log.e("VoiceRoomReport", "6. Supabase error code=${res.code()}: $errBody")
                                 withContext(Dispatchers.Main) {
                                     isSubmittingReport = false
-                                    val errToast = if (res.code() == 403) {
-                                        "Report submission failed: 403 Forbidden (RLS policy check failed)"
-                                    } else {
-                                        "Report submission failed: HTTP ${res.code()}"
-                                    }
+                                    val errToast = com.example.util.ErrorMapper.mapHttp(res.code(), errBody)
                                     Toast.makeText(context, errToast, Toast.LENGTH_LONG).show()
                                 }
                             }
@@ -3891,7 +3887,7 @@ fun VoiceRoomScreen(
                             Log.e("VoiceRoomReport", "Report submission exception", e)
                             withContext(Dispatchers.Main) {
                                 isSubmittingReport = false
-                                Toast.makeText(context, "Network error: ${e.localizedMessage ?: "Unable to submit report"}", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, com.example.util.ErrorMapper.map(e), Toast.LENGTH_SHORT).show()
                             }
                         }
                     }

@@ -32,7 +32,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -60,6 +63,9 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -361,10 +367,90 @@ fun SendButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
         shape = CircleShape,
         color = c.brand,
         shadowElevation = 2.dp,
-        modifier = modifier.size(ChatDimens.MinTouch),
+        modifier = modifier
+            .size(ChatDimens.MinTouch)
+            .testTag("chat_send_button")
+            .semantics { contentDescription = "Send message" },
     ) {
         Box(contentAlignment = Alignment.Center) {
             ChatIconSend(tint = c.onBrand, modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FailedMessageActionSheet(
+    failReason: String?,
+    onRetry: () -> Unit,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val c = LocalChatColors.current
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = c.surface,
+        contentColor = c.text,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 12.dp)
+                .padding(bottom = 16.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ChatIconFailedBadge(modifier = Modifier.size(22.dp), badgeColor = c.danger)
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    Text(
+                        text = "Message not sent",
+                        color = c.text,
+                        fontSize = 17f.chatSp(),
+                        fontWeight = FontWeight.Bold,
+                    )
+                    if (!failReason.isNullOrBlank()) {
+                        Text(
+                            text = failReason,
+                            color = c.textSecondary,
+                            fontSize = 13f.chatSp(),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            HorizontalDivider(thickness = 0.5.dp, color = c.hairline)
+            Spacer(Modifier.height(6.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 52.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable(onClick = onRetry)
+                    .testTag("failed_message_retry_button")
+                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ChatIconRetry(modifier = Modifier.size(20.dp), tint = c.accentIn)
+                Spacer(Modifier.width(14.dp))
+                Text("Retry", color = c.text, fontSize = 16f.chatSp(), fontWeight = FontWeight.SemiBold)
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 52.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable(onClick = onDelete)
+                    .testTag("failed_message_delete_button")
+                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ChatIconTrash(modifier = Modifier.size(20.dp), tint = c.danger)
+                Spacer(Modifier.width(14.dp))
+                Text("Delete", color = c.danger, fontSize = 16f.chatSp(), fontWeight = FontWeight.SemiBold)
+            }
         }
     }
 }
@@ -474,12 +560,16 @@ fun ChatInputBar(
     placeholder: String = "Message",
 ) {
     val c = LocalChatColors.current
+    val haptic = LocalHapticFeedback.current
     Column(modifier = modifier.fillMaxWidth().background(c.surface)) {
         Box(Modifier.fillMaxWidth().height(0.5.dp).background(c.hairline))
         topSlot?.invoke()
         Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp), verticalAlignment = Alignment.Bottom) {
             if (recording == null) {
-                IconButton(onClick = onAttach, modifier = Modifier.size(44.dp)) {
+                IconButton(
+                    onClick = onAttach,
+                    modifier = Modifier.size(48.dp).testTag("chat_attach_button")
+                ) {
                     ChatIconPhoto(tint = c.textSecondary, modifier = Modifier.size(24.dp))
                 }
                 Surface(
@@ -497,7 +587,7 @@ fun ChatInputBar(
                             textStyle = TextStyle(color = c.text, fontSize = 16f.chatSp(), lineHeight = 22f.chatSp()),
                             cursorBrush = SolidColor(c.accentIn),
                             maxLines = 6,
-                            modifier = Modifier.weight(1f).padding(vertical = 11.dp),
+                            modifier = Modifier.weight(1f).padding(vertical = 11.dp).testTag("chat_message_input"),
                             decorationBox = { inner ->
                                 Box {
                                     if (text.isEmpty()) Text(placeholder, color = c.textSecondary, fontSize = 16f.chatSp())
@@ -517,7 +607,16 @@ fun ChatInputBar(
             }
             Spacer(Modifier.width(4.dp))
             Crossfade(targetState = (text.isNotBlank() && recording == null), animationSpec = tween(150), label = "micOrSend") { showSend ->
-                if (showSend) SendButton(onSend) else micButton()
+                if (showSend) {
+                    SendButton(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onSend()
+                        }
+                    )
+                } else {
+                    micButton()
+                }
             }
         }
     }

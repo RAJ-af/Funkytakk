@@ -47,21 +47,28 @@ fun UserAvatarImage(
 ) {
     val model = resolveAvatarModel(avatarUrl)
     val context = androidx.compose.ui.platform.LocalContext.current
-    val imageRequest = androidx.compose.runtime.remember(model) {
-        coil.request.ImageRequest.Builder(context)
-            .data(model)
-            .crossfade(true)
-            .memoryCacheKey(model.toString())
-            .diskCacheKey(model.toString())
-            .placeholder(R.drawable.male_avatar_1781324792347)
-            .error(R.drawable.male_avatar_1781324792347)
-            .fallback(R.drawable.male_avatar_1781324792347)
-            .build()
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier = modifier) {
+        val targetW = with(density) { maxWidth.roundToPx() }.coerceIn(64, 512)
+        val targetH = with(density) { maxHeight.roundToPx() }.coerceIn(64, 512)
+        val imageRequest = androidx.compose.runtime.remember(model, targetW, targetH) {
+            coil.request.ImageRequest.Builder(context)
+                .data(model)
+                .size(targetW, targetH)
+                .scale(coil.size.Scale.FILL)
+                .crossfade(true)
+                .memoryCacheKey("${model}_${targetW}x${targetH}")
+                .diskCacheKey(model.toString())
+                .placeholder(R.drawable.male_avatar_1781324792347)
+                .error(R.drawable.male_avatar_1781324792347)
+                .fallback(R.drawable.male_avatar_1781324792347)
+                .build()
+        }
+        AsyncImage(
+            model = imageRequest,
+            contentDescription = contentDescription,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = contentScale
+        )
     }
-    AsyncImage(
-        model = imageRequest,
-        contentDescription = contentDescription,
-        modifier = modifier,
-        contentScale = contentScale
-    )
 }

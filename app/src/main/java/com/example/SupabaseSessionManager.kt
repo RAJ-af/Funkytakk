@@ -413,7 +413,7 @@ object SupabaseSessionManager {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                lastMessage = e.localizedMessage ?: "Network error contacting auth service."
+                lastMessage = com.example.util.ErrorMapper.map(e)
                 Log.w(TAG, "verify-firebase-token exception on attempt ${attempt + 1}/$MAX_VERIFY_ATTEMPTS: ${e.javaClass.simpleName}")
                 if (attempt >= MAX_VERIFY_ATTEMPTS - 1) {
                     return ExchangeResult.Failure(lastCode, lastErrorCode, lastMessage)

@@ -65,8 +65,10 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
@@ -205,6 +207,7 @@ fun TelegramPendingMediaDialog(
     }
 
     val c = LocalChatColors.current
+    val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { uris.size })
     val thumbListState = rememberLazyListState()
@@ -460,7 +463,10 @@ fun TelegramPendingMediaDialog(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Surface(
-                                    onClick = { onSend(uris, caption.trim()) },
+                                    onClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onSend(uris, caption.trim())
+                                    },
                                     shape = CircleShape,
                                     color = c.brand,
                                     shadowElevation = 4.dp,

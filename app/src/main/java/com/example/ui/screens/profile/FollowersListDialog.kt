@@ -15,20 +15,23 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import com.example.BuildConfig
 import com.example.DiscoverableProfile
 import com.example.SupabaseClient
-import com.example.SupabaseFollower
-import com.example.SupabaseSessionManager
-import com.example.ui.components.CircleFlag
+import com.example.data.AppCacheStore
+import com.example.ui.components.AppNetworkManager
+import com.example.ui.components.FollowersSkeleton
+import com.example.ui.components.FriendlyErrorRetryCard
 import com.example.ui.components.SoftCloseIcon
-import com.example.ui.components.SoftGlobeIcon
 import com.example.ui.theme.LocalFunkyColors
+import com.example.util.ErrorMapper
+import com.example.util.StartupTimingTracker
+import com.example.util.withLoadingTimeout
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -42,68 +45,95 @@ fun FollowersListBottomSheet(
 ) {
     val context = LocalContext.current
     val funkyColors = LocalFunkyColors.current
-    var isLoading by remember { mutableStateOf(true) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    val userList = remember { mutableStateListOf<DiscoverableProfile>() }
+    val isOnline by AppNetworkManager.isOnline.collectAsState()
+    val cacheKey = remember(userId, showFollowers) {
+        "followers_list_${userId}_${if (showFollowers) "followers" else "following"}"
+    }
+    val initialCached = remember(cacheKey) {
+        AppCacheStore.getSync<List<DiscoverableProfile>>(
+            context = context,
+            key = cacheKey,
+            type = AppCacheStore.discoverableProfileListType()
+        )?.data
+    }
+
+    var isLoading by remember(cacheKey) { mutableStateOf(initialCached == null) }
+    var errorMessage by remember(cacheKey) { mutableStateOf<String?>(null) }
+    var retryTrigger by remember { mutableIntStateOf(0) }
+    val userList = remember(cacheKey) {
+        mutableStateListOf<DiscoverableProfile>().apply {
+            if (!initialCached.isNullOrEmpty()) addAll(initialCached)
+        }
+    }
     val blockedUserIds by com.example.repository.BlockRepository.blockedUserIds.collectAsState()
     val visibleUsers = remember(userList.toList(), blockedUserIds) {
         userList.filterNot { blockedUserIds.contains(it.auth_user_id) }
     }
 
-    LaunchedEffect(userId, showFollowers) {
-        isLoading = true
+    LaunchedEffect(userId, showFollowers, retryTrigger) {
+        if (userList.isEmpty()) isLoading = true
         errorMessage = null
-        userList.clear()
 
         try {
-            val token = SupabaseSessionManager.getBearerToken(context)
-            
-            // 1. Fetch Follower/Following relations
-            val relationResp = withContext(Dispatchers.IO) {
-                if (showFollowers) {
-                    SupabaseClient.api.getFollowers(
-                        apiKey = BuildConfig.SUPABASE_ANON_KEY,
-                        auth = token,
-                        followingIdEq = "eq.$userId"
-                    )
-                } else {
-                    SupabaseClient.api.getFollowers(
-                        apiKey = BuildConfig.SUPABASE_ANON_KEY,
-                        auth = token,
-                        followerIdEq = "eq.$userId"
-                    )
-                }
-            }
-
-            if (relationResp.isSuccessful) {
-                val relations = relationResp.body().orEmpty()
-                val targetIds = relations.map {
-                    if (showFollowers) it.follower_id else it.following_id
-                }.toSet()
-
-                if (targetIds.isNotEmpty()) {
-                    // 2. Fetch all discoverable profiles
-                    val profilesResp = withContext(Dispatchers.IO) {
-                        SupabaseClient.api.getDiscoverableProfiles(
-                            apiKey = BuildConfig.SUPABASE_ANON_KEY,
-                            auth = token,
-                            options = emptyMap()
-                        )
+            val loaded = withLoadingTimeout {
+                withContext(Dispatchers.IO) {
+                    val relationRes = StartupTimingTracker.measure("followers_relations") {
+                        ErrorMapper.executeWithSingle401Retry(context) { auth ->
+                            if (showFollowers) {
+                                SupabaseClient.api.getFollowers(
+                                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                                    auth = auth,
+                                    followingIdEq = "eq.$userId"
+                                )
+                            } else {
+                                SupabaseClient.api.getFollowers(
+                                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                                    auth = auth,
+                                    followerIdEq = "eq.$userId"
+                                )
+                            }
+                        }
                     }
 
-                    if (profilesResp.isSuccessful) {
-                        val allProfiles = profilesResp.body().orEmpty()
-                        val filtered = allProfiles.filter { targetIds.contains(it.auth_user_id) }
-                        userList.addAll(filtered)
+                    val relationResp = relationRes.getOrElse { throw it }
+                    val relations = relationResp.body().orEmpty()
+                    val targetIds = relations.map {
+                        if (showFollowers) it.follower_id else it.following_id
+                    }.toSet()
+
+                    if (targetIds.isEmpty()) {
+                        emptyList()
                     } else {
-                        errorMessage = "Failed to load profiles: ${profilesResp.message()}"
+                        val profilesRes = StartupTimingTracker.measure("followers_profiles") {
+                            ErrorMapper.executeWithSingle401Retry(context) { auth ->
+                                SupabaseClient.api.getDiscoverableProfiles(
+                                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                                    auth = auth,
+                                    options = emptyMap()
+                                )
+                            }
+                        }
+                        val profilesResp = profilesRes.getOrElse { throw it }
+                        val allProfiles = profilesResp.body().orEmpty()
+                        allProfiles.filter { targetIds.contains(it.auth_user_id) }
                     }
                 }
-            } else {
-                errorMessage = "Failed to fetch relations: ${relationResp.message()}"
             }
-        } catch (e: Exception) {
-            errorMessage = e.localizedMessage ?: "An error occurred"
+
+            userList.clear()
+            userList.addAll(loaded)
+            AppCacheStore.put(
+                context = context,
+                key = cacheKey,
+                value = loaded,
+                type = AppCacheStore.discoverableProfileListType()
+            )
+        } catch (ce: kotlinx.coroutines.CancellationException) {
+            throw ce
+        } catch (t: Throwable) {
+            if (userList.isEmpty()) {
+                errorMessage = ErrorMapper.map(t)
+            }
         } finally {
             isLoading = false
         }
@@ -134,7 +164,7 @@ fun FollowersListBottomSheet(
                 )
                 Box(
                     modifier = Modifier
-                        .size(32.dp)
+                        .size(48.dp)
                         .clip(CircleShape)
                         .background(funkyColors.soft)
                         .clickable { onDismiss() },
@@ -146,29 +176,20 @@ fun FollowersListBottomSheet(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            if (isLoading) {
-                Box(
+            if (isLoading && userList.isEmpty()) {
+                FollowersSkeleton(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(color = funkyColors.mango)
-                }
-            } else if (errorMessage != null) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = errorMessage ?: "",
-                        color = funkyColors.danger,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
+                        .padding(vertical = 8.dp)
+                        .testTag("followers_skeleton")
+                )
+            } else if (errorMessage != null && userList.isEmpty()) {
+                FriendlyErrorRetryCard(
+                    message = errorMessage ?: ErrorMapper.MSG_GENERIC,
+                    onRetry = { retryTrigger++ },
+                    isOnline = isOnline,
+                    testTagPrefix = "followers",
+                    modifier = Modifier.padding(vertical = 12.dp)
+                )
             } else if (visibleUsers.isEmpty()) {
                 Box(
                     modifier = Modifier

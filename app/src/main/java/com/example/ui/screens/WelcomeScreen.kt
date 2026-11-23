@@ -4,6 +4,7 @@ import android.view.HapticFeedbackConstants
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -223,6 +224,11 @@ private fun SlideToConnectButton(
 
     var isLockedState by remember { mutableStateOf(false) }
 
+    LaunchedEffect(Unit) {
+        isLockedState = false
+        offsetX.snapTo(0f)
+    }
+
     val progress = if (maxDragPx > 0f) (offsetX.value / maxDragPx).coerceIn(0f, 1f) else 0f
 
     val infiniteTransition = rememberInfiniteTransition(label = "pulse_arrow")
@@ -243,6 +249,24 @@ private fun SlideToConnectButton(
             .shadow(elevation = 2.dp, shape = RoundedCornerShape(29.dp))
             .clip(RoundedCornerShape(29.dp))
             .background(Color(0xFFF6C945)) // FunkyTalk Yellow
+            .clickable(enabled = !isLockedState) {
+                isLockedState = true
+                coroutineScope.launch {
+                    try {
+                        view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                    } catch (_: Exception) {}
+                    if (maxDragPx > 0f) {
+                        offsetX.animateTo(
+                            targetValue = maxDragPx,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioLowBouncy,
+                                stiffness = Spring.StiffnessMedium
+                            )
+                        )
+                    }
+                    onConnected()
+                }
+            }
             .onGloballyPositioned { coordinates ->
                 trackWidthPx = coordinates.size.width.toFloat()
             },
