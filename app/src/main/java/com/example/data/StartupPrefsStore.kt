@@ -37,16 +37,16 @@ object StartupPrefsStore {
     fun getFastSnapshot(context: Context): LocalStartupSnapshot {
         val fast = context.applicationContext.getSharedPreferences(FAST_PREFS_NAME, Context.MODE_PRIVATE)
         val legacy = context.applicationContext.getSharedPreferences(LEGACY_PREFS_NAME, Context.MODE_PRIVATE)
+        val firebaseUid = runCatching { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid }.getOrNull()
         val storedUid = fast.getString("last_uid", null)
             ?: SupabaseSessionManager.getUserId(context)
-        val legacyOnboarding = if (!storedUid.isNullOrBlank()) {
-            legacy.getBoolean("profile_onboarding_complete_$storedUid", false)
-        } else {
-            false
-        }
+            ?: firebaseUid
+        val legacyOnboarding = listOfNotNull(storedUid, firebaseUid)
+            .distinct()
+            .any { uid -> legacy.getBoolean("profile_onboarding_complete_$uid", false) }
         val onboardingDone = fast.getBoolean("onboarding_done", false) || legacyOnboarding
         val privacyAccepted = fast.getBoolean("privacy_accepted", false) ||
-            SupabaseSessionManager.hasValidAuthenticatedSession(context) ||
+            SupabaseSessionManager.hasStoredAccount(context) ||
             onboardingDone
         return LocalStartupSnapshot(
             onboardingDone = onboardingDone,
@@ -162,7 +162,8 @@ object StartupPrefsStore {
         val onboardingDone = prefs.getBoolean("profile_onboarding_complete_$userId", false) ||
             prefs.getBoolean("profile_onboarding_complete_$keysUid", false)
         val emailVerified = prefs.getBoolean("custom_email_verified_$userId", false) ||
-            prefs.getBoolean("custom_email_verified_$keysUid", false)
+            prefs.getBoolean("custom_email_verified_$keysUid", false) ||
+            onboardingDone
 
         return UserProfile(
             uid = userId,

@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -24,19 +25,24 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -52,7 +58,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -65,10 +73,12 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
@@ -81,6 +91,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import coil.compose.AsyncImage
 import com.example.R
 import com.example.db.LocalGroupMessage
@@ -199,7 +210,8 @@ fun TelegramPendingMediaDialog(
     onDismiss: () -> Unit,
     onRemoveAt: (Int) -> Unit,
     onAddMore: () -> Unit,
-    onSend: (uris: List<Uri>, caption: String) -> Unit
+    onSend: (uris: List<Uri>, caption: String) -> Unit = { _, _ -> },
+    onSendWithOptions: ((uris: List<Uri>, caption: String, rotations: Map<Int, Int>, isHd: Boolean) -> Unit)? = null
 ) {
     if (uris.isEmpty()) {
         onDismiss()
@@ -212,6 +224,8 @@ fun TelegramPendingMediaDialog(
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { uris.size })
     val thumbListState = rememberLazyListState()
     var caption by remember(initialCaption) { mutableStateOf(initialCaption) }
+    var isHd by remember { mutableStateOf(false) }
+    val rotations = remember { mutableStateMapOf<Int, Int>() }
 
     LaunchedEffect(uris.size) {
         if (pagerState.currentPage >= uris.size && uris.isNotEmpty()) {
@@ -232,6 +246,12 @@ fun TelegramPendingMediaDialog(
             decorFitsSystemWindows = false
         )
     ) {
+        val dialogWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
+        SideEffect {
+            @Suppress("DEPRECATION")
+            dialogWindow?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        }
+
         BackHandler(onBack = onDismiss)
 
         Box(
@@ -239,13 +259,16 @@ fun TelegramPendingMediaDialog(
                 .fillMaxSize()
                 .background(Color(0xFF0A0D14))
         ) {
-            Column(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+            ) {
                 // Top Chrome Bar
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .statusBarsPadding()
-                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                        .padding(horizontal = 6.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(
@@ -261,17 +284,59 @@ fun TelegramPendingMediaDialog(
                         Text(
                             text = recipientLabel.ifBlank { "Send Photos" },
                             color = Color.White,
-                            fontSize = 16.sp,
+                            fontSize = 15.5.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = "${(pagerState.currentPage + 1).coerceAtMost(uris.size)} of ${uris.size} selected",
-                            color = Color.White.copy(alpha = 0.68f),
-                            fontSize = 12.sp,
+                            text = "${(pagerState.currentPage + 1).coerceAtMost(uris.size)} of ${uris.size} · ${if (isHd) "HD" else "Standard"}",
+                            color = Color.White.copy(alpha = 0.70f),
+                            fontSize = 11.5.sp,
                             fontWeight = FontWeight.Medium
                         )
+                    }
+
+                    // HD / Standard Quality Toggle
+                    Surface(
+                        onClick = { isHd = !isHd },
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (isHd) c.brand else Color.White.copy(alpha = 0.12f),
+                        border = BorderStroke(
+                            1.dp,
+                            if (isHd) c.brand else Color.White.copy(alpha = 0.18f)
+                        ),
+                        modifier = Modifier
+                            .height(34.dp)
+                            .testTag("pending_media_hd_toggle")
+                    ) {
+                        Box(
+                            modifier = Modifier.padding(horizontal = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (isHd) "HD" else "SD",
+                                color = if (isHd) c.onBrand else Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(4.dp))
+
+                    // Rotate 90° button
+                    IconButton(
+                        onClick = {
+                            val page = pagerState.currentPage
+                            val currentRot = rotations[page] ?: 0
+                            rotations[page] = (currentRot + 90) % 360
+                        },
+                        modifier = Modifier
+                            .size(44.dp)
+                            .testTag("pending_media_rotate_button")
+                    ) {
+                        ChatIconRotate(tint = Color.White, modifier = Modifier.size(20.dp))
                     }
 
                     if (uris.size < maxSelection) {
@@ -281,38 +346,41 @@ fun TelegramPendingMediaDialog(
                             color = Color.White.copy(alpha = 0.12f),
                             border = BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)),
                             modifier = Modifier
-                                .height(38.dp)
+                                .height(34.dp)
                                 .testTag("pending_media_add_more_button")
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 12.dp),
+                                modifier = Modifier.padding(horizontal = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Icon(
                                     painter = painterResource(id = R.drawable.ic_plus),
                                     contentDescription = null,
                                     tint = Color.White,
-                                    modifier = Modifier.size(15.dp)
+                                    modifier = Modifier.size(14.dp)
                                 )
                                 Text(
                                     text = "Add",
                                     color = Color.White,
-                                    fontSize = 13.sp,
+                                    fontSize = 12.5.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }
                         }
-                        Spacer(modifier = Modifier.width(4.dp))
                     }
 
                     IconButton(
-                        onClick = { onRemoveAt(pagerState.currentPage) },
+                        onClick = {
+                            val idx = pagerState.currentPage
+                            rotations.remove(idx)
+                            onRemoveAt(idx)
+                        },
                         modifier = Modifier
-                            .size(48.dp)
+                            .size(44.dp)
                             .testTag("pending_media_remove_current_button")
                     ) {
-                        ChatIconTrash(tint = Color(0xFFF87171), modifier = Modifier.size(20.dp))
+                        ChatIconTrash(tint = Color(0xFFF87171), modifier = Modifier.size(19.dp))
                     }
                 }
 
@@ -322,9 +390,10 @@ fun TelegramPendingMediaDialog(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
                 ) { page ->
                     val uri = uris.getOrNull(page)
+                    val rotDeg = (rotations[page] ?: 0).toFloat()
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -336,7 +405,9 @@ fun TelegramPendingMediaDialog(
                             AsyncImage(
                                 model = uri,
                                 contentDescription = "Selected photo ${page + 1}",
-                                modifier = Modifier.fillMaxSize(),
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer { rotationZ = rotDeg },
                                 contentScale = ContentScale.Fit
                             )
                         }
@@ -349,13 +420,12 @@ fun TelegramPendingMediaDialog(
                     border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.10f)),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .imePadding()
+                        .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .navigationBarsPadding()
-                            .padding(top = 10.dp, bottom = 10.dp)
+                            .padding(top = 10.dp, bottom = 12.dp)
                     ) {
                         if (uris.size > 1) {
                             LazyRow(
@@ -368,9 +438,10 @@ fun TelegramPendingMediaDialog(
                             ) {
                                 itemsIndexed(uris) { index, uri ->
                                     val isActive = pagerState.currentPage == index
+                                    val rotDeg = (rotations[index] ?: 0).toFloat()
                                     Box(
                                         modifier = Modifier
-                                            .size(58.dp)
+                                            .size(56.dp)
                                             .scale(if (isActive) 1.04f else 0.96f)
                                     ) {
                                         Box(
@@ -389,7 +460,9 @@ fun TelegramPendingMediaDialog(
                                             AsyncImage(
                                                 model = uri,
                                                 contentDescription = "Thumbnail ${index + 1}",
-                                                modifier = Modifier.fillMaxSize(),
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .graphicsLayer { rotationZ = rotDeg },
                                                 contentScale = ContentScale.Crop
                                             )
                                         }
@@ -402,7 +475,10 @@ fun TelegramPendingMediaDialog(
                                                 .size(20.dp)
                                                 .clip(CircleShape)
                                                 .background(Color.Black.copy(alpha = 0.72f))
-                                                .clickable { onRemoveAt(index) }
+                                                .clickable {
+                                                    rotations.remove(index)
+                                                    onRemoveAt(index)
+                                                }
                                                 .semantics { contentDescription = "Remove photo ${index + 1}" },
                                             contentAlignment = Alignment.Center
                                         ) {
@@ -465,7 +541,12 @@ fun TelegramPendingMediaDialog(
                                 Surface(
                                     onClick = {
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        onSend(uris, caption.trim())
+                                        val cleanCaption = caption.trim()
+                                        if (onSendWithOptions != null) {
+                                            onSendWithOptions(uris, cleanCaption, rotations.toMap(), isHd)
+                                        } else {
+                                            onSend(uris, cleanCaption)
+                                        }
                                     },
                                     shape = CircleShape,
                                     color = c.brand,
@@ -863,7 +944,7 @@ private fun TelegramChatPhotoTile(
             .background(c.hairline.copy(alpha = 0.45f))
             .combinedClickable(
                 onClick = {
-                    if (photo.isAutoDownloadPaused && onDownloadClick != null) {
+                    if ((photo.isAutoDownloadPaused || photo.isDownloading) && onDownloadClick != null) {
                         onDownloadClick()
                     } else if (!photo.isDownloading) {
                         onClick()
@@ -897,7 +978,7 @@ private fun TelegramChatPhotoTile(
                             strokeWidth = 2.4.dp
                         )
                         Text(
-                            text = "Decrypting...",
+                            text = if (onDownloadClick != null) "Tap to retry download" else "Decrypting...",
                             color = Color.White.copy(alpha = 0.85f),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium

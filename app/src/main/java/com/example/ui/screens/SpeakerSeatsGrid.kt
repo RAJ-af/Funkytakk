@@ -60,14 +60,23 @@ fun SpeakerSeatsGrid(
     isCurrentUserSpeakerOrHost: Boolean = false,
     isCurrentUserHostOrModerator: Boolean = false,
     onHostInviteSeatClick: () -> Unit = {},
-    onRequestSpeakerSeat: () -> Unit = {}
+    onRequestSpeakerSeat: () -> Unit = {},
+    compactForKeyboard: Boolean = false
 ) {
     val context = LocalContext.current
+    val speakerIdsKey = remember(hostSeat.userId, speakerSeats) {
+        (listOf(hostSeat.userId) + speakerSeats.map { it.userId })
+            .filter { it.isNotBlank() }
+            .distinct()
+            .sorted()
+    }
+    val fetchedCosmeticUids = remember { mutableSetOf<String>() }
 
-    LaunchedEffect(hostSeat, speakerSeats) {
-        val allSpeakerUids = (listOf(hostSeat) + speakerSeats).map { it.userId }.filter { it.isNotBlank() }
-        if (allSpeakerUids.isNotEmpty()) {
-            com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, allSpeakerUids)
+    LaunchedEffect(speakerIdsKey) {
+        val missing = speakerIdsKey.filter { it !in fetchedCosmeticUids }
+        if (missing.isNotEmpty()) {
+            fetchedCosmeticUids.addAll(missing)
+            com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, missing)
         }
     }
 
@@ -172,12 +181,13 @@ fun SpeakerSeatsGrid(
             }
         }
 
-        // Second Row - Seat 4 (Speaker 3), Seat 5 (Speaker 4)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.Top
-        ) {
+        if (!compactForKeyboard) {
+            // Second Row - Seat 4 (Speaker 3), Seat 5 (Speaker 4)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.Top
+            ) {
             val sp3 = speakerSeats.getOrNull(2)
             if (sp3 != null) {
                 VoiceSpeakerItem(
@@ -227,6 +237,7 @@ fun SpeakerSeatsGrid(
                     onRequestSlot = handleSlotRequest
                 )
             }
+        }
         }
     }
 }

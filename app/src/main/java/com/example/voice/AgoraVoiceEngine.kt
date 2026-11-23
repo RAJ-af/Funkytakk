@@ -343,6 +343,12 @@ class AgoraVoiceEngine(
         _speakingUserIds.value = emptySet()
         _remoteUserIds.value = emptySet()
         _connectionState.value = VoiceConnectionState.Idle
+        try {
+            audioManager?.apply {
+                mode = AudioManager.MODE_NORMAL
+                isSpeakerphoneOn = false
+            }
+        } catch (_: Exception) {}
         Log.i(TAG, "[RoomEndedCheck] Agora leaveChannel() and RtcEngine.destroy() release executed successfully (error 17 check passed)")
     }
 

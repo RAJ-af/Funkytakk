@@ -2,6 +2,7 @@ package com.example.ui.screens.chat
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.speech.tts.TextToSpeech
@@ -13,6 +14,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -171,6 +175,7 @@ fun DirectChatScreen(
     var activeMediaViewerIndex by remember { mutableStateOf<Int?>(null) }
     var pendingPhotoUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var showReportUserDialog by remember { mutableStateOf(false) }
+    var showPartnerProfile by remember(partnerUserId) { mutableStateOf(false) }
     var showTopMenu by remember { mutableStateOf(false) }
     var showBlockConfirmDialog by remember { mutableStateOf(false) }
     var isBlockingUser by remember { mutableStateOf(false) }
@@ -535,7 +540,9 @@ fun DirectChatScreen(
         }
 
         BackHandler {
-            if (isEmojiPickerOpen) {
+            if (showPartnerProfile) {
+                showPartnerProfile = false
+            } else if (isEmojiPickerOpen) {
                 isEmojiPickerOpen = false
             } else if (failedMessageForSheet != null) {
                 failedMessageForSheet = null
@@ -604,45 +611,58 @@ fun DirectChatScreen(
                                 .padding(horizontal = 4.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            IconButton(onClick = onBack) {
+                            IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
                                 ChatIconBack(tint = colors.text, modifier = Modifier.size(24.dp))
                             }
 
-                            com.example.ui.components.PresenceAvatar(
-                                avatarUrl = resolvedAvatarUrl.ifBlank { null },
-                                size = 40.dp,
-                                userId = partnerUserId,
-                                enableFrameAnimation = true,
-                                countryCode = resolvedCountryCode.takeIf { it.isNotBlank() },
-                                isOnline = resolvedIsOnline
-                            )
-
-                            Spacer(modifier = Modifier.width(10.dp))
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                com.example.store.DecoratedUserName(
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable(enabled = partnerUserId.isNotBlank()) {
+                                        showPartnerProfile = true
+                                    }
+                                    .padding(horizontal = 4.dp, vertical = 4.dp)
+                                    .testTag("direct_chat_partner_header"),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                com.example.ui.components.PresenceAvatar(
+                                    avatarUrl = resolvedAvatarUrl.ifBlank { null },
+                                    size = 40.dp,
                                     userId = partnerUserId,
-                                    name = partnerName,
-                                    fontSize = 16f.chatSp(),
-                                    fontWeight = FontWeight.SemiBold,
-                                    defaultColor = colors.text,
-                                    modifier = Modifier.fillMaxWidth()
+                                    enableFrameAnimation = true,
+                                    countryCode = resolvedCountryCode.takeIf { it.isNotBlank() },
+                                    isOnline = resolvedIsOnline
                                 )
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(7.dp)
-                                            .clip(CircleShape)
-                                            .background(if (resolvedIsOnline) Color(0xFF22C55E) else Color(0xFF94A3B8))
+
+                                Spacer(modifier = Modifier.width(10.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    com.example.store.DecoratedUserName(
+                                        userId = partnerUserId,
+                                        name = partnerName,
+                                        fontSize = 16f.chatSp(),
+                                        fontWeight = FontWeight.SemiBold,
+                                        defaultColor = colors.text,
+                                        modifier = Modifier.fillMaxWidth()
                                     )
-                                    Spacer(modifier = Modifier.width(5.dp))
-                                    val statusTxt = if (resolvedIsOnline) "Online" else "Offline"
-                                    val displayLocation = if (resolvedCountryName.isNotBlank()) "$statusTxt · $resolvedCountryName" else statusTxt
-                                    Text(
-                                        text = displayLocation,
-                                        color = colors.textSecondary,
-                                        fontSize = 12f.chatSp()
-                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(7.dp)
+                                                .clip(CircleShape)
+                                                .background(if (resolvedIsOnline) Color(0xFF22C55E) else Color(0xFF94A3B8))
+                                        )
+                                        Spacer(modifier = Modifier.width(5.dp))
+                                        val statusTxt = if (resolvedIsOnline) "Online" else "Offline"
+                                        val displayLocation = if (resolvedCountryName.isNotBlank()) "$statusTxt · $resolvedCountryName" else statusTxt
+                                        Text(
+                                            text = displayLocation,
+                                            color = colors.textSecondary,
+                                            fontSize = 12f.chatSp()
+                                        )
+                                    }
                                 }
                             }
 
@@ -813,7 +833,7 @@ fun DirectChatScreen(
                             {
                                 ReplyPreviewStrip(
                                     title = if (replyingToMessage!!.isOutgoing) "You" else partnerName,
-                                    preview = replyingToMessage!!.text.take(60),
+                                    preview = ChatAnimatedStickers.readableLabel(replyingToMessage!!.text).take(60),
                                     onClose = { replyingToMessage = null }
                                 )
                             }
@@ -917,6 +937,33 @@ fun DirectChatScreen(
                                     val lastCharCount = Character.charCount(inputText.codePointBefore(inputText.length))
                                     inputText = inputText.dropLast(lastCharCount)
                                 }
+                            },
+                            onAnimatedStickerSelect = { sticker ->
+                                val reply = replyingToMessage
+                                val tapMs = ChatTimingTracker.nowMs()
+                                ensureVaultUnlocked {
+                                    replyingToMessage = null
+                                    isEmojiPickerOpen = false
+                                    val activeConvId = conversationId.ifBlank { "dm_pending_$partnerUserId" }
+                                    EncryptedChatRepository.enqueueSendMessage(
+                                        context = context,
+                                        conversationId = activeConvId,
+                                        recipientUserId = partnerUserId,
+                                        recipientName = partnerName,
+                                        recipientAvatar = partnerAvatarUrl,
+                                        text = ChatAnimatedStickers.encode(sticker),
+                                        replyToText = reply?.text,
+                                        replyToSender = if (reply != null) {
+                                            if (reply.isOutgoing) "You" else partnerName
+                                        } else null,
+                                        tapElapsedMs = tapMs
+                                    )
+                                    if (timelineItems.isNotEmpty()) {
+                                        coroutineScope.launch {
+                                            listState.animateScrollToItem(timelineItems.size - 1)
+                                        }
+                                    }
+                                }
                             }
                         )
                     }
@@ -996,19 +1043,21 @@ fun DirectChatScreen(
                                     horizontalArrangement = if (isOutgoing) Arrangement.End else Arrangement.Start,
                                     verticalAlignment = Alignment.Bottom
                                 ) {
+                                    val displayPartnerAvatar = resolvedAvatarUrl.ifBlank { partnerAvatarUrl }
                                     if (!isOutgoing) {
                                         if (item.isLastInGroup) {
                                             Box(
                                                 modifier = Modifier
                                                     .size(28.dp)
                                                     .clip(CircleShape)
-                                                    .background(colors.accentIn.copy(alpha = 0.2f)),
+                                                    .background(colors.accentIn.copy(alpha = 0.2f))
+                                                    .clickable(enabled = partnerUserId.isNotBlank()) { showPartnerProfile = true },
                                                 contentAlignment = Alignment.Center
                                             ) {
-                                                if (!partnerAvatarUrl.isNullOrBlank()) {
+                                                if (!displayPartnerAvatar.isNullOrBlank()) {
                                                     AsyncImage(
-                                                        model = partnerAvatarUrl,
-                                                        contentDescription = null,
+                                                        model = displayPartnerAvatar,
+                                                        contentDescription = "View $partnerName profile",
                                                         modifier = Modifier.fillMaxSize(),
                                                         contentScale = ContentScale.Crop
                                                     )
@@ -1034,7 +1083,9 @@ fun DirectChatScreen(
                                             SenderName(
                                                 name = partnerName,
                                                 userId = partnerUserId,
-                                                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
+                                                modifier = Modifier
+                                                    .padding(start = 4.dp, bottom = 2.dp)
+                                                    .clickable(enabled = partnerUserId.isNotBlank()) { showPartnerProfile = true }
                                             )
                                         }
 
@@ -1103,6 +1154,14 @@ fun DirectChatScreen(
                                                     if (!isSelectionMode) {
                                                         selectedMessageForMenu = item.messages.find { it.id == photo.id } ?: firstMsg
                                                     }
+                                                },
+                                                onDownloadClick = { photo ->
+                                                    coroutineScope.launch {
+                                                        val res = EncryptedChatRepository.downloadDmMediaOnDemand(context, photo.id)
+                                                        if (res.isFailure) {
+                                                            Toast.makeText(context, res.exceptionOrNull()?.message ?: "Photo still unavailable", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    }
                                                 }
                                             )
                                         }
@@ -1111,8 +1170,19 @@ fun DirectChatScreen(
                                             ReactionRow(
                                                 reactions = item.reactions,
                                                 onClick = { emoji ->
+                                                    val isMine = item.reactions.any { it.emoji == emoji && it.mine }
                                                     coroutineScope.launch {
-                                                        EncryptedChatRepository.sendDmReaction(context, conversationId, partnerUserId, firstMsg.id, emoji)
+                                                        val res = EncryptedChatRepository.sendDmReaction(
+                                                            context = context,
+                                                            conversationId = conversationId,
+                                                            recipientUserId = partnerUserId,
+                                                            targetMessageId = firstMsg.id,
+                                                            emoji = emoji,
+                                                            op = if (isMine) "remove" else "set"
+                                                        )
+                                                        if (res.isFailure) {
+                                                            Toast.makeText(context, res.exceptionOrNull()?.message ?: "Could not update reaction", Toast.LENGTH_SHORT).show()
+                                                        }
                                                     }
                                                 },
                                                 modifier = Modifier.padding(top = 2.dp)
@@ -1137,6 +1207,8 @@ fun DirectChatScreen(
                                 }
 
                                 val isOnlyEmojis = emojiOnlyCount(msg.text.trim())
+                                val parsedSticker = ChatAnimatedStickers.parse(msg.text)
+                                val displayPartnerAvatar = resolvedAvatarUrl.ifBlank { partnerAvatarUrl }
 
                                 AnimatedBubbleEntrance(animateEntrance = isNewItem, outgoing = isOutgoing) {
                                 Row(
@@ -1158,13 +1230,14 @@ fun DirectChatScreen(
                                                 modifier = Modifier
                                                     .size(28.dp)
                                                     .clip(CircleShape)
-                                                    .background(colors.accentIn.copy(alpha = 0.2f)),
+                                                    .background(colors.accentIn.copy(alpha = 0.2f))
+                                                    .clickable(enabled = partnerUserId.isNotBlank()) { showPartnerProfile = true },
                                                 contentAlignment = Alignment.Center
                                             ) {
-                                                if (!partnerAvatarUrl.isNullOrBlank()) {
+                                                if (!displayPartnerAvatar.isNullOrBlank()) {
                                                     AsyncImage(
-                                                        model = partnerAvatarUrl,
-                                                        contentDescription = null,
+                                                        model = displayPartnerAvatar,
+                                                        contentDescription = "View $partnerName profile",
                                                         modifier = Modifier.fillMaxSize(),
                                                         contentScale = ContentScale.Crop
                                                     )
@@ -1191,7 +1264,9 @@ fun DirectChatScreen(
                                             SenderName(
                                                 name = partnerName,
                                                 userId = partnerUserId,
-                                                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
+                                                modifier = Modifier
+                                                    .padding(start = 4.dp, bottom = 2.dp)
+                                                    .clickable(enabled = partnerUserId.isNotBlank()) { showPartnerProfile = true }
                                             )
                                         }
 
@@ -1223,6 +1298,23 @@ fun DirectChatScreen(
                                                 status = status,
                                                 modifier = bubbleModifier
                                             )
+                                        } else if (parsedSticker != null) {
+                                            Column(
+                                                modifier = bubbleModifier.padding(vertical = 2.dp),
+                                                horizontalAlignment = if (isOutgoing) Alignment.End else Alignment.Start
+                                            ) {
+                                                AnimatedStickerGraphic(
+                                                    sticker = parsedSticker.sticker,
+                                                    size = 124.dp,
+                                                    emojiFontSizeSp = 52
+                                                )
+                                                MessageMeta(
+                                                    time = formatChatTime(msg.timestamp),
+                                                    outgoing = isOutgoing,
+                                                    status = status,
+                                                    modifier = Modifier.padding(top = 2.dp, start = 4.dp, end = 4.dp)
+                                                )
+                                            }
                                         } else {
                                             MessageBubble(
                                                 outgoing = isOutgoing,
@@ -1235,7 +1327,7 @@ fun DirectChatScreen(
                                                 if (!msg.replyToText.isNullOrBlank()) {
                                                     ReplyQuote(
                                                         sender = msg.replyToSender ?: "Reply",
-                                                        preview = msg.replyToText,
+                                                        preview = ChatAnimatedStickers.readableLabel(msg.replyToText),
                                                         outgoing = isOutgoing,
                                                         onClick = {
                                                             val replyKey = msg.replyToText.orEmpty()
@@ -1271,6 +1363,52 @@ fun DirectChatScreen(
                                                         val path = rawText.removePrefix("[voice]").substringBefore("|")
                                                         val durationSec = rawText.substringAfter("|", "0").toIntOrNull() ?: 0
                                                         val isPlayingThis = voicePlayer.currentPlayingId == msg.id && voicePlayer.isPlaying
+                                                        var isDownloadingVoice by remember(msg.id) { mutableStateOf(false) }
+
+                                                        fun playOrFetchVoice(seekFrac: Float? = null) {
+                                                            if (path.isBlank() || path == "downloading...") {
+                                                                if (isDownloadingVoice) return
+                                                                isDownloadingVoice = true
+                                                                coroutineScope.launch {
+                                                                    val dl = EncryptedChatRepository.downloadDmMediaOnDemand(context, msg.id)
+                                                                    isDownloadingVoice = false
+                                                                    dl.onSuccess { localUri ->
+                                                                        voicePlayer.playOrPause(
+                                                                            messageId = msg.id,
+                                                                            audioSource = localUri,
+                                                                            fallbackDurationMs = durationSec * 1000L,
+                                                                            seekFraction = seekFrac,
+                                                                            onError = { err -> Toast.makeText(context, err, Toast.LENGTH_SHORT).show() }
+                                                                        )
+                                                                    }.onFailure { err ->
+                                                                        Toast.makeText(context, err.message ?: "Audio still downloading", Toast.LENGTH_SHORT).show()
+                                                                    }
+                                                                }
+                                                            } else {
+                                                                voicePlayer.playOrPause(
+                                                                    messageId = msg.id,
+                                                                    audioSource = path,
+                                                                    fallbackDurationMs = durationSec * 1000L,
+                                                                    seekFraction = seekFrac,
+                                                                    onError = { err ->
+                                                                        coroutineScope.launch {
+                                                                            val dl = EncryptedChatRepository.downloadDmMediaOnDemand(context, msg.id)
+                                                                            dl.onSuccess { localUri ->
+                                                                                voicePlayer.playOrPause(
+                                                                                    messageId = msg.id,
+                                                                                    audioSource = localUri,
+                                                                                    fallbackDurationMs = durationSec * 1000L,
+                                                                                    seekFraction = seekFrac,
+                                                                                    onError = { e2 -> Toast.makeText(context, e2, Toast.LENGTH_SHORT).show() }
+                                                                                )
+                                                                            }.onFailure {
+                                                                                Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                )
+                                                            }
+                                                        }
 
                                                         VoiceNoteContent(
                                                             outgoing = isOutgoing,
@@ -1278,24 +1416,11 @@ fun DirectChatScreen(
                                                             durationMs = durationSec * 1000L,
                                                             positionMs = if (voicePlayer.currentPlayingId == msg.id) voicePlayer.positionMs else 0L,
                                                             isPlaying = isPlayingThis,
-                                                            isLoading = voicePlayer.currentPlayingId == msg.id && voicePlayer.isLoading,
-                                                            isUnread = !isOutgoing,
+                                                            isLoading = isDownloadingVoice || (voicePlayer.currentPlayingId == msg.id && voicePlayer.isLoading),
+                                                            isUnread = !isOutgoing && !voicePlayer.hasPlayed(msg.id),
                                                             speed = voicePlayer.speed,
-                                                            onPlayPause = {
-                                                                voicePlayer.playOrPause(
-                                                                    messageId = msg.id,
-                                                                    audioSource = path,
-                                                                    fallbackDurationMs = durationSec * 1000L,
-                                                                    onError = { err ->
-                                                                        Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
-                                                                    }
-                                                                )
-                                                            },
-                                                            onSeek = { seekFrac ->
-                                                                if (voicePlayer.currentPlayingId == msg.id) {
-                                                                    voicePlayer.seekTo(seekFrac)
-                                                                }
-                                                            },
+                                                            onPlayPause = { playOrFetchVoice(null) },
+                                                            onSeek = { seekFrac -> playOrFetchVoice(seekFrac) },
                                                             onSpeedClick = { voicePlayer.cycleSpeed() }
                                                         )
                                                     }
@@ -1385,8 +1510,19 @@ fun DirectChatScreen(
                                     ReactionRow(
                                         reactions = item.reactions,
                                         onClick = { emoji ->
+                                            val isMine = item.reactions.any { it.emoji == emoji && it.mine }
                                             coroutineScope.launch {
-                                                EncryptedChatRepository.sendDmReaction(context, conversationId, partnerUserId, msg.id, emoji)
+                                                val res = EncryptedChatRepository.sendDmReaction(
+                                                    context = context,
+                                                    conversationId = conversationId,
+                                                    recipientUserId = partnerUserId,
+                                                    targetMessageId = msg.id,
+                                                    emoji = emoji,
+                                                    op = if (isMine) "remove" else "set"
+                                                )
+                                                if (res.isFailure) {
+                                                    Toast.makeText(context, res.exceptionOrNull()?.message ?: "Could not update reaction", Toast.LENGTH_SHORT).show()
+                                                }
                                             }
                                         },
                                         modifier = Modifier.padding(top = 2.dp)
@@ -1425,20 +1561,39 @@ fun DirectChatScreen(
         // Long-Press Action Overlay Menu
         if (selectedMessageForMenu != null) {
             val selectedMsg = selectedMessageForMenu!!
+            val currentMyReaction = rawReactions.find { it.targetMessageId == selectedMsg.id && it.senderId == currentUserId }?.emoji
+            val isImageMsg = isDmImageText(selectedMsg.text)
+            val actionItems = buildList {
+                if (isImageMsg) {
+                    add(MessageAction("save_gallery", "Save to Gallery", { ChatIconDownload(tint = colors.text) }))
+                }
+                add(MessageAction("reply", "Reply", { ChatIconReply(tint = colors.text) }))
+                if (!isImageMsg && !selectedMsg.text.startsWith("[voice]")) {
+                    add(MessageAction("copy", "Copy Text", { ChatIconCopy(tint = colors.text) }))
+                    add(MessageAction("translate", "Translate", { ChatIconTranslate(tint = colors.text) }))
+                    add(MessageAction("listen", "Listen", { ChatIconVolume(tint = colors.text) }))
+                }
+                add(MessageAction("share", "Share", { ChatIconShare(tint = colors.text) }))
+                add(MessageAction("select", "Select", { ChatIconCheck(tint = colors.text) }))
+                add(MessageAction("delete", "Delete", { ChatIconTrash(tint = colors.danger) }, destructive = true))
+            }
             MessageLongPressOverlay(
-                myReaction = rawReactions.find { it.targetMessageId == selectedMsg.id && it.senderId == currentUserId }?.emoji,
-                actions = listOf(
-                    MessageAction("reply", "Reply", { ChatIconReply(tint = colors.text) }),
-                    MessageAction("copy", "Copy Text", { ChatIconCopy(tint = colors.text) }),
-                    MessageAction("translate", "Translate", { ChatIconTranslate(tint = colors.text) }),
-                    MessageAction("listen", "Listen", { ChatIconVolume(tint = colors.text) }),
-                    MessageAction("forward", "Forward", { ChatIconForward(tint = colors.text) }),
-                    MessageAction("select", "Select", { ChatIconCheck(tint = colors.text) }),
-                    MessageAction("delete", "Delete", { ChatIconTrash(tint = colors.danger) }, destructive = true)
-                ),
+                myReaction = currentMyReaction,
+                actions = actionItems,
                 onPickEmoji = { emoji ->
+                    val op = if (emoji == currentMyReaction) "remove" else "set"
                     coroutineScope.launch {
-                        EncryptedChatRepository.sendDmReaction(context, conversationId, partnerUserId, selectedMsg.id, emoji)
+                        val res = EncryptedChatRepository.sendDmReaction(
+                            context = context,
+                            conversationId = conversationId,
+                            recipientUserId = partnerUserId,
+                            targetMessageId = selectedMsg.id,
+                            emoji = emoji,
+                            op = op
+                        )
+                        if (res.isFailure) {
+                            Toast.makeText(context, res.exceptionOrNull()?.message ?: "Could not send reaction", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 },
                 onMoreEmoji = {
@@ -1446,9 +1601,23 @@ fun DirectChatScreen(
                 },
                 onAction = { actionId ->
                     when (actionId) {
+                        "save_gallery" -> {
+                            val node = parseDmPhotoNode(selectedMsg.id, selectedMsg.text, selectedMsg.timestamp, selectedMsg.isOutgoing)
+                            coroutineScope.launch {
+                                val res = ChatMediaSaver.saveImageToGallery(context, node.source)
+                                Toast.makeText(
+                                    context,
+                                    res.fold(
+                                        onSuccess = { "Saved to Pictures/FunkyTalk" },
+                                        onFailure = { it.message ?: "Could not save photo" }
+                                    ),
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
                         "reply" -> replyingToMessage = selectedMsg
                         "copy" -> {
-                            clipboardManager.setText(AnnotatedString(selectedMsg.text))
+                            clipboardManager.setText(AnnotatedString(ChatAnimatedStickers.readableLabel(selectedMsg.text)))
                             Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
                         }
                         "translate" -> {
@@ -1464,8 +1633,19 @@ fun DirectChatScreen(
                         "listen" -> {
                             ttsEngine?.speak(selectedMsg.text, TextToSpeech.QUEUE_FLUSH, null, "msg_${selectedMsg.id}")
                         }
-                        "forward" -> {
-                            Toast.makeText(context, "Forwarding message", Toast.LENGTH_SHORT).show()
+                        "share" -> {
+                            if (isImageMsg) {
+                                val node = parseDmPhotoNode(selectedMsg.id, selectedMsg.text, selectedMsg.timestamp, selectedMsg.isOutgoing)
+                                coroutineScope.launch {
+                                    ChatMediaSaver.shareImage(context, node.source)
+                                }
+                            } else {
+                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_TEXT, ChatAnimatedStickers.readableLabel(selectedMsg.text))
+                                }
+                                context.startActivity(Intent.createChooser(sendIntent, "Share message"))
+                            }
                         }
                         "select" -> {
                             isSelectionMode = true
@@ -1520,7 +1700,7 @@ fun DirectChatScreen(
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                     )
                 },
-                onSend = { urisToSend, captionText ->
+                onSendWithOptions = { urisToSend, captionText, rotations, isHd ->
                     val replySnapshot = replyingToMessage
                     val tapMs = ChatTimingTracker.nowMs()
                     pendingPhotoUris = emptyList()
@@ -1530,7 +1710,12 @@ fun DirectChatScreen(
                         coroutineScope.launch(Dispatchers.IO) {
                             urisToSend.forEachIndexed { idx, uri ->
                                 try {
-                                    val bytes = readChatImageBytes(context, uri)
+                                    val bytes = ChatMediaSaver.prepareOutgoingImageBytes(
+                                        context = context,
+                                        uri = uri,
+                                        extraRotationDegrees = rotations[idx] ?: 0,
+                                        highQuality = isHd
+                                    )
                                     if (bytes != null && bytes.isNotEmpty()) {
                                         EncryptedChatRepository.enqueueSendMediaMessage(
                                             context = context,
@@ -1566,7 +1751,34 @@ fun DirectChatScreen(
             TelephotoMediaViewerDialog(
                 mediaItems = allMediaItems,
                 initialIndex = activeMediaViewerIndex!!.coerceIn(0, allMediaItems.size - 1),
-                onDismiss = { activeMediaViewerIndex = null }
+                onDismiss = { activeMediaViewerIndex = null },
+                onSave = { item ->
+                    coroutineScope.launch {
+                        val res = ChatMediaSaver.saveImageToGallery(context, item.url)
+                        Toast.makeText(
+                            context,
+                            res.fold(
+                                onSuccess = { "Saved to Pictures/FunkyTalk" },
+                                onFailure = { it.message ?: "Could not save photo" }
+                            ),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                },
+                onShare = { item ->
+                    coroutineScope.launch {
+                        ChatMediaSaver.shareImage(context, item.url)
+                    }
+                },
+                onDelete = { item ->
+                    coroutineScope.launch {
+                        EncryptedChatRepository.deleteDmMessage(context, item.id)
+                        Toast.makeText(context, "Photo deleted", Toast.LENGTH_SHORT).show()
+                        if (allMediaItems.size <= 1) {
+                            activeMediaViewerIndex = null
+                        }
+                    }
+                }
             )
         }
 
@@ -1689,6 +1901,26 @@ fun DirectChatScreen(
                     }
                 }
             )
+        }
+        if (showPartnerProfile && partnerUserId.isNotBlank()) {
+            Dialog(
+                onDismissRequest = { showPartnerProfile = false },
+                properties = DialogProperties(
+                    usePlatformDefaultWidth = false,
+                    decorFitsSystemWindows = false
+                )
+            ) {
+                BackHandler { showPartnerProfile = false }
+                com.example.ui.screens.UserProfileFeedScreen(
+                    userId = partnerUserId,
+                    username = partnerName,
+                    profileName = partnerName,
+                    avatarUrl = resolvedAvatarUrl.ifBlank { partnerAvatarUrl.orEmpty() },
+                    countryCode = resolvedCountryCode.ifBlank { partnerCountryCode.orEmpty() },
+                    onBack = { showPartnerProfile = false },
+                    onStartChat = { showPartnerProfile = false }
+                )
+            }
         }
     }
 }

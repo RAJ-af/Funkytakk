@@ -270,7 +270,7 @@ class MainActivity : FragmentActivity() {
                                 AppFlagsRepository.refreshIfStale(applicationContext)
                                 // Keep Side Dynamic Island strictly in-app while foregrounded
                                 com.example.service.VoiceRoomOverlayManager.stopService(this@MainActivity)
-                                if (SupabaseSessionManager.hasValidAuthenticatedSession(applicationContext) && authState is AuthState.Success) {
+                                if (SupabaseSessionManager.hasStoredAccount(applicationContext) && authState is AuthState.Success) {
                                     authViewModel.refreshModerationStatus(applicationContext)
                                     authViewModel.checkAccountReview(applicationContext)
                                     com.example.SupportChatManager.fetchSupportSession(applicationContext)
@@ -280,6 +280,7 @@ class MainActivity : FragmentActivity() {
                                     com.example.repository.GroupChatRepository.onAppResumed(applicationContext)
                                     com.example.ui.components.RoomInviteOverlayManager.checkAndShowPendingInvite(applicationContext)
                                     lifecycleOwner.lifecycleScope.launch {
+                                        SupabaseSessionManager.ensureActiveSession(applicationContext)
                                         com.example.repository.DeviceSessionRepository.touchDevice(applicationContext)
                                     }
                                 }
@@ -403,17 +404,18 @@ class MainActivity : FragmentActivity() {
                                 ).awaitAll()
                             }
                         } else if (currentScreen == "splash" && (splashHardTimeoutReached || (minSplashElapsed && authState !is AuthState.Loading))) {
-                            val localUid = localStartupSnapshot.lastUid ?: SupabaseSessionManager.getUserId(applicationContext)
-                            if (localStartupSnapshot.onboardingDone &&
+                            val localUid = localStartupSnapshot.lastUid
+                                ?: SupabaseSessionManager.getUserId(applicationContext)
+                                ?: runCatching { com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid }.getOrNull()
+                            val hasStoredAccount = SupabaseSessionManager.hasStoredAccount(applicationContext)
+                            val cachedProfile = if (!localUid.isNullOrBlank()) {
+                                com.example.data.StartupPrefsStore.buildLocalCachedUserProfile(applicationContext, localUid)
+                            } else null
+                            if (hasStoredAccount &&
                                 !localUid.isNullOrBlank() &&
-                                SupabaseSessionManager.hasValidAuthenticatedSession(applicationContext)
+                                (localStartupSnapshot.onboardingDone || cachedProfile?.onboardingComplete == true)
                             ) {
-                                val cachedProfile = com.example.data.StartupPrefsStore.buildLocalCachedUserProfile(applicationContext, localUid)
-                                if (cachedProfile.isEmailVerified && cachedProfile.onboardingComplete) {
-                                    currentScreen = "home"
-                                } else {
-                                    currentScreen = com.example.data.StartupPrefsStore.resolveUnauthenticatedRoute(localStartupSnapshot)
-                                }
+                                currentScreen = "home"
                             } else {
                                 currentScreen = com.example.data.StartupPrefsStore.resolveUnauthenticatedRoute(localStartupSnapshot)
                             }
@@ -950,8 +952,13 @@ class MainActivity : FragmentActivity() {
                             modifier = Modifier.testTag("device_revoked_dialog")
                         )
                     }
-                }
-                }
+                    com.example.diagnostics.ErrorReportBannerAndDialogHost(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(210f)
+                    )
+                        }
+                    }
                 }
             }
         }

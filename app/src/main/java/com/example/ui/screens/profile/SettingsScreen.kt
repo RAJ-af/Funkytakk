@@ -83,6 +83,7 @@ fun SettingsScreen(
     val feedbackUpdates by FeedbackRepository.myUpdatesCount.collectAsState()
     val helpTotalBadge = supportUnread + feedbackUpdates
     val appFlags by com.example.AppFlagsRepository.flags.collectAsState()
+    val capturedDiagnostics by com.example.diagnostics.CrashAndErrorReporter.issues.collectAsState()
 
     BackHandler { onBack() }
 
@@ -635,6 +636,24 @@ fun SettingsScreen(
                             )
                         },
                         onClick = onOpenSupportChat
+                    )
+                    HorizontalDivider(color = funkyColors.line, modifier = Modifier.padding(horizontal = 16.dp))
+                    SettingsRowItem(
+                        title = "Error Finder & Diagnostics",
+                        subtitle = "Detect freezes/crashes & send report to heyitsraj4@gmail.com",
+                        trailingBadge = if (capturedDiagnostics.isNotEmpty()) "${capturedDiagnostics.size}" else null,
+                        trailingBadgeBg = Color(0xFFF59E0B),
+                        trailingBadgeFg = Color.Black,
+                        iconBg = Color(0xFFFEF3C7),
+                        iconContent = {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_alert),
+                                contentDescription = null,
+                                tint = Color(0xFFD97706),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        },
+                        onClick = { com.example.diagnostics.CrashAndErrorReporter.openReportDialog() }
                     )
                 }
 

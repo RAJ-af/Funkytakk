@@ -1472,7 +1472,7 @@ fun VoiceRoomScreen(
 
     LaunchedEffect(activeRoomId, roomHostId, currentUserId) {
         while (isActive && activeRoomId.isNotBlank()) {
-            delay(4000)
+            delay(9000)
             try {
                 // 1. Fetch room status & enforce server-authoritative 3-minute grace period (authenticated for private rooms)
                 val pollToken = SupabaseSessionManager.getBearerToken(context)
@@ -1575,14 +1575,20 @@ fun VoiceRoomScreen(
         }
     }
 
-    LaunchedEffect(participantsData, roomHostId, messages.size) {
-        val ids = (participantsData.map { it.user_id } +
+    val allVisibleUserIds = remember(participantsData, roomHostId, messages.size) {
+        (participantsData.map { it.user_id } +
             listOfNotNull(roomHostId) +
             messages.mapNotNull { it.userId })
             .filter { it.isNotBlank() }
             .distinct()
-        if (ids.isNotEmpty()) {
-            com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, ids)
+    }
+    val syncedCosmeticIds = remember(activeRoomId) { mutableSetOf<String>() }
+
+    LaunchedEffect(allVisibleUserIds) {
+        val missingIds = allVisibleUserIds.filter { it !in syncedCosmeticIds }
+        if (missingIds.isNotEmpty()) {
+            syncedCosmeticIds.addAll(missingIds)
+            com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, missingIds)
         }
     }
 
@@ -2760,7 +2766,8 @@ fun VoiceRoomScreen(
                 isCurrentUserSpeakerOrHost = isCurrentUserSpeakerOrHost,
                 isCurrentUserHostOrModerator = isHostOrModerator,
                 onHostInviteSeatClick = { showPeopleSheet = true },
-                onRequestSpeakerSeat = handleRequestSpeakerSeat
+                onRequestSpeakerSeat = handleRequestSpeakerSeat,
+                compactForKeyboard = isImeVisible
             )
 
             // 3. MINIMAL COMPACT CHAT LOG ROW (flexes cleanly above keyboard)

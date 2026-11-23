@@ -88,11 +88,13 @@ fun FluentEmojiPicker(
     onEmojiSelect: (String) -> Unit,
     onBackspace: () -> Unit,
     onStickerSelect: ((packId: Long, emoji: String) -> Unit)? = null,
+    onAnimatedStickerSelect: ((AnimatedStickerSpec) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val colors = LocalChatColors.current
     var pickerMode by remember { mutableStateOf(0) } // 0 = Emojis, 1 = Stickers
+    var stickerTab by remember { mutableStateOf(0) } // 0 = Animated Stickers, 1 = Store Packs
     var selectedCategory by remember { mutableStateOf(EmojiCategory.SMILEYS) }
     var searchQuery by remember { mutableStateOf("") }
 
@@ -245,8 +247,55 @@ fun FluentEmojiPicker(
                 }
             }
         } else {
-            // Stickers Mode
-            if (isLoadingStickers) {
+            // Stickers Mode: Animated Lottie Stickers + Owned Store Packs
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(
+                    onClick = { stickerTab = 0 },
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (stickerTab == 0) colors.brand.copy(alpha = 0.2f) else colors.surfaceVariant
+                ) {
+                    Text(
+                        text = "Animated (${ChatAnimatedStickers.allStickers.size})",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (stickerTab == 0) colors.accentIn else colors.textSecondary,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+                Surface(
+                    onClick = { stickerTab = 1 },
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (stickerTab == 1) colors.brand.copy(alpha = 0.2f) else colors.surfaceVariant
+                ) {
+                    Text(
+                        text = "Store Packs",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (stickerTab == 1) colors.accentIn else colors.textSecondary,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+            }
+
+            if (stickerTab == 0) {
+                AnimatedStickerPickerGrid(
+                    onStickerSelected = { sticker ->
+                        if (onAnimatedStickerSelect != null) {
+                            onAnimatedStickerSelect(sticker)
+                        } else {
+                            onEmojiSelect(sticker.emojiFallback)
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                )
+            } else if (isLoadingStickers) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -265,10 +314,10 @@ fun FluentEmojiPicker(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("🎁", fontSize = 28.sp)
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text("No owned sticker packs", fontSize = 13.sp, color = colors.textSecondary)
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("No owned store packs yet", fontSize = 13.sp, color = colors.textSecondary)
+                        Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            "Visit the Funky Store in Profile to unlock animated stickers!",
+                            "Free animated stickers are ready in the Animated tab!",
                             fontSize = 11.5.sp,
                             color = colors.textSecondary
                         )

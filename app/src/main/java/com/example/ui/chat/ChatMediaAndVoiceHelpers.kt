@@ -2,6 +2,7 @@ package com.example.ui.chat
 
 import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
 import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Build
@@ -36,6 +37,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -43,13 +45,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import coil.compose.AsyncImage
+import com.example.BuildConfig
 import com.example.CloudAiManager
+import com.example.diagnostics.CrashAndErrorReporter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -94,16 +100,34 @@ class VoicePlaybackController(
     private val _speed = mutableStateOf(1.0f)
     val speed: Float get() = _speed.value
 
+    private val _playedIds = mutableStateListOf<String>()
+    private var currentOnError: ((String) -> Unit)? = null
+
+    fun hasPlayed(messageId: String): Boolean = _playedIds.contains(messageId)
+
     init {
         try {
+            val speechAttributes = AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA)
+                .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH)
+                .build()
+
             exoPlayer = ExoPlayer.Builder(context).build().apply {
+                setAudioAttributes(speechAttributes, true)
+                setHandleAudioBecomingNoisy(true)
                 addListener(object : Player.Listener {
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         if (playbackState == Player.STATE_ENDED) {
+                            _currentPlayingId.value?.let { id ->
+                                if (!_playedIds.contains(id)) _playedIds.add(id)
+                            }
                             this@VoicePlaybackController._isPlaying.value = false
                             this@VoicePlaybackController._positionMs.value = 0L
                             stopProgressPolling()
                         } else if (playbackState == Player.STATE_READY) {
+                            _currentPlayingId.value?.let { id ->
+                                if (!_playedIds.contains(id)) _playedIds.add(id)
+                            }
                             this@VoicePlaybackController._isLoading.value = false
                             this@VoicePlaybackController._durationMs.value = duration.coerceAtLeast(0L)
                         } else if (playbackState == Player.STATE_BUFFERING) {
@@ -114,6 +138,9 @@ class VoicePlaybackController(
                     override fun onIsPlayingChanged(playing: Boolean) {
                         this@VoicePlaybackController._isPlaying.value = playing
                         if (playing) {
+                            _currentPlayingId.value?.let { id ->
+                                if (!_playedIds.contains(id)) _playedIds.add(id)
+                            }
                             startProgressPolling()
                         } else {
                             stopProgressPolling()
@@ -122,14 +149,31 @@ class VoicePlaybackController(
 
                     override fun onPlayerError(error: PlaybackException) {
                         Log.e("VoicePlayback", "ExoPlayer playback error: ${error.errorCodeName}", error)
+                        CrashAndErrorReporter.recordNonFatal(
+                            source = "VoicePlayback",
+                            message = "Audio error (${error.errorCodeName})",
+                            throwable = error
+                        )
                         this@VoicePlaybackController._isLoading.value = false
                         this@VoicePlaybackController._isPlaying.value = false
                         stopProgressPolling()
+                        currentOnError?.invoke("Could not play audio file (${error.errorCodeName})")
                     }
                 })
             }
         } catch (e: Exception) {
             Log.e("VoicePlayback", "Failed to initialize ExoPlayer", e)
+            CrashAndErrorReporter.recordNonFatal("VoicePlayback", "Failed to init audio player", e)
+        }
+    }
+
+    private fun ensureNormalMediaAudioRouting() {
+        try {
+            val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+            if (am.mode != AudioManager.MODE_NORMAL) {
+                am.mode = AudioManager.MODE_NORMAL
+            }
+        } catch (_: Exception) {
         }
     }
 
@@ -137,19 +181,28 @@ class VoicePlaybackController(
         messageId: String,
         audioSource: String,
         fallbackDurationMs: Long = 0L,
+        seekFraction: Float? = null,
         onError: (String) -> Unit = {}
     ) {
         val player = exoPlayer ?: run {
             onError("Audio player is not available")
             return
         }
+        currentOnError = onError
+        ensureNormalMediaAudioRouting()
 
-        if (_currentPlayingId.value == messageId) {
+        if (_currentPlayingId.value == messageId && seekFraction == null) {
             if (player.isPlaying) {
                 player.pause()
             } else {
                 player.play()
             }
+            return
+        }
+
+        if (_currentPlayingId.value == messageId && seekFraction != null) {
+            seekTo(seekFraction)
+            if (!player.isPlaying) player.play()
             return
         }
 
@@ -167,7 +220,7 @@ class VoicePlaybackController(
                     withContext(Dispatchers.Main) {
                         _isLoading.value = false
                         _currentPlayingId.value = null
-                        onError("Audio file could not be downloaded or decrypted")
+                        onError("Audio file could not be loaded")
                     }
                     return@launch
                 }
@@ -177,6 +230,9 @@ class VoicePlaybackController(
                     player.setMediaItem(mediaItem)
                     player.setPlaybackSpeed(_speed.value)
                     player.prepare()
+                    if (seekFraction != null && fallbackDurationMs > 0L) {
+                        player.seekTo((fallbackDurationMs * seekFraction.coerceIn(0f, 1f)).toLong())
+                    }
                     player.play()
                 }
             } catch (e: Exception) {
@@ -245,7 +301,9 @@ class VoicePlaybackController(
         exoPlayer = null
     }
 
-    private suspend fun resolveAudioSourceToLocalFile(context: Context, source: String): File? = withContext(Dispatchers.IO) {
+    private suspend fun resolveAudioSourceToLocalFile(context: Context, rawSource: String): File? = withContext(Dispatchers.IO) {
+        val source = rawSource.trim()
+        if (source.isBlank() || source == "downloading...") return@withContext null
         try {
             if (source.startsWith("http://") || source.startsWith("https://")) {
                 val cacheDir = File(context.cacheDir, "voice_notes").apply { mkdirs() }
@@ -262,6 +320,9 @@ class VoicePlaybackController(
                 }
                 val url = java.net.URL(source)
                 val conn = url.openConnection()
+                if (source.contains("appwrite.io", ignoreCase = true) && com.example.FunkyTalkApplication.APPWRITE_PROJECT_ID.isNotBlank()) {
+                    conn.setRequestProperty("X-Appwrite-Project", com.example.FunkyTalkApplication.APPWRITE_PROJECT_ID)
+                }
                 conn.connectTimeout = 10000
                 conn.readTimeout = 15000
                 conn.getInputStream().use { input ->
@@ -270,16 +331,38 @@ class VoicePlaybackController(
                         output.flush()
                     }
                 }
-                return@withContext cachedFile
+                return@withContext cachedFile.takeIf { it.exists() && it.length() > 0L }
+            }
+
+            if (source.startsWith("file://")) {
+                val parsedPath = runCatching { Uri.parse(source).path }.getOrNull()
+                    ?: source.removePrefix("file://")
+                val file = File(parsedPath)
+                if (file.exists() && file.length() > 0L) {
+                    return@withContext file
+                }
+            }
+
+            if (source.startsWith("content://")) {
+                val cacheDir = File(context.cacheDir, "voice_notes").apply { mkdirs() }
+                val copied = File(cacheDir, "voice_content_${source.hashCode()}.m4a")
+                if (copied.exists() && copied.length() > 0L) return@withContext copied
+                context.contentResolver.openInputStream(Uri.parse(source))?.use { input ->
+                    FileOutputStream(copied).use { output ->
+                        input.copyTo(output)
+                        output.flush()
+                    }
+                }
+                if (copied.exists() && copied.length() > 0L) return@withContext copied
             }
 
             val directFile = File(source)
-            if (directFile.exists() && directFile.length() > 0) {
+            if (directFile.exists() && directFile.length() > 0L) {
                 return@withContext directFile
             }
 
             val appCacheFile = File(context.cacheDir, source)
-            if (appCacheFile.exists() && appCacheFile.length() > 0) {
+            if (appCacheFile.exists() && appCacheFile.length() > 0L) {
                 return@withContext appCacheFile
             }
             null
@@ -479,14 +562,15 @@ fun TelephotoMediaViewerDialog(
     mediaItems: List<ChatViewerMediaItem>,
     initialIndex: Int = 0,
     onDismiss: () -> Unit,
-    onShare: (ChatViewerMediaItem) -> Unit = {},
-    onSave: (ChatViewerMediaItem) -> Unit = {},
-    onForward: (ChatViewerMediaItem) -> Unit = {},
-    onDelete: (ChatViewerMediaItem) -> Unit = {}
+    onShare: ((ChatViewerMediaItem) -> Unit)? = null,
+    onSave: ((ChatViewerMediaItem) -> Unit)? = null,
+    onForward: ((ChatViewerMediaItem) -> Unit)? = null,
+    onDelete: ((ChatViewerMediaItem) -> Unit)? = null
 ) {
     if (mediaItems.isEmpty()) return
 
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val pagerState = rememberPagerState(
         initialPage = initialIndex.coerceIn(0, mediaItems.size - 1),
         pageCount = { mediaItems.size }
@@ -495,6 +579,37 @@ fun TelephotoMediaViewerDialog(
     var showChrome by remember { mutableStateOf(true) }
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
     var showMoreMenu by remember { mutableStateOf(false) }
+    var isSaving by remember { mutableStateOf(false) }
+
+    fun triggerSave(item: ChatViewerMediaItem) {
+        if (onSave != null) {
+            onSave(item)
+        } else if (!isSaving) {
+            isSaving = true
+            scope.launch {
+                val res = ChatMediaSaver.saveImageToGallery(context, item.url)
+                isSaving = false
+                Toast.makeText(
+                    context,
+                    res.fold(
+                        onSuccess = { "Saved to Pictures/FunkyTalk" },
+                        onFailure = { it.message ?: "Could not save photo" }
+                    ),
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
+    fun triggerShare(item: ChatViewerMediaItem) {
+        if (onShare != null) {
+            onShare(item)
+        } else {
+            scope.launch {
+                ChatMediaSaver.shareImage(context, item.url)
+            }
+        }
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -563,7 +678,7 @@ fun TelephotoMediaViewerDialog(
             ) {
                 val currentItem = mediaItems.getOrNull(pagerState.currentPage) ?: mediaItems[0]
                 Surface(
-                    color = Color.Black.copy(alpha = 0.65f),
+                    color = Color.Black.copy(alpha = 0.70f),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
@@ -573,7 +688,10 @@ fun TelephotoMediaViewerDialog(
                             .padding(horizontal = 8.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        IconButton(onClick = onDismiss) {
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.size(48.dp)
+                        ) {
                             ChatIconBack(tint = Color.White, modifier = Modifier.size(24.dp))
                         }
 
@@ -588,17 +706,42 @@ fun TelephotoMediaViewerDialog(
                             )
                             Text(
                                 text = "${currentItem.dateText} · ${pagerState.currentPage + 1} of ${mediaItems.size}",
-                                color = Color.White.copy(alpha = 0.7f),
+                                color = Color.White.copy(alpha = 0.72f),
                                 fontSize = 12.sp
                             )
                         }
 
-                        IconButton(onClick = { onShare(currentItem) }) {
-                            ChatIconForward(tint = Color.White, modifier = Modifier.size(22.dp))
+                        IconButton(
+                            onClick = { triggerSave(currentItem) },
+                            modifier = Modifier
+                                .size(48.dp)
+                                .testTag("media_viewer_save_button")
+                        ) {
+                            if (isSaving) {
+                                CircularProgressIndicator(
+                                    color = Color.White,
+                                    strokeWidth = 2.dp,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            } else {
+                                ChatIconDownload(tint = Color.White, modifier = Modifier.size(22.dp))
+                            }
+                        }
+
+                        IconButton(
+                            onClick = { triggerShare(currentItem) },
+                            modifier = Modifier
+                                .size(48.dp)
+                                .testTag("media_viewer_share_button")
+                        ) {
+                            ChatIconShare(tint = Color.White, modifier = Modifier.size(20.dp))
                         }
 
                         Box {
-                            IconButton(onClick = { showMoreMenu = true }) {
+                            IconButton(
+                                onClick = { showMoreMenu = true },
+                                modifier = Modifier.size(48.dp)
+                            ) {
                                 ChatIconMoreVert(tint = Color.White, modifier = Modifier.size(22.dp))
                             }
                             DropdownMenu(
@@ -608,13 +751,13 @@ fun TelephotoMediaViewerDialog(
                                 containerColor = Color(0xFF1E2128),
                                 shadowElevation = 12.dp,
                                 modifier = Modifier
-                                    .widthIn(min = 190.dp)
+                                    .widthIn(min = 200.dp)
                                     .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(18.dp))
                             ) {
                                 DropdownMenuItem(
                                     text = {
                                         Text(
-                                            "Forward",
+                                            "Save to Gallery",
                                             color = Color.White,
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.SemiBold
@@ -628,24 +771,19 @@ fun TelephotoMediaViewerDialog(
                                                 .background(Color.White.copy(alpha = 0.12f)),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            ChatIconForward(tint = Color.White, modifier = Modifier.size(17.dp))
+                                            ChatIconDownload(tint = Color.White, modifier = Modifier.size(17.dp))
                                         }
                                     },
                                     onClick = {
                                         showMoreMenu = false
-                                        onForward(currentItem)
+                                        triggerSave(currentItem)
                                     }
-                                )
-                                HorizontalDivider(
-                                    modifier = Modifier.padding(horizontal = 12.dp),
-                                    thickness = 0.6.dp,
-                                    color = Color.White.copy(alpha = 0.12f)
                                 )
                                 DropdownMenuItem(
                                     text = {
                                         Text(
-                                            "Delete",
-                                            color = Color(0xFFFF7066),
+                                            "Share",
+                                            color = Color.White,
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.SemiBold
                                         )
@@ -655,17 +793,76 @@ fun TelephotoMediaViewerDialog(
                                             modifier = Modifier
                                                 .size(32.dp)
                                                 .clip(RoundedCornerShape(10.dp))
-                                                .background(Color(0xFFFF7066).copy(alpha = 0.16f)),
+                                                .background(Color.White.copy(alpha = 0.12f)),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            ChatIconTrash(tint = Color(0xFFFF7066), modifier = Modifier.size(17.dp))
+                                            ChatIconShare(tint = Color.White, modifier = Modifier.size(16.dp))
                                         }
                                     },
                                     onClick = {
                                         showMoreMenu = false
-                                        onDelete(currentItem)
+                                        triggerShare(currentItem)
                                     }
                                 )
+                                if (onForward != null) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                "Forward",
+                                                color = Color.White,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        },
+                                        leadingIcon = {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(32.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(Color.White.copy(alpha = 0.12f)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                ChatIconForward(tint = Color.White, modifier = Modifier.size(17.dp))
+                                            }
+                                        },
+                                        onClick = {
+                                            showMoreMenu = false
+                                            onForward(currentItem)
+                                        }
+                                    )
+                                }
+                                if (onDelete != null) {
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 12.dp),
+                                        thickness = 0.6.dp,
+                                        color = Color.White.copy(alpha = 0.12f)
+                                    )
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                "Delete",
+                                                color = Color(0xFFFF7066),
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        },
+                                        leadingIcon = {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(32.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(Color(0xFFFF7066).copy(alpha = 0.16f)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                ChatIconTrash(tint = Color(0xFFFF7066), modifier = Modifier.size(17.dp))
+                                            }
+                                        },
+                                        onClick = {
+                                            showMoreMenu = false
+                                            onDelete(currentItem)
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -682,7 +879,7 @@ fun TelephotoMediaViewerDialog(
                 val currentItem = mediaItems.getOrNull(pagerState.currentPage) ?: mediaItems[0]
                 if (!currentItem.caption.isNullOrBlank()) {
                     Surface(
-                        color = Color.Black.copy(alpha = 0.65f),
+                        color = Color.Black.copy(alpha = 0.72f),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(

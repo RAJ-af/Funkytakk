@@ -1223,7 +1223,8 @@ interface SupabaseApi {
     suspend fun downloadFromUrl(
         @Url url: String,
         @Header("apikey") apiKey: String? = BuildConfig.SUPABASE_ANON_KEY,
-        @Header("Authorization") auth: String? = null
+        @Header("Authorization") auth: String? = null,
+        @Header("X-Appwrite-Project") appwriteProject: String? = null
     ): Response<ResponseBody>
 
     @DELETE("storage/v1/object/dm-media/{path}")

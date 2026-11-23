@@ -100,8 +100,14 @@ object TelemetryManager {
         } catch (_: Exception) {}
     }
 
+    @Volatile
+    private var lastScreenName: String = "splash"
+
+    fun currentScreenName(): String = lastScreenName
+
     fun setCurrentScreen(screen: String) {
         if (screen.isBlank()) return
+        lastScreenName = screen
         try {
             crashlytics()?.setCustomKey("current_screen", screen)
         } catch (_: Exception) {}
@@ -116,6 +122,12 @@ object TelemetryManager {
                 recordException(throwable)
             }
         } catch (_: Exception) {}
+        com.example.diagnostics.CrashAndErrorReporter.recordNonFatal(
+            source = tag,
+            message = throwable.message ?: throwable.javaClass.simpleName,
+            throwable = throwable,
+            showBanner = false
+        )
         Log.w(TAG, "Non-fatal [$tag]: ${throwable.message}")
     }
 

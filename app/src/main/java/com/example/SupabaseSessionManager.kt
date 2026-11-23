@@ -244,6 +244,18 @@ object SupabaseSessionManager {
     }
 
     /**
+     * Returns true if this device currently has a signed-in user identity (Supabase UUID,
+     * stored token, or active Firebase user), even if the short-lived 1h JWT needs refresh.
+     */
+    fun hasStoredAccount(context: Context): Boolean {
+        if (com.example.repository.DeviceSessionRepository.isRevocationInProgress()) return false
+        val uid = getUserId(context)
+        val token = getAccessToken(context)
+        val firebaseAuthed = runCatching { FirebaseAuth.getInstance().currentUser != null }.getOrDefault(false)
+        return isValidUuid(uid) || !token.isNullOrBlank() || firebaseAuthed
+    }
+
+    /**
      * Ensures an active, valid Supabase session using a single-flight Mutex.
      * Proactively refreshes when the JWT is within 5 minutes of `exp` using kind = "refresh".
      * Returns the Supabase Auth UUID, or null if unauthenticated.

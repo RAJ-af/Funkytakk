@@ -520,7 +520,7 @@ fun RecordingBar(
             onClick = onCancel,
             shape = CircleShape,
             color = c.danger.copy(alpha = 0.15f),
-            modifier = Modifier.size(36.dp),
+            modifier = Modifier.size(44.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
                 ChatIconTrash(modifier = Modifier.size(18.dp), tint = c.danger)
@@ -534,7 +534,7 @@ fun RecordingBar(
             onClick = onSend,
             shape = CircleShape,
             color = c.brand,
-            modifier = Modifier.size(36.dp),
+            modifier = Modifier.size(44.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
                 ChatIconSend(modifier = Modifier.size(18.dp), tint = c.onBrand)

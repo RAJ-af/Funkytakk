@@ -666,4 +666,80 @@ fun ChatIconRetry(
     }
 }
 
+@Composable
+fun ChatIconDownload(
+    modifier: Modifier = Modifier.size(20.dp),
+    tint: Color = Color(0xFF1B1B1B)
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val sw = 2.0.dp.toPx()
+        // Vertical shaft
+        drawLine(tint, Offset(w * 0.50f, h * 0.16f), Offset(w * 0.50f, h * 0.64f), strokeWidth = sw, cap = StrokeCap.Round)
+        // Arrowhead
+        val arrow = Path().apply {
+            moveTo(w * 0.30f, h * 0.46f)
+            lineTo(w * 0.50f, h * 0.66f)
+            lineTo(w * 0.70f, h * 0.46f)
+        }
+        drawPath(arrow, tint, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        // Tray at bottom
+        val tray = Path().apply {
+            moveTo(w * 0.18f, h * 0.66f)
+            lineTo(w * 0.18f, h * 0.84f)
+            lineTo(w * 0.82f, h * 0.84f)
+            lineTo(w * 0.82f, h * 0.66f)
+        }
+        drawPath(tray, tint, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+@Composable
+fun ChatIconShare(
+    modifier: Modifier = Modifier.size(20.dp),
+    tint: Color = Color(0xFF1B1B1B)
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val sw = 1.9.dp.toPx()
+        val r = 2.4.dp.toPx()
+        drawCircle(tint, radius = r, center = Offset(w * 0.74f, h * 0.24f), style = Fill)
+        drawCircle(tint, radius = r, center = Offset(w * 0.26f, h * 0.50f), style = Fill)
+        drawCircle(tint, radius = r, center = Offset(w * 0.74f, h * 0.76f), style = Fill)
+        drawLine(tint, Offset(w * 0.32f, h * 0.47f), Offset(w * 0.68f, h * 0.27f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(tint, Offset(w * 0.32f, h * 0.53f), Offset(w * 0.68f, h * 0.73f), strokeWidth = sw, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+fun ChatIconRotate(
+    modifier: Modifier = Modifier.size(20.dp),
+    tint: Color = Color(0xFF1B1B1B)
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val sw = 1.9.dp.toPx()
+        val inset = w * 0.18f
+        drawArc(
+            color = tint,
+            startAngle = -50f,
+            sweepAngle = 280f,
+            useCenter = false,
+            topLeft = Offset(inset, inset),
+            size = Size(w - inset * 2f, h - inset * 2f),
+            style = Stroke(width = sw, cap = StrokeCap.Round)
+        )
+        val arrow = Path().apply {
+            moveTo(w * 0.68f, h * 0.14f)
+            lineTo(w * 0.85f, h * 0.30f)
+            lineTo(w * 0.66f, h * 0.38f)
+        }
+        drawPath(arrow, tint, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+
 

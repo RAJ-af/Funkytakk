@@ -16,6 +16,7 @@ class RoomVoiceSession(
     val roomId: String,
     val userId: String,
     val userName: String,
+    initialRole: String = "listener",
     private val scope: CoroutineScope
 ) {
 
@@ -42,7 +43,10 @@ class RoomVoiceSession(
     val errorEvents: SharedFlow<String> = _errorEvents.asSharedFlow()
 
     private var currentEngine: VoiceEngine? = null
-    private var currentRole: String = "listener"
+    @Volatile
+    private var currentRole: String = initialRole
+    private var lastTokenErrorCode: Int? = null
+    private var lastTokenErrorMsg: String? = null
     private var reconnectAttempts = 0
     private var tokenRenewJob: Job? = null
     private var engineStateCollectJob: Job? = null
@@ -62,7 +66,10 @@ class RoomVoiceSession(
             _connectionState.value = VoiceConnectionState.Connecting
             val tokenResponse = fetchRoomToken()
             if (tokenResponse == null) {
-                handleConnectionFailure("Failed to obtain voice room token from server")
+                val code = lastTokenErrorCode
+                val retryable = code == null || (code !in setOf(401, 403, 404, 410))
+                val msg = lastTokenErrorMsg ?: "Failed to obtain voice room token from server"
+                handleConnectionFailure(msg, retryable = retryable)
                 return@launch
             }
 
@@ -152,30 +159,63 @@ class RoomVoiceSession(
 
     private suspend fun fetchRoomToken(): GetRoomTokenResponse? {
         return try {
-            val bearerToken = SupabaseSessionManager.getBearerToken(appContext)
-            val res = SupabaseClient.api.getRoomToken(
+            lastTokenErrorCode = null
+            lastTokenErrorMsg = null
+            SupabaseSessionManager.ensureActiveSession(appContext)
+            var bearerToken = SupabaseSessionManager.getAuthenticatedBearerToken(appContext)
+                ?: SupabaseSessionManager.getBearerToken(appContext)
+            var res = SupabaseClient.api.getRoomToken(
                 auth = bearerToken,
                 body = GetRoomTokenRequest(room_id = roomId)
             )
+            if (res.code() == 401) {
+                SupabaseSessionManager.forceRefreshSession(appContext)
+                bearerToken = SupabaseSessionManager.getAuthenticatedBearerToken(appContext)
+                    ?: SupabaseSessionManager.getBearerToken(appContext)
+                res = SupabaseClient.api.getRoomToken(
+                    auth = bearerToken,
+                    body = GetRoomTokenRequest(room_id = roomId)
+                )
+            }
             if (res.isSuccessful && res.body() != null) {
                 res.body()
             } else {
                 val code = res.code()
                 val errBody = res.errorBody()?.string() ?: ""
-                Log.d(TAG, "fetchRoomToken error: httpCode=$code, errorBody=$errBody")
+                lastTokenErrorCode = code
+                lastTokenErrorMsg = when (code) {
+                    401 -> "Session expired. Please sign in again."
+                    403 -> "Voice permission restricted for this room."
+                    404 -> "Voice room not found."
+                    410 -> "This voice room has ended."
+                    else -> "Voice server error ($code)"
+                }
+                Log.w(TAG, "fetchRoomToken error: httpCode=$code, errorBody=$errBody")
+                com.example.diagnostics.CrashAndErrorReporter.recordNonFatal(
+                    source = "RoomVoiceToken",
+                    message = "HTTP $code fetching voice token"
+                )
                 null
             }
         } catch (e: Exception) {
             Log.e(TAG, "fetchRoomToken exception with stack trace", e)
+            lastTokenErrorMsg = "Network error connecting voice"
+            com.example.diagnostics.CrashAndErrorReporter.recordNonFatal(
+                source = "RoomVoiceToken",
+                message = e.message ?: "Token request failed",
+                throwable = e
+            )
             null
         }
     }
 
     fun onRoleChanged(newRole: String) {
         val oldRole = currentRole
+        if (newRole == oldRole) return
         currentRole = newRole
         Log.d(TAG, "onRoleChanged: $oldRole -> $newRole")
 
+        val engine = currentEngine ?: return
         if ((newRole == "speaker" || newRole == "host") && oldRole == "listener") {
             // Upgrade: listener -> speaker
             scope.launch(Dispatchers.IO) {
@@ -183,10 +223,9 @@ class RoomVoiceSession(
                 val response = fetchRoomToken()
                 val freshToken = response?.token ?: response?.rtc_token
                 if (!freshToken.isNullOrBlank()) {
-                    currentEngine?.upgradeToPublisher(freshToken)
-                    // Sync current mic state
+                    engine.upgradeToPublisher(freshToken)
                     val micOn = RoomMicController.micOn.value
-                    currentEngine?.setMicEnabled(micOn)
+                    engine.setMicEnabled(micOn)
                 } else {
                     Log.d(TAG, "Failed to get fresh publisher token during upgrade")
                 }
@@ -194,8 +233,8 @@ class RoomVoiceSession(
         } else if (newRole == "listener" && (oldRole == "speaker" || oldRole == "host")) {
             // Downgrade: speaker -> listener
             Log.d(TAG, "Downgrading role to listener")
-            currentEngine?.downgradeToListener()
-            currentEngine?.setMicEnabled(false)
+            engine.downgradeToListener()
+            engine.setMicEnabled(false)
         }
     }
 
@@ -227,24 +266,24 @@ class RoomVoiceSession(
         reconnectWatchdogJob = scope.launch {
             delay(20_000L) // 20 seconds timeout
             if (_connectionState.value is VoiceConnectionState.Reconnecting || _connectionState.value is VoiceConnectionState.Failed) {
-                handleConnectionFailure("Reconnection timed out (> 20s)")
+                handleConnectionFailure("Reconnection timed out (> 20s)", retryable = true)
             }
         }
     }
 
-    private fun handleConnectionFailure(reason: String) {
+    private fun handleConnectionFailure(reason: String, retryable: Boolean = true) {
         if (isLeaving) return
-        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+        if (retryable && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
             reconnectAttempts++
             Log.d(TAG, "Voice connection attempt failed ($reason). Retrying attempt $reconnectAttempts of $MAX_RECONNECT_ATTEMPTS...")
             _connectionState.value = VoiceConnectionState.Reconnecting
             scope.launch {
-                delay(2000L * reconnectAttempts)
+                delay(1500L * reconnectAttempts)
                 connect()
             }
         } else {
-            Log.d(TAG, "Voice connection exhausted all $MAX_RECONNECT_ATTEMPTS attempts. Displaying retry.")
-            _connectionState.value = VoiceConnectionState.Failed("Voice connection failed, tap to retry")
+            Log.d(TAG, "Voice connection stopped (retryable=$retryable, reason=$reason)")
+            _connectionState.value = VoiceConnectionState.Failed(reason.ifBlank { "Voice connection failed, tap to retry" })
         }
     }
 

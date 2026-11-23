@@ -393,30 +393,33 @@ object EncryptedChatRepository {
         } else null
 
         if (reactionJson != null) {
-            val targetId = reactionJson.optString("target").ifBlank { reactionJson.optString("target_message_id") }
+            val rawTargetId = reactionJson.optString("target").ifBlank { reactionJson.optString("target_message_id") }.trim()
             val emoji = reactionJson.optString("emoji")
-            val op = reactionJson.optString("op", "set")
+            val op = reactionJson.optString("op", "set").trim().lowercase()
             val rxTs = reactionJson.optLong("ts", timestamp)
 
-            if (targetId.isNotBlank()) {
-                if (db.messageDao().messageExists(targetId)) {
+            if (rawTargetId.isNotBlank()) {
+                val targetMsg = db.messageDao().getMessage(rawTargetId)
+                    ?: db.messageDao().getMessageByClientId(rawTargetId)
+                val resolvedTargetId = targetMsg?.id ?: rawTargetId
+                val existing = db.dmMessageReactionDao().getReaction(resolvedTargetId, senderId)
+                if (existing == null || existing.ts <= rxTs) {
                     if (op == "remove") {
-                        db.dmMessageReactionDao().deleteReaction(targetId, senderId)
+                        db.dmMessageReactionDao().deleteReaction(resolvedTargetId, senderId)
                     } else if (emoji.isNotBlank()) {
                         db.dmMessageReactionDao().insertReaction(
                             com.example.db.LocalDmMessageReaction(
-                                conversationId = convId,
-                                targetMessageId = targetId,
+                                conversationId = targetMsg?.conversationId ?: convId,
+                                targetMessageId = resolvedTargetId,
                                 senderId = senderId,
                                 emoji = emoji,
                                 ts = rxTs
                             )
                         )
-                        val targetMsg = db.messageDao().getMessage(targetId)
                         val myUserId = SupabaseSessionManager.getUserId(context)
                         if (targetMsg?.isOutgoing == true && senderId != myUserId &&
                             !com.example.service.PushNotificationManager.isChatOpenInForeground(
-                                conversationId = convId,
+                                conversationId = targetMsg.conversationId,
                                 partnerUserId = senderId
                             )
                         ) {
@@ -426,11 +429,11 @@ object EncryptedChatRepository {
                                 title = "FunkyTalk Reaction",
                                 message = "$senderName reacted $emoji to your message",
                                 partnerUserId = senderId,
-                                conversationId = convId,
+                                conversationId = targetMsg.conversationId,
                                 senderId = senderId,
                                 kind = "dm",
                                 notificationId = com.example.service.PushNotificationManager.notificationIdForChat(
-                                    conversationId = convId,
+                                    conversationId = targetMsg.conversationId,
                                     fallbackPartnerId = senderId
                                 ),
                                 channelId = com.example.util.SystemNotificationHelper.CHANNEL_MESSAGES_ID
@@ -690,6 +693,24 @@ object EncryptedChatRepository {
             "[voice]downloading...|$durationSecs"
         }
 
+        // 0. Persist retry descriptor sidecar locally BEFORE server acknowledgement so media can always be retried on-demand
+        saveDmMediaDescriptorSidecar(
+            context = context,
+            msgId = msgId,
+            rawPath = rawPath,
+            cleanPath = cleanPath,
+            convId = convId,
+            senderId = senderId,
+            recipientId = recipientId,
+            keyBase64 = keyBase64,
+            nonceBase64 = nonceBase64,
+            mimeType = mimeType,
+            messageType = messageType,
+            durationSecs = durationSecs,
+            captionSuffix = captionSuffix,
+            timestamp = timestamp
+        )
+
         // 1. Save local message record in Room FIRST (Strict Order of Operations)
         saveDecryptedMessageLocally(
             context = context,
@@ -701,20 +722,135 @@ object EncryptedChatRepository {
             timestamp = timestamp
         )
 
-        // 2. Acknowledge server row ONLY after local record is written
+        // 2. Acknowledge server row ONLY after local record & sidecar are written
         deleteMessageFromServer(context, token, msgId)
 
         // 3. Download & decrypt media payload in background with retries
         scope.launch(Dispatchers.IO) {
-            try {
-                if (keyBase64.isBlank() || nonceBase64.isBlank()) return@launch
-                val keyBytes = Base64.decode(keyBase64, Base64.DEFAULT)
-                val nonceBytes = Base64.decode(nonceBase64, Base64.DEFAULT)
+            fetchAndSaveDmMediaFromDescriptor(
+                context = context,
+                msgId = msgId,
+                convId = convId,
+                senderId = senderId,
+                recipientId = recipientId,
+                rawPath = rawPath,
+                cleanPath = cleanPath,
+                keyBase64 = keyBase64,
+                nonceBase64 = nonceBase64,
+                mimeType = mimeType,
+                messageType = messageType,
+                durationSecs = durationSecs,
+                captionSuffix = captionSuffix,
+                timestamp = timestamp,
+                fallbackToken = token
+            )
+        }
+    }
 
-                SupabaseSessionManager.ensureActiveSession(context)
+    private fun dmDescriptorSidecarFile(context: Context, msgId: String): File {
+        val uid = com.example.ActiveUserManager.requireActiveUid(context)
+        val dir = com.example.ActiveUserManager.mediaDir(context, uid).apply { mkdirs() }
+        return File(dir, "$msgId.desc.json")
+    }
+
+    private fun saveDmMediaDescriptorSidecar(
+        context: Context,
+        msgId: String,
+        rawPath: String,
+        cleanPath: String,
+        convId: String,
+        senderId: String,
+        recipientId: String,
+        keyBase64: String,
+        nonceBase64: String,
+        mimeType: String,
+        messageType: String,
+        durationSecs: Int,
+        captionSuffix: String?,
+        timestamp: Long
+    ) {
+        try {
+            val json = JSONObject().apply {
+                put("raw_path", rawPath)
+                put("clean_path", cleanPath)
+                put("conv_id", convId)
+                put("sender_id", senderId)
+                put("recipient_id", recipientId)
+                put("media_key", keyBase64)
+                put("media_nonce", nonceBase64)
+                put("mime_type", mimeType)
+                put("message_type", messageType)
+                put("duration_seconds", durationSecs)
+                if (!captionSuffix.isNullOrBlank()) put("caption", captionSuffix)
+                put("timestamp", timestamp)
+            }
+            dmDescriptorSidecarFile(context, msgId).writeText(json.toString())
+        } catch (_: Exception) {
+        }
+    }
+
+    suspend fun downloadDmMediaOnDemand(context: Context, messageId: String): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val sidecar = dmDescriptorSidecarFile(context, messageId)
+            if (!sidecar.exists()) {
+                return@withContext Result.failure(IllegalStateException("Media descriptor unavailable"))
+            }
+            val j = JSONObject(sidecar.readText())
+            val ok = fetchAndSaveDmMediaFromDescriptor(
+                context = context,
+                msgId = messageId,
+                convId = j.optString("conv_id"),
+                senderId = j.optString("sender_id"),
+                recipientId = j.optString("recipient_id"),
+                rawPath = j.optString("raw_path"),
+                cleanPath = j.optString("clean_path"),
+                keyBase64 = j.optString("media_key"),
+                nonceBase64 = j.optString("media_nonce"),
+                mimeType = j.optString("mime_type", "audio/mp4"),
+                messageType = j.optString("message_type", "image"),
+                durationSecs = j.optInt("duration_seconds", 0),
+                captionSuffix = j.optString("caption", "").takeIf { it.isNotBlank() },
+                timestamp = j.optLong("timestamp", System.currentTimeMillis()),
+                fallbackToken = SupabaseSessionManager.getBearerToken(context)
+            )
+            if (ok != null) Result.success(ok) else Result.failure(IOException("Failed to download media"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private suspend fun fetchAndSaveDmMediaFromDescriptor(
+        context: Context,
+        msgId: String,
+        convId: String,
+        senderId: String,
+        recipientId: String,
+        rawPath: String,
+        cleanPath: String,
+        keyBase64: String,
+        nonceBase64: String,
+        mimeType: String,
+        messageType: String,
+        durationSecs: Int,
+        captionSuffix: String?,
+        timestamp: Long,
+        fallbackToken: String
+    ): String? {
+        if (keyBase64.isBlank() || nonceBase64.isBlank()) return null
+        val keyBytes = Base64.decode(keyBase64, Base64.DEFAULT)
+        val nonceBytes = Base64.decode(nonceBase64, Base64.DEFAULT)
+
+        for (attempt in 0 until 2) {
+            try {
+                if (attempt > 0) {
+                    delay(1200L)
+                    SupabaseSessionManager.forceRefreshSession(context)
+                } else {
+                    SupabaseSessionManager.ensureActiveSession(context)
+                }
                 val authToken = SupabaseSessionManager.getAuthenticatedBearerToken(context)
                     ?: (SupabaseSessionManager.getAccessToken(context)?.let { "Bearer $it" })
-                    ?: token
+                    ?: fallbackToken
 
                 val encryptedBlobBytes = downloadDmMediaBlob(
                     context = context,
@@ -728,11 +864,6 @@ object EncryptedChatRepository {
                 if (encryptedBlobBytes != null) {
                     val rawBytes = E2EEMediaManager.decryptMediaPayload(encryptedBlobBytes, keyBytes, nonceBytes)
                     val localFile = saveLocalMediaFile(context, msgId, rawBytes, mimeType)
-                    val captionSuffix = descriptorJson.optString("caption", "")
-                        .replace("\n", " ")
-                        .replace("|", " ")
-                        .trim()
-                        .takeIf { it.isNotBlank() }
                     val localText = if (messageType == "image") {
                         if (captionSuffix != null) "[img]file://${localFile.absolutePath}|$captionSuffix" else "[img]file://${localFile.absolutePath}"
                     } else {
@@ -748,16 +879,23 @@ object EncryptedChatRepository {
                         plaintext = localText,
                         timestamp = timestamp
                     )
-
+                    runCatching { dmDescriptorSidecarFile(context, msgId).delete() }
                     deleteStorageObjectFromServer(context, authToken, cleanPath)
                     Log.d(TAG, "Successfully downloaded, decrypted and updated media message $msgId")
-                } else {
-                    Log.w(TAG, "Media blob download returned null for $msgId; placeholder remains")
+                    return localFile.absolutePath
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Background media processing failed for $msgId: ${e.message}")
+                Log.w(TAG, "Media processing attempt ${attempt + 1} failed for $msgId: ${e.message}")
+                if (attempt == 1) {
+                    com.example.diagnostics.CrashAndErrorReporter.recordNonFatal(
+                        source = "DmMediaDownload",
+                        message = "Media $msgId download failed: ${e.message}",
+                        throwable = e
+                    )
+                }
             }
         }
+        return null
     }
 
     private suspend fun saveLocalPlaceholderAndCleanup(
@@ -821,9 +959,8 @@ object EncryptedChatRepository {
         val ext = when {
             mimeType.contains("png") -> "png"
             mimeType.contains("jpg") || mimeType.contains("jpeg") -> "jpg"
-            mimeType.contains("aac") -> "aac"
             mimeType.contains("3gp") -> "3gp"
-            mimeType.contains("m4a") -> "m4a"
+            mimeType.contains("m4a") || mimeType.contains("mp4") || mimeType.contains("aac") || mimeType.contains("audio") -> "m4a"
             else -> "bin"
         }
         val file = File(dir, "${messageId}.$ext")
@@ -2101,21 +2238,24 @@ object EncryptedChatRepository {
             val myUserId = SupabaseSessionManager.ensureActiveSession(context)
                 ?: SupabaseSessionManager.getUserId(context)
                 ?: return@withContext Result.failure(IllegalStateException("User not authenticated"))
-            val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+            var token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
                 ?: (SupabaseSessionManager.getAccessToken(context)?.let { "Bearer $it" })
                 ?: SupabaseSessionManager.getBearerToken(context)
 
             val resolvedUserId = resolveRecipientAuthUserId(context, recipientUserId) ?: recipientUserId
+            val targetMsg = db.messageDao().getMessage(targetMessageId)
+                ?: db.messageDao().getMessageByClientId(targetMessageId)
+            val canonicalTargetId = targetMsg?.id ?: targetMessageId
             val ts = System.currentTimeMillis()
 
-            // Update local DB reaction immediately
+            // Update local DB reaction immediately using canonical local ID
             if (op == "remove") {
-                db.dmMessageReactionDao().deleteReaction(targetMessageId, myUserId)
+                db.dmMessageReactionDao().deleteReaction(canonicalTargetId, myUserId)
             } else {
                 db.dmMessageReactionDao().insertReaction(
                     com.example.db.LocalDmMessageReaction(
                         conversationId = conversationId,
-                        targetMessageId = targetMessageId,
+                        targetMessageId = canonicalTargetId,
                         senderId = myUserId,
                         emoji = emoji,
                         ts = ts
@@ -2128,54 +2268,100 @@ object EncryptedChatRepository {
                 return@withContext Result.success(Unit)
             }
 
-            // Fetch recipient public key
-            val keyResp = SupabaseClient.api.getUserPublicKey(
-                apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
-                auth = token,
-                userIdFilter = "eq.$resolvedUserId"
-            )
-            if (!keyResp.isSuccessful || keyResp.body().isNullOrEmpty()) {
-                Log.w(TAG, "Recipient $recipientUserId has no public key registered for reaction.")
-                return@withContext Result.success(Unit)
+            val serverConvId = resolveOrConfirmServerConversationId(
+                context = context,
+                db = db,
+                token = token,
+                localConversationId = conversationId,
+                resolvedUserId = resolvedUserId
+            ).getOrElse {
+                return@withContext Result.failure(it)
             }
-            val keyItem = keyResp.body()!!.first()
-            val recipientPublicKey = keyItem.identity_public_key ?: return@withContext Result.success(Unit)
 
-            // Construct reaction payload JSON
+            val (recipientPublicKey, keyVersion) = getRecipientPublicKeyCached(
+                context = context,
+                token = token,
+                resolvedUserId = resolvedUserId,
+                displayName = "Partner"
+            ).getOrElse {
+                return@withContext Result.failure(it)
+            }
+
+            // Construct reaction payload JSON using target message's canonical wire id (clientId if outgoing/known)
+            val wireTargetId = targetMsg?.clientId?.takeIf { it.isNotBlank() } ?: canonicalTargetId
             val payloadObj = JSONObject().apply {
                 put("t", "reaction")
-                put("target", targetMessageId)
+                put("target", wireTargetId)
                 put("emoji", emoji)
                 put("op", op)
                 put("ts", ts)
             }
-            val ciphertext = E2EEManager.encryptMessage(recipientPublicKey, payloadObj.toString())
+            val ciphertext = E2EEManager.encryptMessageAsync(recipientPublicKey, payloadObj.toString())
+            val reactionMsgId = UUID.randomUUID().toString()
 
-            val sendResp = SupabaseClient.api.sendDmMessage(
-                apiKey = com.example.BuildConfig.SUPABASE_ANON_KEY,
+            var sendResp = SupabaseClient.api.sendDmMessage(
+                apiKey = BuildConfig.SUPABASE_ANON_KEY,
                 auth = token,
                 body = SendDmMessageRequest(
-                    conversation_id = conversationId,
+                    id = reactionMsgId,
+                    conversation_id = serverConvId,
                     sender_id = myUserId,
                     recipient_id = resolvedUserId,
                     ciphertext = ciphertext,
                     nonce = "",
-                    key_version = keyItem.key_version
+                    key_version = keyVersion,
+                    message_type = "reaction"
                 )
             )
 
+            if (sendResp.code() == 401) {
+                SupabaseSessionManager.forceRefreshSession(context)
+                token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                    ?: SupabaseSessionManager.getBearerToken(context)
+                sendResp = SupabaseClient.api.sendDmMessage(
+                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                    auth = token,
+                    body = SendDmMessageRequest(
+                        id = reactionMsgId,
+                        conversation_id = serverConvId,
+                        sender_id = myUserId,
+                        recipient_id = resolvedUserId,
+                        ciphertext = ciphertext,
+                        nonce = "",
+                        key_version = keyVersion,
+                        message_type = "reaction"
+                    )
+                )
+            }
+
             if (!sendResp.isSuccessful) {
+                val errBody = runCatching { sendResp.errorBody()?.string().orEmpty() }.getOrDefault("")
                 if (sendResp.code() == 429) {
                     withContext(Dispatchers.Main) {
                         android.widget.Toast.makeText(context, "Slow down", android.widget.Toast.LENGTH_SHORT).show()
                     }
+                    return@withContext Result.success(Unit)
                 }
-                Log.w(TAG, "sendDmReaction: failed with code ${sendResp.code()}")
+                if (sendResp.code() == 403 || sendResp.code() == 401) {
+                    publicKeyCache.remove(resolvedUserId)
+                }
+                val errMsg = "sendDmReaction failed HTTP ${sendResp.code()}: $errBody"
+                Log.w(TAG, errMsg)
+                com.example.diagnostics.CrashAndErrorReporter.recordNonFatal(
+                    source = "DmReaction",
+                    message = "HTTP ${sendResp.code()} sending DM reaction"
+                )
+                return@withContext Result.failure(IllegalStateException(errMsg))
             }
 
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e(TAG, "sendDmReaction error", e)
+            com.example.diagnostics.CrashAndErrorReporter.recordNonFatal(
+                source = "DmReaction",
+                message = e.message ?: "Reaction failed",
+                throwable = e
+            )
             Result.failure(e)
         }
     }

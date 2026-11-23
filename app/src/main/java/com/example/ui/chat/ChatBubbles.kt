@@ -553,7 +553,7 @@ fun VoiceNoteContent(
                                 .clickable(onClick = onSpeedClick)
                                 .padding(horizontal = 7.dp, vertical = 2.dp),
                         )
-                    } else if (isUnread) {
+                    } else if (isUnread && positionMs == 0L) {
                         Box(Modifier.size(8.dp).clip(CircleShape).background(if (outgoing) c.accentOut else c.accentIn))
                     }
                 }

@@ -2,6 +2,7 @@ package com.example.ui.screens.chat
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.speech.tts.TextToSpeech
@@ -13,6 +14,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -144,6 +147,7 @@ fun GroupChatScreen(
     var showAiAssistSheet by remember { mutableStateOf(false) }
     var activeMediaViewerIndex by remember { mutableStateOf<Int?>(null) }
     var pendingPhotoUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var inspectedMemberProfile by remember { mutableStateOf<Triple<String, String, String?>?>(null) }
 
     val voicePlayer = rememberVoicePlaybackController()
     val voiceRecorder = rememberLiveVoiceRecorder()
@@ -408,8 +412,10 @@ fun GroupChatScreen(
             mergedMessages.count { it.senderId != currentUserId }
         }
 
-        BackHandler(enabled = isEmojiPickerOpen || failedMessageForSheet != null || isSelectionMode || selectedMessageForMenu != null) {
-            if (isEmojiPickerOpen) {
+        BackHandler(enabled = inspectedMemberProfile != null || isEmojiPickerOpen || failedMessageForSheet != null || isSelectionMode || selectedMessageForMenu != null) {
+            if (inspectedMemberProfile != null) {
+                inspectedMemberProfile = null
+            } else if (isEmojiPickerOpen) {
                 isEmojiPickerOpen = false
             } else if (failedMessageForSheet != null) {
                 failedMessageForSheet = null
@@ -538,7 +544,7 @@ fun GroupChatScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(colors.surface)
-                        .imePadding()
+                        .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
                 ) {
                     ChatInputBar(
                         text = inputText,
@@ -586,7 +592,7 @@ fun GroupChatScreen(
                             {
                                 ReplyPreviewStrip(
                                     title = replyingToMessage!!.senderName,
-                                    preview = replyingToMessage!!.text.take(60),
+                                    preview = ChatAnimatedStickers.readableLabel(replyingToMessage!!.text).take(60),
                                     onClose = { replyingToMessage = null }
                                 )
                             }
@@ -610,6 +616,7 @@ fun GroupChatScreen(
                                                 rawBytes = result.bytes,
                                                 messageType = "voice",
                                                 mimeType = "audio/aac",
+                                                durationSeconds = (result.durationMs / 1000).toInt().coerceAtLeast(1),
                                                 tapElapsedMs = tapMs
                                             )
                                             if (timelineItems.isNotEmpty()) {
@@ -647,6 +654,7 @@ fun GroupChatScreen(
                                                 rawBytes = result.bytes,
                                                 messageType = "voice",
                                                 mimeType = "audio/aac",
+                                                durationSeconds = (result.durationMs / 1000).toInt().coerceAtLeast(1),
                                                 tapElapsedMs = tapMs
                                             )
                                         }
@@ -670,6 +678,24 @@ fun GroupChatScreen(
                                 if (inputText.isNotEmpty()) {
                                     val lastCharCount = Character.charCount(inputText.codePointBefore(inputText.length))
                                     inputText = inputText.dropLast(lastCharCount)
+                                }
+                            },
+                            onAnimatedStickerSelect = { sticker ->
+                                val reply = replyingToMessage
+                                val tapMs = ChatTimingTracker.nowMs()
+                                replyingToMessage = null
+                                isEmojiPickerOpen = false
+                                GroupChatRepository.enqueueSendGroupMessage(
+                                    context = context,
+                                    groupId = group.id,
+                                    text = ChatAnimatedStickers.encode(sticker),
+                                    replyToMessage = reply,
+                                    tapElapsedMs = tapMs
+                                )
+                                if (timelineItems.isNotEmpty()) {
+                                    coroutineScope.launch {
+                                        listState.animateScrollToItem(timelineItems.size - 1)
+                                    }
                                 }
                             }
                         )
@@ -747,13 +773,16 @@ fun GroupChatScreen(
                                                 modifier = Modifier
                                                     .size(28.dp)
                                                     .clip(CircleShape)
-                                                    .background(colors.senderColor(firstMsg.senderId).copy(alpha = 0.2f)),
+                                                    .background(colors.senderColor(firstMsg.senderId).copy(alpha = 0.2f))
+                                                    .clickable(enabled = firstMsg.senderId.isNotBlank()) {
+                                                        inspectedMemberProfile = Triple(firstMsg.senderId, firstMsg.senderName, firstMsg.senderAvatar)
+                                                    },
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 if (!firstMsg.senderAvatar.isNullOrBlank()) {
                                                     AsyncImage(
                                                         model = firstMsg.senderAvatar,
-                                                        contentDescription = null,
+                                                        contentDescription = "View ${firstMsg.senderName} profile",
                                                         modifier = Modifier.fillMaxSize(),
                                                         contentScale = ContentScale.Crop
                                                     )
@@ -779,7 +808,11 @@ fun GroupChatScreen(
                                             SenderName(
                                                 name = firstMsg.senderName,
                                                 userId = firstMsg.senderId,
-                                                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
+                                                modifier = Modifier
+                                                    .padding(start = 4.dp, bottom = 2.dp)
+                                                    .clickable(enabled = firstMsg.senderId.isNotBlank()) {
+                                                        inspectedMemberProfile = Triple(firstMsg.senderId, firstMsg.senderName, firstMsg.senderAvatar)
+                                                    }
                                             )
                                         }
 
@@ -859,8 +892,18 @@ fun GroupChatScreen(
                                             ReactionRow(
                                                 reactions = item.reactions,
                                                 onClick = { emoji ->
+                                                    val isMine = item.reactions.any { it.emoji == emoji && it.mine }
                                                     coroutineScope.launch {
-                                                        GroupChatRepository.sendGroupReaction(context, group.id, firstMsg.id, emoji)
+                                                        val res = GroupChatRepository.sendGroupReaction(
+                                                            context = context,
+                                                            groupId = group.id,
+                                                            targetMessageId = firstMsg.id,
+                                                            emoji = emoji,
+                                                            op = if (isMine) "remove" else "set"
+                                                        )
+                                                        if (res.isFailure) {
+                                                            Toast.makeText(context, res.exceptionOrNull()?.message ?: "Could not update reaction", Toast.LENGTH_SHORT).show()
+                                                        }
                                                     }
                                                 },
                                                 modifier = Modifier.padding(top = 2.dp)
@@ -886,6 +929,7 @@ fun GroupChatScreen(
 
                                 val rawText = msg.text
                                 val isOnlyEmojis = emojiOnlyCount(rawText.trim())
+                                val parsedSticker = ChatAnimatedStickers.parse(rawText)
 
                                 AnimatedBubbleEntrance(animateEntrance = isNewItem, outgoing = isOutgoing) {
 
@@ -908,13 +952,16 @@ fun GroupChatScreen(
                                                 modifier = Modifier
                                                     .size(28.dp)
                                                     .clip(CircleShape)
-                                                    .background(colors.senderColor(msg.senderId).copy(alpha = 0.2f)),
+                                                    .background(colors.senderColor(msg.senderId).copy(alpha = 0.2f))
+                                                    .clickable(enabled = msg.senderId.isNotBlank()) {
+                                                        inspectedMemberProfile = Triple(msg.senderId, msg.senderName, msg.senderAvatar)
+                                                    },
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 if (!msg.senderAvatar.isNullOrBlank()) {
                                                     AsyncImage(
                                                         model = msg.senderAvatar,
-                                                        contentDescription = null,
+                                                        contentDescription = "View ${msg.senderName} profile",
                                                         modifier = Modifier.fillMaxSize(),
                                                         contentScale = ContentScale.Crop
                                                     )
@@ -941,7 +988,11 @@ fun GroupChatScreen(
                                             SenderName(
                                                 name = msg.senderName,
                                                 userId = msg.senderId,
-                                                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
+                                                modifier = Modifier
+                                                    .padding(start = 4.dp, bottom = 2.dp)
+                                                    .clickable(enabled = msg.senderId.isNotBlank()) {
+                                                        inspectedMemberProfile = Triple(msg.senderId, msg.senderName, msg.senderAvatar)
+                                                    }
                                             )
                                         }
 
@@ -973,6 +1024,23 @@ fun GroupChatScreen(
                                                 status = status,
                                                 modifier = bubbleModifier
                                             )
+                                        } else if (parsedSticker != null) {
+                                            Column(
+                                                modifier = bubbleModifier.padding(vertical = 2.dp),
+                                                horizontalAlignment = if (isOutgoing) Alignment.End else Alignment.Start
+                                            ) {
+                                                AnimatedStickerGraphic(
+                                                    sticker = parsedSticker.sticker,
+                                                    size = 124.dp,
+                                                    emojiFontSizeSp = 52
+                                                )
+                                                MessageMeta(
+                                                    time = formatChatTime(msg.timestamp),
+                                                    outgoing = isOutgoing,
+                                                    status = status,
+                                                    modifier = Modifier.padding(top = 2.dp, start = 4.dp, end = 4.dp)
+                                                )
+                                            }
                                         } else {
                                             MessageBubble(
                                                 outgoing = isOutgoing,
@@ -985,7 +1053,7 @@ fun GroupChatScreen(
                                                 if (!msg.replyToMessageId.isNullOrBlank()) {
                                                     ReplyQuote(
                                                         sender = msg.replyToSenderName ?: "Reply",
-                                                        preview = msg.replyToPreview ?: "Message",
+                                                        preview = ChatAnimatedStickers.readableLabel(msg.replyToPreview ?: "Message"),
                                                         outgoing = isOutgoing,
                                                         onClick = {
                                                             val targetIdx = timelineItems.indexOfFirst { tl ->
@@ -1009,9 +1077,58 @@ fun GroupChatScreen(
 
                                                 when {
                                                     msg.messageType == "voice" || rawText.startsWith("[voice]") -> {
-                                                        val path = msg.localMediaPath ?: rawText.removePrefix("[voice]").substringBefore("|")
+                                                        val resolvedPath = msg.localMediaPath?.takeIf { it.isNotBlank() }
+                                                            ?: rawText.removePrefix("[voice]").substringBefore("|")
+                                                                .takeIf { it.startsWith("file://") || it.startsWith("/") || it.startsWith("http") }
+                                                                .orEmpty()
                                                         val durationSec = rawText.substringAfter("|", "0").toIntOrNull() ?: 0
                                                         val isPlayingThis = voicePlayer.currentPlayingId == msg.id && voicePlayer.isPlaying
+                                                        var isDownloadingVoice by remember(msg.id) { mutableStateOf(false) }
+
+                                                        fun playOrFetchGroupVoice(seekFrac: Float? = null) {
+                                                            if (resolvedPath.isBlank()) {
+                                                                if (isDownloadingVoice) return
+                                                                isDownloadingVoice = true
+                                                                coroutineScope.launch {
+                                                                    val dl = GroupChatRepository.downloadGroupMessageMediaOnDemand(context, msg)
+                                                                    isDownloadingVoice = false
+                                                                    dl.onSuccess { localPath ->
+                                                                        voicePlayer.playOrPause(
+                                                                            messageId = msg.id,
+                                                                            audioSource = localPath,
+                                                                            fallbackDurationMs = durationSec * 1000L,
+                                                                            seekFraction = seekFrac,
+                                                                            onError = { err -> Toast.makeText(context, err, Toast.LENGTH_SHORT).show() }
+                                                                        )
+                                                                    }.onFailure { err ->
+                                                                        Toast.makeText(context, err.message ?: "Could not load voice note", Toast.LENGTH_SHORT).show()
+                                                                    }
+                                                                }
+                                                            } else {
+                                                                voicePlayer.playOrPause(
+                                                                    messageId = msg.id,
+                                                                    audioSource = resolvedPath,
+                                                                    fallbackDurationMs = durationSec * 1000L,
+                                                                    seekFraction = seekFrac,
+                                                                    onError = { err ->
+                                                                        coroutineScope.launch {
+                                                                            val dl = GroupChatRepository.downloadGroupMessageMediaOnDemand(context, msg)
+                                                                            dl.onSuccess { localPath ->
+                                                                                voicePlayer.playOrPause(
+                                                                                    messageId = msg.id,
+                                                                                    audioSource = localPath,
+                                                                                    fallbackDurationMs = durationSec * 1000L,
+                                                                                    seekFraction = seekFrac,
+                                                                                    onError = { e2 -> Toast.makeText(context, e2, Toast.LENGTH_SHORT).show() }
+                                                                                )
+                                                                            }.onFailure {
+                                                                                Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                )
+                                                            }
+                                                        }
 
                                                         VoiceNoteContent(
                                                             outgoing = isOutgoing,
@@ -1019,24 +1136,11 @@ fun GroupChatScreen(
                                                             durationMs = durationSec * 1000L,
                                                             positionMs = if (voicePlayer.currentPlayingId == msg.id) voicePlayer.positionMs else 0L,
                                                             isPlaying = isPlayingThis,
-                                                            isLoading = voicePlayer.currentPlayingId == msg.id && voicePlayer.isLoading,
-                                                            isUnread = !isOutgoing,
+                                                            isLoading = isDownloadingVoice || (voicePlayer.currentPlayingId == msg.id && voicePlayer.isLoading),
+                                                            isUnread = !isOutgoing && !voicePlayer.hasPlayed(msg.id),
                                                             speed = voicePlayer.speed,
-                                                            onPlayPause = {
-                                                                voicePlayer.playOrPause(
-                                                                    messageId = msg.id,
-                                                                    audioSource = path,
-                                                                    fallbackDurationMs = durationSec * 1000L,
-                                                                    onError = { err ->
-                                                                        Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
-                                                                    }
-                                                                )
-                                                            },
-                                                            onSeek = { seekFrac ->
-                                                                if (voicePlayer.currentPlayingId == msg.id) {
-                                                                    voicePlayer.seekTo(seekFrac)
-                                                                }
-                                                            },
+                                                            onPlayPause = { playOrFetchGroupVoice(null) },
+                                                            onSeek = { seekFrac -> playOrFetchGroupVoice(seekFrac) },
                                                             onSpeedClick = { voicePlayer.cycleSpeed() }
                                                         )
                                                     }
@@ -1126,8 +1230,18 @@ fun GroupChatScreen(
                                             ReactionRow(
                                                 reactions = item.reactions,
                                                 onClick = { emoji ->
+                                                    val isMine = item.reactions.any { it.emoji == emoji && it.mine }
                                                     coroutineScope.launch {
-                                                        GroupChatRepository.sendGroupReaction(context, group.id, msg.id, emoji)
+                                                        val res = GroupChatRepository.sendGroupReaction(
+                                                            context = context,
+                                                            groupId = group.id,
+                                                            targetMessageId = msg.id,
+                                                            emoji = emoji,
+                                                            op = if (isMine) "remove" else "set"
+                                                        )
+                                                        if (res.isFailure) {
+                                                            Toast.makeText(context, res.exceptionOrNull()?.message ?: "Could not update reaction", Toast.LENGTH_SHORT).show()
+                                                        }
                                                     }
                                                 },
                                                 modifier = Modifier.padding(top = 2.dp)
@@ -1166,20 +1280,38 @@ fun GroupChatScreen(
         // Long-Press Action Overlay Menu
         if (selectedMessageForMenu != null) {
             val selectedMsg = selectedMessageForMenu!!
+            val currentMyReaction = rawReactions.find { it.targetMessageId == selectedMsg.id && it.senderId == currentUserId }?.emoji
+            val isImageMsg = isGroupImageMessage(selectedMsg)
+            val actionItems = buildList {
+                if (isImageMsg) {
+                    add(MessageAction("save_gallery", "Save to Gallery", { ChatIconDownload(tint = colors.text) }))
+                }
+                add(MessageAction("reply", "Reply", { ChatIconReply(tint = colors.text) }))
+                if (!isImageMsg && selectedMsg.messageType != "voice" && !selectedMsg.text.startsWith("[voice]")) {
+                    add(MessageAction("copy", "Copy Text", { ChatIconCopy(tint = colors.text) }))
+                    add(MessageAction("translate", "Translate", { ChatIconTranslate(tint = colors.text) }))
+                    add(MessageAction("listen", "Listen", { ChatIconVolume(tint = colors.text) }))
+                }
+                add(MessageAction("share", "Share", { ChatIconShare(tint = colors.text) }))
+                add(MessageAction("select", "Select", { ChatIconCheck(tint = colors.text) }))
+                add(MessageAction("delete", "Delete", { ChatIconTrash(tint = colors.danger) }, destructive = true))
+            }
             MessageLongPressOverlay(
-                myReaction = rawReactions.find { it.targetMessageId == selectedMsg.id && it.senderId == currentUserId }?.emoji,
-                actions = listOf(
-                    MessageAction("reply", "Reply", { ChatIconReply(tint = colors.text) }),
-                    MessageAction("copy", "Copy Text", { ChatIconCopy(tint = colors.text) }),
-                    MessageAction("translate", "Translate", { ChatIconTranslate(tint = colors.text) }),
-                    MessageAction("listen", "Listen", { ChatIconVolume(tint = colors.text) }),
-                    MessageAction("forward", "Forward", { ChatIconForward(tint = colors.text) }),
-                    MessageAction("select", "Select", { ChatIconCheck(tint = colors.text) }),
-                    MessageAction("delete", "Delete", { ChatIconTrash(tint = colors.danger) }, destructive = true)
-                ),
+                myReaction = currentMyReaction,
+                actions = actionItems,
                 onPickEmoji = { emoji ->
+                    val op = if (emoji == currentMyReaction) "remove" else "set"
                     coroutineScope.launch {
-                        GroupChatRepository.sendGroupReaction(context, group.id, selectedMsg.id, emoji)
+                        val res = GroupChatRepository.sendGroupReaction(
+                            context = context,
+                            groupId = group.id,
+                            targetMessageId = selectedMsg.id,
+                            emoji = emoji,
+                            op = op
+                        )
+                        if (res.isFailure) {
+                            Toast.makeText(context, res.exceptionOrNull()?.message ?: "Could not send reaction", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 },
                 onMoreEmoji = {
@@ -1187,9 +1319,23 @@ fun GroupChatScreen(
                 },
                 onAction = { actionId ->
                     when (actionId) {
+                        "save_gallery" -> {
+                            val node = parseGroupPhotoNode(selectedMsg, selectedMsg.senderId == currentUserId)
+                            coroutineScope.launch {
+                                val res = ChatMediaSaver.saveImageToGallery(context, node.source)
+                                Toast.makeText(
+                                    context,
+                                    res.fold(
+                                        onSuccess = { "Saved to Pictures/FunkyTalk" },
+                                        onFailure = { it.message ?: "Could not save photo" }
+                                    ),
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
                         "reply" -> replyingToMessage = selectedMsg
                         "copy" -> {
-                            clipboardManager.setText(AnnotatedString(selectedMsg.text))
+                            clipboardManager.setText(AnnotatedString(ChatAnimatedStickers.readableLabel(selectedMsg.text)))
                             Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
                         }
                         "translate" -> {
@@ -1205,8 +1351,19 @@ fun GroupChatScreen(
                         "listen" -> {
                             ttsEngine?.speak(selectedMsg.text, TextToSpeech.QUEUE_FLUSH, null, "msg_${selectedMsg.id}")
                         }
-                        "forward" -> {
-                            Toast.makeText(context, "Forwarding message", Toast.LENGTH_SHORT).show()
+                        "share" -> {
+                            if (isImageMsg) {
+                                val node = parseGroupPhotoNode(selectedMsg, selectedMsg.senderId == currentUserId)
+                                coroutineScope.launch {
+                                    ChatMediaSaver.shareImage(context, node.source)
+                                }
+                            } else {
+                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_TEXT, ChatAnimatedStickers.readableLabel(selectedMsg.text))
+                                }
+                                context.startActivity(Intent.createChooser(sendIntent, "Share message"))
+                            }
                         }
                         "select" -> {
                             isSelectionMode = true
@@ -1261,7 +1418,7 @@ fun GroupChatScreen(
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                     )
                 },
-                onSend = { urisToSend, captionText ->
+                onSendWithOptions = { urisToSend, captionText, rotations, isHd ->
                     val replySnapshot = replyingToMessage
                     val tapMs = ChatTimingTracker.nowMs()
                     pendingPhotoUris = emptyList()
@@ -1269,7 +1426,12 @@ fun GroupChatScreen(
                     coroutineScope.launch(Dispatchers.IO) {
                         urisToSend.forEachIndexed { idx, uri ->
                             try {
-                                val bytes = readChatImageBytes(context, uri)
+                                val bytes = ChatMediaSaver.prepareOutgoingImageBytes(
+                                    context = context,
+                                    uri = uri,
+                                    extraRotationDegrees = rotations[idx] ?: 0,
+                                    highQuality = isHd
+                                )
                                 if (bytes != null && bytes.isNotEmpty()) {
                                     GroupChatRepository.enqueueSendGroupMediaMessage(
                                         context = context,
@@ -1298,7 +1460,34 @@ fun GroupChatScreen(
             TelephotoMediaViewerDialog(
                 mediaItems = allMediaItems,
                 initialIndex = activeMediaViewerIndex!!.coerceIn(0, allMediaItems.size - 1),
-                onDismiss = { activeMediaViewerIndex = null }
+                onDismiss = { activeMediaViewerIndex = null },
+                onSave = { item ->
+                    coroutineScope.launch {
+                        val res = ChatMediaSaver.saveImageToGallery(context, item.url)
+                        Toast.makeText(
+                            context,
+                            res.fold(
+                                onSuccess = { "Saved to Pictures/FunkyTalk" },
+                                onFailure = { it.message ?: "Could not save photo" }
+                            ),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                },
+                onShare = { item ->
+                    coroutineScope.launch {
+                        ChatMediaSaver.shareImage(context, item.url)
+                    }
+                },
+                onDelete = { item ->
+                    coroutineScope.launch {
+                        GroupChatRepository.deleteGroupMessage(context, item.id)
+                        Toast.makeText(context, "Photo deleted", Toast.LENGTH_SHORT).show()
+                        if (allMediaItems.size <= 1) {
+                            activeMediaViewerIndex = null
+                        }
+                    }
+                }
             )
         }
 
@@ -1363,6 +1552,26 @@ fun GroupChatScreen(
                     }
                 }
             )
+        }
+        if (inspectedMemberProfile != null) {
+            val (uid, name, avatar) = inspectedMemberProfile!!
+            Dialog(
+                onDismissRequest = { inspectedMemberProfile = null },
+                properties = DialogProperties(
+                    usePlatformDefaultWidth = false,
+                    decorFitsSystemWindows = false
+                )
+            ) {
+                BackHandler { inspectedMemberProfile = null }
+                com.example.ui.screens.UserProfileFeedScreen(
+                    userId = uid,
+                    username = name,
+                    profileName = name,
+                    avatarUrl = avatar.orEmpty(),
+                    onBack = { inspectedMemberProfile = null },
+                    onStartChat = { inspectedMemberProfile = null }
+                )
+            }
         }
     }
 }

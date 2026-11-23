@@ -890,17 +890,19 @@ class AuthViewModel : ViewModel() {
     fun startVoiceSession(context: Context? = null, roomId: String, userId: String, userName: String, initialRole: String) {
         val current = _roomVoiceSession.value
         if (current != null && current.roomId == roomId) {
+            current.onRoleChanged(initialRole)
             Log.d("AuthViewModel", "RoomVoiceSession already running for roomId=$roomId")
             return
         }
         current?.leave()
-        val safeAppContext = context?.applicationContext 
+        val safeAppContext = context?.applicationContext
             ?: com.example.FunkyTalkApplication.getSafeAppContext()
         val session = com.example.voice.RoomVoiceSession(
             context = safeAppContext,
             roomId = roomId,
             userId = userId,
             userName = userName,
+            initialRole = initialRole,
             scope = viewModelScope
         )
         _roomVoiceSession.value = session
@@ -918,15 +920,24 @@ class AuthViewModel : ViewModel() {
         onResult: ((Boolean, GetRoomTokenResponse?, String?) -> Unit)? = null
     ) {
         val ctx = context ?: FunkyTalkApplication.appContext
-        val token = ctx?.let { SupabaseSessionManager.getBearerToken(it) } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 if (ctx != null) {
                     SupabaseSessionManager.ensureActiveSession(ctx)
                 }
+                var token = ctx?.let {
+                    SupabaseSessionManager.getAuthenticatedBearerToken(it)
+                        ?: SupabaseSessionManager.getBearerToken(it)
+                } ?: "Bearer ${BuildConfig.SUPABASE_ANON_KEY}"
                 val req = GetRoomTokenRequest(room_id = roomId)
-                val res = SupabaseClient.api.getRoomToken(auth = token, body = req)
+                var res = SupabaseClient.api.getRoomToken(auth = token, body = req)
+                if (res.code() == 401 && ctx != null) {
+                    SupabaseSessionManager.forceRefreshSession(ctx)
+                    token = SupabaseSessionManager.getAuthenticatedBearerToken(ctx)
+                        ?: SupabaseSessionManager.getBearerToken(ctx)
+                    res = SupabaseClient.api.getRoomToken(auth = token, body = req)
+                }
                 if (res.isSuccessful && res.body() != null) {
                     val body = res.body()!!
                     val role = body.role ?: (if (body.can_publish) "publisher" else "audience")
@@ -1900,11 +1911,13 @@ class AuthViewModel : ViewModel() {
 
                     val online = com.example.ui.components.AppNetworkManager.isOnline.value
                     if (verifiedUid.isNullOrBlank()) {
-                        if (online && !hasLocalSession) {
-                            Log.w("AuthViewModel", "Background boot session verification rejected")
-                            _sessionVerificationState.value = SessionVerificationState.Failed(com.example.util.ErrorMapper.MSG_UNAUTHORIZED)
-                            _authState.value = AuthState.Error(com.example.util.ErrorMapper.MSG_UNAUTHORIZED)
-                        }
+                        // Never lock out an already-cached/onboarded user with verify_error on cold start or expired JWT;
+                        // log quietly for diagnostics while API calls auto-refresh when needed.
+                        Log.w("AuthViewModel", "Background boot session refresh deferred (online=$online, hasLocalSession=$hasLocalSession)")
+                        com.example.diagnostics.CrashAndErrorReporter.recordNonFatal(
+                            source = "BootSessionRefresh",
+                            message = "Deferred background token refresh (online=$online)"
+                        )
                         return@launch
                     }
 
@@ -3842,23 +3855,47 @@ class AuthViewModel : ViewModel() {
 
     fun checkDeletionStatus(context: Context) {
         viewModelScope.launch(Dispatchers.IO) {
-            _deletionStatus.value = DeletionStatusState.Checking
+            val prefs = context.applicationContext.getSharedPreferences("funky_deletion_cache", Context.MODE_PRIVATE)
+            val cachedPending = prefs.getBoolean("pending_deletion", false)
+            if (cachedPending && _deletionStatus.value !is DeletionStatusState.Pending) {
+                _deletionStatus.value = DeletionStatusState.Checking
+            }
             try {
-                val token = SupabaseSessionManager.getBearerToken(context)
-                if (token.isBlank() || token == "Bearer ${BuildConfig.SUPABASE_ANON_KEY}") {
-                    _deletionStatus.value = DeletionStatusState.Clear
+                val activeUid = SupabaseSessionManager.ensureActiveSession(context)
+                if (activeUid.isNullOrBlank()) {
+                    if (!cachedPending) {
+                        _deletionStatus.value = DeletionStatusState.Clear
+                    }
                     return@launch
                 }
-                val response = SupabaseClient.api.getMyDeletionStatus(
+                var token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                    ?: SupabaseSessionManager.getBearerToken(context)
+                if (token.isBlank() || token == "Bearer ${BuildConfig.SUPABASE_ANON_KEY}") {
+                    if (!cachedPending) {
+                        _deletionStatus.value = DeletionStatusState.Clear
+                    }
+                    return@launch
+                }
+                var response = SupabaseClient.api.getMyDeletionStatus(
                     apiKey = BuildConfig.SUPABASE_ANON_KEY,
                     auth = token,
                     body = emptyMap()
                 )
+                if (response.code() == 401) {
+                    SupabaseSessionManager.forceRefreshSession(context)
+                    token = SupabaseSessionManager.getAuthenticatedBearerToken(context) ?: token
+                    response = SupabaseClient.api.getMyDeletionStatus(
+                        apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                        auth = token,
+                        body = emptyMap()
+                    )
+                }
                 if (response.isSuccessful) {
                     val rawJson = response.body()?.string()?.trim().orEmpty()
                     Log.d("AuthViewModel", "getMyDeletionStatus raw: $rawJson")
                     val json = if (rawJson.startsWith("{")) org.json.JSONObject(rawJson) else org.json.JSONObject()
                     val pending = json.optBoolean("pending", false)
+                    prefs.edit().putBoolean("pending_deletion", pending).apply()
                     if (pending) {
                         val statusResp = DeletionStatusResponse(
                             pending = true,
@@ -3873,12 +3910,29 @@ class AuthViewModel : ViewModel() {
                     }
                 } else {
                     val errBody = response.errorBody()?.string()?.trim().orEmpty()
-                    Log.e("AuthViewModel", "getMyDeletionStatus error ${response.code()}: $errBody")
-                    _deletionStatus.value = DeletionStatusState.Failed(com.example.util.ErrorMapper.mapHttp(response.code(), errBody))
+                    Log.w("AuthViewModel", "getMyDeletionStatus error ${response.code()}: $errBody")
+                    com.example.diagnostics.CrashAndErrorReporter.recordNonFatal(
+                        source = "DeletionStatusCheck",
+                        message = "HTTP ${response.code()} checking deletion status"
+                    )
+                    if (cachedPending) {
+                        _deletionStatus.value = DeletionStatusState.Failed(com.example.util.ErrorMapper.mapHttp(response.code(), errBody))
+                    } else {
+                        _deletionStatus.value = DeletionStatusState.Clear
+                    }
                 }
             } catch (e: Exception) {
-                Log.e("AuthViewModel", "checkDeletionStatus exception", e)
-                _deletionStatus.value = DeletionStatusState.Failed(com.example.util.ErrorMapper.map(e))
+                Log.w("AuthViewModel", "checkDeletionStatus exception: ${e.message}")
+                com.example.diagnostics.CrashAndErrorReporter.recordNonFatal(
+                    source = "DeletionStatusCheck",
+                    message = e.message ?: "Network error",
+                    throwable = e
+                )
+                if (cachedPending) {
+                    _deletionStatus.value = DeletionStatusState.Failed(com.example.util.ErrorMapper.map(e))
+                } else {
+                    _deletionStatus.value = DeletionStatusState.Clear
+                }
             }
         }
     }

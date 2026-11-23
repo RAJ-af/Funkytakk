@@ -2020,6 +2020,7 @@ object GroupChatRepository {
         mimeType: String = "image/jpeg",
         messageType: String = "image",
         caption: String? = null,
+        durationSeconds: Int? = null,
         replyToMessage: LocalGroupMessage? = null,
         tapElapsedMs: Long = ChatTimingTracker.nowMs()
     ): String {
@@ -2030,7 +2031,7 @@ object GroupChatRepository {
         val effectiveType = if (messageType == "voice") "voice" else "image"
         val cleanCaption = caption?.replace("\n", " ")?.trim()?.takeIf { it.isNotBlank() }
         val displayLabel = when {
-            effectiveType == "voice" -> "Voice message"
+            effectiveType == "voice" -> "Voice message|${(durationSeconds ?: 0).coerceAtLeast(0)}"
             cleanCaption != null -> cleanCaption
             else -> "Photo"
         }
@@ -2345,12 +2346,16 @@ object GroupChatRepository {
                 val cleanCaption = msg.text.takeIf {
                     msg.messageType == "image" && !it.equals("Photo", ignoreCase = true)
                 }?.replace("\n", " ")?.trim()?.takeIf { it.isNotBlank() }
+                val parsedDurationSec = if (msg.messageType == "voice") {
+                    msg.text.substringAfter("|", "0").toIntOrNull()?.coerceAtLeast(0)
+                } else null
                 JSONObject().apply {
                     put("storage_path", resolvedStoragePath.orEmpty())
                     put("media_key", keyB64.orEmpty())
                     put("media_nonce", nonceB64.orEmpty())
                     put("mime_type", mimeType)
                     put("message_type", msg.messageType)
+                    if (parsedDurationSec != null) put("duration_seconds", parsedDurationSec)
                     if (cleanCaption != null) put("caption", cleanCaption)
                 }.toString()
             } else {
@@ -2470,7 +2475,8 @@ object GroupChatRepository {
         rawBytes: ByteArray,
         mimeType: String = "image/jpeg",
         messageType: String = "image",
-        caption: String? = null
+        caption: String? = null,
+        durationSeconds: Int? = null
     ): Result<SendGroupMessageOutcome> = withContext(Dispatchers.IO) {
         val cleanGroupId = groupId.trim().replace("\"", "")
         val clientId = enqueueSendGroupMediaMessage(
@@ -2479,7 +2485,8 @@ object GroupChatRepository {
             rawBytes = rawBytes,
             mimeType = mimeType,
             messageType = messageType,
-            caption = caption
+            caption = caption,
+            durationSeconds = durationSeconds
         )
         repeat(10) {
             if (database?.groupMessageDao()?.getMessageByClientId(clientId) != null) return@repeat
@@ -2667,29 +2674,29 @@ object GroupChatRepository {
                 (jsonEnvelope != null && jsonEnvelope.optString("t").equals("reaction", ignoreCase = true))
 
         if (isReactionType && jsonEnvelope != null) {
-            val targetMessageId = jsonEnvelope.optString("target").trim()
+            val rawTargetId = jsonEnvelope.optString("target").ifBlank { jsonEnvelope.optString("target_message_id") }.trim()
             val reactionEmoji = jsonEnvelope.optString("emoji").trim()
             val op = jsonEnvelope.optString("op", "set").trim().lowercase()
             val reactionTs = jsonEnvelope.optLong("ts", now)
 
-            if (targetMessageId.isNotBlank()) {
-                val targetMsg = db.groupMessageDao().getMessageById(targetMessageId)
-                if (targetMsg != null) {
-                    val existingReaction = db.messageReactionDao().getReaction(targetMessageId, senderId)
-                    if (existingReaction == null || existingReaction.ts <= reactionTs) {
-                        if (op == "remove") {
-                            db.messageReactionDao().deleteReaction(targetMessageId, senderId)
-                        } else if (reactionEmoji.isNotBlank()) {
-                            db.messageReactionDao().insertOrUpdateReaction(
-                                LocalMessageReaction(
-                                    groupId = groupId,
-                                    targetMessageId = targetMessageId,
-                                    senderId = senderId,
-                                    emoji = reactionEmoji,
-                                    ts = reactionTs
-                                )
+            if (rawTargetId.isNotBlank()) {
+                val targetMsg = db.groupMessageDao().getMessageById(rawTargetId)
+                    ?: db.groupMessageDao().getMessageByClientId(rawTargetId)
+                val canonicalTargetId = targetMsg?.id ?: rawTargetId
+                val existingReaction = db.messageReactionDao().getReaction(canonicalTargetId, senderId)
+                if (existingReaction == null || existingReaction.ts <= reactionTs) {
+                    if (op == "remove") {
+                        db.messageReactionDao().deleteReaction(canonicalTargetId, senderId)
+                    } else if (reactionEmoji.isNotBlank()) {
+                        db.messageReactionDao().insertOrUpdateReaction(
+                            LocalMessageReaction(
+                                groupId = groupId,
+                                targetMessageId = canonicalTargetId,
+                                senderId = senderId,
+                                emoji = reactionEmoji,
+                                ts = reactionTs
                             )
-                        }
+                        )
                     }
                 }
             }
@@ -2708,12 +2715,13 @@ object GroupChatRepository {
             savedStoragePath = jsonEnvelope.optString("storage_path").ifBlank { row.storage_path.orEmpty() }
             val descType = jsonEnvelope.optString("message_type")
             val descCaption = jsonEnvelope.optString("caption", "").trim().takeIf { it.isNotBlank() }
+            val descDurationSec = jsonEnvelope.optInt("duration_seconds", 0).coerceAtLeast(0)
             resolvedType = when {
                 descType == "voice" || rowMessageType == "voice" || savedMime.contains("audio") -> "voice"
                 else -> "image"
             }
             displayText = when {
-                resolvedType == "voice" -> "Voice message"
+                resolvedType == "voice" -> "Voice message|$descDurationSec"
                 descCaption != null -> descCaption
                 else -> "Photo"
             }
@@ -2960,10 +2968,12 @@ object GroupChatRepository {
 
             val encBytes = if (storagePath.startsWith("http://") || storagePath.startsWith("https://")) {
                 val isSupa = storagePath.contains("supabase.co")
+                val isAppwrite = storagePath.contains("appwrite.io")
                 val dlResp = SupabaseClient.api.downloadFromUrl(
                     url = storagePath,
                     apiKey = if (isSupa) BuildConfig.SUPABASE_ANON_KEY else null,
-                    auth = if (isSupa) token else null
+                    auth = if (isSupa) token else null,
+                    appwriteProject = if (isAppwrite) com.example.FunkyTalkApplication.APPWRITE_PROJECT_ID else null
                 )
                 if (dlResp.isSuccessful && dlResp.body() != null) dlResp.body()!!.bytes() else null
             } else {
@@ -2976,7 +2986,7 @@ object GroupChatRepository {
                 if (dlResp.isSuccessful && dlResp.body() != null) dlResp.body()!!.bytes() else null
             }
 
-            if (encBytes != null && encBytes.isNotEmpty()) {
+            if (encBytes != null && encBytes.isNotEmpty() && !isJsonErrorBytes(encBytes)) {
                 val rawBytes = E2EEMediaManager.decryptMediaPayload(encBytes, keyBytes, nonceBytes)
                 val ext = if (isVoice) "m4a" else "jpg"
                 val activeUid = ActiveUserManager.requireActiveUid(context)
@@ -2984,11 +2994,29 @@ object GroupChatRepository {
                 val localFile = File(localDir, "group_${messageId}.$ext")
                 localFile.writeBytes(rawBytes)
                 localFile.absolutePath
-            } else null
+            } else {
+                Log.w(TAG, "Group media blob missing or error response for $messageId")
+                null
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Failed downloading/decrypting media blob for $messageId: ${e.message}")
+            com.example.diagnostics.CrashAndErrorReporter.recordNonFatal(
+                source = "GroupMediaDownload",
+                message = "Group media $messageId failed: ${e.message}",
+                throwable = e
+            )
             null
         }
+    }
+
+    private fun isJsonErrorBytes(bytes: ByteArray): Boolean {
+        if (bytes.isEmpty()) return true
+        val snippet = String(bytes, 0, minOf(bytes.size, 200)).trim()
+        return snippet.startsWith("{\"error\"") ||
+            snippet.startsWith("{\"statusCode\"") ||
+            snippet.startsWith("{\"message\"") ||
+            snippet.startsWith("<!DOCTYPE") ||
+            snippet.startsWith("<html")
     }
 
     private suspend fun deleteRecipientRow(token: String, rowId: String) {
@@ -3155,7 +3183,7 @@ object GroupChatRepository {
             val activeUid = SupabaseSessionManager.ensureActiveSession(context)
             val myUserId = activeUid ?: SupabaseSessionManager.getUserId(context)
                 ?: return@withContext Result.failure(Exception("Not logged in"))
-            val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+            var token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
                 ?: return@withContext Result.failure(Exception("Not authenticated"))
 
             val cleanGroupId = groupId.trim().replace("\"", "")
@@ -3163,22 +3191,25 @@ object GroupChatRepository {
             val db = database
             val now = System.currentTimeMillis()
 
-            // Verify target message exists in local DB
-            if (db != null && !db.groupMessageDao().messageExists(cleanTargetId)) {
+            val targetMsg = db?.groupMessageDao()?.getMessageById(cleanTargetId)
+                ?: db?.groupMessageDao()?.getMessageByClientId(cleanTargetId)
+            if (db != null && targetMsg == null) {
                 return@withContext Result.failure(Exception("Target message not found in local DB"))
             }
+            val canonicalTargetId = targetMsg?.id ?: cleanTargetId
+            val wireTargetId = targetMsg?.clientId?.takeIf { it.isNotBlank() } ?: canonicalTargetId
 
             // 1. Immediate optimistic local update
             if (db != null) {
-                val existing = db.messageReactionDao().getReaction(cleanTargetId, myUserId)
+                val existing = db.messageReactionDao().getReaction(canonicalTargetId, myUserId)
                 if (existing == null || existing.ts <= now) {
                     if (op.equals("remove", ignoreCase = true)) {
-                        db.messageReactionDao().deleteReaction(cleanTargetId, myUserId)
+                        db.messageReactionDao().deleteReaction(canonicalTargetId, myUserId)
                     } else if (emoji.isNotBlank()) {
                         db.messageReactionDao().insertOrUpdateReaction(
                             LocalMessageReaction(
                                 groupId = cleanGroupId,
-                                targetMessageId = cleanTargetId,
+                                targetMessageId = canonicalTargetId,
                                 senderId = myUserId,
                                 emoji = emoji,
                                 ts = now
@@ -3191,41 +3222,37 @@ object GroupChatRepository {
             // 2. Build encrypted payload
             val payloadObj = JSONObject().apply {
                 put("t", "reaction")
-                put("target", cleanTargetId)
+                put("target", wireTargetId)
                 put("emoji", emoji)
                 put("op", if (op.equals("remove", ignoreCase = true)) "remove" else "set")
                 put("ts", now)
             }
             val payloadStr = payloadObj.toString()
 
-            // 3. E2EE Fan-out to joined group members
-            val membersRes = getGroupMembersResult(context, cleanGroupId)
-            val allMembers = membersRes.getOrNull().orEmpty()
-            val joinedMembers = allMembers.filter { it.status.trim().equals("joined", ignoreCase = true) }
-            val memberUserIds = (joinedMembers.map { it.user_id }.toSet() + myUserId).filter { it.isNotBlank() }
-
-            val recipientsPayload = mutableListOf<GroupRecipientPayload>()
-            for (uid in memberUserIds) {
-                val keyResp = SupabaseClient.api.getUserPublicKey(
-                    apiKey = BuildConfig.SUPABASE_ANON_KEY,
-                    auth = token,
-                    userIdFilter = "eq.$uid"
-                )
-                val pubKey = keyResp.body()?.firstOrNull()?.identity_public_key
-                if (!pubKey.isNullOrBlank()) {
-                    val ciphertext = E2EEManager.encryptMessage(pubKey, payloadStr)
-                    recipientsPayload.add(
+            // 3. E2EE Fan-out to joined group members using parallel key lookup & cache
+            val memberUserIds = getJoinedMemberIdsForSend(token, cleanGroupId, myUserId).getOrElse {
+                val allMembers = getGroupMembersResult(context, cleanGroupId).getOrNull().orEmpty()
+                (allMembers.filter { it.status.trim().equals("joined", ignoreCase = true) }
+                    .map { it.user_id } + myUserId).distinct().filter { uid -> uid.isNotBlank() }
+            }
+            val pubKeys = fetchMemberPublicKeysParallel(token, memberUserIds)
+            val recipientsPayload = withContext(Dispatchers.Default) {
+                memberUserIds.mapNotNull { uid ->
+                    val pubKey = pubKeys[uid]
+                    if (pubKey.isNullOrBlank()) null
+                    else {
+                        val ciphertext = E2EEManager.encryptMessage(pubKey, payloadStr)
                         GroupRecipientPayload(
                             recipient_id = uid,
                             ciphertext = ciphertext,
                             nonce = UUID.randomUUID().toString()
                         )
-                    )
+                    }
                 }
             }
 
             if (recipientsPayload.isNotEmpty()) {
-                val sendResp = SupabaseClient.api.sendGroupMessage(
+                var sendResp = SupabaseClient.api.sendGroupMessage(
                     apiKey = BuildConfig.SUPABASE_ANON_KEY,
                     auth = token,
                     body = SendGroupMessageRequest(
@@ -3235,6 +3262,20 @@ object GroupChatRepository {
                     )
                 )
 
+                if (sendResp.code() == 401) {
+                    SupabaseSessionManager.forceRefreshSession(context)
+                    token = SupabaseSessionManager.getAuthenticatedBearerToken(context) ?: token
+                    sendResp = SupabaseClient.api.sendGroupMessage(
+                        apiKey = BuildConfig.SUPABASE_ANON_KEY,
+                        auth = token,
+                        body = SendGroupMessageRequest(
+                            p_group_id = cleanGroupId,
+                            p_message_type = "reaction",
+                            p_recipients = recipientsPayload
+                        )
+                    )
+                }
+
                 if (!sendResp.isSuccessful) {
                     val err = sendResp.errorBody()?.string()?.lowercase().orEmpty()
                     if (err.contains("rate_limited") || err.contains("too_many_requests")) {
@@ -3243,6 +3284,10 @@ object GroupChatRepository {
                         }
                         return@withContext Result.success(Unit)
                     }
+                    com.example.diagnostics.CrashAndErrorReporter.recordNonFatal(
+                        source = "GroupReaction",
+                        message = "HTTP ${sendResp.code()} sending group reaction"
+                    )
                     return@withContext Result.failure(Exception(mapGroupError(err, "Failed to send reaction")))
                 }
             }
@@ -3255,6 +3300,11 @@ object GroupChatRepository {
                 }
                 Result.success(Unit)
             } else {
+                com.example.diagnostics.CrashAndErrorReporter.recordNonFatal(
+                    source = "GroupReaction",
+                    message = e.message ?: "Reaction error",
+                    throwable = e
+                )
                 Result.failure(e)
             }
         }

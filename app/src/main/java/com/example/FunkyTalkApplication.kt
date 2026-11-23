@@ -39,6 +39,7 @@ class FunkyTalkApplication : Application(), ImageLoaderFactory {
         super.onCreate()
         _instance = this
         appContext = applicationContext
+        com.example.diagnostics.CrashAndErrorReporter.install(this)
         try {
             if (FirebaseApp.getApps(this).isEmpty()) {
                 FirebaseApp.initializeApp(this)
