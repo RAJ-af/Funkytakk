@@ -1,0 +1,174 @@
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "jsr:@supabase/supabase-js@2";
+
+// Cron worker (every 5 minutes, called by pg_cron through private.call_edge with the x-push-secret header).
+// Deletes the REAL files for the to-do rows in media_cleanup_queue:
+//   - Appwrite: replaced profile pictures / covers / group avatars
+//   - Cloudinary: images of deleted Moments
+// A missing file (404 / not_found) counts as done. Failures are retried up to MAX_ATTEMPTS times.
+// Second job (body {"job":"dm_orphans"}, daily 03:15): removes unreferenced encrypted chat blobs older than 4 days from the
+// Supabase Storage bucket dm-media (SQL cannot delete from storage tables, only the Storage API can).
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const APPWRITE_ENDPOINT = (Deno.env.get("APPWRITE_ENDPOINT") ?? "").replace(/\/$/, "");
+const APPWRITE_PROJECT_ID = Deno.env.get("APPWRITE_PROJECT_ID") ?? "";
+const APPWRITE_API_KEY = Deno.env.get("APPWRITE_API_KEY") ?? "";
+const APPWRITE_BUCKET_ID = Deno.env.get("APPWRITE_BUCKET_ID") ?? "";
+const CLD_CLOUD = Deno.env.get("CLOUDINARY_CLOUD_NAME") ?? "";
+const CLD_KEY = Deno.env.get("CLOUDINARY_API_KEY") ?? "";
+const CLD_SECRET = Deno.env.get("CLOUDINARY_API_SECRET") ?? "";
+
+const MAX_ROWS = 100;
+const MAX_ATTEMPTS = 8;
+const CLD_BATCH = 50;
+
+const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+const json = (o: unknown, status = 200) =>
+  new Response(JSON.stringify(o), { status, headers: { "Content-Type": "application/json" } });
+const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 200);
+
+const appwriteConfigured = () => Boolean(APPWRITE_ENDPOINT && APPWRITE_PROJECT_ID && APPWRITE_API_KEY && APPWRITE_BUCKET_ID);
+const cloudinaryConfigured = () => Boolean(CLD_CLOUD && CLD_KEY && CLD_SECRET);
+
+async function deleteAppwriteFile(fileId: string): Promise<void> {
+  const res = await fetch(
+    `${APPWRITE_ENDPOINT}/storage/buckets/${APPWRITE_BUCKET_ID}/files/${encodeURIComponent(fileId)}`,
+    {
+      method: "DELETE",
+      headers: { "X-Appwrite-Project": APPWRITE_PROJECT_ID, "X-Appwrite-Key": APPWRITE_API_KEY },
+      signal: AbortSignal.timeout(8000),
+    },
+  );
+  if (res.ok || res.status === 404) return;
+  throw new Error(`appwrite_delete_${res.status}`);
+}
+
+async function deleteCloudinaryBatch(publicIds: string[]): Promise<Record<string, string>> {
+  const qs = publicIds.map((p) => `public_ids[]=${encodeURIComponent(p)}`).join("&") + "&invalidate=true";
+  const res = await fetch(`https://api.cloudinary.com/v1_1/${CLD_CLOUD}/resources/image/upload?${qs}`, {
+    method: "DELETE",
+    headers: { Authorization: "Basic " + btoa(`${CLD_KEY}:${CLD_SECRET}`) },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!res.ok) throw new Error(`cloudinary_delete_${res.status}`);
+  const j = await res.json().catch(() => ({}));
+  return (j.deleted ?? {}) as Record<string, string>;
+}
+
+type Row = { id: number; provider: string; file_ref: string };
+
+async function markDone(ids: number[]) {
+  if (ids.length === 0) return;
+  await admin.from("media_cleanup_queue").update({ done_at: new Date().toISOString(), last_error: null }).in("id", ids);
+}
+
+async function markFailed(rows: Row[], message: string) {
+  for (const r of rows) {
+    const { data } = await admin.from("media_cleanup_queue").select("attempts").eq("id", r.id).maybeSingle();
+    await admin.from("media_cleanup_queue")
+      .update({ attempts: ((data?.attempts as number | undefined) ?? 0) + 1, last_error: message })
+      .eq("id", r.id);
+  }
+}
+
+Deno.serve(async (req: Request) => {
+  if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+  const provided = req.headers.get("x-push-secret") ?? "";
+  if (!provided) return json({ error: "forbidden" }, 403);
+  const { data: okSecret } = await admin.rpc("verify_push_secret", { p_secret: provided });
+  if (okSecret !== true) return json({ error: "forbidden" }, 403);
+
+  let job = "queue";
+  try {
+    const b = await req.json();
+    if (b && typeof b.job === "string") job = b.job;
+  } catch { /* empty body = normal queue job */ }
+
+  if (job === "dm_orphans") {
+    const { data: names, error: listErr } = await admin.rpc("list_orphaned_dm_media", { p_older_than_days: 4, p_limit: 500 });
+    if (listErr) {
+      console.error("list_orphaned_dm_media failed");
+      return json({ error: "query_failed" }, 500);
+    }
+    const all = ((names ?? []) as { name: string }[]).map((n) => n.name);
+    let removed = 0;
+    let failed = 0;
+    for (let i = 0; i < all.length; i += 100) {
+      const chunk = all.slice(i, i + 100);
+      const { data, error: rmErr } = await admin.storage.from("dm-media").remove(chunk);
+      if (rmErr) {
+        failed += chunk.length;
+        console.error("dm-media remove failed", errMsg(rmErr));
+      } else {
+        removed += (data ?? []).length;
+      }
+    }
+    return json({ job, found: all.length, removed, failed });
+  }
+
+  const { data: rows, error } = await admin.from("media_cleanup_queue")
+    .select("id, provider, file_ref")
+    .is("done_at", null).lt("attempts", MAX_ATTEMPTS)
+    .order("id", { ascending: true }).limit(MAX_ROWS);
+  if (error) {
+    console.error("queue select failed");
+    return json({ error: "query_failed" }, 500);
+  }
+  const list = (rows ?? []) as Row[];
+  const result = { appwrite_deleted: 0, cloudinary_deleted: 0, failed: 0, skipped_not_configured: 0 };
+  if (list.length === 0) return json({ ...result, pending: 0 });
+
+  // ---- Appwrite ----
+  const aw = list.filter((r) => r.provider === "appwrite");
+  if (aw.length > 0) {
+    if (!appwriteConfigured()) {
+      result.skipped_not_configured += aw.length;
+    } else {
+      const done: Row[] = [];
+      for (const r of aw) {
+        try {
+          await deleteAppwriteFile(r.file_ref);
+          done.push(r);
+        } catch (e) {
+          result.failed++;
+          console.error("appwrite cleanup failed", errMsg(e));
+          await markFailed([r], errMsg(e));
+        }
+      }
+      await markDone(done.map((r) => r.id));
+      if (done.length > 0) {
+        await admin.from("media_files").update({ deleted_at: new Date().toISOString() })
+          .eq("provider", "appwrite").in("file_id", done.map((r) => r.file_ref)).is("deleted_at", null);
+      }
+      result.appwrite_deleted += done.length;
+    }
+  }
+
+  // ---- Cloudinary ----
+  const cl = list.filter((r) => r.provider === "cloudinary");
+  if (cl.length > 0) {
+    if (!cloudinaryConfigured()) {
+      result.skipped_not_configured += cl.length;
+    } else {
+      for (let i = 0; i < cl.length; i += CLD_BATCH) {
+        const chunk = cl.slice(i, i + CLD_BATCH);
+        try {
+          const deleted = await deleteCloudinaryBatch(chunk.map((r) => r.file_ref));
+          const ok = chunk.filter((r) => deleted[r.file_ref] === "deleted" || deleted[r.file_ref] === "not_found");
+          const notOk = chunk.filter((r) => !ok.includes(r));
+          await markDone(ok.map((r) => r.id));
+          result.cloudinary_deleted += ok.length;
+          if (notOk.length > 0) {
+            result.failed += notOk.length;
+            await markFailed(notOk, "cloudinary_unexpected_status");
+          }
+        } catch (e) {
+          result.failed += chunk.length;
+          console.error("cloudinary cleanup failed", errMsg(e));
+          await markFailed(chunk, errMsg(e));
+        }
+      }
+    }
+  }
+  return json({ ...result, pending: list.length });
+});
