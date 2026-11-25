@@ -174,6 +174,8 @@ fun DirectChatScreen(
     var showAiAssistSheet by remember { mutableStateOf(false) }
     var activeMediaViewerIndex by remember { mutableStateOf<Int?>(null) }
     var pendingPhotoUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var showAttachmentChooser by remember { mutableStateOf(false) }
+    var isPreparingMediaLabel by remember { mutableStateOf<String?>(null) }
     var showReportUserDialog by remember { mutableStateOf(false) }
     var showPartnerProfile by remember(partnerUserId) { mutableStateOf(false) }
     var showTopMenu by remember { mutableStateOf(false) }
@@ -254,6 +256,83 @@ fun DirectChatScreen(
         if (uris.isNotEmpty()) {
             val merged = (pendingPhotoUris + uris).distinct().take(10)
             pendingPhotoUris = merged
+        }
+    }
+
+    val videoPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            coroutineScope.launch {
+                isPreparingMediaLabel = "Compressing video..."
+                val res = ChatVideoHelper.compressAndPrepareVideo(context, uri)
+                isPreparingMediaLabel = null
+                res.onSuccess { prep ->
+                    val replySnapshot = replyingToMessage
+                    val tapMs = ChatTimingTracker.nowMs()
+                    replyingToMessage = null
+                    ensureVaultUnlocked {
+                        val activeConvId = conversationId.ifBlank { "dm_pending_$partnerUserId" }
+                        EncryptedChatRepository.enqueueSendMediaMessage(
+                            context = context,
+                            conversationId = activeConvId,
+                            recipientUserId = partnerUserId,
+                            recipientName = partnerName,
+                            recipientAvatar = partnerAvatarUrl,
+                            rawBytes = prep.bytes,
+                            messageType = "video",
+                            mimeType = prep.mimeType,
+                            durationSeconds = prep.durationSeconds,
+                            replyToText = replySnapshot?.text,
+                            replyToSender = if (replySnapshot != null) {
+                                if (replySnapshot.isOutgoing) "You" else partnerName
+                            } else null,
+                            tapElapsedMs = tapMs
+                        )
+                    }
+                }.onFailure { err ->
+                    Toast.makeText(context, err.message ?: "Could not prepare video", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    val audioPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            coroutineScope.launch {
+                isPreparingMediaLabel = "Preparing audio..."
+                val res = ChatVideoHelper.prepareAudioFile(context, uri)
+                isPreparingMediaLabel = null
+                res.onSuccess { prep ->
+                    val replySnapshot = replyingToMessage
+                    val tapMs = ChatTimingTracker.nowMs()
+                    replyingToMessage = null
+                    ensureVaultUnlocked {
+                        val activeConvId = conversationId.ifBlank { "dm_pending_$partnerUserId" }
+                        EncryptedChatRepository.enqueueSendMediaMessage(
+                            context = context,
+                            conversationId = activeConvId,
+                            recipientUserId = partnerUserId,
+                            recipientName = partnerName,
+                            recipientAvatar = partnerAvatarUrl,
+                            rawBytes = prep.bytes,
+                            messageType = "audio",
+                            mimeType = prep.mimeType,
+                            durationSeconds = prep.durationSeconds,
+                            replyToText = replySnapshot?.text,
+                            replyToSender = if (replySnapshot != null) {
+                                if (replySnapshot.isOutgoing) "You" else partnerName
+                            } else null,
+                            caption = prep.displayName,
+                            tapElapsedMs = tapMs
+                        )
+                    }
+                }.onFailure { err ->
+                    Toast.makeText(context, err.message ?: "Could not prepare audio file", Toast.LENGTH_LONG).show()
+                }
+            }
         }
     }
 
@@ -462,7 +541,9 @@ fun DirectChatScreen(
                             id = m.id,
                             rawText = m.text,
                             timestamp = m.timestamp,
-                            isOutgoing = m.isOutgoing
+                            isOutgoing = m.isOutgoing,
+                            downloadState = m.mediaDownloadState,
+                            failReason = m.mediaFailReason
                         )
                     }
                     items.add(
@@ -521,17 +602,40 @@ fun DirectChatScreen(
 
         val allMediaItems = remember(mergedMessages, partnerName) {
             mergedMessages.sortedBy { it.timestamp }
-                .filter { isDmImageText(it.text) }
-                .map { msg ->
-                    val node = parseDmPhotoNode(msg.id, msg.text, msg.timestamp, msg.isOutgoing)
-                    ChatViewerMediaItem(
-                        id = msg.id,
-                        url = node.source,
-                        senderName = if (msg.isOutgoing) "You" else partnerName,
-                        dateText = node.timeText,
-                        caption = node.caption,
-                        isVideo = false
-                    )
+                .mapNotNull { msg ->
+                    when {
+                        isDmImageText(msg.text) -> {
+                            val node = parseDmPhotoNode(
+                                id = msg.id,
+                                rawText = msg.text,
+                                timestamp = msg.timestamp,
+                                isOutgoing = msg.isOutgoing,
+                                downloadState = msg.mediaDownloadState,
+                                failReason = msg.mediaFailReason
+                            )
+                            if (node.source.isBlank()) null else ChatViewerMediaItem(
+                                id = msg.id,
+                                url = node.source,
+                                senderName = if (msg.isOutgoing) "You" else partnerName,
+                                dateText = node.timeText,
+                                caption = node.caption,
+                                isVideo = false
+                            )
+                        }
+                        msg.messageType == "video" || msg.text.startsWith("[vid]") -> {
+                            val spec = parseDmVideoSpec(msg)
+                            val path = spec.localPath
+                            if (path.isNullOrBlank()) null else ChatViewerMediaItem(
+                                id = msg.id,
+                                url = path,
+                                senderName = if (msg.isOutgoing) "You" else partnerName,
+                                dateText = formatChatTime(msg.timestamp),
+                                caption = spec.caption,
+                                isVideo = true
+                            )
+                        }
+                        else -> null
+                    }
                 }
         }
 
@@ -540,7 +644,9 @@ fun DirectChatScreen(
         }
 
         BackHandler {
-            if (showPartnerProfile) {
+            if (showAttachmentChooser) {
+                showAttachmentChooser = false
+            } else if (showPartnerProfile) {
                 showPartnerProfile = false
             } else if (isEmojiPickerOpen) {
                 isEmojiPickerOpen = false
@@ -819,9 +925,7 @@ fun DirectChatScreen(
                         },
                         onAttach = {
                             isEmojiPickerOpen = false
-                            photoPickerLauncher.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                            )
+                            showAttachmentChooser = true
                         },
                         onEmojiToggle = {
                             isEmojiPickerOpen = !isEmojiPickerOpen
@@ -829,13 +933,38 @@ fun DirectChatScreen(
                         isEmojiOpen = isEmojiPickerOpen,
                         showAiButton = isAiConsentGranted,
                         onAi = { showAiAssistSheet = true },
-                        topSlot = if (replyingToMessage != null) {
+                        topSlot = if (replyingToMessage != null || isPreparingMediaLabel != null) {
                             {
-                                ReplyPreviewStrip(
-                                    title = if (replyingToMessage!!.isOutgoing) "You" else partnerName,
-                                    preview = ChatAnimatedStickers.readableLabel(replyingToMessage!!.text).take(60),
-                                    onClose = { replyingToMessage = null }
-                                )
+                                Column {
+                                    if (isPreparingMediaLabel != null) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 14.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(16.dp),
+                                                strokeWidth = 2.dp,
+                                                color = colors.accentIn
+                                            )
+                                            Text(
+                                                text = isPreparingMediaLabel ?: "",
+                                                color = colors.textSecondary,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+                                    }
+                                    if (replyingToMessage != null) {
+                                        ReplyPreviewStrip(
+                                            title = if (replyingToMessage!!.isOutgoing) "You" else partnerName,
+                                            preview = ChatAnimatedStickers.readableLabel(replyingToMessage!!.text).take(60),
+                                            onClose = { replyingToMessage = null }
+                                        )
+                                    }
+                                }
                             }
                         } else null,
                         recording = if (voiceRecorder.isRecording) {
@@ -861,7 +990,7 @@ fun DirectChatScreen(
                                                     recipientAvatar = partnerAvatarUrl,
                                                     rawBytes = result.bytes,
                                                     messageType = "voice",
-                                                    mimeType = "audio/aac",
+                                                    mimeType = "audio/mp4",
                                                     durationSeconds = (result.durationMs / 1000).toInt().coerceAtLeast(1),
                                                     tapElapsedMs = tapMs
                                                 )
@@ -905,7 +1034,7 @@ fun DirectChatScreen(
                                                     recipientAvatar = partnerAvatarUrl,
                                                     rawBytes = result.bytes,
                                                     messageType = "voice",
-                                                    mimeType = "audio/aac",
+                                                    mimeType = "audio/mp4",
                                                     durationSeconds = (result.durationMs / 1000).toInt().coerceAtLeast(1),
                                                     tapElapsedMs = tapMs
                                                 )
@@ -1359,14 +1488,30 @@ fun DirectChatScreen(
 
                                                 val rawText = msg.text
                                                 when {
-                                                    rawText.startsWith("[voice]") -> {
-                                                        val path = rawText.removePrefix("[voice]").substringBefore("|")
-                                                        val durationSec = rawText.substringAfter("|", "0").toIntOrNull() ?: 0
+                                                    msg.messageType == "voice" || rawText.startsWith("[voice]") -> {
+                                                        val path = msg.localMediaPath?.takeIf { it.isNotBlank() }
+                                                            ?: rawText.removePrefix("[voice]").substringBefore("|")
+                                                        val durationSec = rawText.substringAfter("|", "0").toIntOrNull()
+                                                            ?: (msg.mediaDurationSec ?: 0)
+                                                        val dlState = msg.mediaDownloadState
+                                                        val hasValidLocal = path.isNotBlank() && path != "downloading..." && !path.startsWith("⚠️") &&
+                                                            File(path.removePrefix("file://")).let { it.exists() && it.length() > 0L }
+                                                        val isExpiredVoice = !hasValidLocal && dlState == com.example.db.DmMediaDownloadState.EXPIRED
+                                                        val isFailedVoice = !hasValidLocal && dlState == com.example.db.DmMediaDownloadState.FAILED
+                                                        val isDownloadingState = !hasValidLocal && dlState == com.example.db.DmMediaDownloadState.DOWNLOADING
                                                         val isPlayingThis = voicePlayer.currentPlayingId == msg.id && voicePlayer.isPlaying
                                                         var isDownloadingVoice by remember(msg.id) { mutableStateOf(false) }
 
                                                         fun playOrFetchVoice(seekFrac: Float? = null) {
-                                                            if (path.isBlank() || path == "downloading...") {
+                                                            if (isExpiredVoice) {
+                                                                Toast.makeText(
+                                                                    context,
+                                                                    msg.mediaFailReason ?: "Media expired. Ask them to send it again.",
+                                                                    Toast.LENGTH_SHORT
+                                                                ).show()
+                                                                return
+                                                            }
+                                                            if (!hasValidLocal) {
                                                                 if (isDownloadingVoice) return
                                                                 isDownloadingVoice = true
                                                                 coroutineScope.launch {
@@ -1410,49 +1555,135 @@ fun DirectChatScreen(
                                                             }
                                                         }
 
-                                                        VoiceNoteContent(
+                                                        Column {
+                                                            VoiceNoteContent(
+                                                                outgoing = isOutgoing,
+                                                                amplitudes = remember(msg.id) { List(48) { (40 + (it * 7) % 180) } },
+                                                                durationMs = durationSec * 1000L,
+                                                                positionMs = if (voicePlayer.currentPlayingId == msg.id) voicePlayer.positionMs else 0L,
+                                                                isPlaying = isPlayingThis,
+                                                                isLoading = isDownloadingVoice || isDownloadingState || (voicePlayer.currentPlayingId == msg.id && voicePlayer.isLoading),
+                                                                isUnread = !isOutgoing && !voicePlayer.hasPlayed(msg.id),
+                                                                speed = voicePlayer.speed,
+                                                                onPlayPause = { playOrFetchVoice(null) },
+                                                                onSeek = { seekFrac -> playOrFetchVoice(seekFrac) },
+                                                                onSpeedClick = { voicePlayer.cycleSpeed() }
+                                                            )
+                                                            if (!hasValidLocal && (isExpiredVoice || isFailedVoice || isDownloadingState)) {
+                                                                Text(
+                                                                    text = when {
+                                                                        isExpiredVoice -> msg.mediaFailReason ?: "Media expired. Ask them to send it again."
+                                                                        isFailedVoice -> "Failed. Tap to retry"
+                                                                        else -> "Downloading..."
+                                                                    },
+                                                                    color = if (isFailedVoice) colors.danger else if (isOutgoing) colors.textSecondaryOut else colors.textSecondary,
+                                                                    fontSize = 11.sp,
+                                                                    fontWeight = FontWeight.Medium,
+                                                                    modifier = Modifier.padding(top = 3.dp, start = 52.dp)
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+
+                                                    msg.messageType == "video" || rawText.startsWith("[vid]") -> {
+                                                        val videoSpec = parseDmVideoSpec(msg)
+                                                        VideoAttachmentBubble(
+                                                            localPath = videoSpec.localPath,
+                                                            durationSec = videoSpec.durationSec,
+                                                            caption = videoSpec.caption,
+                                                            timeText = formatChatTime(msg.timestamp),
                                                             outgoing = isOutgoing,
-                                                            amplitudes = remember(msg.id) { List(48) { (40 + (it * 7) % 180) } },
-                                                            durationMs = durationSec * 1000L,
+                                                            status = status,
+                                                            downloadState = videoSpec.downloadState,
+                                                            failReason = videoSpec.failReason,
+                                                            onPlayClick = {
+                                                                val idx = allMediaItems.indexOfFirst { it.id == msg.id }
+                                                                if (idx >= 0) {
+                                                                    activeMediaViewerIndex = idx
+                                                                }
+                                                            },
+                                                            onDownloadClick = {
+                                                                coroutineScope.launch {
+                                                                    val dl = EncryptedChatRepository.downloadDmMediaOnDemand(context, msg.id)
+                                                                    if (dl.isFailure) {
+                                                                        Toast.makeText(context, dl.exceptionOrNull()?.message ?: "Could not load video", Toast.LENGTH_SHORT).show()
+                                                                    }
+                                                                }
+                                                            },
+                                                            onLongPress = {
+                                                                if (!isSelectionMode) {
+                                                                    selectedMessageForMenu = msg
+                                                                }
+                                                            }
+                                                        )
+                                                    }
+
+                                                    msg.messageType == "audio" || rawText.startsWith("[audio]") -> {
+                                                        val audioSpec = parseDmAudioSpec(msg)
+                                                        val isPlayingThis = voicePlayer.currentPlayingId == msg.id && voicePlayer.isPlaying
+                                                        var isDownloadingAudio by remember(msg.id) { mutableStateOf(false) }
+                                                        AudioAttachmentBubble(
+                                                            title = audioSpec.title,
+                                                            durationMs = audioSpec.durationSec * 1000L,
                                                             positionMs = if (voicePlayer.currentPlayingId == msg.id) voicePlayer.positionMs else 0L,
                                                             isPlaying = isPlayingThis,
-                                                            isLoading = isDownloadingVoice || (voicePlayer.currentPlayingId == msg.id && voicePlayer.isLoading),
-                                                            isUnread = !isOutgoing && !voicePlayer.hasPlayed(msg.id),
+                                                            isLoading = isDownloadingAudio || (voicePlayer.currentPlayingId == msg.id && voicePlayer.isLoading),
                                                             speed = voicePlayer.speed,
-                                                            onPlayPause = { playOrFetchVoice(null) },
-                                                            onSeek = { seekFrac -> playOrFetchVoice(seekFrac) },
+                                                            outgoing = isOutgoing,
+                                                            downloadState = audioSpec.downloadState,
+                                                            failReason = audioSpec.failReason,
+                                                            hasLocalFile = !audioSpec.localPath.isNullOrBlank(),
+                                                            onPlayPause = {
+                                                                val src = audioSpec.localPath ?: return@AudioAttachmentBubble
+                                                                voicePlayer.playOrPause(
+                                                                    messageId = msg.id,
+                                                                    audioSource = src,
+                                                                    fallbackDurationMs = audioSpec.durationSec * 1000L,
+                                                                    onError = { err -> Toast.makeText(context, err, Toast.LENGTH_SHORT).show() }
+                                                                )
+                                                            },
+                                                            onDownloadClick = {
+                                                                if (isDownloadingAudio) return@AudioAttachmentBubble
+                                                                isDownloadingAudio = true
+                                                                coroutineScope.launch {
+                                                                    val dl = EncryptedChatRepository.downloadDmMediaOnDemand(context, msg.id)
+                                                                    isDownloadingAudio = false
+                                                                    dl.onFailure { err ->
+                                                                        Toast.makeText(context, err.message ?: "Could not load audio", Toast.LENGTH_SHORT).show()
+                                                                    }
+                                                                }
+                                                            },
                                                             onSpeedClick = { voicePlayer.cycleSpeed() }
                                                         )
                                                     }
 
                                                     rawText.startsWith("[img]") || rawText.startsWith("[imgs]") -> {
-                                                        val url = rawText.removePrefix("[img]").removePrefix("[imgs]").substringBefore("|")
-                                                        MediaFrame(
-                                                            aspectRatio = 1.25f,
-                                                            content = {
-                                                                AsyncImage(
-                                                                    model = url,
-                                                                    contentDescription = "Photo",
-                                                                    modifier = Modifier
-                                                                        .fillMaxSize()
-                                                                        .clickable {
-                                                                            val idx = allMediaItems.indexOfFirst { it.id == msg.id }
-                                                                            activeMediaViewerIndex = if (idx >= 0) idx else 0
-                                                                        },
-                                                                    contentScale = ContentScale.Crop
-                                                                )
+                                                        val singleNode = parseDmPhotoNode(
+                                                            id = msg.id,
+                                                            rawText = msg.text,
+                                                            timestamp = msg.timestamp,
+                                                            isOutgoing = isOutgoing,
+                                                            downloadState = msg.mediaDownloadState,
+                                                            failReason = msg.mediaFailReason
+                                                        )
+                                                        TelegramMediaAlbumContent(
+                                                            photos = listOf(singleNode),
+                                                            outgoing = isOutgoing,
+                                                            position = item.position,
+                                                            status = status,
+                                                            onPhotoClick = { _, _ ->
+                                                                val idx = allMediaItems.indexOfFirst { it.id == msg.id }
+                                                                if (idx >= 0) activeMediaViewerIndex = idx
                                                             },
-                                                            overlay = {
-                                                                Box(
-                                                                    modifier = Modifier
-                                                                        .align(Alignment.BottomEnd)
-                                                                        .padding(6.dp)
-                                                                ) {
-                                                                    MediaTimeChip(
-                                                                        time = formatChatTime(msg.timestamp),
-                                                                        outgoing = isOutgoing,
-                                                                        status = status
-                                                                    )
+                                                            onPhotoLongPress = {
+                                                                if (!isSelectionMode) selectedMessageForMenu = msg
+                                                            },
+                                                            onDownloadClick = {
+                                                                coroutineScope.launch {
+                                                                    val dl = EncryptedChatRepository.downloadDmMediaOnDemand(context, msg.id)
+                                                                    if (dl.isFailure) {
+                                                                        Toast.makeText(context, dl.exceptionOrNull()?.message ?: "Photo still unavailable", Toast.LENGTH_SHORT).show()
+                                                                    }
                                                                 }
                                                             }
                                                         )
@@ -1563,12 +1794,38 @@ fun DirectChatScreen(
             val selectedMsg = selectedMessageForMenu!!
             val currentMyReaction = rawReactions.find { it.targetMessageId == selectedMsg.id && it.senderId == currentUserId }?.emoji
             val isImageMsg = isDmImageText(selectedMsg.text)
+            val isVideoMsg = selectedMsg.messageType == "video" || selectedMsg.text.startsWith("[vid]")
+            val isAudioMsg = selectedMsg.messageType == "audio" || selectedMsg.text.startsWith("[audio]")
+            val isVoiceMsg = selectedMsg.messageType == "voice" || selectedMsg.text.startsWith("[voice]")
+            val imageNodeForMenu = if (isImageMsg) {
+                parseDmPhotoNode(
+                    id = selectedMsg.id,
+                    rawText = selectedMsg.text,
+                    timestamp = selectedMsg.timestamp,
+                    isOutgoing = selectedMsg.isOutgoing,
+                    downloadState = selectedMsg.mediaDownloadState,
+                    failReason = selectedMsg.mediaFailReason
+                )
+            } else null
+            val videoSpecForMenu = if (isVideoMsg) parseDmVideoSpec(selectedMsg) else null
+            val audioSpecForMenu = if (isAudioMsg) parseDmAudioSpec(selectedMsg) else null
+            val voicePathForMenu = if (isVoiceMsg) {
+                (selectedMsg.localMediaPath?.takeIf { it.isNotBlank() }
+                    ?: selectedMsg.text.removePrefix("[voice]").substringBefore("|"))
+                    .removePrefix("file://")
+                    .takeIf { it.isNotBlank() && it != "downloading..." && File(it).exists() }
+            } else null
+
+            val canSaveGallery = (imageNodeForMenu != null && imageNodeForMenu.source.isNotBlank()) ||
+                (videoSpecForMenu?.localPath != null)
+            val isMediaOrVoice = isImageMsg || isVideoMsg || isAudioMsg || isVoiceMsg
+
             val actionItems = buildList {
-                if (isImageMsg) {
+                if (canSaveGallery) {
                     add(MessageAction("save_gallery", "Save to Gallery", { ChatIconDownload(tint = colors.text) }))
                 }
                 add(MessageAction("reply", "Reply", { ChatIconReply(tint = colors.text) }))
-                if (!isImageMsg && !selectedMsg.text.startsWith("[voice]")) {
+                if (!isMediaOrVoice) {
                     add(MessageAction("copy", "Copy Text", { ChatIconCopy(tint = colors.text) }))
                     add(MessageAction("translate", "Translate", { ChatIconTranslate(tint = colors.text) }))
                     add(MessageAction("listen", "Listen", { ChatIconVolume(tint = colors.text) }))
@@ -1602,14 +1859,19 @@ fun DirectChatScreen(
                 onAction = { actionId ->
                     when (actionId) {
                         "save_gallery" -> {
-                            val node = parseDmPhotoNode(selectedMsg.id, selectedMsg.text, selectedMsg.timestamp, selectedMsg.isOutgoing)
                             coroutineScope.launch {
-                                val res = ChatMediaSaver.saveImageToGallery(context, node.source)
+                                val res = if (videoSpecForMenu?.localPath != null) {
+                                    ChatMediaSaver.saveVideoToGallery(context, videoSpecForMenu.localPath)
+                                } else if (imageNodeForMenu != null && imageNodeForMenu.source.isNotBlank()) {
+                                    ChatMediaSaver.saveImageToGallery(context, imageNodeForMenu.source)
+                                } else {
+                                    Result.failure(IllegalStateException("Media file not downloaded yet"))
+                                }
                                 Toast.makeText(
                                     context,
                                     res.fold(
-                                        onSuccess = { "Saved to Pictures/FunkyTalk" },
-                                        onFailure = { it.message ?: "Could not save photo" }
+                                        onSuccess = { "Saved" },
+                                        onFailure = { it.message ?: "Could not save media" }
                                     ),
                                     Toast.LENGTH_SHORT
                                 ).show()
@@ -1634,17 +1896,24 @@ fun DirectChatScreen(
                             ttsEngine?.speak(selectedMsg.text, TextToSpeech.QUEUE_FLUSH, null, "msg_${selectedMsg.id}")
                         }
                         "share" -> {
-                            if (isImageMsg) {
-                                val node = parseDmPhotoNode(selectedMsg.id, selectedMsg.text, selectedMsg.timestamp, selectedMsg.isOutgoing)
-                                coroutineScope.launch {
-                                    ChatMediaSaver.shareImage(context, node.source)
+                            coroutineScope.launch {
+                                when {
+                                    imageNodeForMenu != null && imageNodeForMenu.source.isNotBlank() ->
+                                        ChatMediaSaver.shareImage(context, imageNodeForMenu.source)
+                                    videoSpecForMenu?.localPath != null ->
+                                        ChatMediaSaver.shareMediaFile(context, videoSpecForMenu.localPath, "video/mp4", "Share video")
+                                    audioSpecForMenu?.localPath != null ->
+                                        ChatMediaSaver.shareMediaFile(context, audioSpecForMenu.localPath, selectedMsg.mediaMimeType ?: "audio/mp4", "Share audio")
+                                    voicePathForMenu != null ->
+                                        ChatMediaSaver.shareMediaFile(context, voicePathForMenu, "audio/mp4", "Share voice note")
+                                    else -> {
+                                        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "text/plain"
+                                            putExtra(Intent.EXTRA_TEXT, ChatAnimatedStickers.readableLabel(selectedMsg.text))
+                                        }
+                                        context.startActivity(Intent.createChooser(sendIntent, "Share message"))
+                                    }
                                 }
-                            } else {
-                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "text/plain"
-                                    putExtra(Intent.EXTRA_TEXT, ChatAnimatedStickers.readableLabel(selectedMsg.text))
-                                }
-                                context.startActivity(Intent.createChooser(sendIntent, "Share message"))
                             }
                         }
                         "select" -> {
@@ -1746,6 +2015,25 @@ fun DirectChatScreen(
             )
         }
 
+        if (showAttachmentChooser) {
+            ChatAttachmentChooserSheet(
+                onPickPhotos = {
+                    photoPickerLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                },
+                onPickVideo = {
+                    videoPickerLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
+                    )
+                },
+                onPickAudio = {
+                    audioPickerLauncher.launch(arrayOf("audio/*"))
+                },
+                onDismiss = { showAttachmentChooser = false }
+            )
+        }
+
         // Telephoto Full-Screen Media Viewer
         if (activeMediaViewerIndex != null && allMediaItems.isNotEmpty()) {
             TelephotoMediaViewerDialog(
@@ -1754,12 +2042,16 @@ fun DirectChatScreen(
                 onDismiss = { activeMediaViewerIndex = null },
                 onSave = { item ->
                     coroutineScope.launch {
-                        val res = ChatMediaSaver.saveImageToGallery(context, item.url)
+                        val res = if (item.isVideo) {
+                            ChatMediaSaver.saveVideoToGallery(context, item.url)
+                        } else {
+                            ChatMediaSaver.saveImageToGallery(context, item.url)
+                        }
                         Toast.makeText(
                             context,
                             res.fold(
-                                onSuccess = { "Saved to Pictures/FunkyTalk" },
-                                onFailure = { it.message ?: "Could not save photo" }
+                                onSuccess = { "Saved" },
+                                onFailure = { it.message ?: "Could not save media" }
                             ),
                             Toast.LENGTH_SHORT
                         ).show()
@@ -1767,13 +2059,17 @@ fun DirectChatScreen(
                 },
                 onShare = { item ->
                     coroutineScope.launch {
-                        ChatMediaSaver.shareImage(context, item.url)
+                        if (item.isVideo) {
+                            ChatMediaSaver.shareMediaFile(context, item.url, "video/mp4", "Share video")
+                        } else {
+                            ChatMediaSaver.shareImage(context, item.url)
+                        }
                     }
                 },
                 onDelete = { item ->
                     coroutineScope.launch {
                         EncryptedChatRepository.deleteDmMessage(context, item.id)
-                        Toast.makeText(context, "Photo deleted", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, if (item.isVideo) "Video deleted" else "Photo deleted", Toast.LENGTH_SHORT).show()
                         if (allMediaItems.size <= 1) {
                             activeMediaViewerIndex = null
                         }
@@ -1841,7 +2137,9 @@ fun DirectChatScreen(
                 mergedMessages.takeLast(20).map { msg ->
                     val type = when {
                         msg.text.startsWith("[img]") || msg.text.startsWith("[imgs]") -> "image"
-                        msg.text.startsWith("[voice]") -> "voice"
+                        msg.text.startsWith("[vid]") || msg.messageType == "video" -> "video"
+                        msg.text.startsWith("[audio]") || msg.messageType == "audio" -> "audio"
+                        msg.text.startsWith("[voice]") || msg.messageType == "voice" -> "voice"
                         else -> "text"
                     }
                     val textVal = if (type == "text") msg.text else null

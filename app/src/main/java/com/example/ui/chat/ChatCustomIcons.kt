@@ -741,5 +741,49 @@ fun ChatIconRotate(
     }
 }
 
+@Composable
+fun ChatIconVideo(
+    modifier: Modifier = Modifier.size(20.dp),
+    tint: Color = Color(0xFF1B1B1B)
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val sw = 1.9.dp.toPx()
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(w * 0.10f, h * 0.24f),
+            size = Size(w * 0.56f, h * 0.52f),
+            cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx()),
+            style = Stroke(width = sw)
+        )
+        val lens = Path().apply {
+            moveTo(w * 0.70f, h * 0.38f)
+            lineTo(w * 0.90f, h * 0.26f)
+            lineTo(w * 0.90f, h * 0.74f)
+            lineTo(w * 0.70f, h * 0.62f)
+            close()
+        }
+        drawPath(lens, tint, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+@Composable
+fun ChatIconMusic(
+    modifier: Modifier = Modifier.size(20.dp),
+    tint: Color = Color(0xFF1B1B1B)
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val sw = 1.9.dp.toPx()
+        drawLine(tint, Offset(w * 0.38f, h * 0.72f), Offset(w * 0.38f, h * 0.24f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(tint, Offset(w * 0.76f, h * 0.66f), Offset(w * 0.76f, h * 0.18f), strokeWidth = sw, cap = StrokeCap.Round)
+        drawLine(tint, Offset(w * 0.38f, h * 0.24f), Offset(w * 0.76f, h * 0.18f), strokeWidth = (sw * 1.4f), cap = StrokeCap.Round)
+        drawCircle(tint, radius = w * 0.12f, center = Offset(w * 0.29f, h * 0.75f), style = Fill)
+        drawCircle(tint, radius = w * 0.12f, center = Offset(w * 0.67f, h * 0.69f), style = Fill)
+    }
+}
+
 
 

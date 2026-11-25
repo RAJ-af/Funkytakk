@@ -28,13 +28,22 @@ object LocalMessageStatus {
     const val FAILED = "FAILED"
 }
 
+object DmMediaDownloadState {
+    const val PENDING = "PENDING"
+    const val DOWNLOADING = "DOWNLOADING"
+    const val READY = "READY"
+    const val FAILED = "FAILED"
+    const val EXPIRED = "EXPIRED"
+}
+
 @Entity(
     tableName = "dm_messages",
     indices = [
         Index(value = ["conversationId"]),
         Index(value = ["timestamp"]),
         Index(value = ["clientId"]),
-        Index(value = ["status"])
+        Index(value = ["status"]),
+        Index(value = ["mediaDownloadState"])
     ]
 )
 data class LocalDmMessage(
@@ -44,7 +53,7 @@ data class LocalDmMessage(
     val senderId: String,
     val recipientId: String,
     val text: String, // Plaintext, decrypted locally!
-    val messageType: String = "text", // "text", "image", "voice", "video", "file"
+    val messageType: String = "text", // "text", "image", "voice", "video", "audio", "file"
     val timestamp: Long = System.currentTimeMillis(),
     val isOutgoing: Boolean,
     val replyToText: String? = null,
@@ -57,7 +66,12 @@ data class LocalDmMessage(
     val localMediaPath: String? = null,
     val mediaMimeType: String? = null,
     val mediaDurationSec: Int? = null,
-    val mediaCaption: String? = null
+    val mediaCaption: String? = null,
+    val storagePath: String? = null,
+    val mediaKey: String? = null,
+    val mediaNonce: String? = null,
+    val mediaDownloadState: String? = null,
+    val mediaFailReason: String? = null
 )
 
 @Entity(

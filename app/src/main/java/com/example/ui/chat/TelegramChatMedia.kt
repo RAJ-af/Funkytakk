@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -107,6 +108,8 @@ data class ChatPhotoNode(
     val caption: String?,
     val isDownloading: Boolean,
     val isAutoDownloadPaused: Boolean = false,
+    val downloadState: String? = null,
+    val failReason: String? = null,
     val timeText: String,
     val isOutgoing: Boolean
 )
@@ -118,18 +121,27 @@ fun parseDmPhotoNode(
     id: String,
     rawText: String,
     timestamp: Long,
-    isOutgoing: Boolean
+    isOutgoing: Boolean,
+    downloadState: String? = null,
+    failReason: String? = null
 ): ChatPhotoNode {
     val stripped = rawText.removePrefix("[img]").removePrefix("[imgs]")
     val source = stripped.substringBefore("|").trim()
     val caption = stripped.substringAfter("|", "").trim().takeIf { it.isNotBlank() }
-    val isDownloading = source.isBlank() || source == "downloading..."
+    val hasLocalSource = source.isNotBlank() && source != "downloading..." && !source.startsWith("⚠️")
+    val resolvedState = when {
+        hasLocalSource -> com.example.db.DmMediaDownloadState.READY
+        !downloadState.isNullOrBlank() -> downloadState
+        else -> com.example.db.DmMediaDownloadState.DOWNLOADING
+    }
     return ChatPhotoNode(
         id = id,
-        source = if (isDownloading) "" else source,
+        source = if (hasLocalSource) source else "",
         caption = caption,
-        isDownloading = isDownloading,
-        isAutoDownloadPaused = false,
+        isDownloading = !hasLocalSource && (resolvedState == com.example.db.DmMediaDownloadState.DOWNLOADING || resolvedState == com.example.db.DmMediaDownloadState.PENDING),
+        isAutoDownloadPaused = !hasLocalSource && resolvedState == com.example.db.DmMediaDownloadState.PENDING,
+        downloadState = resolvedState,
+        failReason = failReason,
         timeText = formatChatTime(timestamp),
         isOutgoing = isOutgoing
     )
@@ -140,7 +152,8 @@ fun isGroupImageMessage(msg: LocalGroupMessage): Boolean =
 
 fun parseGroupPhotoNode(
     msg: LocalGroupMessage,
-    isOutgoing: Boolean
+    isOutgoing: Boolean,
+    groupState: Pair<String, String?>? = null
 ): ChatPhotoNode {
     val rawText = msg.text
     val fallbackSource = rawText.removePrefix("[img]").removePrefix("[imgs]").substringBefore("|")
@@ -149,6 +162,12 @@ fun parseGroupPhotoNode(
     val resolvedSource = msg.localMediaPath?.takeIf { it.isNotBlank() } ?: fallbackSource
     val isMissingLocal = resolvedSource.isBlank() || resolvedSource == "downloading..."
     val hasRemoteKey = !msg.storagePath.isNullOrBlank() && !msg.mediaKey.isNullOrBlank()
+    val resolvedState = when {
+        !isMissingLocal -> com.example.db.DmMediaDownloadState.READY
+        groupState != null -> groupState.first
+        hasRemoteKey -> com.example.db.DmMediaDownloadState.PENDING
+        else -> com.example.db.DmMediaDownloadState.DOWNLOADING
+    }
     val caption = when {
         rawText.startsWith("[img]") || rawText.startsWith("[imgs]") ->
             rawText.substringAfter("|", "").trim().takeIf { it.isNotBlank() }
@@ -159,11 +178,238 @@ fun parseGroupPhotoNode(
         id = msg.id,
         source = if (isMissingLocal) "" else resolvedSource,
         caption = caption,
-        isDownloading = isMissingLocal && !hasRemoteKey,
-        isAutoDownloadPaused = isMissingLocal && hasRemoteKey,
+        isDownloading = isMissingLocal && resolvedState == com.example.db.DmMediaDownloadState.DOWNLOADING,
+        isAutoDownloadPaused = isMissingLocal && resolvedState == com.example.db.DmMediaDownloadState.PENDING,
+        downloadState = resolvedState,
+        failReason = groupState?.second,
         timeText = formatChatTime(msg.timestamp),
         isOutgoing = isOutgoing
     )
+}
+
+data class ChatVideoSpec(
+    val localPath: String?,
+    val durationSec: Int,
+    val caption: String?,
+    val downloadState: String? = null,
+    val failReason: String? = null
+)
+
+data class ChatAudioSpec(
+    val localPath: String?,
+    val durationSec: Int,
+    val title: String,
+    val downloadState: String? = null,
+    val failReason: String? = null
+)
+
+fun parseDmVideoSpec(msg: com.example.db.LocalDmMessage): ChatVideoSpec {
+    val parts = msg.text.removePrefix("[vid]").split("|")
+    val rawSrc = parts.getOrNull(0)?.trim().orEmpty()
+    val pathCandidate = msg.localMediaPath?.takeIf { it.isNotBlank() }
+        ?: rawSrc.takeIf { it.isNotBlank() && it != "downloading..." && !it.startsWith("⚠️") }
+    val cleanPath = pathCandidate?.removePrefix("file://")?.takeIf {
+        val f = File(it)
+        f.exists() && f.length() > 0L
+    }
+    val duration = parts.getOrNull(1)?.toIntOrNull()?.coerceAtLeast(0) ?: (msg.mediaDurationSec ?: 0)
+    val caption = parts.getOrNull(2)?.trim()?.takeIf { it.isNotBlank() }
+        ?: msg.mediaCaption?.takeIf { it.isNotBlank() }
+    val state = if (cleanPath != null) {
+        com.example.db.DmMediaDownloadState.READY
+    } else {
+        msg.mediaDownloadState ?: com.example.db.DmMediaDownloadState.PENDING
+    }
+    return ChatVideoSpec(
+        localPath = cleanPath,
+        durationSec = duration,
+        caption = caption,
+        downloadState = state,
+        failReason = msg.mediaFailReason
+    )
+}
+
+fun parseDmAudioSpec(msg: com.example.db.LocalDmMessage): ChatAudioSpec {
+    val parts = msg.text.removePrefix("[audio]").split("|")
+    val rawSrc = parts.getOrNull(0)?.trim().orEmpty()
+    val pathCandidate = msg.localMediaPath?.takeIf { it.isNotBlank() }
+        ?: rawSrc.takeIf { it.isNotBlank() && it != "downloading..." && !it.startsWith("⚠️") }
+    val cleanPath = pathCandidate?.removePrefix("file://")?.takeIf {
+        val f = File(it)
+        f.exists() && f.length() > 0L
+    }
+    val duration = parts.getOrNull(1)?.toIntOrNull()?.coerceAtLeast(0) ?: (msg.mediaDurationSec ?: 0)
+    val title = parts.getOrNull(2)?.trim()?.takeIf { it.isNotBlank() }
+        ?: msg.mediaCaption?.takeIf { it.isNotBlank() }
+        ?: "Audio file"
+    val state = if (cleanPath != null) {
+        com.example.db.DmMediaDownloadState.READY
+    } else {
+        msg.mediaDownloadState ?: com.example.db.DmMediaDownloadState.PENDING
+    }
+    return ChatAudioSpec(
+        localPath = cleanPath,
+        durationSec = duration,
+        title = title,
+        downloadState = state,
+        failReason = msg.mediaFailReason
+    )
+}
+
+fun parseGroupVideoSpec(
+    msg: LocalGroupMessage,
+    groupState: Pair<String, String?>? = null
+): ChatVideoSpec {
+    val cleanPath = msg.localMediaPath?.takeIf {
+        it.isNotBlank() && File(it.removePrefix("file://")).let { f -> f.exists() && f.length() > 0L }
+    }?.removePrefix("file://")
+    val parts = msg.text.removePrefix("[vid]").split("|")
+    val duration = parts.getOrNull(1)?.toIntOrNull()?.coerceAtLeast(0) ?: 0
+    val caption = parts.getOrNull(2)?.trim()?.takeIf { it.isNotBlank() }
+    val state = when {
+        cleanPath != null -> com.example.db.DmMediaDownloadState.READY
+        groupState != null -> groupState.first
+        !msg.storagePath.isNullOrBlank() && !msg.mediaKey.isNullOrBlank() -> com.example.db.DmMediaDownloadState.PENDING
+        else -> com.example.db.DmMediaDownloadState.DOWNLOADING
+    }
+    return ChatVideoSpec(
+        localPath = cleanPath,
+        durationSec = duration,
+        caption = caption,
+        downloadState = state,
+        failReason = groupState?.second
+    )
+}
+
+fun parseGroupAudioSpec(
+    msg: LocalGroupMessage,
+    groupState: Pair<String, String?>? = null
+): ChatAudioSpec {
+    val cleanPath = msg.localMediaPath?.takeIf {
+        it.isNotBlank() && File(it.removePrefix("file://")).let { f -> f.exists() && f.length() > 0L }
+    }?.removePrefix("file://")
+    val parts = msg.text.removePrefix("[audio]").split("|")
+    val duration = parts.getOrNull(1)?.toIntOrNull()?.coerceAtLeast(0) ?: 0
+    val title = parts.getOrNull(2)?.trim()?.takeIf { it.isNotBlank() } ?: "Audio file"
+    val state = when {
+        cleanPath != null -> com.example.db.DmMediaDownloadState.READY
+        groupState != null -> groupState.first
+        !msg.storagePath.isNullOrBlank() && !msg.mediaKey.isNullOrBlank() -> com.example.db.DmMediaDownloadState.PENDING
+        else -> com.example.db.DmMediaDownloadState.DOWNLOADING
+    }
+    return ChatAudioSpec(
+        localPath = cleanPath,
+        durationSec = duration,
+        title = title,
+        downloadState = state,
+        failReason = groupState?.second
+    )
+}
+
+@androidx.compose.material3.ExperimentalMaterial3Api
+@Composable
+fun ChatAttachmentChooserSheet(
+    onPickPhotos: () -> Unit,
+    onPickVideo: () -> Unit,
+    onPickAudio: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val c = LocalChatColors.current
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = c.surface,
+        contentColor = c.text,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "Send media",
+                color = c.text,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+            )
+            Surface(
+                onClick = {
+                    onDismiss()
+                    onPickPhotos()
+                },
+                shape = RoundedCornerShape(14.dp),
+                color = c.surfaceVariant,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 56.dp)
+                    .testTag("attach_option_photos")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    ChatIconPhoto(tint = c.accentIn, modifier = Modifier.size(22.dp))
+                    Column {
+                        Text("Photos", color = c.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Pick up to 10 photos", color = c.textSecondary, fontSize = 12.sp)
+                    }
+                }
+            }
+            Surface(
+                onClick = {
+                    onDismiss()
+                    onPickVideo()
+                },
+                shape = RoundedCornerShape(14.dp),
+                color = c.surfaceVariant,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 56.dp)
+                    .testTag("attach_option_video")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    ChatIconVideo(tint = c.accentIn, modifier = Modifier.size(22.dp))
+                    Column {
+                        Text("Video", color = c.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Compressed to 720p (max 20 MB)", color = c.textSecondary, fontSize = 12.sp)
+                    }
+                }
+            }
+            Surface(
+                onClick = {
+                    onDismiss()
+                    onPickAudio()
+                },
+                shape = RoundedCornerShape(14.dp),
+                color = c.surfaceVariant,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 56.dp)
+                    .testTag("attach_option_audio")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    ChatIconMusic(tint = c.accentIn, modifier = Modifier.size(22.dp))
+                    Column {
+                        Text("Audio File", color = c.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        Text("MP3, M4A, AAC, or OGG (max 20 MB)", color = c.textSecondary, fontSize = 12.sp)
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+        }
+    }
 }
 
 /**
@@ -939,22 +1185,75 @@ private fun TelegramChatPhotoTile(
         label = "pulseAlpha"
     )
 
+    val isMissing = photo.source.isBlank()
+    val effectiveState = photo.downloadState
+    val isExpired = isMissing && effectiveState == com.example.db.DmMediaDownloadState.EXPIRED
+    val isFailed = isMissing && effectiveState == com.example.db.DmMediaDownloadState.FAILED
+    val isPendingTap = isMissing && (effectiveState == com.example.db.DmMediaDownloadState.PENDING || photo.isAutoDownloadPaused)
+    val isInProgress = isMissing && !isExpired && !isFailed && !isPendingTap
+
     Box(
         modifier = modifier
             .background(c.hairline.copy(alpha = 0.45f))
             .combinedClickable(
                 onClick = {
-                    if ((photo.isAutoDownloadPaused || photo.isDownloading) && onDownloadClick != null) {
-                        onDownloadClick()
-                    } else if (!photo.isDownloading) {
-                        onClick()
+                    when {
+                        isExpired -> Unit
+                        (isFailed || isPendingTap || isInProgress) && onDownloadClick != null -> onDownloadClick()
+                        !isMissing -> onClick()
                     }
                 },
                 onLongClick = onLongPress
             )
     ) {
         when {
-            photo.isDownloading -> {
+            isExpired -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFF1E293B).copy(alpha = 0.92f))
+                        .padding(12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = photo.failReason?.takeIf { it.isNotBlank() } ?: "Media expired",
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+
+            isFailed -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFF1E293B).copy(alpha = 0.90f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color(0xFFEF4444).copy(alpha = 0.85f)
+                        ) {
+                            Box(Modifier.padding(10.dp)) {
+                                ChatIconRetry(tint = Color.White, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                        Text(
+                            text = "Failed. Tap to retry",
+                            color = Color.White,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+
+            isInProgress -> {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -978,7 +1277,7 @@ private fun TelegramChatPhotoTile(
                             strokeWidth = 2.4.dp
                         )
                         Text(
-                            text = if (onDownloadClick != null) "Tap to retry download" else "Decrypting...",
+                            text = "Downloading...",
                             color = Color.White.copy(alpha = 0.85f),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium
@@ -987,7 +1286,7 @@ private fun TelegramChatPhotoTile(
                 }
             }
 
-            photo.isAutoDownloadPaused -> {
+            isPendingTap -> {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -1004,9 +1303,9 @@ private fun TelegramChatPhotoTile(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            ChatIconCloud(tint = Color.White, modifier = Modifier.size(16.dp))
+                            ChatIconDownload(tint = Color.White, modifier = Modifier.size(16.dp))
                             Text(
-                                text = "Load photo",
+                                text = "Tap to download",
                                 color = Color.White,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold

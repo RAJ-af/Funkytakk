@@ -435,6 +435,40 @@ fun ChatAppearanceBottomSheet(
                             Text("Re-register push", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         }
                     }
+
+                    var mediaDiagnostics by remember { mutableStateOf<List<com.example.db.LocalDmMessage>>(emptyList()) }
+                    var showMediaDiagnostics by remember { mutableStateOf(false) }
+                    LaunchedEffect(showMediaDiagnostics) {
+                        if (showMediaDiagnostics) {
+                            mediaDiagnostics = com.example.repository.EncryptedChatRepository.getMediaDownloadDiagnostics()
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = { showMediaDiagnostics = !showMediaDiagnostics },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            if (showMediaDiagnostics) "Hide DM Media Downloads" else "Show DM Media Downloads",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    if (showMediaDiagnostics) {
+                        if (mediaDiagnostics.isEmpty()) {
+                            Text("No recent DM media records", fontSize = 11.sp, color = colors.textSecondary)
+                        } else {
+                            mediaDiagnostics.take(10).forEach { row ->
+                                val stateLabel = row.mediaDownloadState ?: if (!row.localMediaPath.isNullOrBlank()) "READY" else "PENDING"
+                                val reasonPart = row.mediaFailReason?.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
+                                Text(
+                                    text = "${row.id.take(8)} · ${row.messageType} · $stateLabel$reasonPart",
+                                    fontSize = 11.sp,
+                                    color = if (stateLabel == "FAILED" || stateLabel == "EXPIRED") Color(0xFFB91C1C) else colors.textSecondary
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

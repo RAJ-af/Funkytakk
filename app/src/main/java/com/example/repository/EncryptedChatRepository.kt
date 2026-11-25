@@ -18,6 +18,8 @@ import com.example.crypto.E2EEManager
 import com.example.crypto.E2EEMediaManager
 import com.example.crypto.VaultSecurityManager
 import com.example.crypto.VaultStatus
+import androidx.room.withTransaction
+import com.example.db.DmMediaDownloadState
 import com.example.db.EncryptedChatDatabase
 import com.example.db.LocalDmConversation
 import com.example.db.LocalDmMessage
@@ -86,6 +88,57 @@ object EncryptedChatRepository {
     private val conversationSendMutexes = ConcurrentHashMap<String, Mutex>()
     private val outboxResumeMutex = Mutex()
     private val activeSendClientIds = ConcurrentHashMap.newKeySet<String>()
+    private val dmMediaDownloadSemaphore = Semaphore(2)
+    private val inFlightDmDownloads = ConcurrentHashMap<String, CompletableDeferred<DmMediaDownloadOutcome>>()
+
+    sealed interface DmMediaDownloadOutcome {
+        data class Ready(val localPath: String) : DmMediaDownloadOutcome
+        data object Expired : DmMediaDownloadOutcome
+        data object NotFound : DmMediaDownloadOutcome
+        data object VaultLocked : DmMediaDownloadOutcome
+        data class Retry(val reason: String) : DmMediaDownloadOutcome
+    }
+
+    private sealed interface DmBlobFetchResult {
+        data class Success(val bytes: ByteArray) : DmBlobFetchResult
+        data class Expired(val reason: String) : DmBlobFetchResult
+        data class Failed(val reason: String) : DmBlobFetchResult
+    }
+
+    internal fun extractAppwriteProjectId(url: String): String? {
+        if (!url.contains("appwrite.io", ignoreCase = true)) return null
+        val fromQuery = runCatching { Uri.parse(url)?.getQueryParameter("project") }.getOrNull()
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: runCatching {
+                java.net.URI(url).rawQuery
+                    ?.split("&")
+                    ?.firstOrNull { it.startsWith("project=") }
+                    ?.substringAfter("project=")
+                    ?.let { java.net.URLDecoder.decode(it, "UTF-8") }
+            }.getOrNull()?.trim()?.takeIf { it.isNotBlank() }
+        return fromQuery ?: com.example.FunkyTalkApplication.APPWRITE_PROJECT_ID.takeIf { it.isNotBlank() }
+    }
+
+    internal fun resolveExtensionForMedia(mimeType: String, messageType: String = ""): String {
+        val mime = mimeType.lowercase()
+        val type = messageType.lowercase()
+        return when {
+            type == "video" || mime.contains("video") -> "mp4"
+            mime.contains("png") -> "png"
+            mime.contains("jpg") || mime.contains("jpeg") -> "jpg"
+            mime.contains("webp") -> "webp"
+            mime.contains("3gp") -> "3gp"
+            mime.contains("mpeg") || mime.contains("mp3") -> "mp3"
+            mime.contains("ogg") -> "ogg"
+            mime.contains("m4a") || mime.contains("mp4") || mime.contains("aac") || mime.contains("audio") || type == "voice" || type == "audio" -> "m4a"
+            else -> "bin"
+        }
+    }
+
+    suspend fun getMediaDownloadDiagnostics(): List<LocalDmMessage> = withContext(Dispatchers.IO) {
+        database?.messageDao()?.getMediaDownloadDiagnostics().orEmpty()
+    }
 
     private var conversationCollectJob: Job? = null
     private var realtimeListenerJob: Job? = null
@@ -138,6 +191,7 @@ object EncryptedChatRepository {
                 VoiceRoomRealtimeManager.reconnectNowIfNeeded()
                 launch { fetchAndProcessPendingInbox(context) }
                 launch { resumePendingOutbox(context) }
+                launch { resumePendingDmMediaDownloads(context) }
             }
         }
     }
@@ -148,6 +202,7 @@ object EncryptedChatRepository {
             VoiceRoomRealtimeManager.reconnectNowIfNeeded()
             fetchAndProcessPendingInbox(appContext)
             resumePendingOutbox(appContext)
+            resumePendingDmMediaDownloads(appContext)
         }
     }
 
@@ -165,7 +220,7 @@ object EncryptedChatRepository {
                 }
             }
 
-            // Sync identity key, process mailbox, & resume persisted outbox
+            // Sync identity key, process mailbox, & resume persisted outbox + pending media downloads
             scope.launch {
                 val myUserId = SupabaseSessionManager.getUserId(context)
                 if (!myUserId.isNullOrBlank()) {
@@ -173,6 +228,7 @@ object EncryptedChatRepository {
                     VoiceRoomRealtimeManager.subscribeDmInbox(myUserId)
                     launch { fetchAndProcessPendingInbox(context) }
                     launch { resumePendingOutbox(context, fromColdStart = true) }
+                    launch { resumePendingDmMediaDownloads(context) }
                 }
             }
         } catch (e: Exception) {
@@ -218,6 +274,7 @@ object EncryptedChatRepository {
                         Log.d(TAG, "Realtime reconnected; checking pending DM mailbox...")
                         launch { fetchAndProcessPendingInbox(context) }
                         launch { resumePendingOutbox(context) }
+                        launch { resumePendingDmMediaDownloads(context) }
                     }
                     else -> {}
                 }
@@ -519,40 +576,52 @@ object EncryptedChatRepository {
                snippet.startsWith("<html")
     }
 
-    private suspend fun downloadDmMediaBlob(
+    private suspend fun downloadDmMediaBlobTyped(
         context: Context,
         authToken: String,
         rawPath: String,
         cleanPath: String,
         convId: String,
         msgId: String
-    ): ByteArray? {
+    ): DmBlobFetchResult {
         if (rawPath.startsWith("data:")) {
             return try {
                 val base64Data = rawPath.substringAfter(",")
-                Base64.decode(base64Data, Base64.DEFAULT)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed decoding base64 data URI in downloadDmMediaBlob", e)
-                null
+                DmBlobFetchResult.Success(Base64.decode(base64Data, Base64.DEFAULT))
+            } catch (_: Exception) {
+                DmBlobFetchResult.Expired("Invalid data URI")
             }
         }
 
         if (rawPath.startsWith("http://") || rawPath.startsWith("https://")) {
-            try {
-                val isSupa = rawPath.contains("supabase.co")
+            return try {
+                val isSupa = rawPath.contains("supabase.co", ignoreCase = true)
+                val appwriteProject = extractAppwriteProjectId(rawPath)
                 val resp = SupabaseClient.api.downloadFromUrl(
                     url = rawPath,
                     apiKey = if (isSupa) com.example.BuildConfig.SUPABASE_ANON_KEY else null,
-                    auth = if (isSupa) authToken else null
+                    auth = if (isSupa) authToken else null,
+                    appwriteProject = appwriteProject
                 )
                 if (resp.isSuccessful && resp.body() != null) {
                     val bytes = resp.body()!!.bytes()
                     if (bytes.isNotEmpty() && !isJsonErrorBytes(bytes)) {
-                        return bytes
+                        DmBlobFetchResult.Success(bytes)
+                    } else {
+                        DmBlobFetchResult.Expired("HTTP 404 / error body")
+                    }
+                } else {
+                    val errText = runCatching { resp.errorBody()?.string().orEmpty() }.getOrDefault("")
+                    if (resp.code() == 404 || resp.code() == 410 || errText.contains("not_found", ignoreCase = true)) {
+                        DmBlobFetchResult.Expired("HTTP ${resp.code()}")
+                    } else {
+                        DmBlobFetchResult.Failed("HTTP ${resp.code()}")
                     }
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed downloading from direct URL in downloadDmMediaBlob: $rawPath", e)
+            } catch (_: IOException) {
+                DmBlobFetchResult.Failed("Network error")
+            } catch (_: Exception) {
+                DmBlobFetchResult.Failed("Download failed")
             }
         }
 
@@ -580,6 +649,10 @@ object EncryptedChatRepository {
         if (!accessTok.isNullOrBlank()) tokens.add("Bearer $accessTok")
         tokens.add("Bearer ${com.example.BuildConfig.SUPABASE_ANON_KEY}")
 
+        var sawExpired = false
+        var anyTransientError = false
+        var lastFailureReason = "Network error"
+
         for (path in candidates) {
             for (authHeader in tokens) {
                 // Strategy 1: Direct authenticated storage download
@@ -592,11 +665,21 @@ object EncryptedChatRepository {
                     if (resp.isSuccessful && resp.body() != null) {
                         val bytes = resp.body()!!.bytes()
                         if (bytes.isNotEmpty() && !isJsonErrorBytes(bytes)) {
-                            Log.d(TAG, "Direct authenticated download succeeded for $path (${bytes.size} bytes)")
-                            return bytes
+                            return DmBlobFetchResult.Success(bytes)
                         }
+                        sawExpired = true
+                    } else if (resp.code() == 404 || resp.code() == 410) {
+                        sawExpired = true
+                    } else {
+                        anyTransientError = true
+                        lastFailureReason = "HTTP ${resp.code()}"
                     }
-                } catch (_: Exception) {}
+                } catch (_: IOException) {
+                    anyTransientError = true
+                    lastFailureReason = "Network error"
+                } catch (_: Exception) {
+                    anyTransientError = true
+                }
 
                 // Strategy 2: Direct standard storage download
                 try {
@@ -608,11 +691,21 @@ object EncryptedChatRepository {
                     if (resp.isSuccessful && resp.body() != null) {
                         val bytes = resp.body()!!.bytes()
                         if (bytes.isNotEmpty() && !isJsonErrorBytes(bytes)) {
-                            Log.d(TAG, "Standard object download succeeded for $path (${bytes.size} bytes)")
-                            return bytes
+                            return DmBlobFetchResult.Success(bytes)
                         }
+                        sawExpired = true
+                    } else if (resp.code() == 404 || resp.code() == 410) {
+                        sawExpired = true
+                    } else {
+                        anyTransientError = true
+                        lastFailureReason = "HTTP ${resp.code()}"
                     }
-                } catch (_: Exception) {}
+                } catch (_: IOException) {
+                    anyTransientError = true
+                    lastFailureReason = "Network error"
+                } catch (_: Exception) {
+                    anyTransientError = true
+                }
 
                 // Strategy 3: Supabase Storage Signed URL
                 try {
@@ -625,8 +718,7 @@ object EncryptedChatRepository {
                         body = CreateSignedUrlRequest(expiresIn = 3600)
                     )
                     if (signResp.isSuccessful && signResp.body() != null) {
-                        val body = signResp.body()!!
-                        val signedPath = body.getResolvedPath()
+                        val signedPath = signResp.body()!!.getResolvedPath()
                         if (!signedPath.isNullOrBlank()) {
                             val baseUrl = com.example.BuildConfig.SUPABASE_URL.trimEnd('/')
                             val prefix = if (baseUrl.startsWith("http")) baseUrl else "https://$baseUrl"
@@ -647,20 +739,46 @@ object EncryptedChatRepository {
                                     if (signedDownloadResp.isSuccessful && signedDownloadResp.body() != null) {
                                         val bytes = signedDownloadResp.body()!!.bytes()
                                         if (bytes.isNotEmpty() && !isJsonErrorBytes(bytes)) {
-                                            Log.d(TAG, "Signed URL download succeeded for $path (${bytes.size} bytes)")
-                                            return bytes
+                                            return DmBlobFetchResult.Success(bytes)
                                         }
+                                        sawExpired = true
+                                    } else if (signedDownloadResp.code() == 404 || signedDownloadResp.code() == 410) {
+                                        sawExpired = true
+                                    } else {
+                                        anyTransientError = true
+                                        lastFailureReason = "HTTP ${signedDownloadResp.code()}"
                                     }
-                                } catch (_: Exception) {}
+                                } catch (_: IOException) {
+                                    anyTransientError = true
+                                    lastFailureReason = "Network error"
+                                } catch (_: Exception) {
+                                    anyTransientError = true
+                                }
                             }
                         }
+                    } else if (signResp.code() == 404 || signResp.code() == 410 || signResp.code() == 400) {
+                        val errTxt = runCatching { signResp.errorBody()?.string().orEmpty() }.getOrDefault("")
+                        if (errTxt.contains("not_found", ignoreCase = true) || errTxt.contains("Object not found", ignoreCase = true)) {
+                            sawExpired = true
+                        }
+                    } else {
+                        anyTransientError = true
+                        lastFailureReason = "HTTP ${signResp.code()}"
                     }
-                } catch (_: Exception) {}
+                } catch (_: IOException) {
+                    anyTransientError = true
+                    lastFailureReason = "Network error"
+                } catch (_: Exception) {
+                    anyTransientError = true
+                }
             }
         }
 
-        Log.w(TAG, "Media blob unavailable at path $cleanPath after trying all download strategies; falling back to placeholder")
-        return null
+        return if (sawExpired && !anyTransientError) {
+            DmBlobFetchResult.Expired("HTTP 404")
+        } else {
+            DmBlobFetchResult.Failed(lastFailureReason)
+        }
     }
 
     private suspend fun processIncomingMediaDescriptor(
@@ -675,75 +793,142 @@ object EncryptedChatRepository {
         storagePath: String,
         timestamp: Long
     ) {
+        val db = database ?: throw IllegalStateException("Chat vault is locked")
+
         val rawPath = descriptorJson.optString("storage_path").ifBlank { storagePath }
-        val cleanPath = cleanStoragePath(rawPath).ifBlank { "$convId/$msgId" }
+        val descType = descriptorJson.optString("message_type").lowercase()
+        val mimeTypeRaw = descriptorJson.optString("mime_type")
+        val effectiveType = when {
+            messageType.lowercase() == "video" || descType == "video" || mimeTypeRaw.contains("video", ignoreCase = true) -> "video"
+            messageType.lowercase() == "audio" || descType == "audio" -> "audio"
+            messageType.lowercase() == "voice" || descType == "voice" -> "voice"
+            mimeTypeRaw.contains("audio", ignoreCase = true) -> if (descriptorJson.has("file_name")) "audio" else "voice"
+            else -> "image"
+        }
+        val mimeType = mimeTypeRaw.ifBlank {
+            when (effectiveType) {
+                "video" -> "video/mp4"
+                "voice", "audio" -> "audio/mp4"
+                else -> "image/jpeg"
+            }
+        }
         val keyBase64 = descriptorJson.optString("media_key")
         val nonceBase64 = descriptorJson.optString("media_nonce")
-        val mimeType = descriptorJson.optString("mime_type", if (messageType == "image") "image/jpeg" else "audio/aac")
-        val durationSecs = descriptorJson.optInt("duration_seconds", 0)
+        val durationSecs = descriptorJson.optInt("duration_seconds", 0).coerceAtLeast(0)
         val captionSuffix = descriptorJson.optString("caption", "")
             .replace("\n", " ")
             .replace("|", " ")
             .trim()
             .takeIf { it.isNotBlank() }
+        val fileTitle = descriptorJson.optString("file_name", "")
+            .replace("\n", " ")
+            .replace("|", " ")
+            .trim()
+            .takeIf { it.isNotBlank() }
 
-        val initialPlaceholder = if (messageType == "image") {
-            if (captionSuffix != null) "[img]downloading...|$captionSuffix" else "[img]downloading..."
-        } else {
-            "[voice]downloading...|$durationSecs"
+        val initialPlaceholder = when (effectiveType) {
+            "image" -> if (captionSuffix != null) "[img]downloading...|$captionSuffix" else "[img]downloading..."
+            "video" -> if (captionSuffix != null) "[vid]downloading...|$durationSecs|$captionSuffix" else "[vid]downloading...|$durationSecs"
+            "audio" -> "[audio]downloading...|$durationSecs|${fileTitle ?: "Audio"}"
+            else -> "[voice]downloading...|$durationSecs"
+        }
+        val previewText = when (effectiveType) {
+            "image" -> if (captionSuffix != null) "📷 $captionSuffix" else "📷 Photo"
+            "video" -> if (captionSuffix != null) "🎬 $captionSuffix" else "🎬 Video"
+            "audio" -> "🎵 ${fileTitle ?: "Audio file"}"
+            else -> "🎤 Voice note"
         }
 
-        // 0. Persist retry descriptor sidecar locally BEFORE server acknowledgement so media can always be retried on-demand
-        saveDmMediaDescriptorSidecar(
-            context = context,
-            msgId = msgId,
-            rawPath = rawPath,
-            cleanPath = cleanPath,
-            convId = convId,
-            senderId = senderId,
-            recipientId = recipientId,
-            keyBase64 = keyBase64,
-            nonceBase64 = nonceBase64,
-            mimeType = mimeType,
-            messageType = messageType,
-            durationSecs = durationSecs,
-            captionSuffix = captionSuffix,
-            timestamp = timestamp
+        verifiedServerConvIds.add(convId)
+        val isChatOpen = com.example.service.PushNotificationManager.isChatOpenInForeground(
+            conversationId = convId,
+            partnerUserId = senderId
         )
+        val cachedProfile = senderProfileCache[senderId]
+        val existingConv = db.conversationDao().getConversation(convId)
 
-        // 1. Save local message record in Room FIRST (Strict Order of Operations)
-        saveDecryptedMessageLocally(
-            context = context,
-            messageId = msgId,
+        val localMsg = LocalDmMessage(
+            id = msgId,
             conversationId = convId,
             senderId = senderId,
             recipientId = recipientId,
-            plaintext = initialPlaceholder,
-            timestamp = timestamp
+            text = initialPlaceholder,
+            messageType = effectiveType,
+            timestamp = timestamp,
+            isOutgoing = false,
+            status = LocalMessageStatus.SENT,
+            localMediaPath = null,
+            mediaMimeType = mimeType,
+            mediaDurationSec = durationSecs.takeIf { it > 0 },
+            mediaCaption = captionSuffix ?: fileTitle,
+            storagePath = rawPath,
+            mediaKey = keyBase64,
+            mediaNonce = nonceBase64,
+            mediaDownloadState = DmMediaDownloadState.PENDING,
+            mediaFailReason = null
         )
 
-        // 2. Acknowledge server row ONLY after local record & sidecar are written
+        // 1. Persist descriptor + conversation atomically in Room FIRST (Strict Durability)
+        db.withTransaction {
+            db.messageDao().insertMediaDescriptorAndConversation(
+                message = localMsg,
+                conversationDao = db.conversationDao(),
+                partnerName = cachedProfile?.first ?: existingConv?.otherUserName ?: "FunkyTalk User",
+                partnerAvatar = cachedProfile?.second ?: existingConv?.otherUserAvatar,
+                partnerFlag = cachedProfile?.third ?: existingConv?.otherUserFlag,
+                previewText = previewText,
+                unreadDelta = if (isChatOpen) 0 else 1
+            )
+        }
+
+        if (cachedProfile == null) {
+            scope.launch(Dispatchers.IO) {
+                val fetched = fetchSenderProfileInfo(context, senderId)
+                senderProfileCache[senderId] = fetched
+                val current = db.conversationDao().getConversation(convId)
+                if (current != null) {
+                    db.conversationDao().updateLastMessageAndProfile(
+                        conversationId = convId,
+                        text = current.lastMessageText,
+                        time = current.lastMessageTime,
+                        unreadDelta = 0,
+                        name = fetched.first.takeIf { it != "FunkyTalk User" },
+                        avatar = fetched.second ?: current.otherUserAvatar,
+                        flag = fetched.third ?: current.otherUserFlag
+                    )
+                }
+            }
+        }
+
+        val myUserId = SupabaseSessionManager.getUserId(context)
+        if (!myUserId.isNullOrBlank() && senderId != myUserId && !isChatOpen) {
+            val conv = db.conversationDao().getConversation(convId)
+            val senderTitle = conv?.otherUserName?.ifBlank { "FunkyTalk Chat" } ?: "New Message"
+            com.example.util.SystemNotificationHelper.showSystemNotification(
+                context = context,
+                title = senderTitle,
+                message = previewText,
+                partnerUserId = senderId,
+                conversationId = convId,
+                senderId = senderId,
+                kind = "dm",
+                notificationId = com.example.service.PushNotificationManager.notificationIdForChat(
+                    conversationId = convId,
+                    fallbackPartnerId = senderId
+                ),
+                channelId = com.example.util.SystemNotificationHelper.CHANNEL_MESSAGES_ID
+            )
+        }
+
+        // 2. Delete server dm_messages row ONLY AFTER local Room transaction succeeded
         deleteMessageFromServer(context, token, msgId)
 
-        // 3. Download & decrypt media payload in background with retries
+        // 3. Enqueue durable WorkManager retry + trigger bounded immediate download if online
+        com.example.service.DmMediaDownloadWorker.enqueue(context, msgId)
         scope.launch(Dispatchers.IO) {
-            fetchAndSaveDmMediaFromDescriptor(
-                context = context,
-                msgId = msgId,
-                convId = convId,
-                senderId = senderId,
-                recipientId = recipientId,
-                rawPath = rawPath,
-                cleanPath = cleanPath,
-                keyBase64 = keyBase64,
-                nonceBase64 = nonceBase64,
-                mimeType = mimeType,
-                messageType = messageType,
-                durationSecs = durationSecs,
-                captionSuffix = captionSuffix,
-                timestamp = timestamp,
-                fallbackToken = token
-            )
+            if (AppNetworkManager.checkConnection(context)) {
+                performDmMediaDownload(context, msgId)
+            }
         }
     }
 
@@ -753,173 +938,223 @@ object EncryptedChatRepository {
         return File(dir, "$msgId.desc.json")
     }
 
-    private fun saveDmMediaDescriptorSidecar(
-        context: Context,
-        msgId: String,
-        rawPath: String,
-        cleanPath: String,
-        convId: String,
-        senderId: String,
-        recipientId: String,
-        keyBase64: String,
-        nonceBase64: String,
-        mimeType: String,
-        messageType: String,
-        durationSecs: Int,
-        captionSuffix: String?,
-        timestamp: Long
-    ) {
-        try {
-            val json = JSONObject().apply {
-                put("raw_path", rawPath)
-                put("clean_path", cleanPath)
-                put("conv_id", convId)
-                put("sender_id", senderId)
-                put("recipient_id", recipientId)
-                put("media_key", keyBase64)
-                put("media_nonce", nonceBase64)
-                put("mime_type", mimeType)
-                put("message_type", messageType)
-                put("duration_seconds", durationSecs)
-                if (!captionSuffix.isNullOrBlank()) put("caption", captionSuffix)
-                put("timestamp", timestamp)
-            }
-            dmDescriptorSidecarFile(context, msgId).writeText(json.toString())
-        } catch (_: Exception) {
-        }
-    }
-
     suspend fun downloadDmMediaOnDemand(context: Context, messageId: String): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val sidecar = dmDescriptorSidecarFile(context, messageId)
-            if (!sidecar.exists()) {
-                return@withContext Result.failure(IllegalStateException("Media descriptor unavailable"))
-            }
-            val j = JSONObject(sidecar.readText())
-            val ok = fetchAndSaveDmMediaFromDescriptor(
-                context = context,
-                msgId = messageId,
-                convId = j.optString("conv_id"),
-                senderId = j.optString("sender_id"),
-                recipientId = j.optString("recipient_id"),
-                rawPath = j.optString("raw_path"),
-                cleanPath = j.optString("clean_path"),
-                keyBase64 = j.optString("media_key"),
-                nonceBase64 = j.optString("media_nonce"),
-                mimeType = j.optString("mime_type", "audio/mp4"),
-                messageType = j.optString("message_type", "image"),
-                durationSecs = j.optInt("duration_seconds", 0),
-                captionSuffix = j.optString("caption", "").takeIf { it.isNotBlank() },
-                timestamp = j.optLong("timestamp", System.currentTimeMillis()),
-                fallbackToken = SupabaseSessionManager.getBearerToken(context)
-            )
-            if (ok != null) Result.success(ok) else Result.failure(IOException("Failed to download media"))
-        } catch (e: Exception) {
-            Result.failure(e)
+        when (val outcome = performDmMediaDownload(context.applicationContext, messageId)) {
+            is DmMediaDownloadOutcome.Ready -> Result.success(outcome.localPath)
+            is DmMediaDownloadOutcome.Expired -> Result.failure(IllegalStateException("Media expired. Ask them to send it again."))
+            is DmMediaDownloadOutcome.NotFound -> Result.failure(IllegalStateException("Message not found"))
+            is DmMediaDownloadOutcome.VaultLocked -> Result.failure(IllegalStateException("Chat vault is locked"))
+            is DmMediaDownloadOutcome.Retry -> Result.failure(IOException(outcome.reason))
         }
     }
 
-    private suspend fun fetchAndSaveDmMediaFromDescriptor(
-        context: Context,
-        msgId: String,
-        convId: String,
-        senderId: String,
-        recipientId: String,
-        rawPath: String,
-        cleanPath: String,
-        keyBase64: String,
-        nonceBase64: String,
-        mimeType: String,
-        messageType: String,
-        durationSecs: Int,
-        captionSuffix: String?,
-        timestamp: Long,
-        fallbackToken: String
-    ): String? {
-        if (keyBase64.isBlank() || nonceBase64.isBlank()) return null
-        val keyBytes = Base64.decode(keyBase64, Base64.DEFAULT)
-        val nonceBytes = Base64.decode(nonceBase64, Base64.DEFAULT)
-
-        for (attempt in 0 until 2) {
-            try {
-                if (attempt > 0) {
-                    delay(1200L)
-                    SupabaseSessionManager.forceRefreshSession(context)
-                } else {
-                    SupabaseSessionManager.ensureActiveSession(context)
+    suspend fun resumePendingDmMediaDownloads(context: Context) = withContext(Dispatchers.IO) {
+        val db = database ?: return@withContext
+        val pending = db.messageDao().getPendingOrFailedMediaDownloads()
+        if (pending.isEmpty()) return@withContext
+        if (!AppNetworkManager.checkConnection(context)) return@withContext
+        coroutineScope {
+            pending.forEach { msg ->
+                launch {
+                    performDmMediaDownload(context.applicationContext, msg.id)
                 }
-                val authToken = SupabaseSessionManager.getAuthenticatedBearerToken(context)
-                    ?: (SupabaseSessionManager.getAccessToken(context)?.let { "Bearer $it" })
-                    ?: fallbackToken
+            }
+        }
+    }
 
-                val encryptedBlobBytes = downloadDmMediaBlob(
-                    context = context,
-                    authToken = authToken,
-                    rawPath = rawPath,
-                    cleanPath = cleanPath,
-                    convId = convId,
-                    msgId = msgId
-                )
+    suspend fun performDmMediaDownload(context: Context, messageId: String): DmMediaDownloadOutcome {
+        inFlightDmDownloads[messageId]?.let { existing ->
+            return existing.await()
+        }
+        val deferred = CompletableDeferred<DmMediaDownloadOutcome>()
+        val racer = inFlightDmDownloads.putIfAbsent(messageId, deferred)
+        if (racer != null) {
+            return racer.await()
+        }
 
-                if (encryptedBlobBytes != null) {
-                    val rawBytes = E2EEMediaManager.decryptMediaPayload(encryptedBlobBytes, keyBytes, nonceBytes)
-                    val localFile = saveLocalMediaFile(context, msgId, rawBytes, mimeType)
-                    val localText = if (messageType == "image") {
-                        if (captionSuffix != null) "[img]file://${localFile.absolutePath}|$captionSuffix" else "[img]file://${localFile.absolutePath}"
-                    } else {
-                        "[voice]file://${localFile.absolutePath}|$durationSecs"
+        return try {
+            val outcome = dmMediaDownloadSemaphore.withPermit {
+                executeDmMediaDownload(context.applicationContext, messageId)
+            }
+            deferred.complete(outcome)
+            outcome
+        } catch (ce: CancellationException) {
+            deferred.cancel(ce)
+            throw ce
+        } catch (t: Throwable) {
+            val outcome = DmMediaDownloadOutcome.Retry(t.message ?: "Download failed")
+            deferred.complete(outcome)
+            outcome
+        } finally {
+            inFlightDmDownloads.remove(messageId, deferred)
+        }
+    }
+
+    private suspend fun executeDmMediaDownload(context: Context, messageId: String): DmMediaDownloadOutcome = withContext(Dispatchers.IO) {
+        val db = database ?: return@withContext DmMediaDownloadOutcome.VaultLocked
+        val msg = db.messageDao().getMessage(messageId) ?: return@withContext DmMediaDownloadOutcome.NotFound
+
+        val existingLocal = msg.localMediaPath
+        if (!existingLocal.isNullOrBlank()) {
+            val existingFile = File(existingLocal)
+            if (existingFile.exists() && existingFile.length() > 0L) {
+                db.messageDao().updateMediaDownloadState(messageId, DmMediaDownloadState.READY, null)
+                return@withContext DmMediaDownloadOutcome.Ready(existingLocal)
+            }
+        }
+
+        if (msg.mediaDownloadState == DmMediaDownloadState.EXPIRED) {
+            return@withContext DmMediaDownloadOutcome.Expired
+        }
+
+        var rawPath = msg.storagePath.orEmpty()
+        var keyBase64 = msg.mediaKey.orEmpty()
+        var nonceBase64 = msg.mediaNonce.orEmpty()
+        var mimeType = msg.mediaMimeType
+        var durationSecs = msg.mediaDurationSec ?: 0
+        var captionOrTitle = msg.mediaCaption
+
+        // Migrate any legacy v10 descriptor sidecar if Room columns are blank
+        val sidecar = runCatching { dmDescriptorSidecarFile(context, messageId) }.getOrNull()
+        if ((rawPath.isBlank() || keyBase64.isBlank() || nonceBase64.isBlank()) && sidecar != null && sidecar.exists()) {
+            runCatching {
+                val j = JSONObject(sidecar.readText())
+                rawPath = j.optString("raw_path").ifBlank { j.optString("clean_path") }
+                keyBase64 = j.optString("media_key")
+                nonceBase64 = j.optString("media_nonce")
+                if (mimeType.isNullOrBlank()) mimeType = j.optString("mime_type")
+                if (durationSecs == 0) durationSecs = j.optInt("duration_seconds", 0)
+                if (captionOrTitle.isNullOrBlank()) captionOrTitle = j.optString("caption").takeIf { it.isNotBlank() }
+            }
+        }
+
+        if (rawPath.isBlank() || keyBase64.isBlank() || nonceBase64.isBlank()) {
+            db.messageDao().updateMediaDownloadState(
+                messageId,
+                DmMediaDownloadState.EXPIRED,
+                "Media expired. Ask them to send it again."
+            )
+            return@withContext DmMediaDownloadOutcome.Expired
+        }
+
+        val cleanPath = cleanStoragePath(rawPath).ifBlank { "${msg.conversationId}/$messageId" }
+        val keyBytes = try {
+            Base64.decode(keyBase64, Base64.DEFAULT)
+        } catch (_: Exception) {
+            db.messageDao().updateMediaDownloadState(messageId, DmMediaDownloadState.EXPIRED, "Media expired. Ask them to send it again.")
+            return@withContext DmMediaDownloadOutcome.Expired
+        }
+        val nonceBytes = try {
+            Base64.decode(nonceBase64, Base64.DEFAULT)
+        } catch (_: Exception) {
+            db.messageDao().updateMediaDownloadState(messageId, DmMediaDownloadState.EXPIRED, "Media expired. Ask them to send it again.")
+            return@withContext DmMediaDownloadOutcome.Expired
+        }
+
+        val resolvedMime = mimeType?.takeIf { it.isNotBlank() } ?: when (msg.messageType) {
+            "video" -> "video/mp4"
+            "voice", "audio" -> "audio/mp4"
+            else -> "image/jpeg"
+        }
+
+        db.messageDao().updateMediaDownloadState(messageId, DmMediaDownloadState.DOWNLOADING, null)
+
+        var lastFailReason = "Network error"
+        for (attempt in 0 until 2) {
+            if (attempt > 0) {
+                delay(1200L)
+                runCatching { SupabaseSessionManager.forceRefreshSession(context) }
+            } else {
+                runCatching { SupabaseSessionManager.ensureActiveSession(context) }
+            }
+
+            val authToken = SupabaseSessionManager.getAuthenticatedBearerToken(context)
+                ?: (SupabaseSessionManager.getAccessToken(context)?.let { "Bearer $it" })
+                ?: SupabaseSessionManager.getBearerToken(context)
+
+            when (val fetchRes = downloadDmMediaBlobTyped(
+                context = context,
+                authToken = authToken,
+                rawPath = rawPath,
+                cleanPath = cleanPath,
+                convId = msg.conversationId,
+                msgId = messageId
+            )) {
+                is DmBlobFetchResult.Success -> {
+                    val rawBytes = try {
+                        E2EEMediaManager.decryptMediaPayload(fetchRes.bytes, keyBytes, nonceBytes)
+                    } catch (_: Exception) {
+                        db.messageDao().updateMediaDownloadState(messageId, DmMediaDownloadState.FAILED, "Decrypt failed")
+                        com.example.diagnostics.CrashAndErrorReporter.recordNonFatal(
+                            source = "DmMediaDownload",
+                            message = "Media $messageId decrypt failed"
+                        )
+                        return@withContext DmMediaDownloadOutcome.Retry("Decrypt failed")
                     }
 
-                    saveDecryptedMessageLocally(
-                        context = context,
-                        messageId = msgId,
-                        conversationId = convId,
-                        senderId = senderId,
-                        recipientId = recipientId,
-                        plaintext = localText,
-                        timestamp = timestamp
+                    val localFile = saveLocalMediaFile(context, messageId, rawBytes, resolvedMime, msg.messageType)
+                    val safeMeta = captionOrTitle?.replace("\n", " ")?.replace("|", " ")?.trim()?.takeIf { it.isNotBlank() }
+                    val localText = when (msg.messageType) {
+                        "image" -> if (safeMeta != null) "[img]file://${localFile.absolutePath}|$safeMeta" else "[img]file://${localFile.absolutePath}"
+                        "video" -> if (safeMeta != null) "[vid]file://${localFile.absolutePath}|$durationSecs|$safeMeta" else "[vid]file://${localFile.absolutePath}|$durationSecs"
+                        "audio" -> "[audio]file://${localFile.absolutePath}|$durationSecs|${safeMeta ?: "Audio"}"
+                        else -> "[voice]file://${localFile.absolutePath}|$durationSecs"
+                    }
+
+                    db.messageDao().markMediaDownloadReady(
+                        id = messageId,
+                        text = localText,
+                        localMediaPath = localFile.absolutePath,
+                        mediaMimeType = resolvedMime
                     )
-                    runCatching { dmDescriptorSidecarFile(context, msgId).delete() }
-                    deleteStorageObjectFromServer(context, authToken, cleanPath)
-                    Log.d(TAG, "Successfully downloaded, decrypted and updated media message $msgId")
-                    return localFile.absolutePath
+
+                    val latest = db.messageDao().getLatestMessage(msg.conversationId)
+                    if (latest?.id == messageId) {
+                        val conv = db.conversationDao().getConversation(msg.conversationId)
+                        if (conv != null) {
+                            val preview = when (msg.messageType) {
+                                "image" -> if (safeMeta != null) "📷 $safeMeta" else "📷 Photo"
+                                "video" -> if (safeMeta != null) "🎬 $safeMeta" else "🎬 Video"
+                                "audio" -> "🎵 ${safeMeta ?: "Audio file"}"
+                                else -> "🎤 Voice note"
+                            }
+                            db.conversationDao().insertOrUpdate(
+                                conv.copy(lastMessageText = preview, lastMessageType = msg.messageType)
+                            )
+                        }
+                    }
+
+                    runCatching { sidecar?.delete() }
+                    deleteStorageObjectFromServer(context, authToken, rawPath)
+                    return@withContext DmMediaDownloadOutcome.Ready(localFile.absolutePath)
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Media processing attempt ${attempt + 1} failed for $msgId: ${e.message}")
-                if (attempt == 1) {
-                    com.example.diagnostics.CrashAndErrorReporter.recordNonFatal(
-                        source = "DmMediaDownload",
-                        message = "Media $msgId download failed: ${e.message}",
-                        throwable = e
-                    )
+
+                is DmBlobFetchResult.Expired -> {
+                    lastFailReason = fetchRes.reason
+                    if (attempt == 1) {
+                        val expiredMsg = "Media expired. Ask them to send it again."
+                        db.messageDao().updateMediaDownloadState(
+                            messageId,
+                            DmMediaDownloadState.EXPIRED,
+                            expiredMsg
+                        )
+                        runCatching { sidecar?.delete() }
+                        return@withContext DmMediaDownloadOutcome.Expired
+                    }
+                }
+
+                is DmBlobFetchResult.Failed -> {
+                    lastFailReason = fetchRes.reason
                 }
             }
         }
-        return null
-    }
 
-    private suspend fun saveLocalPlaceholderAndCleanup(
-        context: Context,
-        token: String,
-        msgId: String,
-        convId: String,
-        senderId: String,
-        recipientId: String,
-        storagePath: String,
-        timestamp: Long
-    ) {
-        saveDecryptedMessageLocally(
-            context = context,
-            messageId = msgId,
-            conversationId = convId,
-            senderId = senderId,
-            recipientId = recipientId,
-            plaintext = "⚠️ Media content unavailable",
-            timestamp = timestamp
+        db.messageDao().updateMediaDownloadState(messageId, DmMediaDownloadState.FAILED, lastFailReason)
+        com.example.diagnostics.CrashAndErrorReporter.recordNonFatal(
+            source = "DmMediaDownload",
+            message = "Media $messageId failed: $lastFailReason"
         )
-        // Clean up from server so the client does not loop indefinitely and server copy is purged
-        deleteMessageFromServer(context, token, msgId)
-        deleteStorageObjectFromServer(context, token, storagePath)
+        DmMediaDownloadOutcome.Retry(lastFailReason)
     }
 
     private suspend fun deleteStorageObjectFromServer(context: Context, token: String, path: String) {
@@ -949,20 +1184,20 @@ object EncryptedChatRepository {
                 Log.w(TAG, "Failed to delete storage object $cleanPath: code=${resp.code()}")
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Error deleting storage object $path: ${e.message}")
+            Log.w(TAG, "Error deleting storage object: ${e.message}")
         }
     }
 
-    private fun saveLocalMediaFile(context: Context, messageId: String, bytes: ByteArray, mimeType: String): File {
+    private fun saveLocalMediaFile(
+        context: Context,
+        messageId: String,
+        bytes: ByteArray,
+        mimeType: String,
+        messageType: String = ""
+    ): File {
         val uid = com.example.ActiveUserManager.requireActiveUid(context)
         val dir = com.example.ActiveUserManager.mediaDir(context, uid).apply { mkdirs() }
-        val ext = when {
-            mimeType.contains("png") -> "png"
-            mimeType.contains("jpg") || mimeType.contains("jpeg") -> "jpg"
-            mimeType.contains("3gp") -> "3gp"
-            mimeType.contains("m4a") || mimeType.contains("mp4") || mimeType.contains("aac") || mimeType.contains("audio") -> "m4a"
-            else -> "bin"
-        }
+        val ext = resolveExtensionForMedia(mimeType, messageType)
         val file = File(dir, "${messageId}.$ext")
         file.writeBytes(bytes)
         return file
@@ -1421,16 +1656,19 @@ object EncryptedChatRepository {
         ChatTimingTracker.markTap(clientId, tapElapsedMs)
 
         val cleanCaption = caption?.replace("\n", " ")?.replace("|", " ")?.trim()?.takeIf { it.isNotBlank() }
-        val localFile = saveLocalMediaFile(appContext, clientId, rawBytes, mimeType)
-        val localText = if (messageType == "image") {
-            if (cleanCaption != null) "[img]file://${localFile.absolutePath}|$cleanCaption" else "[img]file://${localFile.absolutePath}"
-        } else {
-            "[voice]file://${localFile.absolutePath}|${durationSeconds ?: 0}"
+        val normalizedType = messageType.lowercase()
+        val localFile = saveLocalMediaFile(appContext, clientId, rawBytes, mimeType, normalizedType)
+        val localText = when (normalizedType) {
+            "image" -> if (cleanCaption != null) "[img]file://${localFile.absolutePath}|$cleanCaption" else "[img]file://${localFile.absolutePath}"
+            "video" -> if (cleanCaption != null) "[vid]file://${localFile.absolutePath}|${durationSeconds ?: 0}|$cleanCaption" else "[vid]file://${localFile.absolutePath}|${durationSeconds ?: 0}"
+            "audio" -> "[audio]file://${localFile.absolutePath}|${durationSeconds ?: 0}|${cleanCaption ?: "Audio"}"
+            else -> "[voice]file://${localFile.absolutePath}|${durationSeconds ?: 0}"
         }
-        val previewText = if (messageType == "image") {
-            if (cleanCaption != null) "📷 $cleanCaption" else "📷 Photo"
-        } else {
-            "🎙️ Voice message"
+        val previewText = when (normalizedType) {
+            "image" -> if (cleanCaption != null) "📷 $cleanCaption" else "📷 Photo"
+            "video" -> if (cleanCaption != null) "🎬 $cleanCaption" else "🎬 Video"
+            "audio" -> "🎵 ${cleanCaption ?: "Audio file"}"
+            else -> "🎤 Voice note"
         }
 
         val optimisticMsg = LocalDmMessage(
@@ -1439,7 +1677,7 @@ object EncryptedChatRepository {
             senderId = myUserId,
             recipientId = recipientUserId,
             text = localText,
-            messageType = messageType,
+            messageType = normalizedType,
             timestamp = now,
             isOutgoing = true,
             replyToText = replyToText,
@@ -1449,7 +1687,8 @@ object EncryptedChatRepository {
             localMediaPath = localFile.absolutePath,
             mediaMimeType = mimeType,
             mediaDurationSec = durationSeconds,
-            mediaCaption = cleanCaption
+            mediaCaption = cleanCaption,
+            mediaDownloadState = DmMediaDownloadState.READY
         )
 
         _optimisticMessages.update { it + optimisticMsg }
@@ -1701,13 +1940,13 @@ object EncryptedChatRepository {
             ).getOrElse { return Result.failure(it) }
 
             val clientId = msg.clientId ?: msg.id
-            val isMedia = msg.messageType == "image" || msg.messageType == "voice"
+            val isMedia = msg.messageType in listOf("image", "voice", "video", "audio")
 
             var storagePathForRequest: String? = null
             val encryptStartMs = ChatTimingTracker.nowMs()
             val ciphertext = if (isMedia) {
                 val mediaPath = msg.localMediaPath
-                    ?: msg.text.removePrefix("[img]").removePrefix("[voice]")
+                    ?: msg.text.removePrefix("[img]").removePrefix("[voice]").removePrefix("[vid]").removePrefix("[audio]")
                         .substringBefore("|")
                         .removePrefix("file://")
                 val localFile = File(mediaPath)
@@ -1715,8 +1954,11 @@ object EncryptedChatRepository {
                     return Result.failure(IllegalStateException("Local media file missing"))
                 }
                 val rawBytes = withContext(Dispatchers.IO) { localFile.readBytes() }
-                val mimeType = msg.mediaMimeType
-                    ?: if (msg.messageType == "voice") "audio/aac" else "image/jpeg"
+                val mimeType = msg.mediaMimeType ?: when (msg.messageType) {
+                    "video" -> "video/mp4"
+                    "voice", "audio" -> "audio/mp4"
+                    else -> "image/jpeg"
+                }
 
                 val (encryptedMediaBytes, keyBytes, nonceBytes) = withContext(Dispatchers.Default) {
                     E2EEMediaManager.encryptMediaPayload(rawBytes)
@@ -1740,8 +1982,13 @@ object EncryptedChatRepository {
                     put("media_key", keyBase64)
                     put("media_nonce", nonceBase64)
                     put("mime_type", mimeType)
+                    put("message_type", msg.messageType)
                     msg.mediaDurationSec?.let { put("duration_seconds", it) }
-                    msg.mediaCaption?.takeIf { it.isNotBlank() }?.let { put("caption", it) }
+                    if (msg.messageType == "audio") {
+                        msg.mediaCaption?.takeIf { it.isNotBlank() }?.let { put("file_name", it) }
+                    } else {
+                        msg.mediaCaption?.takeIf { it.isNotBlank() }?.let { put("caption", it) }
+                    }
                 }.toString()
 
                 E2EEManager.encryptMessageAsync(recipientPublicKey, descriptorJson)

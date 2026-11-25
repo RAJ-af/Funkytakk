@@ -1,10 +1,12 @@
 package com.example.repository
 
 import android.content.Context
+import android.net.Uri
 import android.util.Base64
 import android.util.Log
 import android.widget.Toast
 import com.example.*
+import com.example.db.DmMediaDownloadState
 import com.example.crypto.ChatTimingTracker
 import com.example.crypto.E2EEManager
 import com.example.crypto.E2EEMediaManager
@@ -108,6 +110,29 @@ object GroupChatRepository {
     // Instant in-memory optimistic overlay so outgoing group messages render in the tap frame
     private val _optimisticGroupMessages = MutableStateFlow<List<LocalGroupMessage>>(emptyList())
     val optimisticGroupMessages: StateFlow<List<LocalGroupMessage>> = _optimisticGroupMessages.asStateFlow()
+
+    // Per-message group media download states (messageId -> Pair(DmMediaDownloadState, failReason?))
+    private val _groupMediaStates = MutableStateFlow<Map<String, Pair<String, String?>>>(emptyMap())
+    val groupMediaStates: StateFlow<Map<String, Pair<String, String?>>> = _groupMediaStates.asStateFlow()
+
+    private fun updateGroupMediaState(messageId: String, state: String, failReason: String? = null) {
+        _groupMediaStates.update { it + (messageId to (state to failReason)) }
+    }
+
+    internal fun extractAppwriteProjectId(url: String): String? {
+        if (!url.contains("appwrite.io", ignoreCase = true)) return null
+        val fromQuery = runCatching { Uri.parse(url)?.getQueryParameter("project") }.getOrNull()
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: runCatching {
+                java.net.URI(url).rawQuery
+                    ?.split("&")
+                    ?.firstOrNull { it.startsWith("project=") }
+                    ?.substringAfter("project=")
+                    ?.let { java.net.URLDecoder.decode(it, "UTF-8") }
+            }.getOrNull()?.trim()?.takeIf { it.isNotBlank() }
+        return fromQuery ?: FunkyTalkApplication.APPWRITE_PROJECT_ID.takeIf { it.isNotBlank() }
+    }
 
     // Deep-link invite code state (funkytalk://group/<code> or https://<host>/g/<code>)
     private val _pendingInviteCode = MutableStateFlow<String?>(null)
@@ -1839,8 +1864,14 @@ object GroupChatRepository {
         _optimisticGroupMessages.update { list -> list.filterNot { it.id == clientId || it.clientId == clientId } }
     }
 
-    private fun saveLocalGroupMediaFile(context: Context, messageId: String, rawBytes: ByteArray, messageType: String): File {
-        val ext = if (messageType == "voice") "m4a" else "jpg"
+    private fun saveLocalGroupMediaFile(
+        context: Context,
+        messageId: String,
+        rawBytes: ByteArray,
+        messageType: String,
+        mimeType: String? = null
+    ): File {
+        val ext = EncryptedChatRepository.resolveExtensionForMedia(mimeType.orEmpty(), messageType)
         val uid = ActiveUserManager.getActiveUid(context) ?: "default"
         val localDir = ActiveUserManager.mediaDir(context, uid).apply { mkdirs() }
         val localFile = File(localDir, "group_$messageId.$ext")
@@ -2028,12 +2059,16 @@ object GroupChatRepository {
         val cleanGroupId = groupId.trim().replace("\"", "")
         val clientId = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
-        val effectiveType = if (messageType == "voice") "voice" else "image"
-        val cleanCaption = caption?.replace("\n", " ")?.trim()?.takeIf { it.isNotBlank() }
-        val displayLabel = when {
-            effectiveType == "voice" -> "Voice message|${(durationSeconds ?: 0).coerceAtLeast(0)}"
-            cleanCaption != null -> cleanCaption
-            else -> "Photo"
+        val effectiveType = when (messageType.lowercase()) {
+            "voice", "video", "audio" -> messageType.lowercase()
+            else -> "image"
+        }
+        val cleanCaption = caption?.replace("\n", " ")?.replace("|", " ")?.trim()?.takeIf { it.isNotBlank() }
+        val displayLabel = when (effectiveType) {
+            "voice" -> "Voice message|${(durationSeconds ?: 0).coerceAtLeast(0)}"
+            "video" -> if (cleanCaption != null) "Video|${(durationSeconds ?: 0).coerceAtLeast(0)}|$cleanCaption" else "Video|${(durationSeconds ?: 0).coerceAtLeast(0)}"
+            "audio" -> "Audio|${(durationSeconds ?: 0).coerceAtLeast(0)}|${cleanCaption ?: "Audio"}"
+            else -> cleanCaption ?: "Photo"
         }
         val myUserId = SupabaseSessionManager.getUserId(appContext)
             ?: ActiveUserManager.getActiveUid(appContext)
@@ -2070,7 +2105,7 @@ object GroupChatRepository {
         _optimisticGroupMessages.update { it + optimisticMsg }
 
         scope.launch(Dispatchers.IO) {
-            val localFile = runCatching { saveLocalGroupMediaFile(appContext, clientId, rawBytes, effectiveType) }.getOrNull()
+            val localFile = runCatching { saveLocalGroupMediaFile(appContext, clientId, rawBytes, effectiveType, mimeType) }.getOrNull()
             val db = database ?: run {
                 _optimisticGroupMessages.update { list ->
                     list.map {
@@ -2294,11 +2329,15 @@ object GroupChatRepository {
             val cleanGroupId = msg.groupId.trim().replace("\"", "")
             E2EEManager.ensureIdentityKeyInitialized(context)
 
-            val isMedia = msg.messageType == "image" || msg.messageType == "voice"
+            val isMedia = msg.messageType in listOf("image", "voice", "video", "audio")
             var resolvedStoragePath = msg.storagePath
             var keyB64 = msg.mediaKey
             var nonceB64 = msg.mediaNonce
-            val mimeType = msg.mimeType ?: if (msg.messageType == "voice") "audio/aac" else "image/jpeg"
+            val mimeType = msg.mimeType ?: when (msg.messageType) {
+                "video" -> "video/mp4"
+                "voice", "audio" -> "audio/mp4"
+                else -> "image/jpeg"
+            }
 
             if (isMedia && (resolvedStoragePath.isNullOrBlank() || keyB64.isNullOrBlank() || nonceB64.isNullOrBlank())) {
                 val localPath = msg.localMediaPath
@@ -2343,12 +2382,20 @@ object GroupChatRepository {
 
             // 2. Build plaintext envelope (unchanged E2EE format)
             val payloadToEncrypt = if (isMedia) {
-                val cleanCaption = msg.text.takeIf {
-                    msg.messageType == "image" && !it.equals("Photo", ignoreCase = true)
-                }?.replace("\n", " ")?.trim()?.takeIf { it.isNotBlank() }
-                val parsedDurationSec = if (msg.messageType == "voice") {
-                    msg.text.substringAfter("|", "0").toIntOrNull()?.coerceAtLeast(0)
+                val parts = msg.text.split("|")
+                val parsedDurationSec = when (msg.messageType) {
+                    "voice", "video", "audio" -> parts.getOrNull(1)?.toIntOrNull()?.coerceAtLeast(0)
+                    else -> null
+                }
+                val cleanCaption = when (msg.messageType) {
+                    "image" -> msg.text.takeIf { !it.equals("Photo", ignoreCase = true) }?.replace("\n", " ")?.trim()?.takeIf { it.isNotBlank() }
+                    "video" -> parts.getOrNull(2)?.replace("\n", " ")?.trim()?.takeIf { it.isNotBlank() }
+                    else -> null
+                }
+                val audioTitle = if (msg.messageType == "audio") {
+                    parts.getOrNull(2)?.replace("\n", " ")?.trim()?.takeIf { it.isNotBlank() }
                 } else null
+
                 JSONObject().apply {
                     put("storage_path", resolvedStoragePath.orEmpty())
                     put("media_key", keyB64.orEmpty())
@@ -2357,6 +2404,7 @@ object GroupChatRepository {
                     put("message_type", msg.messageType)
                     if (parsedDurationSec != null) put("duration_seconds", parsedDurationSec)
                     if (cleanCaption != null) put("caption", cleanCaption)
+                    if (audioTitle != null) put("file_name", audioTitle)
                 }.toString()
             } else {
                 val cleanMentions = parseMentionsJson(msg.mentionsJson)
@@ -2711,19 +2759,31 @@ object GroupChatRepository {
         if (jsonEnvelope != null && jsonEnvelope.has("media_key")) {
             savedKey = jsonEnvelope.optString("media_key")
             savedNonce = jsonEnvelope.optString("media_nonce")
-            savedMime = jsonEnvelope.optString("mime_type", "image/jpeg")
-            savedStoragePath = jsonEnvelope.optString("storage_path").ifBlank { row.storage_path.orEmpty() }
-            val descType = jsonEnvelope.optString("message_type")
-            val descCaption = jsonEnvelope.optString("caption", "").trim().takeIf { it.isNotBlank() }
+            val descType = jsonEnvelope.optString("message_type").lowercase()
+            val rawMime = jsonEnvelope.optString("mime_type")
+            val descCaption = jsonEnvelope.optString("caption", "").replace("|", " ").trim().takeIf { it.isNotBlank() }
+            val descTitle = jsonEnvelope.optString("file_name", "").replace("|", " ").trim().takeIf { it.isNotBlank() }
             val descDurationSec = jsonEnvelope.optInt("duration_seconds", 0).coerceAtLeast(0)
             resolvedType = when {
-                descType == "voice" || rowMessageType == "voice" || savedMime.contains("audio") -> "voice"
+                descType == "video" || rowMessageType == "video" || rawMime.contains("video", ignoreCase = true) -> "video"
+                descType == "audio" || rowMessageType == "audio" -> "audio"
+                descType == "voice" || rowMessageType == "voice" -> "voice"
+                rawMime.contains("audio", ignoreCase = true) -> if (descTitle != null) "audio" else "voice"
                 else -> "image"
             }
-            displayText = when {
-                resolvedType == "voice" -> "Voice message|$descDurationSec"
-                descCaption != null -> descCaption
-                else -> "Photo"
+            savedMime = rawMime.ifBlank {
+                when (resolvedType) {
+                    "video" -> "video/mp4"
+                    "voice", "audio" -> "audio/mp4"
+                    else -> "image/jpeg"
+                }
+            }
+            savedStoragePath = jsonEnvelope.optString("storage_path").ifBlank { row.storage_path.orEmpty() }
+            displayText = when (resolvedType) {
+                "voice" -> "Voice message|$descDurationSec"
+                "video" -> if (descCaption != null) "Video|$descDurationSec|$descCaption" else "Video|$descDurationSec"
+                "audio" -> "Audio|$descDurationSec|${descTitle ?: "Audio"}"
+                else -> descCaption ?: "Photo"
             }
         } else if (jsonEnvelope != null && (jsonEnvelope.optBoolean("__e2ee_v2", false) || jsonEnvelope.has("mentions"))) {
             displayText = jsonEnvelope.optString("text", plaintext)
@@ -2862,6 +2922,7 @@ object GroupChatRepository {
 
             // Step 3: Trigger background media download if media key exists
             if (autoDownload && !savedKey.isNullOrBlank() && !savedNonce.isNullOrBlank() && !savedStoragePath.isNullOrBlank()) {
+                updateGroupMediaState(msgId, DmMediaDownloadState.PENDING, null)
                 scope.launch(Dispatchers.IO) {
                     val mediaPath = downloadAndDecryptGroupMediaBlob(
                         context = context,
@@ -2870,7 +2931,8 @@ object GroupChatRepository {
                         storagePath = savedStoragePath,
                         keyBase64 = savedKey,
                         nonceBase64 = savedNonce,
-                        isVoice = resolvedType == "voice"
+                        messageType = resolvedType,
+                        mimeType = savedMime
                     )
                     if (!mediaPath.isNullOrBlank()) {
                         db.groupMessageDao().updateLocalMediaPath(msgId, mediaPath)
@@ -2925,7 +2987,11 @@ object GroupChatRepository {
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             if (!message.localMediaPath.isNullOrBlank() && File(message.localMediaPath).exists()) {
+                updateGroupMediaState(message.id, DmMediaDownloadState.READY, null)
                 return@withContext Result.success(message.localMediaPath)
+            }
+            if (_groupMediaStates.value[message.id]?.first == DmMediaDownloadState.EXPIRED) {
+                return@withContext Result.failure(Exception("Media expired. Ask them to send it again."))
             }
             val token = SupabaseSessionManager.getAuthenticatedBearerToken(context)
                 ?: return@withContext Result.failure(Exception("Not authenticated"))
@@ -2943,11 +3009,16 @@ object GroupChatRepository {
                 storagePath = storagePath,
                 keyBase64 = keyB64,
                 nonceBase64 = nonceB64,
-                isVoice = message.messageType == "voice"
-            ) ?: return@withContext Result.failure(Exception("Failed to download or decrypt media"))
-
-            database?.groupMessageDao()?.updateLocalMediaPath(message.id, path)
-            Result.success(path)
+                messageType = message.messageType,
+                mimeType = message.mimeType
+            )
+            if (path != null) {
+                database?.groupMessageDao()?.updateLocalMediaPath(message.id, path)
+                Result.success(path)
+            } else {
+                val failReason = _groupMediaStates.value[message.id]?.second ?: "Download failed"
+                Result.failure(Exception(failReason))
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -2960,22 +3031,31 @@ object GroupChatRepository {
         storagePath: String,
         keyBase64: String,
         nonceBase64: String,
-        isVoice: Boolean
+        messageType: String,
+        mimeType: String? = null
     ): String? {
+        updateGroupMediaState(messageId, DmMediaDownloadState.DOWNLOADING, null)
         return try {
             val keyBytes = Base64.decode(keyBase64, Base64.DEFAULT)
             val nonceBytes = Base64.decode(nonceBase64, Base64.DEFAULT)
 
+            var httpCode = 0
+            var sawErrorBody = false
             val encBytes = if (storagePath.startsWith("http://") || storagePath.startsWith("https://")) {
-                val isSupa = storagePath.contains("supabase.co")
-                val isAppwrite = storagePath.contains("appwrite.io")
+                val isSupa = storagePath.contains("supabase.co", ignoreCase = true)
+                val appwriteProject = extractAppwriteProjectId(storagePath)
                 val dlResp = SupabaseClient.api.downloadFromUrl(
                     url = storagePath,
                     apiKey = if (isSupa) BuildConfig.SUPABASE_ANON_KEY else null,
                     auth = if (isSupa) token else null,
-                    appwriteProject = if (isAppwrite) com.example.FunkyTalkApplication.APPWRITE_PROJECT_ID else null
+                    appwriteProject = appwriteProject
                 )
-                if (dlResp.isSuccessful && dlResp.body() != null) dlResp.body()!!.bytes() else null
+                httpCode = dlResp.code()
+                if (dlResp.isSuccessful && dlResp.body() != null) {
+                    dlResp.body()!!.bytes()
+                } else {
+                    null
+                }
             } else {
                 val relativePath = storagePath.removePrefix("group-media/").removePrefix("/")
                 val dlResp = SupabaseClient.api.downloadGroupMedia(
@@ -2983,27 +3063,38 @@ object GroupChatRepository {
                     auth = token,
                     path = relativePath
                 )
+                httpCode = dlResp.code()
                 if (dlResp.isSuccessful && dlResp.body() != null) dlResp.body()!!.bytes() else null
             }
 
-            if (encBytes != null && encBytes.isNotEmpty() && !isJsonErrorBytes(encBytes)) {
+            if (encBytes != null && isJsonErrorBytes(encBytes)) {
+                sawErrorBody = true
+            }
+
+            if (encBytes != null && encBytes.isNotEmpty() && !sawErrorBody) {
                 val rawBytes = E2EEMediaManager.decryptMediaPayload(encBytes, keyBytes, nonceBytes)
-                val ext = if (isVoice) "m4a" else "jpg"
+                val ext = EncryptedChatRepository.resolveExtensionForMedia(mimeType.orEmpty(), messageType)
                 val activeUid = ActiveUserManager.requireActiveUid(context)
                 val localDir = ActiveUserManager.mediaDir(context, activeUid).apply { mkdirs() }
                 val localFile = File(localDir, "group_${messageId}.$ext")
                 localFile.writeBytes(rawBytes)
+                updateGroupMediaState(messageId, DmMediaDownloadState.READY, null)
                 localFile.absolutePath
+            } else if (httpCode == 404 || httpCode == 410 || sawErrorBody) {
+                val msg = "Media expired. Ask them to send it again."
+                updateGroupMediaState(messageId, DmMediaDownloadState.EXPIRED, msg)
+                null
             } else {
-                Log.w(TAG, "Group media blob missing or error response for $messageId")
+                val reason = if (httpCode > 0) "HTTP $httpCode" else "Download failed"
+                updateGroupMediaState(messageId, DmMediaDownloadState.FAILED, reason)
                 null
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Failed downloading/decrypting media blob for $messageId: ${e.message}")
+            val reason = if (e is IOException) "Network error" else "Download failed"
+            updateGroupMediaState(messageId, DmMediaDownloadState.FAILED, reason)
             com.example.diagnostics.CrashAndErrorReporter.recordNonFatal(
                 source = "GroupMediaDownload",
-                message = "Group media $messageId failed: ${e.message}",
-                throwable = e
+                message = "Group media $messageId failed: $reason"
             )
             null
         }

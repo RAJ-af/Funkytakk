@@ -905,6 +905,65 @@ fun SettingsScreen(
                                     Text("Reset to server flags", fontSize = 11.5.sp, color = funkyColors.mango)
                                 }
                             }
+                            HorizontalDivider(
+                                modifier = Modifier.padding(vertical = 8.dp),
+                                color = funkyColors.line
+                            )
+                            var dmMediaDiags by remember {
+                                mutableStateOf<List<com.example.db.LocalDmMessage>>(emptyList())
+                            }
+                            var diagRefreshNonce by remember { mutableStateOf(0) }
+                            LaunchedEffect(diagRefreshNonce) {
+                                dmMediaDiags = com.example.repository.EncryptedChatRepository.getMediaDownloadDiagnostics()
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "DM Media Downloads (Debug)",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = funkyColors.ink
+                                )
+                                TextButton(
+                                    onClick = { diagRefreshNonce++ },
+                                    modifier = Modifier.testTag("debug_dm_media_refresh_button")
+                                ) {
+                                    Text("Refresh", fontSize = 11.5.sp, color = funkyColors.mango)
+                                }
+                            }
+                            if (dmMediaDiags.isEmpty()) {
+                                Text(
+                                    text = "No DM media download records yet.",
+                                    fontSize = 11.sp,
+                                    color = funkyColors.mute
+                                )
+                            } else {
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    dmMediaDiags.forEach { row ->
+                                        val timeLabel = remember(row.id, row.timestamp) {
+                                            SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+                                                .format(Date(row.timestamp))
+                                        }
+                                        val reasonSuffix = row.mediaFailReason?.takeIf { it.isNotBlank() }
+                                            ?.let { " · $it" }.orEmpty()
+                                        Text(
+                                            text = "$timeLabel · ${row.id.take(8)} · ${row.messageType} · ${row.mediaDownloadState.orEmpty()}$reasonSuffix",
+                                            fontSize = 11.sp,
+                                            color = when (row.mediaDownloadState) {
+                                                com.example.db.DmMediaDownloadState.READY -> funkyColors.ok
+                                                com.example.db.DmMediaDownloadState.EXPIRED,
+                                                com.example.db.DmMediaDownloadState.FAILED -> funkyColors.danger
+                                                else -> funkyColors.mute
+                                            },
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }

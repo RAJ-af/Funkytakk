@@ -5,9 +5,12 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -33,9 +36,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -806,3 +814,308 @@ fun ReactionChip(emoji: String, count: Int, mine: Boolean, onClick: () -> Unit) 
         if (count > 1) Text(count.toString(), color = c.text, fontSize = 12f.chatSp())
     }
 }
+
+// ---------------------------------------------------------------------------
+// Video & Audio File Attachment Bubbles
+// ---------------------------------------------------------------------------
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun VideoAttachmentBubble(
+    localPath: String?,
+    durationSec: Int,
+    caption: String?,
+    timeText: String,
+    outgoing: Boolean,
+    status: MessageStatus?,
+    downloadState: String?,
+    failReason: String?,
+    onPlayClick: () -> Unit,
+    onDownloadClick: () -> Unit,
+    onLongPress: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val c = LocalChatColors.current
+    val context = LocalContext.current
+    val hasFile = !localPath.isNullOrBlank() && java.io.File(localPath.removePrefix("file://")).let { it.exists() && it.length() > 0L }
+    val cleanFilePath = localPath?.removePrefix("file://").orEmpty()
+
+    val thumbnail by produceState<android.graphics.Bitmap?>(initialValue = null, key1 = cleanFilePath, key2 = hasFile) {
+        value = if (hasFile) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                ChatVideoHelper.extractThumbnail(context, android.net.Uri.fromFile(java.io.File(cleanFilePath)))
+            }
+        } else null
+    }
+
+    val isExpired = !hasFile && downloadState == com.example.db.DmMediaDownloadState.EXPIRED
+    val isFailed = !hasFile && downloadState == com.example.db.DmMediaDownloadState.FAILED
+    val isDownloading = !hasFile && downloadState == com.example.db.DmMediaDownloadState.DOWNLOADING
+    val isPending = !hasFile && !isExpired && !isFailed && !isDownloading
+
+    Column(modifier = modifier.widthIn(min = 216.dp, max = ChatDimens.BubbleMaxWidth)) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1.35f)
+                .clip(RoundedCornerShape(ChatDimens.MediaInnerRadius))
+                .background(Color(0xFF0F172A))
+                .combinedClickable(
+                    onClick = {
+                        when {
+                            hasFile -> onPlayClick()
+                            isExpired -> Unit
+                            else -> onDownloadClick()
+                        }
+                    },
+                    onLongClick = onLongPress
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            if (thumbnail != null) {
+                Image(
+                    bitmap = thumbnail!!.asImageBitmap(),
+                    contentDescription = caption ?: "Video",
+                    modifier = Modifier.fillMaxWidth().fillMaxHeight(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+
+            // Duration pill in top-left
+            if (durationSec > 0) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color.Black.copy(alpha = 0.62f),
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        ChatIconVideo(tint = Color.White, modifier = Modifier.size(12.dp))
+                        Text(
+                            text = formatDuration(durationSec * 1000L),
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+
+            // Center control / download state
+            when {
+                hasFile -> {
+                    Surface(
+                        shape = CircleShape,
+                        color = Color.Black.copy(alpha = 0.58f),
+                        modifier = Modifier.size(52.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            ChatIconPlay(tint = Color.White, modifier = Modifier.size(22.dp))
+                        }
+                    }
+                }
+
+                isExpired -> {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color.Black.copy(alpha = 0.72f),
+                        modifier = Modifier.padding(12.dp)
+                    ) {
+                        Text(
+                            text = failReason?.takeIf { it.isNotBlank() } ?: "Media expired",
+                            color = Color.White.copy(alpha = 0.9f),
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+
+                isFailed -> {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Surface(shape = CircleShape, color = Color(0xFFEF4444).copy(alpha = 0.88f)) {
+                            Box(Modifier.padding(10.dp)) {
+                                ChatIconRetry(tint = Color.White, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                        Text("Failed. Tap to retry", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+
+                isDownloading -> {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        CircularProgressIndicator(modifier = Modifier.size(26.dp), color = Color.White, strokeWidth = 2.5.dp)
+                        Text("Downloading...", color = Color.White.copy(alpha = 0.9f), fontSize = 11.sp)
+                    }
+                }
+
+                isPending -> {
+                    Surface(shape = CircleShape, color = Color.Black.copy(alpha = 0.62f)) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            ChatIconDownload(tint = Color.White, modifier = Modifier.size(16.dp))
+                            Text("Tap to download", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
+
+            if (caption.isNullOrBlank()) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(7.dp)
+                ) {
+                    MediaTimeChip(time = timeText, outgoing = outgoing, status = status)
+                }
+            }
+        }
+
+        if (!caption.isNullOrBlank()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                MessageText(
+                    text = AnnotatedString(caption),
+                    time = timeText,
+                    outgoing = outgoing,
+                    status = status
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun AudioAttachmentBubble(
+    title: String,
+    durationMs: Long,
+    positionMs: Long,
+    isPlaying: Boolean,
+    isLoading: Boolean,
+    speed: Float,
+    outgoing: Boolean,
+    downloadState: String?,
+    failReason: String?,
+    hasLocalFile: Boolean,
+    onPlayPause: () -> Unit,
+    onDownloadClick: () -> Unit,
+    onSpeedClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val c = LocalChatColors.current
+    val muted = if (outgoing) c.textSecondaryOut else c.textSecondary
+    val accent = if (outgoing) c.voiceButtonOut else c.voiceButtonIn
+    val onAccent = if (outgoing) c.onVoiceButtonOut else c.onVoiceButtonIn
+    val isExpired = !hasLocalFile && downloadState == com.example.db.DmMediaDownloadState.EXPIRED
+    val isFailed = !hasLocalFile && downloadState == com.example.db.DmMediaDownloadState.FAILED
+    val isDownloading = !hasLocalFile && downloadState == com.example.db.DmMediaDownloadState.DOWNLOADING
+    val isPending = !hasLocalFile && !isExpired && !isFailed && !isDownloading
+
+    Row(
+        modifier = modifier
+            .width(ChatDimens.VoiceWidth)
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Surface(
+            onClick = {
+                when {
+                    hasLocalFile -> onPlayPause()
+                    isExpired -> Unit
+                    else -> onDownloadClick()
+                }
+            },
+            shape = CircleShape,
+            color = if (isFailed) c.danger else accent,
+            shadowElevation = 2.dp,
+            modifier = Modifier.size(44.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                when {
+                    isLoading || isDownloading -> CircularProgressIndicator(Modifier.size(20.dp), color = onAccent, strokeWidth = 2.dp)
+                    isFailed -> ChatIconRetry(modifier = Modifier.size(18.dp), tint = Color.White)
+                    isPending -> ChatIconDownload(modifier = Modifier.size(18.dp), tint = onAccent)
+                    isExpired -> ChatIconMusic(modifier = Modifier.size(18.dp), tint = onAccent.copy(alpha = 0.6f))
+                    isPlaying -> ChatIconPause(modifier = Modifier.size(18.dp), tint = onAccent)
+                    else -> ChatIconPlay(modifier = Modifier.size(18.dp), tint = onAccent)
+                }
+            }
+        }
+
+        Spacer(Modifier.width(10.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                ChatIconMusic(modifier = Modifier.size(14.dp), tint = if (outgoing) c.accentOut else c.accentIn)
+                Text(
+                    text = title.ifBlank { "Audio file" },
+                    color = c.text,
+                    fontSize = 14f.chatSp(),
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            val progress = if (durationMs > 0) (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .clip(RoundedCornerShape(2.dp)),
+                color = if (outgoing) c.wavePlayedOut else c.wavePlayedIn,
+                trackColor = if (outgoing) c.waveIdleOut else c.waveIdleIn
+            )
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val statusLabel = when {
+                    isExpired -> failReason ?: "Expired"
+                    isFailed -> "Failed. Tap to retry"
+                    isDownloading -> "Downloading..."
+                    isPending -> "Tap to download"
+                    isPlaying || positionMs > 0 -> "${formatDuration(positionMs)} / ${formatDuration(durationMs)}"
+                    durationMs > 0 -> formatDuration(durationMs)
+                    else -> "Audio"
+                }
+                Text(
+                    text = statusLabel,
+                    color = if (isFailed) c.danger else muted,
+                    fontSize = 11f.chatSp(),
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                if (hasLocalFile && (isPlaying || speed != 1f)) {
+                    Text(
+                        text = if (speed % 1f == 0f) "${speed.toInt()}x" else "${speed}x",
+                        color = c.text,
+                        fontSize = 11f.chatSp(),
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(c.hairline)
+                            .clickable(onClick = onSpeedClick)
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+

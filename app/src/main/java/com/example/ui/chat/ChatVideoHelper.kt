@@ -257,6 +257,32 @@ object ChatVideoHelper {
         }
     }
 
+    fun extractThumbnail(context: Context, uri: Uri): Bitmap? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(context, uri)
+            val frame = retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            frame?.let { bmp ->
+                val maxDim = 480
+                if (bmp.width > maxDim || bmp.height > maxDim) {
+                    val ratio = minOf(maxDim.toFloat() / bmp.width, maxDim.toFloat() / bmp.height)
+                    Bitmap.createScaledBitmap(
+                        bmp,
+                        (bmp.width * ratio).toInt().coerceAtLeast(1),
+                        (bmp.height * ratio).toInt().coerceAtLeast(1),
+                        true
+                    ).also { if (it !== bmp) bmp.recycle() }
+                } else {
+                    bmp
+                }
+            }
+        } catch (_: Exception) {
+            null
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }
+
     suspend fun prepareAudioFile(
         context: Context,
         uri: Uri

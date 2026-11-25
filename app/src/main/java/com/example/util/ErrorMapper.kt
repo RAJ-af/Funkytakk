@@ -22,6 +22,7 @@ object ErrorMapper {
     const val MSG_DEVICE_REVOKED = "You were signed out on this device."
     const val MSG_RATE_LIMITED = "Too many tries. Please wait a moment."
     const val MSG_SERVER_BUSY = "Server is busy. Please try again."
+    const val MSG_PAYLOAD_TOO_LARGE = "File is too large to upload (20 MB max)."
     const val MSG_GENERIC = "Something went wrong. Please try again."
 
     fun isNetworkException(throwable: Throwable?): Boolean {
@@ -65,6 +66,7 @@ object ErrorMapper {
         return when {
             statusCode == 403 && bodyLower.contains("device_revoked") -> MSG_DEVICE_REVOKED
             statusCode == 401 -> MSG_UNAUTHORIZED
+            statusCode == 413 || bodyLower.contains("payload too large") -> MSG_PAYLOAD_TOO_LARGE
             statusCode == 429 || bodyLower.contains("rate_limited") || bodyLower.contains("daily_limit") -> MSG_RATE_LIMITED
             statusCode == 503 && bodyLower.contains("session_mint_failed") -> MSG_SERVER_BUSY
             statusCode in 500..599 -> MSG_SERVER_BUSY

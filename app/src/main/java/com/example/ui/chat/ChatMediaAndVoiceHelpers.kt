@@ -8,6 +8,8 @@ import android.net.Uri
 import android.os.Build
 import android.util.Log
 import android.widget.Toast
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.ui.PlayerView
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
@@ -236,14 +238,14 @@ class VoicePlaybackController(
                     player.play()
                 }
             } catch (e: Exception) {
-                Log.e("VoicePlayback", "Error playing voice note: $audioSource", e)
+                Log.e("VoicePlayback", "Error playing voice note: ${e.javaClass.simpleName}: ${e.message}")
                 withContext(Dispatchers.Main) {
                     _isLoading.value = false
                     _currentPlayingId.value = null
                     val mapped = com.example.util.ErrorMapper.map(e)
                     onError(
                         if (mapped == com.example.util.ErrorMapper.MSG_GENERIC) {
-                            "Could not play voice note. Please try again."
+                            "Could not play audio. Please try again."
                         } else {
                             mapped
                         }
@@ -301,7 +303,7 @@ class VoicePlaybackController(
         exoPlayer = null
     }
 
-    private suspend fun resolveAudioSourceToLocalFile(context: Context, rawSource: String): File? = withContext(Dispatchers.IO) {
+    internal suspend fun resolveAudioSourceToLocalFile(context: Context, rawSource: String): File? = withContext(Dispatchers.IO) {
         val source = rawSource.trim()
         if (source.isBlank() || source == "downloading...") return@withContext null
         try {
@@ -320,8 +322,9 @@ class VoicePlaybackController(
                 }
                 val url = java.net.URL(source)
                 val conn = url.openConnection()
-                if (source.contains("appwrite.io", ignoreCase = true) && com.example.FunkyTalkApplication.APPWRITE_PROJECT_ID.isNotBlank()) {
-                    conn.setRequestProperty("X-Appwrite-Project", com.example.FunkyTalkApplication.APPWRITE_PROJECT_ID)
+                val appwriteProject = com.example.repository.EncryptedChatRepository.extractAppwriteProjectId(source)
+                if (!appwriteProject.isNullOrBlank()) {
+                    conn.setRequestProperty("X-Appwrite-Project", appwriteProject)
                 }
                 conn.connectTimeout = 10000
                 conn.readTimeout = 15000
@@ -367,7 +370,7 @@ class VoicePlaybackController(
             }
             null
         } catch (e: Exception) {
-            Log.e("VoicePlayback", "Failed to resolve audio source: $source", e)
+            Log.e("VoicePlayback", "Failed to resolve audio source: ${e.javaClass.simpleName}")
             null
         }
     }
@@ -501,6 +504,8 @@ class LiveVoiceRecorder(
                 bytes = bytes
             )
         }
+        runCatching { file?.delete() }
+        Toast.makeText(context, "Hold the mic and speak", Toast.LENGTH_SHORT).show()
         return null
     }
 
@@ -587,13 +592,17 @@ fun TelephotoMediaViewerDialog(
         } else if (!isSaving) {
             isSaving = true
             scope.launch {
-                val res = ChatMediaSaver.saveImageToGallery(context, item.url)
+                val res = if (item.isVideo) {
+                    ChatMediaSaver.saveVideoToGallery(context, item.url)
+                } else {
+                    ChatMediaSaver.saveImageToGallery(context, item.url)
+                }
                 isSaving = false
                 Toast.makeText(
                     context,
                     res.fold(
-                        onSuccess = { "Saved to Pictures/FunkyTalk" },
-                        onFailure = { it.message ?: "Could not save photo" }
+                        onSuccess = { "Saved" },
+                        onFailure = { it.message ?: "Could not save media" }
                     ),
                     Toast.LENGTH_SHORT
                 ).show()
@@ -606,7 +615,11 @@ fun TelephotoMediaViewerDialog(
             onShare(item)
         } else {
             scope.launch {
-                ChatMediaSaver.shareImage(context, item.url)
+                if (item.isVideo) {
+                    ChatMediaSaver.shareMediaFile(context, item.url, "video/mp4", "Share video")
+                } else {
+                    ChatMediaSaver.shareImage(context, item.url)
+                }
             }
         }
     }
@@ -649,23 +662,32 @@ fun TelephotoMediaViewerDialog(
                 modifier = Modifier.fillMaxSize()
             ) { page ->
                 val item = mediaItems[page]
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clickable(
-                            indication = null,
-                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-                        ) {
-                            showChrome = !showChrome
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    ZoomableAsyncImage(
-                        model = item.url,
-                        contentDescription = "Media item",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Fit
+                val isCurrentPage = pagerState.currentPage == page
+                if (item.isVideo) {
+                    FullscreenVideoViewerPage(
+                        videoSource = item.url,
+                        isActivePage = isCurrentPage,
+                        onToggleChrome = { showChrome = !showChrome }
                     )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable(
+                                indication = null,
+                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                            ) {
+                                showChrome = !showChrome
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        ZoomableAsyncImage(
+                            model = item.url,
+                            contentDescription = "Media item",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit
+                        )
+                    }
                 }
             }
 
@@ -894,6 +916,65 @@ fun TelephotoMediaViewerDialog(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun FullscreenVideoViewerPage(
+    videoSource: String,
+    isActivePage: Boolean,
+    onToggleChrome: () -> Unit
+) {
+    val context = LocalContext.current
+    val player = remember(videoSource) {
+        ExoPlayer.Builder(context).build().apply {
+            val uri = if (videoSource.startsWith("/")) {
+                Uri.fromFile(File(videoSource))
+            } else {
+                Uri.parse(videoSource)
+            }
+            setMediaItem(MediaItem.fromUri(uri))
+            prepare()
+        }
+    }
+
+    LaunchedEffect(isActivePage) {
+        if (isActivePage) {
+            player.playWhenReady = true
+        } else {
+            player.pause()
+        }
+    }
+
+    DisposableEffect(player) {
+        onDispose {
+            player.release()
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable(
+                indication = null,
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+            ) { onToggleChrome() },
+        contentAlignment = Alignment.Center
+    ) {
+        AndroidView(
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    this.player = player
+                    useController = true
+                }
+            },
+            update = { view ->
+                if (view.player !== player) {
+                    view.player = player
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
     }
 }
 

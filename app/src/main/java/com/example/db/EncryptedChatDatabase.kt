@@ -18,7 +18,7 @@ import net.sqlcipher.database.SupportFactory
         LocalMessageTranslation::class,
         InboxFailureEntity::class
     ],
-    version = 10,
+    version = 11,
     exportSchema = false
 )
 abstract class EncryptedChatDatabase : RoomDatabase() {
@@ -59,6 +59,17 @@ abstract class EncryptedChatDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE group_messages ADD COLUMN nextRetryAt INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_group_messages_clientId ON group_messages(clientId)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_group_messages_status ON group_messages(status)")
+            }
+        }
+
+        internal val MIGRATION_10_11 = object : androidx.room.migration.Migration(10, 11) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE dm_messages ADD COLUMN storagePath TEXT")
+                db.execSQL("ALTER TABLE dm_messages ADD COLUMN mediaKey TEXT")
+                db.execSQL("ALTER TABLE dm_messages ADD COLUMN mediaNonce TEXT")
+                db.execSQL("ALTER TABLE dm_messages ADD COLUMN mediaDownloadState TEXT")
+                db.execSQL("ALTER TABLE dm_messages ADD COLUMN mediaFailReason TEXT")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_dm_messages_mediaDownloadState ON dm_messages(mediaDownloadState)")
             }
         }
 
@@ -113,7 +124,7 @@ abstract class EncryptedChatDatabase : RoomDatabase() {
                 com.example.ActiveUserManager.dbName(effectiveUid)
             )
                 .openHelperFactory(openHelperFactory)
-                .addMigrations(MIGRATION_9_10)
+                .addMigrations(MIGRATION_9_10, MIGRATION_10_11)
                 .fallbackToDestructiveMigration()
                 .build()
         }

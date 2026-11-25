@@ -44,7 +44,7 @@ object StartupTimingTracker {
         }
         val elapsed = (firstContentUptimeMs - appCreateUptimeMs).coerceAtLeast(0L)
         if (BuildConfig.DEBUG && summaryLogged.compareAndSet(false, true)) {
-            Log.i(TAG, "Cold start to first content rendered: ${elapsed}ms")
+            runCatching { Log.i(TAG, "Cold start to first content rendered: ${elapsed}ms") }
         }
         return elapsed
     }
@@ -54,7 +54,7 @@ object StartupTimingTracker {
         val clamped = durationMs.coerceAtLeast(0L)
         timings[name] = clamped
         if (BuildConfig.DEBUG) {
-            Log.d(TAG, "Startup call [$name] completed in ${clamped}ms")
+            runCatching { Log.d(TAG, "Startup call [$name] completed in ${clamped}ms") }
         }
     }
 
@@ -87,11 +87,13 @@ object StartupTimingTracker {
         if (!BuildConfig.DEBUG) return
         val report = getReport()
         val slowestLabel = report.slowestRequestName ?: "none"
-        Log.i(
-            TAG,
-            "Startup timing summary: firstContent=${report.coldStartToFirstContentMs}ms, " +
-                "slowest=$slowestLabel (${report.slowestRequestMs}ms), trackedCalls=${report.timingsMs.size}"
-        )
+        runCatching {
+            Log.i(
+                TAG,
+                "Startup timing summary: firstContent=${report.coldStartToFirstContentMs}ms, " +
+                    "slowest=$slowestLabel (${report.slowestRequestMs}ms), trackedCalls=${report.timingsMs.size}"
+            )
+        }
     }
 
     fun resetForTest() {

@@ -9,6 +9,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import java.io.IOException
 import java.net.ConnectException
@@ -16,6 +17,11 @@ import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 
 class ErrorMapperAndCacheTest {
+
+    @Before
+    fun resetTimings() {
+        StartupTimingTracker.resetForTest()
+    }
 
     @Test
     fun `ErrorMapper maps network exceptions to friendly offline message`() {
@@ -33,6 +39,7 @@ class ErrorMapperAndCacheTest {
             ErrorMapper.mapHttp(403, """{"code":"device_revoked","url":"https://secret.example.com"}""")
         )
         assertEquals(ErrorMapper.MSG_RATE_LIMITED, ErrorMapper.mapHttp(429, "rate_limited"))
+        assertEquals(ErrorMapper.MSG_PAYLOAD_TOO_LARGE, ErrorMapper.mapHttp(413, """{"error":"Payload too large"}"""))
         assertEquals(ErrorMapper.MSG_SERVER_BUSY, ErrorMapper.mapHttp(503, """{"code":"session_mint_failed"}"""))
         assertEquals(ErrorMapper.MSG_SERVER_BUSY, ErrorMapper.mapHttp(500, "Internal SQL syntax error at line 42"))
         assertEquals(ErrorMapper.MSG_GENERIC, ErrorMapper.mapHttp(400, """{"detail":"raw trace https://host/path"}"""))
@@ -79,15 +86,29 @@ class ErrorMapperAndCacheTest {
             )
         )
 
-        val incompleteName = UserProfile(uid = "u1", displayName = "", username = "")
+        val incompleteName = UserProfile(
+            uid = "u1",
+            email = "alex@example.com",
+            displayName = "",
+            isEmailVerified = true,
+            username = ""
+        )
         assertEquals("onboarding_profile", StartupPrefsStore.resolveOnboardingRoute(incompleteName))
 
-        val incompleteAge = UserProfile(uid = "u1", displayName = "Alex", username = "alex")
+        val incompleteAge = UserProfile(
+            uid = "u1",
+            email = "alex@example.com",
+            displayName = "Alex",
+            isEmailVerified = true,
+            username = "alex"
+        )
         assertEquals("onboarding_age", StartupPrefsStore.resolveOnboardingRoute(incompleteAge))
 
         val readyHobbies = UserProfile(
             uid = "u1",
+            email = "alex@example.com",
             displayName = "Alex",
+            isEmailVerified = true,
             username = "alex",
             age = 24,
             gender = "Non-binary",

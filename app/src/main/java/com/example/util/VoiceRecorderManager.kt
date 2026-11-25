@@ -41,7 +41,7 @@ object VoiceRecorderManager {
         return try {
             stopRecording() // Clean up any active session
 
-            val file = File(context.cacheDir, "voice_rec_${System.currentTimeMillis()}.aac")
+            val file = File(context.cacheDir, "voice_rec_${System.currentTimeMillis()}.m4a")
             outputFile = file
 
             val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -60,7 +60,7 @@ object VoiceRecorderManager {
 
             mediaRecorder = recorder
             startTimeMs = System.currentTimeMillis()
-            Log.d(TAG, "Started recording audio to ${file.absolutePath}")
+            Log.d(TAG, "Started recording audio")
             true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start voice recording", e)

@@ -98,6 +98,84 @@ interface DmMessageDao {
     @Query("DELETE FROM dm_messages")
     suspend fun deleteAllMessages()
 
+    @Query(
+        "SELECT * FROM dm_messages WHERE isOutgoing = 0 " +
+            "AND messageType IN ('image', 'voice', 'video', 'audio') " +
+            "AND ((storagePath IS NOT NULL AND storagePath != '' AND (localMediaPath IS NULL OR localMediaPath = '')) " +
+            "OR mediaDownloadState IN ('PENDING', 'DOWNLOADING', 'FAILED')) " +
+            "AND (mediaDownloadState IS NULL OR mediaDownloadState != 'EXPIRED') " +
+            "ORDER BY timestamp DESC"
+    )
+    suspend fun getPendingOrFailedMediaDownloads(): List<LocalDmMessage>
+
+    @Query(
+        "SELECT * FROM dm_messages WHERE messageType IN ('image', 'voice', 'video', 'audio') " +
+            "ORDER BY timestamp DESC LIMIT 20"
+    )
+    suspend fun getMediaDownloadDiagnostics(): List<LocalDmMessage>
+
+    @Query("UPDATE dm_messages SET mediaDownloadState = :state, mediaFailReason = :failReason WHERE id = :id")
+    suspend fun updateMediaDownloadState(id: String, state: String, failReason: String?)
+
+    @Query(
+        "UPDATE dm_messages SET text = :text, localMediaPath = :localMediaPath, " +
+            "mediaMimeType = COALESCE(:mediaMimeType, mediaMimeType), " +
+            "storagePath = NULL, mediaKey = NULL, mediaNonce = NULL, " +
+            "mediaDownloadState = 'READY', mediaFailReason = NULL WHERE id = :id"
+    )
+    suspend fun markMediaDownloadReady(
+        id: String,
+        text: String,
+        localMediaPath: String,
+        mediaMimeType: String?
+    )
+
+    @Transaction
+    suspend fun insertMediaDescriptorAndConversation(
+        message: LocalDmMessage,
+        conversationDao: DmConversationDao,
+        partnerName: String,
+        partnerAvatar: String?,
+        partnerFlag: String?,
+        previewText: String,
+        unreadDelta: Int
+    ) {
+        insertMessage(message)
+        val existingConv = conversationDao.getConversation(message.conversationId)
+        if (existingConv == null) {
+            conversationDao.insertOrUpdate(
+                LocalDmConversation(
+                    id = message.conversationId,
+                    otherUserId = message.senderId,
+                    otherUserName = partnerName,
+                    otherUserAvatar = partnerAvatar,
+                    otherUserFlag = partnerFlag,
+                    lastMessageText = previewText,
+                    lastMessageType = message.messageType,
+                    lastMessageTime = message.timestamp,
+                    unreadCount = unreadDelta
+                )
+            )
+        } else if (message.timestamp >= existingConv.lastMessageTime) {
+            conversationDao.updateLastMessageAndProfile(
+                conversationId = message.conversationId,
+                text = previewText,
+                time = message.timestamp,
+                unreadDelta = unreadDelta,
+                name = partnerName,
+                avatar = partnerAvatar,
+                flag = partnerFlag
+            )
+        } else if (unreadDelta > 0) {
+            conversationDao.updateLastMessage(
+                conversationId = message.conversationId,
+                text = existingConv.lastMessageText,
+                time = existingConv.lastMessageTime,
+                unreadDelta = unreadDelta
+            )
+        }
+    }
+
     @Transaction
     suspend fun deleteMessageAndRefreshConversation(
         messageId: String,
@@ -109,8 +187,10 @@ interface DmMessageDao {
         val conv = conversationDao.getConversation(conversationId) ?: return
         if (latest != null) {
             val preview = when (latest.messageType) {
-                "image" -> "[Encrypted Photo]"
-                "voice" -> "[Encrypted Voice Note]"
+                "image" -> "📷 Photo"
+                "voice" -> "🎤 Voice note"
+                "video" -> "🎬 Video"
+                "audio" -> "🎵 Audio"
                 else -> latest.text
             }
             conversationDao.insertOrUpdate(
