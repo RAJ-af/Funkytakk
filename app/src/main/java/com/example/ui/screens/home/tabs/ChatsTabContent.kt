@@ -101,6 +101,7 @@ fun ChatsTabContent(
 
     val isMinimalistMode by ChatPreferencesManager.isMinimalistMode.collectAsState()
     val failureStats by com.example.repository.InboxDrainTracker.stats.collectAsState()
+    var dismissedUnreadableBanner by remember(failureStats.failedCount) { mutableStateOf(false) }
 
     val supportPreview by SupportChatManager.latestMessagePreview.collectAsState()
     val supportTime by SupportChatManager.latestMessageTime.collectAsState()
@@ -699,25 +700,51 @@ fun ChatsTabContent(
                         )
                     }
 
-                    if (failureStats.failedCount > 0) {
+                    if (failureStats.failedCount > 0 && !dismissedUnreadableBanner) {
                         Spacer(modifier = Modifier.height(10.dp))
                         Surface(
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(14.dp),
                             color = if (isDark) funkyColors.danger.copy(alpha = 0.14f) else Color(0xFFFEF2F2),
                             border = BorderStroke(1.dp, if (isDark) funkyColors.danger.copy(alpha = 0.45f) else Color(0xFFFCA5A5)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Row(
+                            Column(
                                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                SoftWarningIcon(size = 16.dp, color = funkyColors.danger)
-                                Spacer(modifier = Modifier.width(8.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    SoftWarningIcon(size = 16.dp, color = funkyColors.danger)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "${failureStats.failedCount} ${if (failureStats.failedCount == 1) "message" else "messages"} could not be opened",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (isDark) Color(0xFFFCA5A5) else Color(0xFF991B1B),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    TextButton(
+                                        onClick = { dismissedUnreadableBanner = true },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier
+                                            .heightIn(min = 32.dp)
+                                            .testTag("chats_unreadable_dismiss_button")
+                                    ) {
+                                        Text(
+                                            text = "Dismiss",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isDark) Color(0xFFFCA5A5) else Color(0xFF991B1B)
+                                        )
+                                    }
+                                }
                                 Text(
-                                    text = "${failureStats.failedCount} ${if (failureStats.failedCount == 1) "message" else "messages"} could not be opened",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = if (isDark) Color(0xFFFCA5A5) else Color(0xFF991B1B)
+                                    text = "Encrypted with a key from a previous install or before a Vault password reset, so this device cannot decrypt them.",
+                                    fontSize = 11.5.sp,
+                                    lineHeight = 16.sp,
+                                    color = if (isDark) Color(0xFFFCA5A5).copy(alpha = 0.85f) else Color(0xFF991B1B).copy(alpha = 0.85f)
                                 )
                             }
                         }

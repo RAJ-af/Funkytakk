@@ -202,10 +202,11 @@ fun AuthScreen(
             passwordError = null
         }
 
-        if (!isOnline) {
-            Toast.makeText(context, com.example.util.ErrorMapper.MSG_OFFLINE, Toast.LENGTH_SHORT).show()
-        } else if (!hasError && !isLoading) {
-            if (isSignUpMode) {
+        if (!hasError && !isLoading) {
+            val liveOnline = com.example.ui.components.AppNetworkManager.checkConnection(context)
+            if (!liveOnline) {
+                Toast.makeText(context, com.example.util.ErrorMapper.MSG_OFFLINE, Toast.LENGTH_SHORT).show()
+            } else if (isSignUpMode) {
                 viewModel.signUpWithEmail(
                     email = trimmedEmail,
                     password = password,
@@ -228,10 +229,16 @@ fun AuthScreen(
     LaunchedEffect(authState) {
         if (authState is AuthState.Loading) {
             com.example.ui.components.AppLoadingManager.show(if (isSignUpMode) "Creating your account..." else "Logging in...")
-            kotlinx.coroutines.delay(com.example.util.DEFAULT_SCREEN_LOAD_TIMEOUT_MS)
+            val authTimeoutMs = maxOf(com.example.util.DEFAULT_SCREEN_LOAD_TIMEOUT_MS, 30_000L)
+            kotlinx.coroutines.delay(authTimeoutMs)
             if (viewModel.authState.value is AuthState.Loading) {
                 com.example.ui.components.AppLoadingManager.hide()
-                viewModel.setTimeoutError(com.example.util.ErrorMapper.MSG_OFFLINE)
+                val timeoutMsg = if (com.example.ui.components.AppNetworkManager.checkConnection(context)) {
+                    "Taking longer than expected. Please try again."
+                } else {
+                    com.example.util.ErrorMapper.MSG_OFFLINE
+                }
+                viewModel.setTimeoutError(timeoutMsg)
             }
         } else {
             com.example.ui.components.AppLoadingManager.hide()
@@ -798,7 +805,8 @@ fun AuthScreen(
             // 6. CONTINUE WITH GOOGLE BUTTON
             Button(
                 onClick = {
-                    if (!isOnline) {
+                    val liveOnline = com.example.ui.components.AppNetworkManager.checkConnection(context)
+                    if (!liveOnline) {
                         Toast.makeText(context, com.example.util.ErrorMapper.MSG_OFFLINE, Toast.LENGTH_SHORT).show()
                         return@Button
                     }
@@ -819,7 +827,7 @@ fun AuthScreen(
                         Toast.makeText(context, "Google Sign-In is unavailable right now. Try Email login.", Toast.LENGTH_LONG).show()
                     }
                 },
-                enabled = !isLoading && isOnline,
+                enabled = !isLoading,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(58.dp)

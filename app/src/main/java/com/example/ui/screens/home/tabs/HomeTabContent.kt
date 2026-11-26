@@ -51,7 +51,8 @@ fun HomeTabContent(
     homeUiState: UiState<Unit> = UiState.Content(Unit),
     isOnline: Boolean = true,
     homeLoadError: String? = null,
-    onRetryLoad: () -> Unit = {}
+    onRetryLoad: () -> Unit = {},
+    onFriendClick: (FollowedFriend) -> Unit = {}
 ) {
     val funkyColors = LocalFunkyColors.current
     val chipSelectedLanguage = when (selectedLanguageFilters.size) {
@@ -87,7 +88,8 @@ fun HomeTabContent(
         if (activeFriendsList.isNotEmpty()) {
             item {
                 ActiveFriendsRow(
-                    activeFriendsList = activeFriendsList
+                    activeFriendsList = activeFriendsList,
+                    onFriendClick = onFriendClick
                 )
             }
         }

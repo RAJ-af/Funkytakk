@@ -58,18 +58,36 @@ fun MomentsTabContent(
     currentUserName: String = "",
     currentUserAvatarUrl: String = "",
     currentUserCountryCode: String = "",
-    onCreatePostVisibilityChange: (Boolean) -> Unit = {}
+    onCreatePostVisibilityChange: (Boolean) -> Unit = {},
+    onStartDirectChat: (userId: String, name: String, avatarUrl: String, countryCode: String) -> Unit = { _, _, _, _ -> }
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val funkyColors = LocalFunkyColors.current
     val isAppDark = LocalAppDarkTheme.current
-    val prefs = remember(context) {
-        context.getSharedPreferences("funky_talk_prefs", android.content.Context.MODE_PRIVATE)
-    }
-    val bookmarkedIds = remember {
-        mutableStateListOf<String>().apply {
-            addAll(prefs.getStringSet("bookmarked_moment_ids", emptySet()).orEmpty())
+    val vaultStatus by com.example.crypto.VaultSecurityManager.vaultStatus.collectAsState()
+    val bookmarkedIds by com.example.data.SavedMomentsStore.savedIds.collectAsState()
+    var showVaultGateDialog by remember { mutableStateOf(false) }
+    var pendingBookmarkMoment by remember { mutableStateOf<MomentDto?>(null) }
+
+    LaunchedEffect(vaultStatus) {
+        if (vaultStatus == com.example.crypto.VaultStatus.UNLOCKED) {
+            com.example.data.SavedMomentsStore.loadIfUnlocked(context)
+            val pending = pendingBookmarkMoment
+            if (pending != null) {
+                pendingBookmarkMoment = null
+                showVaultGateDialog = false
+                val savedNow = com.example.data.SavedMomentsStore.toggleSave(context, pending)
+                if (savedNow != null) {
+                    Toast.makeText(
+                        context,
+                        if (savedNow) "Saved to encrypted bookmarks" else "Removed from Saved Moments",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            } else {
+                showVaultGateDialog = false
+            }
         }
     }
 
@@ -109,11 +127,13 @@ fun MomentsTabContent(
     var commentsInitialFixMode by remember { mutableStateOf(false) }
     var activeMomentIdForComments by remember { mutableStateOf<String?>(null) }
     var showCreatePostSheet by remember { mutableStateOf(false) }
+    var showSavedMomentsScreen by remember { mutableStateOf(false) }
+    var inspectedAuthor by remember { mutableStateOf<com.example.MomentAuthorDto?>(null) }
     var reportingMoment by remember { mutableStateOf<MomentDto?>(null) }
     var activeVideoUrl by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(showCreatePostSheet) {
-        onCreatePostVisibilityChange(showCreatePostSheet)
+    LaunchedEffect(showCreatePostSheet, showSavedMomentsScreen, inspectedAuthor) {
+        onCreatePostVisibilityChange(showCreatePostSheet || showSavedMomentsScreen || inspectedAuthor != null)
     }
     DisposableEffect(Unit) {
         onDispose { onCreatePostVisibilityChange(false) }
@@ -408,6 +428,11 @@ fun MomentsTabContent(
                             moment = moment,
                             isBookmarked = isBookmarked,
                             contentBottomPadding = 16.dp,
+                            onAuthorClick = { author ->
+                                if (author.id.isNotBlank()) {
+                                    inspectedAuthor = author
+                                }
+                            },
                             onOpenComments = {
                                 activeMomentIdForComments = moment.id
                                 commentsInitialTab = 0
@@ -451,16 +476,27 @@ fun MomentsTabContent(
                             },
                             onToggleLike = { performToggleLike(moment) },
                             onToggleBookmark = {
-                                if (isBookmarked) bookmarkedIds.remove(moment.id)
-                                else bookmarkedIds.add(moment.id)
-                                prefs.edit()
-                                    .putStringSet("bookmarked_moment_ids", bookmarkedIds.toSet())
-                                    .apply()
-                                Toast.makeText(
-                                    context,
-                                    if (!isBookmarked) "Saved to Bookmarks" else "Removed from Bookmarks",
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                                if (com.example.crypto.VaultSecurityManager.isVaultLocked() ||
+                                    vaultStatus != com.example.crypto.VaultStatus.UNLOCKED
+                                ) {
+                                    pendingBookmarkMoment = moment
+                                    showVaultGateDialog = true
+                                } else {
+                                    val savedNow = com.example.data.SavedMomentsStore.toggleSave(context, moment)
+                                    if (savedNow != null) {
+                                        Toast.makeText(
+                                            context,
+                                            if (savedNow) "Saved to encrypted bookmarks" else "Removed from Saved Moments",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    } else {
+                                        Toast.makeText(
+                                            context,
+                                            "Could not update saved moment.",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                }
                             },
                             onShare = {
                                 val shareText = buildString {
@@ -622,6 +658,37 @@ fun MomentsTabContent(
                                     showTopMenu = false
                                     coroutineScope.launch { loadFeedPage(activeFeed, reset = true) }
                                 }
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        "Saved Moments",
+                                        color = funkyColors.ink,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 14.sp
+                                    )
+                                },
+                                leadingIcon = {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(funkyColors.mango.copy(alpha = 0.16f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            painter = painterResource(id = R.drawable.ic_bookmark_filled),
+                                            contentDescription = null,
+                                            tint = funkyColors.mango,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    showTopMenu = false
+                                    showSavedMomentsScreen = true
+                                },
+                                modifier = Modifier.testTag("moments_saved_menu_item")
                             )
                             if (currentDisplayedMoment != null) {
                                 HorizontalDivider(
@@ -856,6 +923,13 @@ fun MomentsTabContent(
                         corrections_count = newCorrectionsCount.coerceAtLeast(0)
                     )
                 }
+            },
+            onAuthorClick = { author ->
+                if (author.id.isNotBlank()) {
+                    showCommentsSheet = false
+                    activeMomentIdForComments = null
+                    inspectedAuthor = author
+                }
             }
         )
     }
@@ -908,6 +982,54 @@ fun MomentsTabContent(
             contextType = "moment",
             contextId = moment.id,
             onDismiss = { reportingMoment = null }
+        )
+    }
+
+    if (showVaultGateDialog) {
+        com.example.ui.screens.chat.VaultManagementDialogs(
+            onDismissRequest = {
+                showVaultGateDialog = false
+                pendingBookmarkMoment = null
+            }
+        )
+    }
+
+    if (showSavedMomentsScreen) {
+        com.example.ui.screens.moments.SavedMomentsScreen(
+            currentUserNativeLanguage = currentUserNativeLanguage,
+            onBack = { showSavedMomentsScreen = false },
+            onOpenMomentAuthorProfile = { author ->
+                if (author.id.isNotBlank()) {
+                    inspectedAuthor = author
+                }
+            }
+        )
+    }
+
+    inspectedAuthor?.let { author ->
+        val displayName = author.name?.takeIf { it.isNotBlank() }
+            ?: author.username?.takeIf { it.isNotBlank() }
+            ?: "Learner"
+        com.example.ui.screens.UserProfileFeedScreen(
+            userId = author.id,
+            username = author.username.orEmpty().ifBlank { displayName },
+            profileName = displayName,
+            avatarUrl = author.avatar_url.orEmpty(),
+            countryCode = author.country_code.orEmpty(),
+            nativeLanguages = author.native_languages.joinToString(", "),
+            learningLanguages = author.learning_languages.joinToString(", "),
+            onBack = { inspectedAuthor = null },
+            onStartChat = {
+                inspectedAuthor = null
+                if (author.id.isNotBlank()) {
+                    onStartDirectChat(
+                        author.id,
+                        displayName,
+                        author.avatar_url.orEmpty(),
+                        author.country_code.orEmpty()
+                    )
+                }
+            }
         )
     }
 }

@@ -171,8 +171,15 @@ object CrashAndErrorReporter {
         worker.start()
     }
 
+    private fun safeStackTraceString(throwable: Throwable): String {
+        // Android's Log.getStackTraceString explicitly returns "" when UnknownHostException is in the cause chain.
+        return Log.getStackTraceString(throwable).ifBlank {
+            throwable.stackTraceToString()
+        }
+    }
+
     private fun recordCrashSynchronously(thread: Thread, throwable: Throwable) {
-        val trace = Log.getStackTraceString(throwable)
+        val trace = safeStackTraceString(throwable)
         recordIssueInternal(
             severity = "CRASH",
             source = "Uncaught(${thread.name})",
@@ -189,7 +196,7 @@ object CrashAndErrorReporter {
         throwable: Throwable? = null,
         showBanner: Boolean = false
     ) {
-        val trace = throwable?.let { Log.getStackTraceString(it) } ?: ""
+        val trace = throwable?.let { safeStackTraceString(it) } ?: ""
         recordIssueInternal(
             severity = "ERROR",
             source = source,

@@ -112,6 +112,14 @@ class AuthViewModel : ViewModel() {
     var tempOnboardingLearningLanguage = ""
     var tempOnboardingHobbies = emptyList<String>()
 
+    private val safeMainExceptionHandler = kotlinx.coroutines.CoroutineExceptionHandler { _, throwable ->
+        if (throwable is kotlinx.coroutines.CancellationException) return@CoroutineExceptionHandler
+        Log.w("AuthViewModel", "Handled coroutine error (${throwable.javaClass.simpleName}): ${throwable.message}")
+        if (!com.example.util.ErrorMapper.isNetworkException(throwable)) {
+            TelemetryManager.recordNonFatal("auth_vm_coroutine", throwable)
+        }
+    }
+
     private val _authState = MutableStateFlow<AuthState>(AuthState.Idle)
     val authState: StateFlow<AuthState> = _authState
 
@@ -369,27 +377,28 @@ class AuthViewModel : ViewModel() {
     }
 
     init {
-        viewModelScope.launch {
+        viewModelScope.launch(safeMainExceptionHandler) {
             VoiceRoomRealtimeManager.events.collect { event ->
-                when (event) {
-                    is RealtimeTableEvent.Reconnected -> {
-                        val currentRoomId = _activeRoomId.value
-                        if (!currentRoomId.isNullOrBlank()) {
-                            val hostId = _activeRoomHostId.value
-                            val appContext = FunkyTalkApplication.appContext
-                            val myUid = appContext?.let { SupabaseSessionManager.getUserId(it) }
-                                ?: (authState.value as? AuthState.Success)?.user?.uid
-                            val isHost = (hostId != null && myUid != null && hostId.equals(myUid, ignoreCase = true))
+                try {
+                    when (event) {
+                        is RealtimeTableEvent.Reconnected -> {
+                            val currentRoomId = _activeRoomId.value
+                            if (!currentRoomId.isNullOrBlank()) {
+                                val hostId = _activeRoomHostId.value
+                                val appContext = FunkyTalkApplication.appContext
+                                val myUid = appContext?.let { SupabaseSessionManager.getUserId(it) }
+                                    ?: (authState.value as? AuthState.Success)?.user?.uid
+                                val isHost = (hostId != null && myUid != null && hostId.equals(myUid, ignoreCase = true))
 
-                            Log.d("HostSpeakerRequests", "[Realtime Reconnect] Reconnected to Realtime. Refreshing room $currentRoomId (isHost=$isHost)")
-                            if (isHost) {
-                                checkPendingSpeakerRequestsForHost(currentRoomId, appContext)
-                            } else {
-                                checkMySpeakerRequest(currentRoomId, appContext)
+                                Log.d("HostSpeakerRequests", "[Realtime Reconnect] Reconnected to Realtime. Refreshing room $currentRoomId (isHost=$isHost)")
+                                if (isHost) {
+                                    checkPendingSpeakerRequestsForHost(currentRoomId, appContext)
+                                } else {
+                                    checkMySpeakerRequest(currentRoomId, appContext)
+                                }
+                                refreshActiveRoomSpeakers(currentRoomId, appContext)
                             }
-                            refreshActiveRoomSpeakers(currentRoomId, appContext)
                         }
-                    }
                     is RealtimeTableEvent.SpeakerRequestChanged -> {
                         val currentRoomId = _activeRoomId.value
                         if (currentRoomId != null && (event.roomId == currentRoomId || event.roomId.isNullOrBlank())) {
@@ -537,6 +546,11 @@ class AuthViewModel : ViewModel() {
                         }
                     }
                     else -> {}
+                    }
+                } catch (ce: kotlinx.coroutines.CancellationException) {
+                    throw ce
+                } catch (e: Exception) {
+                    Log.w("AuthViewModel", "Error handling realtime event: ${e.message}")
                 }
             }
         }
@@ -1884,7 +1898,7 @@ class AuthViewModel : ViewModel() {
                 startSessionListener(context, cachedUid)
 
                 // Revalidate session and profile silently in the background (SWR)
-                viewModelScope.launch {
+                viewModelScope.launch(safeMainExceptionHandler) {
                     val verifiedUid = com.example.util.StartupTimingTracker.measure("verify_firebase_token") {
                         if (hasLocalSession) {
                             SupabaseSessionManager.getUserId(context)
@@ -1927,7 +1941,7 @@ class AuthViewModel : ViewModel() {
                         emitCachedImmediately = true
                     ) { refreshed ->
                         if (!isGoogleAccount && online) {
-                            viewModelScope.launch {
+                            viewModelScope.launch(safeMainExceptionHandler) {
                                 val realVerify = performRemoteVerificationStatusCheck(context, verifiedUid, false)
                                 if (realVerify != refreshed.isEmailVerified) {
                                     prefs.edit().putBoolean("custom_email_verified_${verifiedUid}", realVerify).apply()
@@ -1942,7 +1956,7 @@ class AuthViewModel : ViewModel() {
 
             _sessionVerificationState.value = SessionVerificationState.Verifying
             _authState.value = AuthState.Loading
-            viewModelScope.launch {
+            viewModelScope.launch(safeMainExceptionHandler) {
                 val verifiedUid = com.example.util.StartupTimingTracker.measure("verify_firebase_token") {
                     SupabaseSessionManager.ensureActiveSession(context)
                         ?: if (!com.example.repository.DeviceSessionRepository.isRevocationInProgress() &&
@@ -1987,7 +2001,7 @@ class AuthViewModel : ViewModel() {
                         startSessionListener(context, effectiveUid)
 
                         if (!isGoogleAccount) {
-                            viewModelScope.launch {
+                            viewModelScope.launch(safeMainExceptionHandler) {
                                 val realVerify = performRemoteVerificationStatusCheck(context, effectiveUid, false)
                                 if (realVerify != initialVerified) {
                                     prefs.edit().putBoolean("custom_email_verified_${effectiveUid}", realVerify).apply()
@@ -2054,7 +2068,7 @@ class AuthViewModel : ViewModel() {
 
         if (!isCustomVerified && creationTime > 0L && (System.currentTimeMillis() - creationTime) > 2L * 3600L * 1000L) {
             _authState.value = AuthState.Loading
-            viewModelScope.launch {
+            viewModelScope.launch(safeMainExceptionHandler) {
                 // Double-check remote verification state in Supabase
                 val remoteVerified = performRemoteVerificationStatusCheck(context, effectiveUid, false)
                 if (remoteVerified) {
@@ -2135,7 +2149,7 @@ class AuthViewModel : ViewModel() {
                             .addOnSuccessListener { tokenResult ->
                                 val firebaseIdToken = tokenResult.token
                                 if (!firebaseIdToken.isNullOrEmpty()) {
-                                    viewModelScope.launch {
+                                    viewModelScope.launch(safeMainExceptionHandler) {
                                         // STEP 2: POST to verify-firebase-token edge function
                                         try {
                                             val exchange = SupabaseSessionManager.exchangeFirebaseToken(
@@ -2277,7 +2291,7 @@ class AuthViewModel : ViewModel() {
                             .addOnSuccessListener { tokenResult ->
                                 val firebaseIdToken = tokenResult.token
                                 if (!firebaseIdToken.isNullOrEmpty()) {
-                                    viewModelScope.launch {
+                                    viewModelScope.launch(safeMainExceptionHandler) {
                                         // STEP 2: POST to verify-firebase-token edge function
                                         try {
                                             val exchange = SupabaseSessionManager.exchangeFirebaseToken(
@@ -2381,7 +2395,7 @@ class AuthViewModel : ViewModel() {
     fun startAutoVerificationCheck(context: Context, onVerified: () -> Unit) {
         initializeFirebaseIfNeeded(context)
         verificationJob?.cancel()
-        verificationJob = viewModelScope.launch {
+        verificationJob = viewModelScope.launch(safeMainExceptionHandler) {
             val auth = firebaseAuth
             if (auth != null) {
                 while (true) {
@@ -2438,7 +2452,7 @@ class AuthViewModel : ViewModel() {
         val supabaseUserId = SupabaseSessionManager.getUserId(context) ?: auth?.currentUser?.uid
         if (auth != null && supabaseUserId != null) {
             _authState.value = AuthState.Loading
-            viewModelScope.launch {
+            viewModelScope.launch(safeMainExceptionHandler) {
                 var isVerifiedRemote = false
                 val bearerToken = SupabaseSessionManager.getBearerToken(context)
                 
@@ -2580,7 +2594,7 @@ class AuthViewModel : ViewModel() {
         displayName: String?,
         onComplete: () -> Unit
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(safeMainExceptionHandler) {
             try {
                 val bearerAuth = SupabaseSessionManager.getBearerToken(context)
 
@@ -2929,7 +2943,7 @@ class AuthViewModel : ViewModel() {
         onSuccess: () -> Unit = {},
         onError: (String) -> Unit = {}
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(safeMainExceptionHandler) {
             try {
                 var supaUid = SupabaseSessionManager.getUserId(context)?.ifBlank { null }
                     ?: (_authState.value as? AuthState.Success)?.user?.uid?.ifBlank { null }
@@ -3043,7 +3057,7 @@ class AuthViewModel : ViewModel() {
         onSuccess: () -> Unit = {},
         onError: (String) -> Unit = {}
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(safeMainExceptionHandler) {
             var finalAvatar = avatar
             val cleanUsername = username.trim().lowercase()
 
@@ -3142,7 +3156,7 @@ class AuthViewModel : ViewModel() {
     ) {
         val currentState = _authState.value
         if (currentState is AuthState.Success) {
-            viewModelScope.launch {
+            viewModelScope.launch(safeMainExceptionHandler) {
                 val cleanUsername = username.trim().lowercase()
                 val cleanDisplayName = com.example.ui.screens.profile.sanitizeProfileName(displayName)
                 val cleanBio = (bio ?: dob).trim()
@@ -3554,7 +3568,7 @@ class AuthViewModel : ViewModel() {
             onComplete(mergedProfile)
         }
 
-        viewModelScope.launch {
+        viewModelScope.launch(safeMainExceptionHandler) {
             try {
                 var bearerToken = if (!explicitAccessToken.isNullOrBlank()) {
                     "Bearer $explicitAccessToken"
@@ -3659,7 +3673,7 @@ class AuthViewModel : ViewModel() {
     }
 
     fun checkUsernameUnique(username: String, currentUserId: String?, callback: (Boolean) -> Unit) {
-        viewModelScope.launch {
+        viewModelScope.launch(safeMainExceptionHandler) {
             try {
                 val trimmedUsername = username.trim()
                 if (trimmedUsername.isEmpty()) {
@@ -3762,7 +3776,7 @@ class AuthViewModel : ViewModel() {
     }
 
     fun fetchSupabaseProfiles(context: Context) {
-        viewModelScope.launch {
+        viewModelScope.launch(safeMainExceptionHandler) {
             try {
                 // Ensure active authenticated session
                 SupabaseSessionManager.ensureActiveSession(context)

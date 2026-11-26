@@ -208,9 +208,18 @@ object AppNetworkManager {
     }
 
     private fun querySystemOnline(cm: ConnectivityManager): Boolean {
-        val activeNetwork = cm.activeNetwork ?: return false
-        val capabilities = cm.getNetworkCapabilities(activeNetwork) ?: return false
-        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        val activeNetwork = cm.activeNetwork
+        if (activeNetwork != null) {
+            val capabilities = cm.getNetworkCapabilities(activeNetwork)
+            if (capabilities != null && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+                return true
+            }
+        }
+        @Suppress("DEPRECATION")
+        return cm.allNetworks.any { network ->
+            val capabilities = cm.getNetworkCapabilities(network)
+            capabilities != null && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        }
     }
 
     fun checkConnection(context: Context): Boolean {

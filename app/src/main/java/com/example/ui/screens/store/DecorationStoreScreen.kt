@@ -90,6 +90,7 @@ private val ColorErrorContainer: Color
 
 enum class StoreTab(val displayName: String, val categoryType: String?) {
     ALL("All", null),
+    CARD("Card", "card_design"),
     AVATAR("Avatar", "avatar_frame"),
     NAME("Name", "name_effect"),
     ENTRY("Entry", "entry_animation"),
@@ -98,6 +99,7 @@ enum class StoreTab(val displayName: String, val categoryType: String?) {
 }
 
 private fun getCategoryDisplayName(type: String): String = when (type) {
+    "card_design" -> "Discover Card"
     "avatar_frame" -> "Avatar Frames"
     "name_effect" -> "Name Effects"
     "entry_animation" -> "Entry Animations"
@@ -107,6 +109,7 @@ private fun getCategoryDisplayName(type: String): String = when (type) {
 }
 
 private fun getCategoryIcon(type: String): String = when (type) {
+    "card_design" -> "🪪"
     "avatar_frame" -> "👑"
     "name_effect" -> "✨"
     "entry_animation" -> "🚀"
@@ -120,13 +123,16 @@ private fun getCategoryIcon(type: String): String = when (type) {
 fun DecorationStoreScreen(
     onDismiss: () -> Unit,
     currentUserAvatar: String? = null,
-    currentUserName: String = "You"
+    currentUserName: String = "You",
+    currentUserCardProfile: com.example.card.PeopleCardProfile? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val appFlags by com.example.AppFlagsRepository.flags.collectAsState()
 
-    BackHandler { onDismiss() }
+    var showCardWorkshop by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = !showCardWorkshop) { onDismiss() }
 
     val walletBalance by CosmeticsManager.userWalletBalance.collectAsState()
     val myCosmetics by CosmeticsManager.myCosmetics.collectAsState()
@@ -284,7 +290,13 @@ fun DecorationStoreScreen(
             // Tabs Row
             StoreTabsRow(
                 selectedTab = selectedTab,
-                onTabSelect = { selectedTab = it }
+                onTabSelect = { tab ->
+                    if (tab == StoreTab.CARD) {
+                        showCardWorkshop = true
+                    } else {
+                        selectedTab = tab
+                    }
+                }
             )
 
             // Main Content Area
@@ -334,7 +346,8 @@ fun DecorationStoreScreen(
                                     else -> StoreTab.ALL
                                 }
                             },
-                            onPlayMiniPreview = { activeMiniPreviewItem = it }
+                            onPlayMiniPreview = { activeMiniPreviewItem = it },
+                            onOpenCardWorkshop = { showCardWorkshop = true }
                         )
                     }
                     else -> {
@@ -420,6 +433,20 @@ fun DecorationStoreScreen(
         message = generalErrorDialogMessage,
         onDismiss = { generalErrorDialogMessage = null }
     )
+
+    if (showCardWorkshop) {
+        val fallbackUid = remember { com.example.SupabaseSessionManager.getUserId(context).orEmpty() }
+        val effectiveProfile = currentUserCardProfile ?: com.example.card.PeopleCardProfile(
+            userId = fallbackUid,
+            name = currentUserName,
+            avatarUrl = currentUserAvatar.orEmpty(),
+            isOnline = true
+        )
+        com.example.card.CardWorkshopScreen(
+            myProfile = effectiveProfile,
+            onDismiss = { showCardWorkshop = false }
+        )
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -613,7 +640,8 @@ private fun StoreAllTabContent(
     onSelectItem: (StoreItemRow) -> Unit,
     onUnequipItem: (StoreItemRow) -> Unit,
     onViewAllCategory: (String) -> Unit,
-    onPlayMiniPreview: (StoreItemRow) -> Unit
+    onPlayMiniPreview: (StoreItemRow) -> Unit,
+    onOpenCardWorkshop: () -> Unit = {}
 ) {
     val categories = remember {
         listOf("avatar_frame", "name_effect", "entry_animation", "bubble_theme", "chat_bg")
@@ -623,6 +651,58 @@ private fun StoreAllTabContent(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 120.dp)
     ) {
+        item(key = "card_workshop_banner") {
+            Surface(
+                shape = RoundedCornerShape(22.dp),
+                color = Color(0xFFFFF3C4),
+                border = BorderStroke(2.dp, Color(0xFF1A1A1A)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 4.dp)
+                    .testTag("store_open_card_workshop_card")
+                    .clip(RoundedCornerShape(22.dp))
+                    .clickable { onOpenCardWorkshop() }
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Text(
+                            text = "🪪 Card Workshop",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFF1A1A1A)
+                        )
+                        Text(
+                            text = "Decorate your Discover card with stickers, patterns & remix",
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color(0xFF44403C)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Surface(
+                        shape = RoundedCornerShape(100.dp),
+                        color = Color(0xFFFFB800),
+                        border = BorderStroke(1.8.dp, Color(0xFF1A1A1A))
+                    ) {
+                        Text(
+                            text = "Customize",
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFF1A1A1A),
+                            modifier = Modifier.padding(horizontal = 13.dp, vertical = 8.dp)
+                        )
+                    }
+                }
+            }
+        }
+
         categories.forEach { catType ->
             val catItems = allItems.filter { it.item_type == catType }
             if (catItems.isNotEmpty()) {

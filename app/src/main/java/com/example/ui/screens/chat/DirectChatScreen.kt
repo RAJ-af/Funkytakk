@@ -702,7 +702,8 @@ fun DirectChatScreen(
                         onClose = {
                             isSelectionMode = false
                             selectedMessageIds.clear()
-                        }
+                        },
+                        applyStatusBarPadding = !embeddedInSheet
                     )
                 } else {
                     Surface(
@@ -1163,15 +1164,35 @@ fun DirectChatScreen(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
+                                        .then(
+                                            if (isSelectionMode) {
+                                                Modifier.clickable {
+                                                    val albumIds = item.messages.map { it.id }
+                                                    if (isSelected) selectedMessageIds.removeAll(albumIds)
+                                                    else albumIds.forEach { if (!selectedMessageIds.contains(it)) selectedMessageIds.add(it) }
+                                                }
+                                            } else Modifier
+                                        )
                                         .padding(
-                                            start = if (isOutgoing) 48.dp else 12.dp,
+                                            start = if (isSelectionMode) 10.dp else if (isOutgoing) 48.dp else 12.dp,
                                             end = if (isOutgoing) 12.dp else 48.dp,
                                             top = if (item.position == GroupPosition.First || item.position == GroupPosition.Single) 6.dp else 2.dp,
                                             bottom = 2.dp
                                         ),
-                                    horizontalArrangement = if (isOutgoing) Arrangement.End else Arrangement.Start,
+                                    horizontalArrangement = if (isSelectionMode) Arrangement.Start else if (isOutgoing) Arrangement.End else Arrangement.Start,
                                     verticalAlignment = Alignment.Bottom
                                 ) {
+                                    if (isSelectionMode) {
+                                        SelectionCheckBadge(
+                                            selected = isSelected,
+                                            modifier = Modifier
+                                                .align(Alignment.CenterVertically)
+                                                .padding(end = 8.dp)
+                                        )
+                                        if (isOutgoing) {
+                                            Spacer(modifier = Modifier.weight(1f))
+                                        }
+                                    }
                                     val displayPartnerAvatar = resolvedAvatarUrl.ifBlank { partnerAvatarUrl }
                                     if (!isOutgoing) {
                                         if (item.isLastInGroup) {
@@ -1343,15 +1364,34 @@ fun DirectChatScreen(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
+                                        .then(
+                                            if (isSelectionMode) {
+                                                Modifier.clickable {
+                                                    if (isSelected) selectedMessageIds.remove(msg.id)
+                                                    else selectedMessageIds.add(msg.id)
+                                                }
+                                            } else Modifier
+                                        )
                                         .padding(
-                                            start = if (isOutgoing) 48.dp else 12.dp,
+                                            start = if (isSelectionMode) 10.dp else if (isOutgoing) 48.dp else 12.dp,
                                             end = if (isOutgoing) 12.dp else 48.dp,
                                             top = if (item.position == GroupPosition.First || item.position == GroupPosition.Single) 6.dp else 2.dp,
                                             bottom = 2.dp
                                         ),
-                                    horizontalArrangement = if (isOutgoing) Arrangement.End else Arrangement.Start,
+                                    horizontalArrangement = if (isSelectionMode) Arrangement.Start else if (isOutgoing) Arrangement.End else Arrangement.Start,
                                     verticalAlignment = Alignment.Bottom
                                 ) {
+                                    if (isSelectionMode) {
+                                        SelectionCheckBadge(
+                                            selected = isSelected,
+                                            modifier = Modifier
+                                                .align(Alignment.CenterVertically)
+                                                .padding(end = 8.dp)
+                                        )
+                                        if (isOutgoing) {
+                                            Spacer(modifier = Modifier.weight(1f))
+                                        }
+                                    }
                                     // 28dp Avatar only beside last message of group
                                     if (!isOutgoing) {
                                         if (item.isLastInGroup) {
@@ -1597,9 +1637,14 @@ fun DirectChatScreen(
                                                             downloadState = videoSpec.downloadState,
                                                             failReason = videoSpec.failReason,
                                                             onPlayClick = {
-                                                                val idx = allMediaItems.indexOfFirst { it.id == msg.id }
-                                                                if (idx >= 0) {
-                                                                    activeMediaViewerIndex = idx
+                                                                if (isSelectionMode) {
+                                                                    if (isSelected) selectedMessageIds.remove(msg.id)
+                                                                    else selectedMessageIds.add(msg.id)
+                                                                } else {
+                                                                    val idx = allMediaItems.indexOfFirst { it.id == msg.id }
+                                                                    if (idx >= 0) {
+                                                                        activeMediaViewerIndex = idx
+                                                                    }
                                                                 }
                                                             },
                                                             onDownloadClick = {
@@ -1672,8 +1717,13 @@ fun DirectChatScreen(
                                                             position = item.position,
                                                             status = status,
                                                             onPhotoClick = { _, _ ->
-                                                                val idx = allMediaItems.indexOfFirst { it.id == msg.id }
-                                                                if (idx >= 0) activeMediaViewerIndex = idx
+                                                                if (isSelectionMode) {
+                                                                    if (isSelected) selectedMessageIds.remove(msg.id)
+                                                                    else selectedMessageIds.add(msg.id)
+                                                                } else {
+                                                                    val idx = allMediaItems.indexOfFirst { it.id == msg.id }
+                                                                    if (idx >= 0) activeMediaViewerIndex = idx
+                                                                }
                                                             },
                                                             onPhotoLongPress = {
                                                                 if (!isSelectionMode) selectedMessageForMenu = msg
@@ -1706,6 +1756,11 @@ fun DirectChatScreen(
                                                         }
                                                     },
                                                     onWordClick = { word ->
+                                                        if (isSelectionMode) {
+                                                            if (isSelected) selectedMessageIds.remove(msg.id)
+                                                            else selectedMessageIds.add(msg.id)
+                                                            return@MessageText
+                                                        }
                                                         if (msg.status == LocalMessageStatus.FAILED) {
                                                             failedMessageForSheet = msg
                                                             return@MessageText

@@ -199,6 +199,52 @@ fun MessageBubble(
 }
 
 @Composable
+fun SelectionCheckBadge(
+    selected: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val c = LocalChatColors.current
+    val fillColor by animateColorAsState(
+        targetValue = if (selected) c.brand else Color.Transparent,
+        animationSpec = tween(160),
+        label = "selectionBadgeFill"
+    )
+    val borderColor by animateColorAsState(
+        targetValue = if (selected) c.brand else c.textSecondary.copy(alpha = 0.55f),
+        animationSpec = tween(160),
+        label = "selectionBadgeBorder"
+    )
+    Box(
+        modifier = modifier
+            .size(22.dp)
+            .clip(CircleShape)
+            .background(fillColor)
+            .border(width = 1.8.dp, color = borderColor, shape = CircleShape)
+            .semantics { contentDescription = if (selected) "Selected" else "Not selected" },
+        contentAlignment = Alignment.Center
+    ) {
+        if (selected) {
+            Canvas(modifier = Modifier.size(11.dp)) {
+                val p = Path().apply {
+                    moveTo(size.width * 0.14f, size.height * 0.52f)
+                    lineTo(size.width * 0.42f, size.height * 0.80f)
+                    lineTo(size.width * 0.88f, size.height * 0.22f)
+                }
+                drawPath(
+                    path = p,
+                    color = c.onBrand,
+                    style = Stroke(
+                        width = 2.1.dp.toPx(),
+                        cap = StrokeCap.Round,
+                        join = StrokeJoin.Round
+                    )
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun SenderName(name: String, userId: String, modifier: Modifier = Modifier) {
     val c = LocalChatColors.current
     com.example.store.DecoratedUserName(

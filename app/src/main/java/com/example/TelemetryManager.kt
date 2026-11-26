@@ -133,13 +133,19 @@ object TelemetryManager {
 
     fun recordRpcFailure(rpcName: String, httpCode: Int?, rawError: String?) {
         val codeText = rawError.orEmpty()
-        // Never treat expected user validation or rate-limit responses as non-fatal crashes
+        // Never treat expected user validation, rate-limit, or offline/DNS connectivity failures as non-fatal crashes
         val ignoredCodes = listOf(
             "empty_message", "message_too_long", "body_too_long", "title_too_long",
             "title_too_short", "invalid_kind", "voting_closed", "rate_limited",
             "feedback_not_found", "forbidden"
         )
         if (ignoredCodes.any { codeText.contains(it, ignoreCase = true) }) return
+        val offlineErrors = listOf(
+            "unable to resolve host", "no address associated", "failed to connect",
+            "network is unreachable", "connection reset", "software caused connection abort",
+            "timeout", "timed out", "broken pipe", "sslhandshake"
+        )
+        if (httpCode == null && offlineErrors.any { codeText.contains(it, ignoreCase = true) }) return
         if (httpCode != null && httpCode in 400..499 && httpCode != 401 && httpCode != 403 && httpCode != 404) return
 
         val msg = "RPC $rpcName failed (HTTP ${httpCode ?: -1}): ${codeText.take(240)}"

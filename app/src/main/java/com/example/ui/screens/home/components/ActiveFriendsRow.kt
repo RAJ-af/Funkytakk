@@ -36,7 +36,8 @@ import com.example.ui.theme.LocalFunkyColors
 
 @Composable
 fun ActiveFriendsRow(
-    activeFriendsList: List<FollowedFriend>
+    activeFriendsList: List<FollowedFriend>,
+    onFriendClick: (FollowedFriend) -> Unit = {}
 ) {
     val context = LocalContext.current
     val funkyColors = LocalFunkyColors.current
@@ -224,11 +225,14 @@ fun ActiveFriendsRow(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
                         .clickable {
-                            if (isOnlineUser) {
-                                val speakMsg = if (friend.isSpeaking) "Speaking in room now" else "Online now"
-                                Toast.makeText(context, "${friend.name} is online! ($speakMsg)", Toast.LENGTH_SHORT).show()
+                            if (friend.id.isNotBlank()) {
+                                onFriendClick(friend)
                             } else {
-                                Toast.makeText(context, "${friend.name} is currently offline", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(
+                                    context,
+                                    if (isOnlineUser) "${friend.name} is online now" else "${friend.name} is currently offline",
+                                    Toast.LENGTH_SHORT
+                                ).show()
                             }
                         }
                         .width(78.dp)
@@ -253,34 +257,28 @@ fun ActiveFriendsRow(
                         defaultColor = if (isOnlineUser) funkyColors.ink else funkyColors.mute
                     )
 
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(3.dp)
-                    ) {
-                        if (isOnlineUser && friend.isSpeaking) {
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_mic),
-                                contentDescription = null,
-                                tint = GoldDark,
-                                modifier = Modifier.size(10.dp)
+                    if (isOnlineUser) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            if (friend.isSpeaking) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_mic),
+                                    contentDescription = null,
+                                    tint = GoldDark,
+                                    modifier = Modifier.size(10.dp)
+                                )
+                            }
+                            Text(
+                                text = if (friend.isSpeaking) "Speaking" else "Online",
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (friend.isSpeaking) GoldDark else if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
-                        Text(
-                            text = when {
-                                isOnlineUser && friend.isSpeaking -> "Speaking"
-                                isOnlineUser -> "Online"
-                                else -> "Offline"
-                            },
-                            fontSize = 9.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = when {
-                                isOnlineUser && friend.isSpeaking -> GoldDark
-                                isOnlineUser -> if (isDark) Color(0xFF4ADE80) else Color(0xFF16A34A)
-                                else -> funkyColors.mute
-                            },
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
                     }
                 }
             }

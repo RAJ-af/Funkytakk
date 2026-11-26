@@ -400,6 +400,7 @@ object VaultSecurityManager {
         activeVaultKey?.fill(0)
         activeVaultKey = null
         activeKeyUid = null
+        com.example.data.SavedMomentsStore.clearMemoryCache()
         _vaultStatus.value = VaultStatus.LOCKED
         if (BuildConfig.DEBUG) {
             Log.d(TAG, "Vault locked.")
@@ -447,6 +448,7 @@ object VaultSecurityManager {
         EncryptedChatDatabase.deleteDatabaseForUid(context, uid)
         BackupCrypto.wipeForUid(context, uid)
         ChatLockManager.wipeForUid(context, uid)
+        com.example.data.SavedMomentsStore.wipeForUid(context, uid)
         try {
             ActiveUserManager.mediaDir(context, uid).deleteRecursively()
             ActiveUserManager.restoredMediaDir(context, uid).deleteRecursively()

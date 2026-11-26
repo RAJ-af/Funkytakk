@@ -62,6 +62,7 @@ data class DiscoverPartner(
     val name: String,
     val username: String = "",
     val age: Int,
+    val gender: String = "",
     val isOnline: Boolean,
     val avatarUrl: String,
     val coverUrl: String? = null,
@@ -77,6 +78,25 @@ data class DiscoverPartner(
     val city: String = "",
     val country: String = ""
 )
+
+fun DiscoverPartner.toPeopleCardProfile(): com.example.card.PeopleCardProfile =
+    com.example.card.PeopleCardProfile(
+        userId = id,
+        name = name,
+        username = username,
+        age = age,
+        gender = gender,
+        isOnline = isOnline,
+        avatarUrl = avatarUrl,
+        countryCode = countryCode,
+        country = country,
+        city = city,
+        nativeLang = nativeLang,
+        learningLang = learningLang,
+        bio = bio,
+        hobbies = interests,
+        isWaved = isWaved
+    )
 
 fun formatLanguageToCode(langStr: String): String {
     if (langStr.isBlank()) return "EN"
@@ -216,6 +236,7 @@ fun DiscoverTabContent(
                 name = item.name,
                 username = item.username,
                 age = item.age,
+                gender = item.gender,
                 isOnline = item.isOnline,
                 avatarUrl = item.avatarUrl,
                 coverUrl = item.coverUrl,
@@ -233,6 +254,7 @@ fun DiscoverTabContent(
             )
         }.orEmpty()
     }
+    val cardDesignsMap by com.example.card.CardDesignRepository.designsMap.collectAsState()
     var partnersList by remember { mutableStateOf<List<DiscoverPartner>>(cachedPartners) }
     var isDatabaseLoading by remember { mutableStateOf(cachedPartners.isEmpty()) }
     var databaseError by remember { mutableStateOf<String?>(null) }
@@ -275,6 +297,7 @@ fun DiscoverTabContent(
                             name = p.profile_name ?: p.username ?: "Learner",
                             username = p.username ?: "",
                             age = p.age ?: 21,
+                            gender = p.gender ?: "",
                             isOnline = p.is_online ?: false,
                             avatarUrl = p.avatar_url ?: "",
                             coverUrl = p.cover_url,
@@ -305,6 +328,7 @@ fun DiscoverTabContent(
                             name = p.name,
                             username = p.username,
                             age = p.age,
+                            gender = p.gender,
                             isOnline = p.isOnline,
                             avatarUrl = p.avatarUrl,
                             coverUrl = p.coverUrl,
@@ -327,6 +351,7 @@ fun DiscoverTabContent(
             val partnerIds = loaded.map { it.id }.filter { it.isNotBlank() }.distinct()
             if (partnerIds.isNotEmpty()) {
                 com.example.store.CosmeticsManager.batchFetchUserCosmetics(context, partnerIds)
+                com.example.card.CardDesignRepository.batchFetchCardDesigns(context, partnerIds)
             }
         } catch (ce: kotlinx.coroutines.CancellationException) {
             throw ce
@@ -345,6 +370,7 @@ fun DiscoverTabContent(
     var waveCustomMessage by remember { mutableStateOf("") }
     var profileSheetUser by remember { mutableStateOf<DiscoverPartner?>(null) }
     var showFullProfileScreenWithFeed by remember { mutableStateOf<DiscoverPartner?>(null) }
+    var reportPartnerUser by remember { mutableStateOf<DiscoverPartner?>(null) }
 
     val languageSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val interestsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -690,9 +716,12 @@ fun DiscoverTabContent(
                     }
                 } else {
                     items(filteredPartners.distinctBy { it.id }, key = { it.id }) { partner ->
-                        DiscoverUserCard(
-                            partner = partner,
+                        val cardDesign = cardDesignsMap[partner.id]
+                        com.example.card.PeopleCard(
+                            profile = partner.toPeopleCardProfile(),
+                            design = cardDesign,
                             onCardClick = { showFullProfileScreenWithFeed = partner },
+                            onCardLongClick = { reportPartnerUser = partner },
                             onWaveClick = {
                                 if (!isOnline) {
                                     Toast.makeText(context, com.example.util.ErrorMapper.MSG_OFFLINE, Toast.LENGTH_SHORT).show()
@@ -875,15 +904,14 @@ fun DiscoverTabContent(
                         color = funkyColors.mute,
                         fontWeight = FontWeight.Medium
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Box(
-                        modifier = Modifier
-                            .size(9.dp)
-                            .background(
-                                if (user.isOnline) funkyColors.ok else funkyColors.mute.copy(alpha = 0.5f),
-                                CircleShape
-                            )
-                    )
+                    if (user.isOnline) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(9.dp)
+                                .background(funkyColors.ok, CircleShape)
+                        )
+                    }
                 }
 
                 val locStr = when {
@@ -1035,6 +1063,18 @@ fun DiscoverTabContent(
                 showFullProfileScreenWithFeed = null
                 onStartDirectChat(partner.id, partner.name, partner.avatarUrl, partner.countryCode)
             }
+        )
+    }
+
+    // Long-press Report Profile flow (existing ReportUserDialog)
+    reportPartnerUser?.let { target ->
+        com.example.moderation.ReportUserDialog(
+            reportedUserId = target.id,
+            reportedUserName = target.name,
+            contextType = "profile",
+            contextId = target.id,
+            onDismiss = { reportPartnerUser = null },
+            onReportSubmitted = { reportPartnerUser = null }
         )
     }
 
@@ -1617,208 +1657,15 @@ private fun DiscoverFilterChip(
 fun DiscoverUserCard(
     partner: DiscoverPartner,
     onCardClick: () -> Unit,
-    onWaveClick: () -> Unit
+    onWaveClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null
 ) {
-    val funkyColors = LocalFunkyColors.current
-    val isDark = LocalAppDarkTheme.current
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onCardClick() },
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = funkyColors.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (isDark) 0.dp else 1.dp),
-        border = BorderStroke(1.dp, funkyColors.line)
-    ) {
-        Box(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Avatar with bottom-right overlapping country flag (FramedAvatar when framed, square avatar otherwise)
-                val userCosmeticsMap by com.example.store.CosmeticsManager.userCosmeticsMap.collectAsState()
-                val partnerFrame = remember(partner.id, userCosmeticsMap) {
-                    val row = userCosmeticsMap[partner.id] ?: com.example.store.CosmeticsManager.getCachedCosmetics(partner.id)
-                    row?.avatar_frame?.config?.let {
-                        runCatching { com.example.store.CosmeticsConfigParser.parseAvatarFrame(it) }.getOrNull()
-                    }
-                }
-                if (partnerFrame != null) {
-                    com.example.ui.components.PresenceAvatar(
-                        avatarUrl = partner.avatarUrl,
-                        size = 64.dp,
-                        isOnline = partner.isOnline,
-                        countryCode = partner.countryCode,
-                        userId = partner.id,
-                        frameConfig = partnerFrame,
-                        showFlagBadge = true,
-                        enableFrameAnimation = false
-                    )
-                } else {
-                    DiscoverSquareAvatarWithFlag(
-                        avatarUrl = partner.avatarUrl,
-                        countryCode = partner.countryCode,
-                        isOnline = partner.isOnline,
-                        avatarSize = 80.dp,
-                        flagSize = 24.dp
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(14.dp))
-
-                // Info Column
-                Column(
-                    modifier = Modifier.weight(1f)
-                ) {
-                    // Name, Age & Online/Offline Pill Badge
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        com.example.store.DecoratedUserName(
-                            userId = partner.id,
-                            name = partner.name,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            defaultColor = funkyColors.ink,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                        Text(
-                            text = "${partner.age}",
-                            fontSize = 13.sp,
-                            color = funkyColors.mute,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Box(
-                            modifier = Modifier
-                                .clip(CircleShape)
-                                .background(
-                                    if (partner.isOnline) {
-                                        if (isDark) Color(0xFF143524) else Color(0xFFE6F4EA)
-                                    } else {
-                                        funkyColors.soft
-                                    }
-                                )
-                                .padding(horizontal = 8.dp, vertical = 3.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(6.dp)
-                                        .clip(CircleShape)
-                                        .background(if (partner.isOnline) Color(0xFF22C55E) else funkyColors.mute)
-                                )
-                                Text(
-                                    text = if (partner.isOnline) "Online" else "Offline",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Black,
-                                    color = if (partner.isOnline) {
-                                        if (isDark) Color(0xFF4ADE80) else Color(0xFF137333)
-                                    } else {
-                                        funkyColors.mute
-                                    }
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(3.dp))
-
-                    // Language Exchange: e.g., hi en mr -> zh ko jp
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            text = partner.nativeLang.lowercase(),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = funkyColors.mute
-                        )
-                        Text(
-                            text = "→",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = funkyColors.mute
-                        )
-                        Text(
-                            text = partner.learningLang.lowercase(),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = funkyColors.mango
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(3.dp))
-
-                    // Bio
-                    Text(
-                        text = partner.bio,
-                        fontSize = 12.sp,
-                        color = funkyColors.mute,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        lineHeight = 16.sp
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(10.dp))
-
-                // Hi / Sent Action Button
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(
-                            if (partner.isWaved) {
-                                if (isDark) Color(0xFF143524) else Color(0xFFDCFCE7)
-                            } else {
-                                funkyColors.mango
-                            }
-                        )
-                        .clickable { onWaveClick() }
-                        .padding(horizontal = 14.dp, vertical = 9.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        if (partner.isWaved) {
-                            SoftCheckmarkBadge(
-                                size = 15.dp,
-                                badgeColor = Color(0xFF15803D),
-                                checkColor = Color.White
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Sent",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = if (isDark) Color(0xFF4ADE80) else Color(0xFF15803D)
-                            )
-                        } else {
-                            SoftWavingHandIcon(
-                                color = funkyColors.onMango,
-                                size = 15.dp
-                            )
-                            Spacer(modifier = Modifier.width(5.dp))
-                            Text(
-                                text = "Hi",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = funkyColors.onMango
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
+    val cardDesignsMap by com.example.card.CardDesignRepository.designsMap.collectAsState()
+    com.example.card.PeopleCard(
+        profile = partner.toPeopleCardProfile(),
+        design = cardDesignsMap[partner.id],
+        onCardClick = onCardClick,
+        onCardLongClick = onLongClick,
+        onWaveClick = onWaveClick
+    )
 }

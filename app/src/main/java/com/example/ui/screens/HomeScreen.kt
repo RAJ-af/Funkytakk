@@ -259,38 +259,51 @@ fun HomeScreen(
             while (isActive) {
                 delay(8000)
                 if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
-                    refreshRoomsAndFriends()
+                    try {
+                        refreshRoomsAndFriends()
+                    } catch (ce: kotlinx.coroutines.CancellationException) {
+                        throw ce
+                    } catch (_: Throwable) {}
                 }
             }
         }
 
         // Real-time updates from Supabase postgres_changes, live participants, and room broadcasts
         launch {
-            VoiceRoomRealtimeManager.events.collect { event ->
-                if (event is RealtimeTableEvent.VoiceRoomChanged) {
-                    val record = event.record
-                    val rId = record?.optString("id")
-                    val isLive = record?.optBoolean("is_live", true) ?: true
-                    val status = record?.optString("status") ?: "active"
-                    if (!rId.isNullOrBlank() && (!isLive || status == "ended" || event.eventType.equals("DELETE", ignoreCase = true))) {
-                        roomsList = roomsList.filterNot { it.id == rId }
+            try {
+                VoiceRoomRealtimeManager.events.collect { event ->
+                    if (event is RealtimeTableEvent.VoiceRoomChanged) {
+                        val record = event.record
+                        val rId = record?.optString("id")
+                        val isLive = record?.optBoolean("is_live", true) ?: true
+                        val status = record?.optString("status") ?: "active"
+                        if (!rId.isNullOrBlank() && (!isLive || status == "ended" || event.eventType.equals("DELETE", ignoreCase = true))) {
+                            roomsList = roomsList.filterNot { it.id == rId }
+                        }
+                    } else if (event is RealtimeTableEvent.RoomLifecycleEvent && event.action == "room_ended") {
+                        roomsList = roomsList.filterNot { it.id == event.roomId }
                     }
-                } else if (event is RealtimeTableEvent.RoomLifecycleEvent && event.action == "room_ended") {
-                    roomsList = roomsList.filterNot { it.id == event.roomId }
+                    refreshRoomsAndFriends()
                 }
-                refreshRoomsAndFriends()
-            }
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (_: Throwable) {}
         }
         launch {
-            VoiceRoomRealtimeManager.roomLiveParticipants.collect {
-                refreshRoomsAndFriends()
-            }
+            try {
+                VoiceRoomRealtimeManager.roomLiveParticipants.collect {
+                    refreshRoomsAndFriends()
+                }
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (_: Throwable) {}
         }
     }
 
     // Real conversations list - user-initiated contacts from Discover or Empty
     val dynamicInitiatedChats = remember { mutableStateListOf<DirectChat>() }
     var activeGroupChat by remember { mutableStateOf<com.example.db.LocalGroupConversation?>(null) }
+    var inspectedFriendProfile by remember { mutableStateOf<FollowedFriend?>(null) }
 
     val pendingChatTarget by com.example.service.PushNotificationManager.pendingChatNavigation.collectAsState()
     val vaultStatus by com.example.crypto.VaultSecurityManager.vaultStatus.collectAsState()
@@ -315,6 +328,52 @@ fun HomeScreen(
         } else {
             pendingPostUnlockAction = action
             showVaultGateDialog = true
+        }
+    }
+
+    fun startDirectChat(userId: String, name: String, avatarUrl: String, flagCode: String) {
+        requireUnlockedVault {
+            val newChat = DirectChat(
+                id = userId.ifBlank { name.hashCode().toString() },
+                name = name,
+                avatar = avatarUrl,
+                lastMsg = "🔒 Secure chat started",
+                time = "Just now",
+                unreadCount = 0,
+                onlineStatus = "online",
+                isNativeLanguage = flagCode
+            )
+            if (dynamicInitiatedChats.none { it.id == newChat.id }) {
+                dynamicInitiatedChats.add(0, newChat)
+            }
+            activeChatWindowContact = newChat
+
+            if (userId.isNotBlank() && !userId.startsWith("partner_mock")) {
+                homeScope.launch {
+                    try {
+                        com.example.repository.EncryptedChatRepository.init(context)
+                        val ready = com.example.repository.EncryptedChatRepository.checkRecipientKeyStatus(context, userId)
+                        if (ready) {
+                            val res = com.example.repository.EncryptedChatRepository.sendMessage(
+                                context = context,
+                                recipientUserId = userId,
+                                recipientName = name,
+                                recipientAvatar = avatarUrl,
+                                text = "Hi"
+                            )
+                            if (res.isFailure) {
+                                android.util.Log.w("HomeScreen", "Wave deferred: ${res.exceptionOrNull()?.message}")
+                            }
+                        } else {
+                            android.util.Log.d("HomeScreen", "E2EE keys missing, Secure Chat Unavailable flow active.")
+                        }
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        android.util.Log.e("HomeScreen", "Error waving to user: ${e.javaClass.simpleName}", e)
+                    }
+                }
+            }
         }
     }
 
@@ -475,6 +534,7 @@ fun HomeScreen(
         hideBottomBarForProfileOverlay,
         activeChatWindowContact,
         activeGroupChat,
+        inspectedFriendProfile,
         showCreateRoomBottomSheet,
         showFilterDialog,
         showAmusementEventsDialog,
@@ -491,6 +551,7 @@ fun HomeScreen(
         tabOverlayOpen ||
             activeChatWindowContact != null ||
             activeGroupChat != null ||
+            inspectedFriendProfile != null ||
             showCreateRoomBottomSheet ||
             showFilterDialog ||
             showAmusementEventsDialog ||
@@ -581,6 +642,11 @@ fun HomeScreen(
                                     homeUiState = com.example.util.UiState.Loading
                                 }
                                 retryTrigger++
+                            },
+                            onFriendClick = { friend ->
+                                if (friend.id.isNotBlank()) {
+                                    inspectedFriendProfile = friend
+                                }
                             }
                         )
                     }
@@ -588,52 +654,7 @@ fun HomeScreen(
                         DiscoverTabContent(
                             supabaseProfiles = supabaseProfiles,
                             onCreateRoom = { showCreateRoomBottomSheet = true },
-                            onStartDirectChat = { userId, name, avatarUrl, flagCode ->
-                                requireUnlockedVault {
-                                    val newChat = DirectChat(
-                                        id = userId.ifBlank { name.hashCode().toString() },
-                                        name = name,
-                                        avatar = avatarUrl,
-                                        lastMsg = "🔒 Secure chat started",
-                                        time = "Just now",
-                                        unreadCount = 0,
-                                        onlineStatus = "online",
-                                        isNativeLanguage = flagCode
-                                    )
-                                    if (dynamicInitiatedChats.none { it.id == newChat.id }) {
-                                        dynamicInitiatedChats.add(0, newChat)
-                                    }
-                                    activeChatWindowContact = newChat
-
-                                    // Wave send "Hi" using existing E2EE chat system once vault is unlocked
-                                    if (userId.isNotBlank() && !userId.startsWith("partner_mock")) {
-                                        homeScope.launch {
-                                            try {
-                                                com.example.repository.EncryptedChatRepository.init(context)
-                                                val ready = com.example.repository.EncryptedChatRepository.checkRecipientKeyStatus(context, userId)
-                                                if (ready) {
-                                                    val res = com.example.repository.EncryptedChatRepository.sendMessage(
-                                                        context = context,
-                                                        recipientUserId = userId,
-                                                        recipientName = name,
-                                                        recipientAvatar = avatarUrl,
-                                                        text = "Hi"
-                                                    )
-                                                    if (res.isFailure) {
-                                                        android.util.Log.w("HomeScreen", "Wave deferred: ${res.exceptionOrNull()?.message}")
-                                                    }
-                                                } else {
-                                                    android.util.Log.d("HomeScreen", "E2EE keys missing, Secure Chat Unavailable flow active.")
-                                                }
-                                            } catch (e: kotlinx.coroutines.CancellationException) {
-                                                throw e
-                                            } catch (e: Exception) {
-                                                android.util.Log.e("HomeScreen", "Error waving to user: ${e.javaClass.simpleName}", e)
-                                            }
-                                        }
-                                    }
-                                }
-                            },
+                            onStartDirectChat = ::startDirectChat,
                             onOverlayVisibilityChange = { hideBottomBarForDiscoverOverlay = it }
                         )
                     }
@@ -644,7 +665,8 @@ fun HomeScreen(
                             currentUserName = currentUserProfile.displayName ?: currentUserProfile.username.orEmpty(),
                             currentUserAvatarUrl = currentUserProfile.avatar.orEmpty(),
                             currentUserCountryCode = currentUserProfile.countryCode.orEmpty(),
-                            onCreatePostVisibilityChange = { hideBottomBarForMomentsOverlay = it }
+                            onCreatePostVisibilityChange = { hideBottomBarForMomentsOverlay = it },
+                            onStartDirectChat = ::startDirectChat
                         )
                     }
                     "chats" -> {
@@ -731,6 +753,30 @@ fun HomeScreen(
             )
         }
 
+        inspectedFriendProfile?.let { friend ->
+            val matchedProfile = supabaseProfiles.find { it.uid == friend.id }
+            val resolvedName = matchedProfile?.displayName?.takeIf { it.isNotBlank() } ?: friend.name
+            val resolvedAvatar = matchedProfile?.avatar?.takeIf { it.isNotBlank() } ?: friend.avatarUrl
+            val resolvedFlag = matchedProfile?.countryCode?.takeIf { it.isNotBlank() } ?: friend.flagCode
+            UserProfileFeedScreen(
+                userId = friend.id,
+                username = matchedProfile?.username ?: friend.name,
+                profileName = resolvedName,
+                avatarUrl = resolvedAvatar,
+                coverUrl = matchedProfile?.coverUrl.orEmpty(),
+                countryCode = resolvedFlag,
+                nativeLanguages = matchedProfile?.nativeLanguage.orEmpty(),
+                learningLanguages = matchedProfile?.learningLanguage.orEmpty(),
+                hobbies = matchedProfile?.hobbies ?: emptyList(),
+                bio = matchedProfile?.bio.orEmpty(),
+                onBack = { inspectedFriendProfile = null },
+                onStartChat = {
+                    inspectedFriendProfile = null
+                    startDirectChat(friend.id, resolvedName, resolvedAvatar, resolvedFlag)
+                }
+            )
+        }
+
         val hasHomeOverlayOpen = selectedAmusementEvent != null ||
             showAmusementEventsDialog ||
             showFilterDialog ||
@@ -739,6 +785,7 @@ fun HomeScreen(
             showLogoutDialog ||
             showVaultGateDialog ||
             pendingInviteCode != null ||
+            inspectedFriendProfile != null ||
             activeGroupChat != null ||
             activeChatWindowContact != null
 
@@ -764,6 +811,7 @@ fun HomeScreen(
                         .remove("pending_group_invite_code")
                         .apply()
                 }
+                inspectedFriendProfile != null -> inspectedFriendProfile = null
                 activeGroupChat != null -> activeGroupChat = null
                 activeChatWindowContact != null -> activeChatWindowContact = null
                 activeTab != "home" -> activeTab = "home"

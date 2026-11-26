@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -67,6 +68,7 @@ fun SettingsScreen(
     onOpenBlockedUsers: () -> Unit,
     onOpenBlockedGroups: () -> Unit,
     onOpenChatBackup: () -> Unit,
+    onOpenSavedMoments: () -> Unit = {},
     onOpenChatAppearance: () -> Unit,
     onOpenLoggedInDevices: () -> Unit = {},
     onOpenDebugGallery: () -> Unit,
@@ -334,6 +336,21 @@ fun SettingsScreen(
                     )
                     HorizontalDivider(color = funkyColors.line, modifier = Modifier.padding(horizontal = 16.dp))
                     SettingsRowItem(
+                        title = "Saved Moments",
+                        subtitle = "Encrypted on this device with your Vault key",
+                        iconBg = Color(0xFFFEF3C7),
+                        iconContent = {
+                            Icon(
+                                imageVector = Icons.Outlined.BookmarkBorder,
+                                contentDescription = null,
+                                tint = Color(0xFFD97706),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        },
+                        onClick = onOpenSavedMoments
+                    )
+                    HorizontalDivider(color = funkyColors.line, modifier = Modifier.padding(horizontal = 16.dp))
+                    SettingsRowItem(
                         title = "Chat Appearance & AI",
                         subtitle = "Butter, Sky, Mint, Graphite presets · Text size · Cloud AI",
                         iconBg = Color(0xFFEDE9FE),
@@ -476,6 +493,64 @@ fun SettingsScreen(
                                 uncheckedTrackColor = funkyColors.soft
                             ),
                             modifier = Modifier.testTag("settings_chat_lock_switch")
+                        )
+                    }
+
+                    // Privacy > Block screenshots
+                    val blockScreenshots by com.example.ui.components.SecureWindowRegistry.blockScreenshots.collectAsState()
+                    HorizontalDivider(color = funkyColors.line, modifier = Modifier.padding(horizontal = 16.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                com.example.ui.components.SecureWindowRegistry.setBlockScreenshots(
+                                    context,
+                                    !blockScreenshots
+                                )
+                            }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFFDCFCE7)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            SoftShieldIcon(size = 20.dp, color = Color(0xFF16A34A))
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Block screenshots",
+                                fontSize = 14.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = funkyColors.ink
+                            )
+                            Text(
+                                text = if (blockScreenshots) {
+                                    "Screenshots & screen recording are blocked in private screens"
+                                } else {
+                                    "Screenshots are allowed across the app"
+                                },
+                                fontSize = 11.5.sp,
+                                color = funkyColors.mute,
+                                lineHeight = 16.sp
+                            )
+                        }
+                        Switch(
+                            checked = blockScreenshots,
+                            onCheckedChange = {
+                                com.example.ui.components.SecureWindowRegistry.setBlockScreenshots(context, it)
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = funkyColors.onMango,
+                                checkedTrackColor = funkyColors.mango,
+                                uncheckedThumbColor = funkyColors.mute,
+                                uncheckedTrackColor = funkyColors.soft
+                            ),
+                            modifier = Modifier.testTag("settings_block_screenshots_switch")
                         )
                     }
 

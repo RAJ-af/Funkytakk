@@ -12,16 +12,45 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.window.DialogWindowProvider
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.util.Collections
 import java.util.IdentityHashMap
 
 /**
  * Tracks active [SecureWindow] scopes per Window and coordinates with Activity pause/resume on
  * Android < 33 so overlapping secure dialogs/screens do not prematurely strip FLAG_SECURE.
+ * Also honors the user's "Block screenshots" privacy toggle in Settings.
  */
 object SecureWindowRegistry {
+    private const val PREFS_NAME = "funky_talk_prefs"
+    private const val KEY_BLOCK_SCREENSHOTS = "block_screenshots"
+
     private val windowTokens = IdentityHashMap<Window, MutableSet<Any>>()
     private val pausedPre33Activities = Collections.newSetFromMap(IdentityHashMap<Window, Boolean>())
+
+    private val _blockScreenshots = MutableStateFlow(true)
+    val blockScreenshots: StateFlow<Boolean> = _blockScreenshots.asStateFlow()
+
+    @Synchronized
+    fun init(context: Context) {
+        val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val blocked = prefs.getBoolean(KEY_BLOCK_SCREENSHOTS, true)
+        _blockScreenshots.value = blocked
+        reapplyAllTrackedWindowsLocked()
+    }
+
+    @Synchronized
+    fun setBlockScreenshots(context: Context, blocked: Boolean) {
+        context.applicationContext
+            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_BLOCK_SCREENSHOTS, blocked)
+            .apply()
+        _blockScreenshots.value = blocked
+        reapplyAllTrackedWindowsLocked()
+    }
 
     @Synchronized
     fun acquire(window: Window, token: Any) {
@@ -54,11 +83,21 @@ object SecureWindowRegistry {
 
     @Synchronized
     fun isSecureActiveForTest(window: Window): Boolean {
+        if (!_blockScreenshots.value) return false
         return !windowTokens[window].isNullOrEmpty() || pausedPre33Activities.contains(window)
     }
 
+    private fun reapplyAllTrackedWindowsLocked() {
+        val allWindows = LinkedHashSet<Window>().apply {
+            addAll(windowTokens.keys)
+            addAll(pausedPre33Activities)
+        }
+        allWindows.forEach { applyFlag(it) }
+    }
+
     private fun applyFlag(window: Window) {
-        val shouldSecure = !windowTokens[window].isNullOrEmpty() || pausedPre33Activities.contains(window)
+        val shouldSecure = _blockScreenshots.value &&
+            (!windowTokens[window].isNullOrEmpty() || pausedPre33Activities.contains(window))
         if (shouldSecure) {
             window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         } else {

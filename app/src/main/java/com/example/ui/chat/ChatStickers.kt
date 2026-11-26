@@ -1,8 +1,15 @@
 package com.example.ui.chat
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -25,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -65,6 +73,8 @@ object ChatAnimatedStickers {
     ): String {
         val midY = 100 - bounceAmp
         val lowY = 100 + (bounceAmp / 3)
+        val e1 = """"i":{"x":[0.42],"y":[0]},"o":{"x":[0.58],"y":[1]}"""
+        val e3 = """"i":{"x":[0.42,0.42,0.42],"y":[0,0,0]},"o":{"x":[0.58,0.58,0.58],"y":[1,1,1]}"""
         return """
         {
           "v":"5.7.4","fr":30,"ip":0,"op":60,"w":200,"h":200,"nm":"telegram_sticker","ddd":0,
@@ -73,11 +83,11 @@ object ChatAnimatedStickers {
             {
               "ddd":0,"ind":1,"ty":4,"nm":"outer_halo","sr":1,
               "ks":{
-                "o":{"a":1,"k":[{"t":0,"s":[38],"e":[72]},{"t":30,"s":[72],"e":[38]},{"t":60,"s":[38]}]},
-                "r":{"a":1,"k":[{"t":0,"s":[0],"e":[$spinDeg]},{"t":30,"s":[$spinDeg],"e":[-$spinDeg]},{"t":60,"s":[0]}]},
-                "p":{"a":1,"k":[{"t":0,"s":[100,100,0],"e":[100,$midY,0]},{"t":28,"s":[100,$midY,0],"e":[100,$lowY,0]},{"t":45,"s":[100,$lowY,0],"e":[100,100,0]},{"t":60,"s":[100,100,0]}]},
+                "o":{"a":1,"k":[{$e1,"t":0,"s":[38],"e":[72]},{$e1,"t":30,"s":[72],"e":[38]},{"t":60,"s":[38]}]},
+                "r":{"a":1,"k":[{$e1,"t":0,"s":[0],"e":[$spinDeg]},{$e1,"t":30,"s":[$spinDeg],"e":[-$spinDeg]},{"t":60,"s":[0]}]},
+                "p":{"a":1,"k":[{$e3,"t":0,"s":[100,100,0],"e":[100,$midY,0]},{$e3,"t":28,"s":[100,$midY,0],"e":[100,$lowY,0]},{$e3,"t":45,"s":[100,$lowY,0],"e":[100,100,0]},{"t":60,"s":[100,100,0]}]},
                 "a":{"a":0,"k":[0,0,0]},
-                "s":{"a":1,"k":[{"t":0,"s":[88,88,100],"e":[108,108,100]},{"t":30,"s":[108,108,100],"e":[94,94,100]},{"t":60,"s":[88,88,100]}]}
+                "s":{"a":1,"k":[{$e3,"t":0,"s":[88,88,100],"e":[108,108,100]},{$e3,"t":30,"s":[108,108,100],"e":[94,94,100]},{"t":60,"s":[88,88,100]}]}
               },
               "shapes":[
                 {"ty":"gr","it":[
@@ -92,11 +102,11 @@ object ChatAnimatedStickers {
             {
               "ddd":0,"ind":2,"ty":4,"nm":"accent_orbit","sr":1,
               "ks":{
-                "o":{"a":1,"k":[{"t":0,"s":[70],"e":[25]},{"t":30,"s":[25],"e":[70]},{"t":60,"s":[70]}]},
-                "r":{"a":1,"k":[{"t":0,"s":[0],"e":[360]},{"t":60,"s":[360]}]},
+                "o":{"a":1,"k":[{$e1,"t":0,"s":[70],"e":[25]},{$e1,"t":30,"s":[25],"e":[70]},{"t":60,"s":[70]}]},
+                "r":{"a":1,"k":[{$e1,"t":0,"s":[0],"e":[360]},{"t":60,"s":[360]}]},
                 "p":{"a":0,"k":[100,100,0]},
                 "a":{"a":0,"k":[0,0,0]},
-                "s":{"a":1,"k":[{"t":0,"s":[92,92,100],"e":[104,104,100]},{"t":30,"s":[104,104,100],"e":[92,92,100]},{"t":60,"s":[92,92,100]}]}
+                "s":{"a":1,"k":[{$e3,"t":0,"s":[92,92,100],"e":[104,104,100]},{$e3,"t":30,"s":[104,104,100],"e":[92,92,100]},{"t":60,"s":[92,92,100]}]}
               },
               "shapes":[
                 {"ty":"gr","it":[
@@ -110,11 +120,11 @@ object ChatAnimatedStickers {
             {
               "ddd":0,"ind":3,"ty":4,"nm":"spark_top_right","sr":1,
               "ks":{
-                "o":{"a":1,"k":[{"t":0,"s":[95],"e":[20]},{"t":30,"s":[20],"e":[95]},{"t":60,"s":[95]}]},
-                "r":{"a":1,"k":[{"t":0,"s":[0],"e":[180]},{"t":60,"s":[360]}]},
+                "o":{"a":1,"k":[{$e1,"t":0,"s":[95],"e":[20]},{$e1,"t":30,"s":[20],"e":[95]},{"t":60,"s":[95]}]},
+                "r":{"a":1,"k":[{$e1,"t":0,"s":[0],"e":[180]},{"t":60,"s":[360]}]},
                 "p":{"a":0,"k":[160,40,0]},
                 "a":{"a":0,"k":[0,0,0]},
-                "s":{"a":1,"k":[{"t":0,"s":[65,65,100],"e":[120,120,100]},{"t":30,"s":[120,120,100],"e":[65,65,100]},{"t":60,"s":[65,65,100]}]}
+                "s":{"a":1,"k":[{$e3,"t":0,"s":[65,65,100],"e":[120,120,100]},{$e3,"t":30,"s":[120,120,100],"e":[65,65,100]},{"t":60,"s":[65,65,100]}]}
               },
               "shapes":[
                 {"ty":"gr","it":[
@@ -128,11 +138,11 @@ object ChatAnimatedStickers {
             {
               "ddd":0,"ind":4,"ty":4,"nm":"spark_bottom_left","sr":1,
               "ks":{
-                "o":{"a":1,"k":[{"t":0,"s":[25],"e":[95]},{"t":30,"s":[95],"e":[25]},{"t":60,"s":[25]}]},
-                "r":{"a":1,"k":[{"t":0,"s":[45],"e":[225]},{"t":60,"s":[405]}]},
+                "o":{"a":1,"k":[{$e1,"t":0,"s":[25],"e":[95]},{$e1,"t":30,"s":[95],"e":[25]},{"t":60,"s":[25]}]},
+                "r":{"a":1,"k":[{$e1,"t":0,"s":[45],"e":[225]},{"t":60,"s":[405]}]},
                 "p":{"a":0,"k":[42,158,0]},
                 "a":{"a":0,"k":[0,0,0]},
-                "s":{"a":1,"k":[{"t":0,"s":[110,110,100],"e":[60,60,100]},{"t":30,"s":[60,60,100],"e":[110,110,100]},{"t":60,"s":[110,110,100]}]}
+                "s":{"a":1,"k":[{$e3,"t":0,"s":[110,110,100],"e":[60,60,100]},{$e3,"t":30,"s":[60,60,100],"e":[110,110,100]},{"t":60,"s":[110,110,100]}]}
               },
               "shapes":[
                 {"ty":"gr","it":[
@@ -192,12 +202,19 @@ object ChatAnimatedStickers {
 fun AnimatedStickerGraphic(
     sticker: AnimatedStickerSpec,
     size: Dp = 118.dp,
-    emojiFontSizeSp: Int = 52
+    emojiFontSizeSp: Int = 52,
+    enableTapBounce: Boolean = true
 ) {
     val spec = remember(sticker.id) {
         LottieCompositionSpec.JsonString(sticker.lottieJson)
     }
-    val composition by rememberLottieComposition(spec)
+    val compositionResult = rememberLottieComposition(spec)
+    val composition = if (compositionResult.error == null && !compositionResult.isFailure) {
+        compositionResult.value
+    } else {
+        null
+    }
+
     var bounceTrigger by remember { mutableStateOf(false) }
     LaunchedEffect(bounceTrigger) {
         if (bounceTrigger) {
@@ -213,17 +230,33 @@ fun AnimatedStickerGraphic(
         ),
         label = "stickerBounce"
     )
+    val infiniteTransition = rememberInfiniteTransition(label = "stickerIdlePulse")
+    val idlePulse by infiniteTransition.animateFloat(
+        initialValue = 0.96f,
+        targetValue = 1.06f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1400, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "stickerHaloScale"
+    )
 
     Box(
         modifier = Modifier
             .size(size)
             .scale(springScale)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) {
-                bounceTrigger = true
-            },
+            .then(
+                if (enableTapBounce) {
+                    Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        bounceTrigger = true
+                    }
+                } else {
+                    Modifier
+                }
+            ),
         contentAlignment = Alignment.Center
     ) {
         if (composition != null) {
@@ -233,17 +266,24 @@ fun AnimatedStickerGraphic(
                 modifier = Modifier.fillMaxSize()
             )
         } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize(0.78f)
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(sticker.accentColor.copy(alpha = 0.14f))
-            )
+            Canvas(modifier = Modifier.fillMaxSize(0.84f).scale(idlePulse)) {
+                val radius = this.size.minDimension / 2f
+                drawCircle(
+                    color = sticker.accentColor.copy(alpha = 0.16f),
+                    radius = radius
+                )
+                drawCircle(
+                    color = sticker.accentColor.copy(alpha = 0.55f),
+                    radius = radius * 0.92f,
+                    style = Stroke(width = 3.dp.toPx())
+                )
+            }
         }
         Text(
             text = sticker.emojiFallback,
             fontSize = emojiFontSizeSp.sp,
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            modifier = Modifier.scale(if (composition == null) idlePulse else 1.0f)
         )
     }
 }
@@ -312,7 +352,8 @@ fun AnimatedStickerPickerGrid(
                     AnimatedStickerGraphic(
                         sticker = sticker,
                         size = 54.dp,
-                        emojiFontSizeSp = 26
+                        emojiFontSizeSp = 26,
+                        enableTapBounce = false
                     )
                     Text(
                         text = sticker.label,

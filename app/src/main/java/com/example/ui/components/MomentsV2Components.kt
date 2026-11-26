@@ -67,12 +67,16 @@ import com.example.MomentCommentDto
 import com.example.MomentDto
 import com.example.MomentMediaDto
 import com.example.R
+import com.example.crypto.VaultSecurityManager
+import com.example.crypto.VaultStatus
+import com.example.data.SavedMomentsStore
 import com.example.moderation.ReportUserDialog
 import com.example.repository.MomentRpcException
 import com.example.repository.MomentsRepository
 import com.example.ui.screens.FeedPost
 import com.example.ui.screens.LanguageData
 import com.example.ui.screens.PostType
+import com.example.ui.screens.chat.VaultManagementDialogs
 import com.example.ui.screens.chat.components.ChatImagePreviewDialog
 import com.example.ui.screens.formatMomentTimestamp
 import kotlinx.coroutines.delay
@@ -205,6 +209,7 @@ fun MomentV2Slide(
     onToggleBookmark: () -> Unit,
     onShare: () -> Unit,
     onMediaImageClick: ((List<String>, Int) -> Unit)? = null,
+    onAuthorClick: (MomentAuthorDto) -> Unit = {},
     contentBottomPadding: Dp = 96.dp
 ) {
     val context = LocalContext.current
@@ -666,45 +671,57 @@ fun MomentV2Slide(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                com.example.ui.components.PresenceAvatar(
-                    avatarUrl = moment.author.avatar_url,
-                    size = 40.dp,
-                    userId = moment.author.id,
-                    countryCode = flagCode.takeIf { it.isNotBlank() },
-                    showFlagBadge = flagCode.isNotBlank(),
-                    enableFrameAnimation = true
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .heightIn(min = 48.dp)
+                        .clickable(enabled = moment.author.id.isNotBlank()) {
+                            onAuthorClick(moment.author)
+                        }
+                        .testTag("moment_author_profile_trigger")
+                ) {
+                    com.example.ui.components.PresenceAvatar(
+                        avatarUrl = moment.author.avatar_url,
+                        size = 40.dp,
+                        userId = moment.author.id,
+                        countryCode = flagCode.takeIf { it.isNotBlank() },
+                        showFlagBadge = flagCode.isNotBlank(),
+                        enableFrameAnimation = true
+                    )
 
-                Column(modifier = Modifier.weight(1f, fill = false)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        com.example.store.DecoratedUserName(
-                            userId = moment.author.id,
-                            name = authorName,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            defaultColor = overlayInk,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        if (moment.author.is_verified) {
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_verified),
-                                contentDescription = "Verified",
-                                tint = Color(0xFF38BDF8),
-                                modifier = Modifier.size(15.dp)
+                    Column(modifier = Modifier.weight(1f, fill = false)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            com.example.store.DecoratedUserName(
+                                userId = moment.author.id,
+                                name = authorName,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                defaultColor = overlayInk,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (moment.author.is_verified) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_verified),
+                                    contentDescription = "Verified",
+                                    tint = Color(0xFF38BDF8),
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                        }
+
+                        if (subLocationLine.isNotBlank()) {
+                            Text(
+                                text = subLocationLine,
+                                fontSize = 11.sp,
+                                color = overlaySubInk,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
-                    }
-
-                    if (subLocationLine.isNotBlank()) {
-                        Text(
-                            text = subLocationLine,
-                            fontSize = 11.sp,
-                            color = overlaySubInk,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
                     }
                 }
 
@@ -797,7 +814,8 @@ fun MomentCommentsBottomSheet(
     initialNativeFixMode: Boolean = false,
     onDismiss: () -> Unit,
     onMomentRemoved: () -> Unit,
-    onCountsChanged: (commentsCount: Int, correctionsCount: Int) -> Unit
+    onCountsChanged: (commentsCount: Int, correctionsCount: Int) -> Unit,
+    onAuthorClick: (MomentAuthorDto) -> Unit = {}
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -1121,6 +1139,7 @@ fun MomentCommentsBottomSheet(
                                     replies = replies,
                                     isLoadingReplies = isLoadingReplies,
                                     animateNameEffects = !commentsListState.isScrollInProgress,
+                                    onAuthorClick = onAuthorClick,
                                     onToggleLike = { targetComment ->
                                         val isReply = targetComment.parent_id != null
                                         val prevLiked = targetComment.liked_by_me
@@ -1815,7 +1834,8 @@ fun CommentItemRow(
     onDelete: (MomentCommentDto) -> Unit,
     onTranslate: (MomentCommentDto) -> Unit,
     isNestedReply: Boolean = false,
-    animateNameEffects: Boolean = true
+    animateNameEffects: Boolean = true,
+    onAuthorClick: (MomentAuthorDto) -> Unit = {}
 ) {
     val context = LocalContext.current
     val funkyColors = com.example.ui.theme.LocalFunkyColors.current
@@ -1833,6 +1853,17 @@ fun CommentItemRow(
 
     val avatarSize = if (isNestedReply) 30.dp else 38.dp
     val avatarCorner = if (isNestedReply) 11.dp else 14.dp
+
+    val commentAuthorProfile = remember(comment.author) {
+        MomentAuthorDto(
+            id = comment.author.id,
+            username = comment.author.username,
+            name = comment.author.name,
+            avatar_url = comment.author.avatar_url,
+            is_me = comment.author.is_me
+        )
+    }
+    val canOpenAuthor = comment.author.id.isNotBlank()
 
     Row(
         modifier = Modifier
@@ -1852,13 +1883,15 @@ fun CommentItemRow(
                 modifier = Modifier
                     .size(avatarSize)
                     .clip(RoundedCornerShape(avatarCorner))
+                    .clickable(enabled = canOpenAuthor) { onAuthorClick(commentAuthorProfile) }
             )
         } else {
             Box(
                 modifier = Modifier
                     .size(avatarSize)
                     .clip(RoundedCornerShape(avatarCorner))
-                    .background(mangoColor),
+                    .background(mangoColor)
+                    .clickable(enabled = canOpenAuthor) { onAuthorClick(commentAuthorProfile) },
                 contentAlignment = Alignment.Center
             ) {
                 Text(
@@ -1875,14 +1908,20 @@ fun CommentItemRow(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(7.dp)
             ) {
-                com.example.store.DecoratedUserName(
-                    userId = comment.author.id,
-                    name = authorName,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    defaultColor = inkColor,
-                    animate = animateNameEffects
-                )
+                Box(
+                    modifier = Modifier.clickable(enabled = canOpenAuthor) {
+                        onAuthorClick(commentAuthorProfile)
+                    }
+                ) {
+                    com.example.store.DecoratedUserName(
+                        userId = comment.author.id,
+                        name = authorName,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        defaultColor = inkColor,
+                        animate = animateNameEffects
+                    )
+                }
                 Text(
                     text = timeText,
                     fontSize = 12.sp,
@@ -2122,7 +2161,8 @@ fun CommentItemRow(
                             onReply = onReply,
                             onDelete = onDelete,
                             onTranslate = onTranslate,
-                            isNestedReply = true
+                            isNestedReply = true,
+                            onAuthorClick = onAuthorClick
                         )
                     }
                 }
@@ -2205,18 +2245,37 @@ fun MomentsV2FeedViewerDialog(
     onDismiss: () -> Unit,
     onMomentUpdated: (MomentDto) -> Unit = {},
     onMomentDeleted: (String) -> Unit = {},
-    onBookmarkToggled: (String, Boolean) -> Unit = { _, _ -> }
+    onBookmarkToggled: (String, Boolean) -> Unit = { _, _ -> },
+    onAuthorClick: (MomentAuthorDto) -> Unit = {}
 ) {
     BackHandler { onDismiss() }
 
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    val prefs = remember(context) {
-        context.getSharedPreferences("funky_talk_prefs", Context.MODE_PRIVATE)
-    }
-    val bookmarkedIds = remember {
-        mutableStateListOf<String>().apply {
-            addAll(prefs.getStringSet("bookmarked_moment_ids", emptySet()).orEmpty())
+    val vaultStatus by VaultSecurityManager.vaultStatus.collectAsState()
+    val savedIds by SavedMomentsStore.savedIds.collectAsState()
+    var showVaultGateDialog by remember { mutableStateOf(false) }
+    var pendingBookmarkMoment by remember { mutableStateOf<MomentDto?>(null) }
+
+    LaunchedEffect(vaultStatus) {
+        if (vaultStatus == VaultStatus.UNLOCKED) {
+            SavedMomentsStore.loadIfUnlocked(context)
+            val pending = pendingBookmarkMoment
+            if (pending != null) {
+                pendingBookmarkMoment = null
+                showVaultGateDialog = false
+                val nextState = SavedMomentsStore.toggleSave(context, pending)
+                if (nextState != null) {
+                    onBookmarkToggled(pending.id, nextState)
+                    Toast.makeText(
+                        context,
+                        if (nextState) "Saved to encrypted bookmarks" else "Removed from Saved Moments",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            } else {
+                showVaultGateDialog = false
+            }
         }
     }
 
@@ -2324,12 +2383,13 @@ fun MomentsV2FeedViewerDialog(
                 modifier = Modifier.fillMaxSize()
             ) { pageIndex ->
                 val moment = visibleMoments.getOrNull(pageIndex) ?: return@VerticalPager
-                val isBookmarked = bookmarkedIds.contains(moment.id)
+                val isBookmarked = savedIds.contains(moment.id)
 
                 MomentV2Slide(
                     moment = moment,
                     isBookmarked = isBookmarked,
                     contentBottomPadding = 24.dp,
+                    onAuthorClick = onAuthorClick,
                     onOpenComments = {
                         activeMomentIdForComments = moment.id
                         commentsInitialTab = 0
@@ -2413,17 +2473,26 @@ fun MomentsV2FeedViewerDialog(
                         }
                     },
                     onToggleBookmark = {
-                        val nextState = !isBookmarked
-                        if (isBookmarked) bookmarkedIds.remove(moment.id) else bookmarkedIds.add(moment.id)
-                        prefs.edit()
-                            .putStringSet("bookmarked_moment_ids", bookmarkedIds.toSet())
-                            .apply()
-                        onBookmarkToggled(moment.id, nextState)
-                        Toast.makeText(
-                            context,
-                            if (nextState) "Saved to Bookmarks" else "Removed from Bookmarks",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        if (VaultSecurityManager.isVaultLocked() || vaultStatus != VaultStatus.UNLOCKED) {
+                            pendingBookmarkMoment = moment
+                            showVaultGateDialog = true
+                        } else {
+                            val nextState = SavedMomentsStore.toggleSave(context, moment)
+                            if (nextState != null) {
+                                onBookmarkToggled(moment.id, nextState)
+                                Toast.makeText(
+                                    context,
+                                    if (nextState) "Saved to encrypted bookmarks" else "Removed from Saved Moments",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            } else {
+                                Toast.makeText(
+                                    context,
+                                    "Could not update saved moment.",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
                     },
                     onShare = {
                         val shareText = buildString {
@@ -2649,7 +2718,8 @@ fun MomentsV2FeedViewerDialog(
                         corrections_count = newCorrectionsCount.coerceAtLeast(0)
                     )
                 }
-            }
+            },
+            onAuthorClick = onAuthorClick
         )
     }
 
@@ -2678,6 +2748,15 @@ fun MomentsV2FeedViewerDialog(
             contextType = "moment",
             contextId = moment.id,
             onDismiss = { reportingMoment = null }
+        )
+    }
+
+    if (showVaultGateDialog) {
+        VaultManagementDialogs(
+            onDismissRequest = {
+                showVaultGateDialog = false
+                pendingBookmarkMoment = null
+            }
         )
     }
 }

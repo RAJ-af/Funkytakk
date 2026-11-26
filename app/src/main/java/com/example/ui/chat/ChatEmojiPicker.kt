@@ -104,9 +104,16 @@ fun FluentEmojiPicker(
     LaunchedEffect(pickerMode) {
         if (pickerMode == 1) {
             isLoadingStickers = true
-            val res = CosmeticsManager.getStoreItems(context, type = "sticker_pack", ownedOnly = true)
-            ownedStickerPacks = res.getOrDefault(emptyList())
-            isLoadingStickers = false
+            try {
+                val res = CosmeticsManager.getStoreItems(context, type = "sticker_pack", ownedOnly = true)
+                ownedStickerPacks = res.getOrDefault(emptyList())
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (_: Throwable) {
+                ownedStickerPacks = emptyList()
+            } finally {
+                isLoadingStickers = false
+            }
         }
     }
 

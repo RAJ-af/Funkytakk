@@ -62,8 +62,9 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        com.example.ui.components.SecureWindowRegistry.init(applicationContext)
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            setRecentsScreenshotEnabled(false)
+            setRecentsScreenshotEnabled(!com.example.ui.components.SecureWindowRegistry.blockScreenshots.value)
         }
         enableEdgeToEdge()
 
@@ -91,6 +92,12 @@ class MainActivity : FragmentActivity() {
                     if (!com.example.util.SystemNotificationHelper.hasNotificationPermission(applicationContext)) {
                         notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                     }
+                }
+            }
+            val blockScreenshots by com.example.ui.components.SecureWindowRegistry.blockScreenshots.collectAsState()
+            LaunchedEffect(blockScreenshots) {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                    setRecentsScreenshotEnabled(!blockScreenshots)
                 }
             }
             MyApplicationTheme {
@@ -177,45 +184,77 @@ class MainActivity : FragmentActivity() {
                             coroutineScope {
                                 listOf(
                                     async {
-                                        com.example.util.StartupTimingTracker.measure("chat_repo_init") {
-                                            com.example.repository.EncryptedChatRepository.init(applicationContext)
-                                        }
+                                        try {
+                                            com.example.util.StartupTimingTracker.measure("chat_repo_init") {
+                                                com.example.repository.EncryptedChatRepository.init(applicationContext)
+                                            }
+                                        } catch (ce: kotlinx.coroutines.CancellationException) {
+                                            throw ce
+                                        } catch (_: Throwable) {}
                                     },
                                     async {
-                                        com.example.util.StartupTimingTracker.measure("group_repo_init") {
-                                            com.example.repository.GroupChatRepository.init(applicationContext)
-                                        }
+                                        try {
+                                            com.example.util.StartupTimingTracker.measure("group_repo_init") {
+                                                com.example.repository.GroupChatRepository.init(applicationContext)
+                                            }
+                                        } catch (ce: kotlinx.coroutines.CancellationException) {
+                                            throw ce
+                                        } catch (_: Throwable) {}
                                     },
                                     async {
-                                        com.example.util.StartupTimingTracker.measure("block_refresh") {
-                                            com.example.repository.BlockRepository.init(applicationContext)
-                                            com.example.repository.BlockRepository.refreshBlockedUsers(applicationContext)
-                                        }
+                                        try {
+                                            com.example.util.StartupTimingTracker.measure("block_refresh") {
+                                                com.example.repository.BlockRepository.init(applicationContext)
+                                                com.example.repository.BlockRepository.refreshBlockedUsers(applicationContext)
+                                            }
+                                        } catch (ce: kotlinx.coroutines.CancellationException) {
+                                            throw ce
+                                        } catch (_: Throwable) {}
                                     },
                                     async {
-                                        com.example.util.StartupTimingTracker.measure("moderation_status") {
-                                            authViewModel.refreshModerationStatus(applicationContext)
-                                        }
+                                        try {
+                                            com.example.util.StartupTimingTracker.measure("moderation_status") {
+                                                authViewModel.refreshModerationStatus(applicationContext)
+                                            }
+                                        } catch (ce: kotlinx.coroutines.CancellationException) {
+                                            throw ce
+                                        } catch (_: Throwable) {}
                                     },
                                     async {
-                                        com.example.util.StartupTimingTracker.measure("account_review") {
-                                            authViewModel.checkAccountReview(applicationContext)
-                                        }
+                                        try {
+                                            com.example.util.StartupTimingTracker.measure("account_review") {
+                                                authViewModel.checkAccountReview(applicationContext)
+                                            }
+                                        } catch (ce: kotlinx.coroutines.CancellationException) {
+                                            throw ce
+                                        } catch (_: Throwable) {}
                                     },
                                     async {
-                                        com.example.util.StartupTimingTracker.measure("deletion_status") {
-                                            authViewModel.checkDeletionStatus(applicationContext)
-                                        }
+                                        try {
+                                            com.example.util.StartupTimingTracker.measure("deletion_status") {
+                                                authViewModel.checkDeletionStatus(applicationContext)
+                                            }
+                                        } catch (ce: kotlinx.coroutines.CancellationException) {
+                                            throw ce
+                                        } catch (_: Throwable) {}
                                     },
                                     async {
-                                        com.example.util.StartupTimingTracker.measure("support_init") {
-                                            com.example.SupportChatManager.init(applicationContext)
-                                        }
+                                        try {
+                                            com.example.util.StartupTimingTracker.measure("support_init") {
+                                                com.example.SupportChatManager.init(applicationContext)
+                                            }
+                                        } catch (ce: kotlinx.coroutines.CancellationException) {
+                                            throw ce
+                                        } catch (_: Throwable) {}
                                     },
                                     async {
-                                        com.example.util.StartupTimingTracker.measure("feedback_badge") {
-                                            com.example.repository.FeedbackRepository.refreshMyUpdatesCount(applicationContext)
-                                        }
+                                        try {
+                                            com.example.util.StartupTimingTracker.measure("feedback_badge") {
+                                                com.example.repository.FeedbackRepository.refreshMyUpdatesCount(applicationContext)
+                                            }
+                                        } catch (ce: kotlinx.coroutines.CancellationException) {
+                                            throw ce
+                                        } catch (_: Throwable) {}
                                     }
                                 ).awaitAll()
                             }
@@ -280,8 +319,12 @@ class MainActivity : FragmentActivity() {
                                     com.example.repository.GroupChatRepository.onAppResumed(applicationContext)
                                     com.example.ui.components.RoomInviteOverlayManager.checkAndShowPendingInvite(applicationContext)
                                     lifecycleOwner.lifecycleScope.launch {
-                                        SupabaseSessionManager.ensureActiveSession(applicationContext)
-                                        com.example.repository.DeviceSessionRepository.touchDevice(applicationContext)
+                                        try {
+                                            SupabaseSessionManager.ensureActiveSession(applicationContext)
+                                            com.example.repository.DeviceSessionRepository.touchDevice(applicationContext)
+                                        } catch (ce: kotlinx.coroutines.CancellationException) {
+                                            throw ce
+                                        } catch (_: Throwable) {}
                                     }
                                 }
                             }
@@ -298,9 +341,13 @@ class MainActivity : FragmentActivity() {
                         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
                             while (isActive) {
                                 delay(60_000L)
-                                if (SupabaseSessionManager.hasValidAuthenticatedSession(applicationContext)) {
-                                    com.example.repository.DeviceSessionRepository.touchDevice(applicationContext)
-                                }
+                                try {
+                                    if (SupabaseSessionManager.hasValidAuthenticatedSession(applicationContext)) {
+                                        com.example.repository.DeviceSessionRepository.touchDevice(applicationContext)
+                                    }
+                                } catch (ce: kotlinx.coroutines.CancellationException) {
+                                    throw ce
+                                } catch (_: Throwable) {}
                             }
                         }
                     }
@@ -972,6 +1019,9 @@ class MainActivity : FragmentActivity() {
     override fun onResume() {
         super.onResume()
         com.example.ui.components.SecureWindowRegistry.setActivityPaused(this, false)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            setRecentsScreenshotEnabled(!com.example.ui.components.SecureWindowRegistry.blockScreenshots.value)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {

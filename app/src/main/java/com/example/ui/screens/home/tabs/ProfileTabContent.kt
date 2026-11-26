@@ -121,6 +121,7 @@ fun ProfileTabContent(
     var showCoinStoreScreen by remember { mutableStateOf(false) }
     var showChatKitGalleryDebug by remember { mutableStateOf(false) }
     var showSettingsScreen by remember { mutableStateOf(false) }
+    var showSavedMomentsScreen by remember { mutableStateOf(false) }
     var showLoggedInDevicesScreen by remember { mutableStateOf(false) }
     var isAdmin by remember { mutableStateOf(false) }
 
@@ -130,6 +131,7 @@ fun ProfileTabContent(
 
     val anyOverlayOpen = showEditProfileDialog ||
         showSettingsScreen ||
+        showSavedMomentsScreen ||
         showLoggedInDevicesScreen ||
         showModerationDialog ||
         showBlockedUsersSheet ||
@@ -1771,6 +1773,10 @@ fun ProfileTabContent(
                 showSettingsScreen = false
                 showChatBackupScreen = true
             },
+            onOpenSavedMoments = {
+                showSettingsScreen = false
+                showSavedMomentsScreen = true
+            },
             onOpenChatAppearance = {
                 showSettingsScreen = false
                 showChatAppearanceSheet = true
@@ -1792,6 +1798,26 @@ fun ProfileTabContent(
             onDeleteAccount = {
                 showSettingsScreen = false
                 onDeleteAccountClick()
+            }
+        )
+    }
+
+    if (showSavedMomentsScreen) {
+        com.example.ui.screens.moments.SavedMomentsScreen(
+            currentUserNativeLanguage = currentNativeLanguage,
+            onBack = {
+                showSavedMomentsScreen = false
+                showSettingsScreen = true
+            },
+            onOpenMomentAuthorProfile = { author ->
+                showSavedMomentsScreen = false
+                activeClickedProfile = com.example.DiscoverableProfile(
+                    auth_user_id = author.id,
+                    username = author.username,
+                    profile_name = author.name ?: author.username,
+                    avatar_url = author.avatar_url,
+                    country_code = author.country_code
+                )
             }
         )
     }
@@ -1974,6 +2000,42 @@ fun ProfileTabContent(
     }
 
     if (showThemeStoreSheet) {
+        val myCardProfile = remember(
+            supaUid,
+            currentProfileName,
+            currentUsername,
+            currentAge,
+            currentGender,
+            isOnline,
+            currentAvatarUrl,
+            currentCountryCode,
+            currentCountry,
+            currentCity,
+            currentNativeLanguage,
+            currentLearningLanguage,
+            currentBio,
+            userHobbies,
+            isVerified
+        ) {
+            com.example.card.PeopleCardProfile(
+                userId = supaUid,
+                name = currentProfileName,
+                username = currentUsername,
+                age = currentAge.takeIf { it > 0 },
+                gender = currentGender.takeIf { it.isNotBlank() },
+                isOnline = isOnline,
+                avatarUrl = currentAvatarUrl,
+                countryCode = currentCountryCode,
+                country = currentCountry,
+                city = currentCity,
+                nativeLang = currentNativeLanguage,
+                learningLang = currentLearningLanguage,
+                bio = currentBio,
+                hobbies = userHobbies,
+                isWaved = false,
+                isVerified = isVerified
+            )
+        }
         com.example.ui.screens.store.DecorationStoreScreen(
             onDismiss = {
                 showThemeStoreSheet = false
@@ -1984,7 +2046,8 @@ fun ProfileTabContent(
                 }
             },
             currentUserAvatar = currentAvatarUrl,
-            currentUserName = currentProfileName
+            currentUserName = currentProfileName,
+            currentUserCardProfile = myCardProfile
         )
     }
 }

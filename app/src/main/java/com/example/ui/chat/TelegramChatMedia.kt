@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
+import androidx.core.view.WindowCompat
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -492,10 +493,18 @@ fun TelegramPendingMediaDialog(
             decorFitsSystemWindows = false
         )
     ) {
-        val dialogWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
+        val dialogView = LocalView.current
+        val dialogWindow = (dialogView.parent as? DialogWindowProvider)?.window
         SideEffect {
-            @Suppress("DEPRECATION")
-            dialogWindow?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+            dialogWindow?.let { win ->
+                WindowCompat.setDecorFitsSystemWindows(win, false)
+                WindowCompat.getInsetsController(win, dialogView).apply {
+                    isAppearanceLightStatusBars = false
+                    isAppearanceLightNavigationBars = false
+                }
+                @Suppress("DEPRECATION")
+                win.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+            }
         }
 
         BackHandler(onBack = onDismiss)
@@ -510,23 +519,33 @@ fun TelegramPendingMediaDialog(
                     .fillMaxSize()
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
             ) {
-                // Top Chrome Bar
+                // Sleek Telegram-style dark glass Top Chrome Bar
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 6.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    IconButton(
+                    Surface(
                         onClick = onDismiss,
+                        shape = CircleShape,
+                        color = Color.White.copy(alpha = 0.12f),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)),
                         modifier = Modifier
-                            .size(48.dp)
+                            .size(44.dp)
                             .testTag("pending_media_close_button")
                     ) {
-                        ChatIconBack(tint = Color.White, modifier = Modifier.size(22.dp))
+                        Box(contentAlignment = Alignment.Center) {
+                            ChatIconBack(tint = Color.White, modifier = Modifier.size(20.dp))
+                        }
                     }
 
-                    Column(modifier = Modifier.weight(1f)) {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 4.dp)
+                    ) {
                         Text(
                             text = recipientLabel.ifBlank { "Send Photos" },
                             color = Color.White,
@@ -537,7 +556,7 @@ fun TelegramPendingMediaDialog(
                         )
                         Text(
                             text = "${(pagerState.currentPage + 1).coerceAtMost(uris.size)} of ${uris.size} · ${if (isHd) "HD" else "Standard"}",
-                            color = Color.White.copy(alpha = 0.70f),
+                            color = Color.White.copy(alpha = 0.72f),
                             fontSize = 11.5.sp,
                             fontWeight = FontWeight.Medium
                         )
@@ -569,20 +588,23 @@ fun TelegramPendingMediaDialog(
                         }
                     }
 
-                    Spacer(modifier = Modifier.width(4.dp))
-
-                    // Rotate 90° button
-                    IconButton(
+                    // Rotate 90° pill button
+                    Surface(
                         onClick = {
                             val page = pagerState.currentPage
                             val currentRot = rotations[page] ?: 0
                             rotations[page] = (currentRot + 90) % 360
                         },
+                        shape = CircleShape,
+                        color = Color.White.copy(alpha = 0.12f),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)),
                         modifier = Modifier
-                            .size(44.dp)
+                            .size(38.dp)
                             .testTag("pending_media_rotate_button")
                     ) {
-                        ChatIconRotate(tint = Color.White, modifier = Modifier.size(20.dp))
+                        Box(contentAlignment = Alignment.Center) {
+                            ChatIconRotate(tint = Color.White, modifier = Modifier.size(18.dp))
+                        }
                     }
 
                     if (uris.size < maxSelection) {
@@ -592,7 +614,7 @@ fun TelegramPendingMediaDialog(
                             color = Color.White.copy(alpha = 0.12f),
                             border = BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)),
                             modifier = Modifier
-                                .height(34.dp)
+                                .height(36.dp)
                                 .testTag("pending_media_add_more_button")
                         ) {
                             Row(
@@ -616,17 +638,22 @@ fun TelegramPendingMediaDialog(
                         }
                     }
 
-                    IconButton(
+                    Surface(
                         onClick = {
                             val idx = pagerState.currentPage
                             rotations.remove(idx)
                             onRemoveAt(idx)
                         },
+                        shape = CircleShape,
+                        color = Color(0xFFF87171).copy(alpha = 0.16f),
+                        border = BorderStroke(1.dp, Color(0xFFF87171).copy(alpha = 0.30f)),
                         modifier = Modifier
-                            .size(44.dp)
+                            .size(38.dp)
                             .testTag("pending_media_remove_current_button")
                     ) {
-                        ChatIconTrash(tint = Color(0xFFF87171), modifier = Modifier.size(19.dp))
+                        Box(contentAlignment = Alignment.Center) {
+                            ChatIconTrash(tint = Color(0xFFF87171), modifier = Modifier.size(17.dp))
+                        }
                     }
                 }
 

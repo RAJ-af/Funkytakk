@@ -1916,6 +1916,45 @@ interface SupabaseApi {
         @Header("Authorization") auth: String,
         @Body body: CurrentDeviceRequest
     ): Response<ResponseBody>
+
+    // ----------------------------------------------------
+    // DISCOVER PEOPLE CARD DESIGNS & WORKSHOP RPCs
+    // ----------------------------------------------------
+    @GET("rest/v1/user_card_designs")
+    suspend fun getUserCardDesigns(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("select") select: String = "user_id,design",
+        @Query("user_id") userIdFilter: String
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/save_my_card_design")
+    suspend fun saveMyCardDesign(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: SaveCardDesignRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/reset_my_card_design")
+    suspend fun resetMyCardDesign(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> = emptyMap()
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/list_remixable_cards")
+    suspend fun listRemixableCards(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: ListRemixableCardsRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/remix_card_design")
+    suspend fun remixCardDesign(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: RemixCardDesignRequest
+    ): Response<ResponseBody>
 }
 
 @JsonClass(generateAdapter = true)
@@ -3112,5 +3151,25 @@ data class UserDeviceRow(
     val last_seen_at: String? = null,
     val revoked: Boolean = false,
     val is_current: Boolean = false
+)
+
+// ----------------------------------------------------
+// DISCOVER PEOPLE CARD DESIGN DTOs
+// ----------------------------------------------------
+@JsonClass(generateAdapter = true)
+data class SaveCardDesignRequest(
+    val p_design: Map<String, Any?>,
+    val p_remixable: Boolean = true
+)
+
+@JsonClass(generateAdapter = true)
+data class RemixCardDesignRequest(
+    val p_source: String
+)
+
+@JsonClass(generateAdapter = true)
+data class ListRemixableCardsRequest(
+    val p_limit: Int = 20,
+    val p_offset: Int = 0
 )
 

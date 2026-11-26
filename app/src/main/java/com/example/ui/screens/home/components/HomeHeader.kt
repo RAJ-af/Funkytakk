@@ -7,6 +7,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Event
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -15,7 +18,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -23,7 +27,6 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.NotificationsManager
-import com.example.R
 import com.example.ui.components.FunkyHeartIcon
 import com.example.ui.components.FunkyHomeIcon
 import com.example.ui.components.FunkyLockIcon
@@ -93,10 +96,10 @@ fun HomeHeader(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    painter = painterResource(id = R.drawable.ic_ring),
+                    imageVector = Icons.Outlined.Notifications,
                     contentDescription = "Notifications",
                     tint = if (unreadNotifications > 0) funkyColors.ink else funkyColors.mute,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(21.dp)
                 )
                 if (unreadNotifications > 0) {
                     Box(
@@ -119,7 +122,7 @@ fun HomeHeader(
                 }
             }
 
-            // Amusements/Events icon with badge dot
+            // Events / Schedule icon with badge dot
             Box(
                 modifier = Modifier
                     .size(48.dp)
@@ -131,7 +134,7 @@ fun HomeHeader(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    painter = painterResource(id = R.drawable.ic_sparkle),
+                    imageVector = Icons.Outlined.Event,
                     contentDescription = "Funky Events",
                     tint = funkyColors.mango,
                     modifier = Modifier.size(20.dp)
@@ -148,31 +151,21 @@ fun HomeHeader(
                 }
             }
 
-            // Join with Code button (requires internet)
-            Button(
-                onClick = onJoinWithCode,
-                enabled = isOnline,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = funkyColors.surface,
-                    disabledContainerColor = funkyColors.soft
-                ),
-                shape = RoundedCornerShape(100.dp),
-                border = BorderStroke(1.dp, funkyColors.line),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            // Join with Code circular lock button (requires internet)
+            Box(
                 modifier = Modifier
-                    .height(48.dp)
-                    .testTag("home_join_code_button")
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(if (isOnline) funkyColors.surface else funkyColors.soft)
+                    .border(1.dp, funkyColors.line, CircleShape)
+                    .clickable(enabled = isOnline) { onJoinWithCode() }
+                    .semantics { contentDescription = "Join room with code" }
+                    .testTag("home_join_code_button"),
+                contentAlignment = Alignment.Center
             ) {
                 FunkyLockIcon(
                     color = if (isOnline) funkyColors.ink else funkyColors.mute,
-                    modifier = Modifier.size(14.dp)
-                )
-                Spacer(modifier = Modifier.width(5.dp))
-                Text(
-                    text = "Code",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isOnline) funkyColors.ink else funkyColors.mute
+                    modifier = Modifier.size(18.dp)
                 )
             }
 

@@ -65,6 +65,7 @@ data class CachedDiscoverPartnerItem(
     val name: String,
     val username: String = "",
     val age: Int,
+    val gender: String = "",
     val isOnline: Boolean,
     val avatarUrl: String,
     val coverUrl: String? = null,

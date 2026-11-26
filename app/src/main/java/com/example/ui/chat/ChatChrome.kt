@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -325,14 +326,22 @@ fun SelectionTopBar(
     onAction: (String) -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    applyStatusBarPadding: Boolean = true,
 ) {
     val c = LocalChatColors.current
     Surface(color = c.surface, shadowElevation = 2.dp, modifier = modifier.fillMaxWidth()) {
-        Row(Modifier.height(56.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onClose) { ChatIconClose(tint = c.text) }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(if (applyStatusBarPadding) Modifier.statusBarsPadding() else Modifier)
+                .height(56.dp)
+                .padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onClose, modifier = Modifier.size(48.dp)) { ChatIconClose(tint = c.text) }
             Text("$selectedCount selected", color = c.text, fontSize = 17f.chatSp(), fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             actions.forEach { a ->
-                IconButton(onClick = { onAction(a.id) }) {
+                IconButton(onClick = { onAction(a.id) }, modifier = Modifier.size(48.dp)) {
                     if (a.icon != null) a.icon.invoke()
                     else Text(a.label, color = if (a.destructive) c.danger else c.text, fontSize = 14f.chatSp(), fontWeight = FontWeight.Medium)
                 }
