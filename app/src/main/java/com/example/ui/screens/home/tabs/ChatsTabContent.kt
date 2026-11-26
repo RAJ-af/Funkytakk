@@ -307,11 +307,12 @@ fun ChatsTabContent(
                     Box {
                         Box(
                             modifier = Modifier
-                                .size(40.dp)
+                                .size(48.dp)
                                 .clip(CircleShape)
                                 .background(funkyColors.surface)
                                 .border(1.dp, funkyColors.line, CircleShape)
-                                .clickable { showOptionsMenu = true },
+                                .clickable { showOptionsMenu = true }
+                                .testTag("chats_options_menu_button"),
                             contentAlignment = Alignment.Center
                         ) {
                             FunkyMoreIcon(color = funkyColors.ink, modifier = Modifier.size(18.dp))

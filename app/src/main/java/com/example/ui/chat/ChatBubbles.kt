@@ -178,14 +178,19 @@ fun MessageBubble(
     }
     val overlay by animateColorAsState(overlayTarget, tween(600), label = "bubbleOverlay")
     val maxW = minOf(ChatDimens.BubbleMaxWidth, (LocalConfiguration.current.screenWidthDp * 0.82f).dp)
+    val shape = bubbleShape(outgoing, position)
     Surface(
-        shape = bubbleShape(outgoing, position),
+        shape = shape,
         color = when {
             transparent -> Color.Transparent
             outgoing -> c.outgoingBubble
             else -> c.incomingBubble
         },
-        shadowElevation = if (transparent) 0.dp else 0.5.dp,
+        border = if (transparent) null else androidx.compose.foundation.BorderStroke(
+            width = 0.6.dp,
+            color = if (outgoing) c.accentOut.copy(alpha = 0.08f) else c.hairline
+        ),
+        shadowElevation = if (transparent) 0.dp else 1.dp,
         modifier = modifier
             .widthIn(max = maxW)
             .semantics(mergeDescendants = true) {

@@ -38,6 +38,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -513,6 +514,7 @@ fun GroupChatScreen(
         }
 
         Scaffold(
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
             topBar = {
                 if (isSelectionMode) {
                     SelectionTopBar(
@@ -552,74 +554,118 @@ fun GroupChatScreen(
                     )
                 } else {
                     Surface(
-                        color = colors.surface,
-                        shadowElevation = 1.dp,
+                        color = colors.surface.copy(alpha = 0.96f),
+                        shadowElevation = 2.dp,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .statusBarsPadding()
-                                .padding(horizontal = 4.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            IconButton(onClick = onBack) {
-                                ChatIconBack(tint = colors.text, modifier = Modifier.size(24.dp))
-                            }
-
-                            Box(
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
                                 modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(colors.accentIn.copy(alpha = 0.15f))
-                                    .clickable(onClick = onNavigateToInfo),
-                                contentAlignment = Alignment.Center
+                                    .fillMaxWidth()
+                                    .statusBarsPadding()
+                                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                if (group.avatarUrl.isNotBlank()) {
-                                    AsyncImage(
-                                        model = group.avatarUrl,
-                                        contentDescription = "Group Avatar",
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                } else {
-                                    Text(
-                                        text = group.name.take(1).uppercase(),
-                                        color = colors.accentIn,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 17.sp
-                                    )
+                                IconButton(
+                                    onClick = onBack,
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .testTag("group_chat_back_button")
+                                ) {
+                                    ChatIconBack(tint = colors.text, modifier = Modifier.size(22.dp))
+                                }
+
+                                Row(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .defaultMinSize(minHeight = 48.dp)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .clickable(onClick = onNavigateToInfo)
+                                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(42.dp)
+                                            .clip(CircleShape)
+                                            .background(colors.accentIn.copy(alpha = 0.15f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (group.avatarUrl.isNotBlank()) {
+                                            AsyncImage(
+                                                model = group.avatarUrl,
+                                                contentDescription = "Group Avatar",
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        } else {
+                                            Text(
+                                                text = group.name.take(1).uppercase(),
+                                                color = colors.accentIn,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 17.sp
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.width(10.dp))
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(
+                                                text = group.name,
+                                                color = colors.text,
+                                                fontSize = 16f.chatSp(),
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f, fill = false)
+                                            )
+                                            Surface(
+                                                shape = RoundedCornerShape(99.dp),
+                                                color = colors.accentIn.copy(alpha = 0.12f)
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                                ) {
+                                                    ChatIconLock(tint = colors.accentIn, modifier = Modifier.size(10.dp))
+                                                    Text(
+                                                        text = "E2EE",
+                                                        color = colors.accentIn,
+                                                        fontSize = 9.5.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        Text(
+                                            text = "${group.memberCount} members",
+                                            color = colors.textSecondary,
+                                            fontSize = 11.5f.chatSp(),
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+
+                                IconButton(
+                                    onClick = { onNavigateToManageMembers(true) },
+                                    modifier = Modifier.size(48.dp)
+                                ) {
+                                    ChatIconAddUser(tint = colors.text, modifier = Modifier.size(21.dp))
+                                }
+                                IconButton(
+                                    onClick = onNavigateToSettings,
+                                    modifier = Modifier.size(48.dp)
+                                ) {
+                                    ChatIconSettings(tint = colors.text, modifier = Modifier.size(21.dp))
                                 }
                             }
-
-                            Spacer(modifier = Modifier.width(10.dp))
-
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable(onClick = onNavigateToInfo)
-                            ) {
-                                Text(
-                                    text = group.name,
-                                    color = colors.text,
-                                    fontSize = 16f.chatSp(),
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = "${group.memberCount} members",
-                                    color = colors.textSecondary,
-                                    fontSize = 12f.chatSp()
-                                )
-                            }
-
-                            IconButton(onClick = { onNavigateToManageMembers(true) }) {
-                                ChatIconAddUser(tint = colors.text, modifier = Modifier.size(22.dp))
-                            }
-                            IconButton(onClick = onNavigateToSettings) {
-                                ChatIconSettings(tint = colors.text, modifier = Modifier.size(22.dp))
-                            }
+                            Box(Modifier.fillMaxWidth().height(0.6.dp).background(colors.hairline))
                         }
                     }
                 }
@@ -816,8 +862,8 @@ fun GroupChatScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
-                    .background(colors.wallpaper)
             ) {
+                TelegramAmbientWallpaper(colors = colors, modifier = Modifier.fillMaxSize())
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),

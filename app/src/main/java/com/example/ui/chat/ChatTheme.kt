@@ -256,23 +256,23 @@ fun ChatColors.senderColor(userId: String): Color =
 
 /** Sizes and spacing. Touch targets are never below 48dp. */
 object ChatDimens {
-    val BubbleBig = 18.dp
-    val BubbleSmall = 5.dp
+    val BubbleBig = 20.dp
+    val BubbleSmall = 6.dp
     val BubbleMaxWidth = 340.dp // also capped at 80% of the screen width
-    val BubblePadH = 10.dp
-    val BubblePadV = 6.dp
-    val InGroupGap = 2.dp
+    val BubblePadH = 12.dp
+    val BubblePadV = 7.dp
+    val InGroupGap = 3.dp
     val BetweenGroupsGap = 8.dp
-    val ScreenEdge = 8.dp
+    val ScreenEdge = 10.dp
     val AvatarSize = 32.dp
     val AvatarGap = 6.dp
     val MediaPad = 3.dp
-    val MediaInnerRadius = 15.dp // BubbleBig - MediaPad
+    val MediaInnerRadius = 17.dp // BubbleBig - MediaPad
     val MinTouch = 48.dp
     val VoiceWidth = 240.dp
     val PlayButton = 40.dp
-    val FabSize = 40.dp
-    val ReactionHeight = 24.dp
+    val FabSize = 42.dp
+    val ReactionHeight = 25.dp
     val SwipeReplyThreshold = 64.dp
     val SwipeReplyMax = 96.dp
 }

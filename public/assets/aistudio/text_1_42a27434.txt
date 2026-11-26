@@ -1,0 +1,208 @@
+FunkyTalk Diagnostic Report
+Generated: 2026-11-26 20:21:28 UTC
+App Version: 0.9.0-beta1 (1)
+Device: OPPO CPH2565 (Android 15, SDK 35)
+Current Screen: home
+
+Recent Issues (30):
+---- #1 [CRASH] 2026-11-26 19:59:34 UTC ----
+Source: Uncaught(main)
+Screen: home
+Message: ExceptionInInitializerError
+Trace:
+java.lang.ExceptionInInitializerError
+	at com.example.crypto.VaultSecurityManager.lock(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:15)
+	at com.example.crypto.ChatLockManager.onAppForegrounded(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:140)
+	at com.example.crypto.ChatLockManager$attachLifecycleObserver$1.onStart(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:23)
+	at rp0.onStateChanged(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:86)
+	at e82.a(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:21)
+	at f82.e(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:330)
+	at f82.d(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:77)
+	at f82.c(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:13)
+	at h43$a.onActivityPostStarted(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:22)
+	at android.app.Activity.dispatchActivityPostStarted(Activity.java:1595)
+	at android.app.Activity.performStart(Activity.java:9289)
+	at android.app.ActivityThread.handleStartActivity(ActivityThread.java:4397)
+	at android.app.servertransaction.TransactionExecutor.performLifecycleSequence(TransactionExecutor.java:275)
+	at android.app.servertransaction.TransactionExecutor.cycleToPath(TransactionExecutor.java:255)
+	at android.app.servertransaction.TransactionExecutor.executeLifecycleItem(TransactionExecutor.java:227)
+	at android.app.servertransaction.TransactionExecutor.executeTransactionItems(TransactionExecutor.java:112)
+	at android.app.servertransaction.TransactionExecutor.execute(TransactionExecutor.java:86)
+	at android.app.ActivityThread$H.handleMessage(ActivityThread.java:2902)
+	at android.os.Handler.dispatchMessage(Handler.java:107)
+	at android.os.Looper.loopOnce(Looper.java:282)
+	at android.os.Looper.loop(Looper.java:387)
+	at android.app.ActivityThread.main(ActivityThread.java:9500)
+	at java.lang.reflect.Method.invoke(Native Method)
+	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:600)
+	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:1005)
+Caused by: java.lang.IllegalStateException: TypeToken must be created with a type argument: new TypeToken<...>() {}; When using code shrinkers (ProGuard, R8, ...) make sure that generic signatures are preserved.
+	at gc.g(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:3)
+---- #2 [SLOW_UI] 2026-11-26 19:46:11 UTC ----
+Source: MainThreadWatchdog
+Screen: home
+Message: UI thread paused for >2773ms
+Trace:
+jdk.internal.misc.Unsafe.park(Native Method)
+  at java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:276)
+  at java.util.concurrent.locks.AbstractQueuedSynchronizer.acquire(AbstractQueuedSynchronizer.java:792)
+  at java.util.concurrent.locks.AbstractQueuedSynchronizer.tryAcquireSharedNanos(AbstractQueuedSynchronizer.java:1166)
+  at java.util.concurrent.CountDownLatch.await(CountDownLatch.java:276)
+  at com.google.firebase.crashlytics.internal.common.Utils.awaitEvenIfOnMainThread(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:33)
+  at com.google.firebase.crashlytics.internal.common.CrashlyticsController.handleUncaughtException(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:69)
+  at com.google.firebase.crashlytics.internal.common.CrashlyticsController.handleUncaughtException(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:104)
+  at com.google.firebase.crashlytics.internal.common.CrashlyticsController$1.onUncaughtException(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:3)
+  at com.google.firebase.crashlytics.internal.common.CrashlyticsUncaughtExceptionHandler.uncaughtException(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:22)
+  at com.example.diagnostics.CrashAndErrorReporter.install$lambda$2(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:16)
+  at com.example.diagnostics.CrashAndErrorReporter.e(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:1)
+  at wg0.uncaughtException(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:1)
+  at java.lang.ThreadGroup.uncaughtException(ThreadGroup.java:1098)
+  at java.lang.ThreadGroup.uncaughtException(ThreadGroup.java:1093)
+  at com.android.internal.os.RuntimeInitExtImpl.uncaughtExceptionExt(RuntimeInitExtImpl.java:68)
+  at com.android.internal.os.RuntimeInit$LoggingHandler.uncaughtException(RuntimeInit.java:138)
+  at com.android.internal.os.RuntimeInit$KillApplicationHandler.ensureLogging(RuntimeInit.java:224)
+---- #3 [CRASH] 2026-11-26 19:46:10 UTC ----
+Source: Uncaught(main)
+Screen: home
+Message: ExceptionInInitializerError
+Trace:
+java.lang.ExceptionInInitializerError
+	at com.example.ui.screens.home.tabs.MomentsTabContentKt.MomentsTabContent(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:419)
+	at com.example.ui.screens.HomeScreenKt.HomeScreen$lambda$229$lambda$201$lambda$200(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:20)
+	at com.example.ui.screens.HomeScreenKt.i0(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:1)
+	at wn1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:219)
+	at androidx.compose.runtime.internal.ComposableLambdaImpl.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:37)
+	at androidx.compose.runtime.internal.ComposableLambdaImpl.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:9)
+	at androidx.compose.animation.CrossfadeKt$Crossfade$5$1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:293)
+	at androidx.compose.animation.CrossfadeKt$Crossfade$5$1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:309)
+	at androidx.compose.runtime.internal.ComposableLambdaImpl.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:30)
+	at androidx.compose.runtime.internal.ComposableLambdaImpl.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:159)
+	at androidx.compose.animation.CrossfadeKt.Crossfade(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:776)
+	at androidx.compose.animation.CrossfadeKt.Crossfade(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:856)
+	at com.example.ui.screens.HomeScreenKt.HomeScreen$lambda$229$lambda$201(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:9)
+	at com.example.ui.screens.HomeScreenKt.A(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:1)
+	at xn1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:225)
+	at androidx.compose.runtime.internal.ComposableLambdaImpl.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:37)
+	at androidx.compose.runtime.internal.ComposableLambdaImpl$invoke$1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:13)
+	at androidx.compose.runtime.internal.ComposableLambdaImpl$invoke$1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:17)
+	at androidx.compose.runtime.RecomposeScopeImpl.compose(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:31)
+	at androidx.compose.runtime.ComposerImpl.recomposeToGroupEnd(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:109)
+	at androidx.compose.runtime.ComposerImpl.skipCurrentGroup(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:126)
+	at androidx.compose.runtime.ComposerImpl.doCompose(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:281)
+	at androidx.compose.runtime.ComposerImpl.recompose$runtime_release(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:36)
+	at androidx.compose.runtime.CompositionImpl.recompose(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:34)
+	at androidx.compose.runtime.Recomposer.performRecompose(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:63)
+	at androidx.compose.runtime.Recomposer.access$performRecompose(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:1)
+	at androidx.compose.runtime.Recomposer$runRecomposeAndApplyChanges$2$1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:557)
+---- #4 [CRASH] 2026-11-26 19:46:07 UTC ----
+Source: Uncaught(main)
+Screen: home
+Message: ExceptionInInitializerError
+Trace:
+java.lang.ExceptionInInitializerError
+	at com.example.ui.screens.home.tabs.MomentsTabContentKt.MomentsTabContent(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:419)
+	at com.example.ui.screens.HomeScreenKt.HomeScreen$lambda$229$lambda$201$lambda$200(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:20)
+	at com.example.ui.screens.HomeScreenKt.i0(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:1)
+	at wn1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:219)
+	at androidx.compose.runtime.internal.ComposableLambdaImpl.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:37)
+	at androidx.compose.runtime.internal.ComposableLambdaImpl.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:9)
+	at androidx.compose.animation.CrossfadeKt$Crossfade$5$1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:293)
+	at androidx.compose.animation.CrossfadeKt$Crossfade$5$1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:309)
+	at androidx.compose.runtime.internal.ComposableLambdaImpl.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:30)
+	at androidx.compose.runtime.internal.ComposableLambdaImpl.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:159)
+	at androidx.compose.animation.CrossfadeKt.Crossfade(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:776)
+	at androidx.compose.animation.CrossfadeKt.Crossfade(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:856)
+	at com.example.ui.screens.HomeScreenKt.HomeScreen$lambda$229$lambda$201(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:9)
+	at com.example.ui.screens.HomeScreenKt.A(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:1)
+	at xn1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:225)
+	at androidx.compose.runtime.internal.ComposableLambdaImpl.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:37)
+	at androidx.compose.runtime.internal.ComposableLambdaImpl$invoke$1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:13)
+	at androidx.compose.runtime.internal.ComposableLambdaImpl$invoke$1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:17)
+	at androidx.compose.runtime.RecomposeScopeImpl.compose(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:31)
+	at androidx.compose.runtime.ComposerImpl.recomposeToGroupEnd(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:109)
+	at androidx.compose.runtime.ComposerImpl.skipCurrentGroup(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:126)
+	at androidx.compose.runtime.ComposerImpl.doCompose(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:281)
+	at androidx.compose.runtime.ComposerImpl.recompose$runtime_release(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:36)
+	at androidx.compose.runtime.CompositionImpl.recompose(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:34)
+	at androidx.compose.runtime.Recomposer.performRecompose(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:63)
+	at androidx.compose.runtime.Recomposer.access$performRecompose(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:1)
+	at androidx.compose.runtime.Recomposer$runRecomposeAndApplyChanges$2$1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:557)
+---- #5 [SLOW_UI] 2026-11-26 18:23:22 UTC ----
+Source: MainThreadWatchdog
+Screen: home
+Message: UI thread paused for >2775ms
+Trace:
+jdk.internal.misc.Unsafe.park(Native Method)
+  at java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:276)
+  at java.util.concurrent.locks.AbstractQueuedSynchronizer.acquire(AbstractQueuedSynchronizer.java:792)
+  at java.util.concurrent.locks.AbstractQueuedSynchronizer.tryAcquireSharedNanos(AbstractQueuedSynchronizer.java:1166)
+  at java.util.concurrent.CountDownLatch.await(CountDownLatch.java:276)
+  at com.google.firebase.crashlytics.internal.common.Utils.awaitEvenIfOnMainThread(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:33)
+  at com.google.firebase.crashlytics.internal.common.CrashlyticsController.handleUncaughtException(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:69)
+  at com.google.firebase.crashlytics.internal.common.CrashlyticsController.handleUncaughtException(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:104)
+  at com.google.firebase.crashlytics.internal.common.CrashlyticsController$1.onUncaughtException(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:3)
+  at com.google.firebase.crashlytics.internal.common.CrashlyticsUncaughtExceptionHandler.uncaughtException(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:22)
+  at com.example.diagnostics.CrashAndErrorReporter.install$lambda$2(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:16)
+  at com.example.diagnostics.CrashAndErrorReporter.e(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:1)
+  at wg0.uncaughtException(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:1)
+  at java.lang.ThreadGroup.uncaughtException(ThreadGroup.java:1098)
+  at java.lang.ThreadGroup.uncaughtException(ThreadGroup.java:1093)
+  at com.android.internal.os.RuntimeInitExtImpl.uncaughtExceptionExt(RuntimeInitExtImpl.java:68)
+  at com.android.internal.os.RuntimeInit$LoggingHandler.uncaughtException(RuntimeInit.java:138)
+  at java.lang.Thread.dispatchUncaughtException(Thread.java:3374)
+---- #6 [CRASH] 2026-11-26 18:23:20 UTC ----
+Source: Uncaught(main)
+Screen: home
+Message: ExceptionInInitializerError
+Trace:
+java.lang.ExceptionInInitializerError
+	at com.example.crypto.VaultSecurityManager.lock(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:15)
+	at com.example.crypto.ChatLockManager.onAppForegrounded(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:140)
+	at com.example.crypto.ChatLockManager$attachLifecycleObserver$1.onStart(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:23)
+	at rp0.onStateChanged(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:86)
+	at e82.a(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:21)
+	at f82.e(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:330)
+	at f82.d(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:77)
+	at f82.c(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:13)
+	at h43$a.onActivityPostStarted(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:22)
+	at android.app.Activity.dispatchActivityPostStarted(Activity.java:1595)
+	at android.app.Activity.performStart(Activity.java:9289)
+	at android.app.ActivityThread.handleStartActivity(ActivityThread.java:4397)
+	at android.app.servertransaction.TransactionExecutor.performLifecycleSequence(TransactionExecutor.java:275)
+	at android.app.servertransaction.TransactionExecutor.cycleToPath(TransactionExecutor.java:255)
+	at android.app.servertransaction.TransactionExecutor.executeLifecycleItem(TransactionExecutor.java:227)
+	at android.app.servertransaction.TransactionExecutor.executeTransactionItems(TransactionExecutor.java:112)
+	at android.app.servertransaction.TransactionExecutor.execute(TransactionExecutor.java:86)
+	at android.app.ActivityThread$H.handleMessage(ActivityThread.java:2902)
+	at android.os.Handler.dispatchMessage(Handler.java:107)
+	at android.os.Looper.loopOnce(Looper.java:282)
+	at android.os.Looper.loop(Looper.java:387)
+	at android.app.ActivityThread.main(ActivityThread.java:9500)
+	at java.lang.reflect.Method.invoke(Native Method)
+	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:600)
+	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:1005)
+Caused by: java.lang.IllegalStateException: TypeToken must be created with a type argument: new TypeToken<...>() {}; When using code shrinkers (ProGuard, R8, ...) make sure that generic signatures are preserved.
+	at gc.g(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:3)
+---- #7 [SLOW_UI] 2026-11-26 17:08:04 UTC ----
+Source: MainThreadWatchdog
+Screen: home
+Message: UI thread paused for >2754ms
+Trace:
+jdk.internal.misc.Unsafe.park(Native Method)
+  at java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:276)
+  at java.util.concurrent.locks.AbstractQueuedSynchronizer.acquire(AbstractQueuedSynchronizer.java:792)
+  at java.util.concurrent.locks.AbstractQueuedSynchronizer.tryAcquireSharedNanos(AbstractQueuedSynchronizer.java:1166)
+  at java.util.concurrent.CountDownLatch.await(CountDownLatch.java:276)
+  at com.google.firebase.crashlytics.internal.common.Utils.awaitEvenIfOnMainThread(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:33)
+  at com.google.firebase.crashlytics.internal.common.CrashlyticsController.handleUncaughtException(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:69)
+  at com.google.firebase.crashlytics.internal.common.CrashlyticsController.handleUncaughtException(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:104)
+  at com.google.firebase.crashlytics.internal.common.CrashlyticsController$1.onUncaughtException(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:3)
+  at com.google.firebase.crashlytics.internal.common.CrashlyticsUncaughtExceptionHandler.uncaughtException(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:22)
+  at com.example.diagnostics.CrashAndErrorReporter.install$lambda$2(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:16)
+  at com.example.diagnostics.CrashAndErrorReporter.e(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:1)
+  at wg0.uncaughtException(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:1)
+  at java.lang.ThreadGroup.uncaughtException(ThreadGroup.java:1098)
+  at java.lang.ThreadGroup.uncaughtException(ThreadGroup.java:1093)
+  at com.android.internal.os.RuntimeInitExtImpl.uncaughtExceptionExt(RuntimeInitExtImpl.java:68)
+  at com.android.internal.os.RuntimeInit$LoggingHandler.uncaughtException(RuntimeInit.java:138)
+  at com.android.internal.os.RuntimeInit$KillApplicationHandler.ensureLogging(RuntimeInit.java:224)

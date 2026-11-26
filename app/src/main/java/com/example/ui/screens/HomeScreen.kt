@@ -123,6 +123,11 @@ fun HomeScreen(
     var showAmusementEventsDialog by remember { mutableStateOf(false) }
     var selectedAmusementEvent by remember { mutableStateOf<SupabaseEvent?>(null) }
 
+    // Live Leaderboard & Special Offers Spin UI
+    var showLeaderboardScreen by remember { mutableStateOf(false) }
+    var showSpinOfferDialog by remember { mutableStateOf(false) }
+    var inspectedLeaderboardEntry by remember { mutableStateOf<com.example.leaderboard.LeaderboardEntry?>(null) }
+
     // Direct Chat active messages thread dialog
     var activeChatWindowContact by remember { mutableStateOf<DirectChat?>(null) }
     val chatMessagesStorage = remember { mutableStateMapOf<String, List<Pair<String, Boolean>>>() } // Pair: text, isMe
@@ -214,6 +219,10 @@ fun HomeScreen(
     }
 
     val currentUserId = currentUserProfile.uid
+    LaunchedEffect(currentUserId) {
+        com.example.leaderboard.LeaderboardRepository.recordLocalAppLogin(context, currentUserId)
+    }
+
     LaunchedEffect(currentUserId, supabaseProfiles, retryTrigger) {
         VoiceRoomRealtimeManager.start()
 
@@ -535,6 +544,9 @@ fun HomeScreen(
         activeChatWindowContact,
         activeGroupChat,
         inspectedFriendProfile,
+        inspectedLeaderboardEntry,
+        showLeaderboardScreen,
+        showSpinOfferDialog,
         showCreateRoomBottomSheet,
         showFilterDialog,
         showAmusementEventsDialog,
@@ -552,6 +564,9 @@ fun HomeScreen(
             activeChatWindowContact != null ||
             activeGroupChat != null ||
             inspectedFriendProfile != null ||
+            inspectedLeaderboardEntry != null ||
+            showLeaderboardScreen ||
+            showSpinOfferDialog ||
             showCreateRoomBottomSheet ||
             showFilterDialog ||
             showAmusementEventsDialog ||
@@ -608,6 +623,8 @@ fun HomeScreen(
                                 showAmusementEventsDialog = true
                             },
                             onOpenNotifications = onOpenNotifications,
+                            onOpenLeaderboard = { showLeaderboardScreen = true },
+                            onOpenSpinOffers = { showSpinOfferDialog = true },
                             onCreateRoom = {
                                 if (!isOnline) {
                                     Toast.makeText(context, com.example.util.ErrorMapper.MSG_OFFLINE, Toast.LENGTH_SHORT).show()
@@ -777,6 +794,43 @@ fun HomeScreen(
             )
         }
 
+        if (showLeaderboardScreen) {
+            com.example.ui.screens.leaderboard.LeaderboardScreen(
+                supabaseProfiles = supabaseProfiles,
+                onBack = { showLeaderboardScreen = false },
+                onOpenUserProfile = { entry ->
+                    inspectedLeaderboardEntry = entry
+                }
+            )
+        }
+
+        inspectedLeaderboardEntry?.let { entry ->
+            UserProfileFeedScreen(
+                userId = entry.userId,
+                username = entry.username.ifBlank { entry.displayName },
+                profileName = entry.displayName,
+                avatarUrl = entry.avatarUrl,
+                coverUrl = entry.coverUrl,
+                countryCode = entry.countryCode,
+                nativeLanguages = entry.nativeLanguages.joinToString(", "),
+                learningLanguages = entry.learningLanguages.joinToString(", "),
+                hobbies = entry.hobbies,
+                bio = entry.bio,
+                onBack = { inspectedLeaderboardEntry = null },
+                onStartChat = {
+                    inspectedLeaderboardEntry = null
+                    showLeaderboardScreen = false
+                    startDirectChat(entry.userId, entry.displayName, entry.avatarUrl, entry.countryCode)
+                }
+            )
+        }
+
+        if (showSpinOfferDialog) {
+            com.example.ui.screens.store.SpinOfferWheelDialog(
+                onDismiss = { showSpinOfferDialog = false }
+            )
+        }
+
         val hasHomeOverlayOpen = selectedAmusementEvent != null ||
             showAmusementEventsDialog ||
             showFilterDialog ||
@@ -786,6 +840,9 @@ fun HomeScreen(
             showVaultGateDialog ||
             pendingInviteCode != null ||
             inspectedFriendProfile != null ||
+            inspectedLeaderboardEntry != null ||
+            showLeaderboardScreen ||
+            showSpinOfferDialog ||
             activeGroupChat != null ||
             activeChatWindowContact != null
 
@@ -811,6 +868,9 @@ fun HomeScreen(
                         .remove("pending_group_invite_code")
                         .apply()
                 }
+                inspectedLeaderboardEntry != null -> inspectedLeaderboardEntry = null
+                showLeaderboardScreen -> showLeaderboardScreen = false
+                showSpinOfferDialog -> showSpinOfferDialog = false
                 inspectedFriendProfile != null -> inspectedFriendProfile = null
                 activeGroupChat != null -> activeGroupChat = null
                 activeChatWindowContact != null -> activeChatWindowContact = null

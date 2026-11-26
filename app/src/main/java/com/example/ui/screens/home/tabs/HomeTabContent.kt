@@ -44,6 +44,8 @@ fun HomeTabContent(
     hasActiveEvents: Boolean = false,
     onOpenEvents: () -> Unit,
     onOpenNotifications: () -> Unit = {},
+    onOpenLeaderboard: () -> Unit = {},
+    onOpenSpinOffers: () -> Unit = {},
     onCreateRoom: () -> Unit,
     onJoinWithCode: () -> Unit,
     onOpenFilter: () -> Unit,
@@ -81,6 +83,14 @@ fun HomeTabContent(
         item {
             HomeGreetingCard(
                 currentUserProfile = currentUserProfile
+            )
+        }
+
+        // 2.2 QUICK ACCESS: LIVE LEADERBOARD & SPECIAL OFFERS SPIN
+        item {
+            HomeQuickAccessStrip(
+                onOpenLeaderboard = onOpenLeaderboard,
+                onOpenSpinOffers = onOpenSpinOffers
             )
         }
 
@@ -293,6 +303,156 @@ fun HomeTabContent(
                         room = room,
                         index = index,
                         onJoin = { onJoinRoom(room) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeQuickAccessStrip(
+    onOpenLeaderboard: () -> Unit,
+    onOpenSpinOffers: () -> Unit
+) {
+    val funkyColors = LocalFunkyColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Surface(
+            onClick = onOpenLeaderboard,
+            shape = RoundedCornerShape(20.dp),
+            color = funkyColors.surface,
+            border = BorderStroke(1.dp, funkyColors.line),
+            shadowElevation = 1.dp,
+            modifier = Modifier
+                .weight(1f)
+                .heightIn(min = 66.dp)
+                .testTag("home_leaderboard_card")
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Surface(
+                    shape = androidx.compose.foundation.shape.CircleShape,
+                    color = funkyColors.mango.copy(alpha = 0.16f),
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_crown_filled),
+                            contentDescription = "Live Leaderboard",
+                            tint = funkyColors.mango,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Text(
+                            text = "Leaderboard",
+                            color = funkyColors.ink,
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            maxLines = 1
+                        )
+                        Surface(
+                            shape = RoundedCornerShape(99.dp),
+                            color = androidx.compose.ui.graphics.Color(0xFF22C55E).copy(alpha = 0.16f)
+                        ) {
+                            Text(
+                                text = "LIVE",
+                                color = androidx.compose.ui.graphics.Color(0xFF16A34A),
+                                fontSize = 8.5.sp,
+                                fontWeight = FontWeight.Black,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                            )
+                        }
+                    }
+                    Text(
+                        text = "Voice · Popular · Logins",
+                        color = funkyColors.mute,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+
+        Surface(
+            onClick = onOpenSpinOffers,
+            shape = RoundedCornerShape(20.dp),
+            color = funkyColors.surface,
+            border = BorderStroke(1.dp, funkyColors.line),
+            shadowElevation = 1.dp,
+            modifier = Modifier
+                .weight(1f)
+                .heightIn(min = 66.dp)
+                .testTag("home_spin_offers_card")
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Surface(
+                    shape = androidx.compose.foundation.shape.CircleShape,
+                    color = funkyColors.soft,
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_gift),
+                            contentDescription = "Special Offers Spin",
+                            tint = funkyColors.mango,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Text(
+                            text = "Spin Offers",
+                            color = funkyColors.ink,
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            maxLines = 1
+                        )
+                        Surface(
+                            shape = RoundedCornerShape(99.dp),
+                            color = funkyColors.soft
+                        ) {
+                            Text(
+                                text = "SOON",
+                                color = funkyColors.mango,
+                                fontSize = 8.5.sp,
+                                fontWeight = FontWeight.Black,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                            )
+                        }
+                    }
+                    Text(
+                        text = "Coin Discounts",
+                        color = funkyColors.mute,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1
                     )
                 }
             }

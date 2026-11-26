@@ -497,6 +497,15 @@ fun TelegramPendingMediaDialog(
         val dialogWindow = (dialogView.parent as? DialogWindowProvider)?.window
         SideEffect {
             dialogWindow?.let { win ->
+                win.setLayout(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                )
+                win.setBackgroundDrawableResource(android.R.color.transparent)
+                @Suppress("DEPRECATION")
+                win.statusBarColor = android.graphics.Color.TRANSPARENT
+                @Suppress("DEPRECATION")
+                win.navigationBarColor = android.graphics.Color.TRANSPARENT
                 WindowCompat.setDecorFitsSystemWindows(win, false)
                 WindowCompat.getInsetsController(win, dialogView).apply {
                     isAppearanceLightStatusBars = false
@@ -523,7 +532,7 @@ fun TelegramPendingMediaDialog(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
@@ -533,7 +542,7 @@ fun TelegramPendingMediaDialog(
                         color = Color.White.copy(alpha = 0.12f),
                         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)),
                         modifier = Modifier
-                            .size(44.dp)
+                            .size(48.dp)
                             .testTag("pending_media_close_button")
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -572,7 +581,7 @@ fun TelegramPendingMediaDialog(
                             if (isHd) c.brand else Color.White.copy(alpha = 0.18f)
                         ),
                         modifier = Modifier
-                            .height(34.dp)
+                            .height(36.dp)
                             .testTag("pending_media_hd_toggle")
                     ) {
                         Box(
@@ -657,20 +666,20 @@ fun TelegramPendingMediaDialog(
                     }
                 }
 
-                // Swipeable Photo Preview Pager
+                // Swipeable Photo Preview Pager (bounded with clipToBounds so bottom bar is never pushed off-screen)
                 HorizontalPager(
                     state = pagerState,
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) { page ->
                     val uri = uris.getOrNull(page)
                     val rotDeg = (rotations[page] ?: 0).toFloat()
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .clip(RoundedCornerShape(18.dp))
+                            .clip(RoundedCornerShape(20.dp))
                             .background(Color(0xFF101520)),
                         contentAlignment = Alignment.Center
                     ) {
@@ -691,14 +700,14 @@ fun TelegramPendingMediaDialog(
                 Surface(
                     color = Color(0xFF121722),
                     border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.10f)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
+                    shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 10.dp, bottom = 12.dp)
+                            .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
+                            .padding(top = 12.dp, bottom = 14.dp)
                     ) {
                         if (uris.size > 1) {
                             LazyRow(
@@ -765,16 +774,16 @@ fun TelegramPendingMediaDialog(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp),
+                                .padding(horizontal = 14.dp),
                             verticalAlignment = Alignment.Bottom
                         ) {
                             Surface(
                                 shape = RoundedCornerShape(24.dp),
                                 color = Color(0xFF1E2533),
-                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.10f)),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
                                 modifier = Modifier
                                     .weight(1f)
-                                    .defaultMinSize(minHeight = 46.dp)
+                                    .defaultMinSize(minHeight = 48.dp)
                             ) {
                                 BasicTextField(
                                     value = caption,
@@ -788,7 +797,7 @@ fun TelegramPendingMediaDialog(
                                     maxLines = 4,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                                        .padding(horizontal = 16.dp, vertical = 13.dp)
                                         .testTag("pending_media_caption_input"),
                                     decorationBox = { inner ->
                                         Box(contentAlignment = Alignment.CenterStart) {
@@ -808,7 +817,7 @@ fun TelegramPendingMediaDialog(
                             Spacer(modifier = Modifier.width(10.dp))
 
                             Box(
-                                modifier = Modifier.size(52.dp),
+                                modifier = Modifier.size(54.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Surface(
@@ -823,7 +832,7 @@ fun TelegramPendingMediaDialog(
                                     },
                                     shape = CircleShape,
                                     color = c.brand,
-                                    shadowElevation = 4.dp,
+                                    shadowElevation = 6.dp,
                                     modifier = Modifier
                                         .size(48.dp)
                                         .testTag("pending_media_send_button")

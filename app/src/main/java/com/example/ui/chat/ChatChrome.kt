@@ -10,6 +10,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -97,17 +98,21 @@ fun SystemEventLine(text: String, modifier: Modifier = Modifier) {
 @Composable
 fun DateChip(text: String, modifier: Modifier = Modifier) {
     val c = LocalChatColors.current
-    Box(modifier.fillMaxWidth().padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
-        Text(
-            text = text,
-            color = c.textSecondary,
-            fontSize = 12f.chatSp(),
-            modifier = Modifier
-                .clip(RoundedCornerShape(10.dp))
-                .background(c.surface.copy(alpha = 0.94f))
-                .border(0.5.dp, c.hairline, RoundedCornerShape(10.dp))
-                .padding(horizontal = 10.dp, vertical = 3.dp),
-        )
+    Box(modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+        Surface(
+            shape = RoundedCornerShape(99.dp),
+            color = c.surface.copy(alpha = 0.88f),
+            border = BorderStroke(0.6.dp, c.hairline),
+            shadowElevation = 0.5.dp
+        ) {
+            Text(
+                text = text,
+                color = c.textSecondary,
+                fontSize = 11.5f.chatSp(),
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+        }
     }
 }
 
@@ -119,11 +124,11 @@ fun UnreadDivider(count: Int, modifier: Modifier = Modifier) {
             text = if (count == 1) "1 unread message" else "$count unread messages",
             color = c.accentIn,
             fontSize = 12f.chatSp(),
-            fontWeight = FontWeight.Medium,
+            fontWeight = FontWeight.SemiBold,
             modifier = Modifier
-                .clip(RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(99.dp))
                 .background(c.accentIn.copy(alpha = 0.12f))
-                .padding(horizontal = 12.dp, vertical = 3.dp),
+                .padding(horizontal = 12.dp, vertical = 4.dp),
         )
     }
 }
@@ -135,16 +140,16 @@ fun SecurityNotice(text: String, modifier: Modifier = Modifier, onClick: (() -> 
     Box(modifier.fillMaxWidth().padding(vertical = 8.dp, horizontal = 24.dp), contentAlignment = Alignment.Center) {
         Row(
             modifier = Modifier
-                .clip(RoundedCornerShape(12.dp))
-                .background(c.surface.copy(alpha = 0.94f))
-                .border(0.5.dp, c.hairline, RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(16.dp))
+                .background(c.surface.copy(alpha = 0.88f))
+                .border(0.6.dp, c.hairline, RoundedCornerShape(16.dp))
                 .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(horizontal = 14.dp, vertical = 9.dp),
             verticalAlignment = Alignment.Top,
         ) {
-            ChatIconLock(modifier = Modifier.size(14.dp).padding(top = 2.dp), tint = c.textSecondary)
-            Spacer(Modifier.width(6.dp))
-            Text(text, color = c.textSecondary, fontSize = 12f.chatSp(), lineHeight = 17f.chatSp(), textAlign = TextAlign.Center)
+            ChatIconLock(modifier = Modifier.size(14.dp).padding(top = 2.dp), tint = c.accentIn)
+            Spacer(Modifier.width(7.dp))
+            Text(text, color = c.textSecondary, fontSize = 11.5f.chatSp(), lineHeight = 16.5f.chatSp(), textAlign = TextAlign.Center)
         }
     }
 }
@@ -232,7 +237,8 @@ fun ChatFab(icon: @Composable () -> Unit, contentDescription: String, badge: Int
 }
 
 @Composable
-fun ScrollToBottomFab(unread: Int = 0, onClick: () -> Unit, modifier: Modifier = Modifier) =
+fun ScrollToBottomFab(unread: Int = 0, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val c = LocalChatColors.current
     ChatFab(icon = {
         Canvas(Modifier.size(20.dp)) {
             val sw = 2.dp.toPx()
@@ -241,15 +247,18 @@ fun ScrollToBottomFab(unread: Int = 0, onClick: () -> Unit, modifier: Modifier =
                 lineTo(size.width * 0.50f, size.height * 0.65f)
                 lineTo(size.width * 0.75f, size.height * 0.38f)
             }
-            drawPath(p, Color(0xFF6B6B66), style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            drawPath(p, c.textSecondary, style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
         }
-    }, contentDescription = "Scroll to latest message", badge = 0, onClick = onClick, modifier = modifier)
+    }, contentDescription = "Scroll to latest message", badge = unread, onClick = onClick, modifier = modifier)
+}
 
 @Composable
-fun MentionFab(unreadMentions: Int, onClick: () -> Unit, modifier: Modifier = Modifier) =
+fun MentionFab(unreadMentions: Int, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val c = LocalChatColors.current
     ChatFab(icon = {
-        Text("@", color = Color(0xFF2F6FDE), fontWeight = FontWeight.Bold, fontSize = 20.sp)
+        Text("@", color = c.accentIn, fontWeight = FontWeight.Bold, fontSize = 20.sp)
     }, contentDescription = "Jump to next mention", badge = unreadMentions, onClick = onClick, modifier = modifier)
+}
 
 // ---------------------------------------------------------------------------
 // Long-press: reaction bar + action menu
@@ -570,61 +579,158 @@ fun ChatInputBar(
 ) {
     val c = LocalChatColors.current
     val haptic = LocalHapticFeedback.current
-    Column(modifier = modifier.fillMaxWidth().background(c.surface)) {
-        Box(Modifier.fillMaxWidth().height(0.5.dp).background(c.hairline))
-        topSlot?.invoke()
-        Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp), verticalAlignment = Alignment.Bottom) {
-            if (recording == null) {
-                IconButton(
-                    onClick = onAttach,
-                    modifier = Modifier.size(48.dp).testTag("chat_attach_button")
-                ) {
-                    ChatIconPhoto(tint = c.textSecondary, modifier = Modifier.size(24.dp))
-                }
-                Surface(
-                    modifier = Modifier.weight(1f).defaultMinSize(minHeight = 44.dp),
-                    shape = RoundedCornerShape(22.dp),
-                    color = c.surfaceVariant,
-                ) {
-                    Row(verticalAlignment = Alignment.Bottom) {
-                        IconButton(onClick = onEmojiToggle, modifier = Modifier.size(44.dp)) {
-                            ChatIconEmoji(tint = if (isEmojiOpen) c.accentIn else c.textSecondary)
-                        }
-                        BasicTextField(
-                            value = text,
-                            onValueChange = onTextChange,
-                            textStyle = TextStyle(color = c.text, fontSize = 16f.chatSp(), lineHeight = 22f.chatSp()),
-                            cursorBrush = SolidColor(c.accentIn),
-                            maxLines = 6,
-                            modifier = Modifier.weight(1f).padding(vertical = 11.dp).testTag("chat_message_input"),
-                            decorationBox = { inner ->
-                                Box {
-                                    if (text.isEmpty()) Text(placeholder, color = c.textSecondary, fontSize = 16f.chatSp())
-                                    inner()
+    Surface(
+        color = c.surface,
+        shadowElevation = 4.dp,
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Box(Modifier.fillMaxWidth().height(0.6.dp).background(c.hairline))
+            topSlot?.invoke()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.Bottom
+            ) {
+                if (recording == null) {
+                    Surface(
+                        modifier = Modifier.weight(1f).defaultMinSize(minHeight = 48.dp),
+                        shape = RoundedCornerShape(24.dp),
+                        color = c.surfaceVariant,
+                        border = BorderStroke(0.75.dp, c.hairline)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.Bottom,
+                            modifier = Modifier.padding(horizontal = 2.dp)
+                        ) {
+                            IconButton(
+                                onClick = onEmojiToggle,
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .testTag("chat_emoji_button")
+                            ) {
+                                ChatIconEmoji(tint = if (isEmojiOpen) c.accentIn else c.textSecondary)
+                            }
+                            BasicTextField(
+                                value = text,
+                                onValueChange = onTextChange,
+                                textStyle = TextStyle(color = c.text, fontSize = 16f.chatSp(), lineHeight = 22f.chatSp()),
+                                cursorBrush = SolidColor(c.accentIn),
+                                maxLines = 6,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(vertical = 12.dp)
+                                    .testTag("chat_message_input"),
+                                decorationBox = { inner ->
+                                    Box {
+                                        if (text.isEmpty()) Text(placeholder, color = c.textSecondary, fontSize = 16f.chatSp())
+                                        inner()
+                                    }
+                                },
+                            )
+                            if (showAiButton && text.isNotBlank()) {
+                                IconButton(onClick = onAi, modifier = Modifier.size(44.dp)) {
+                                    ChatIconSparkles(tint = c.accentIn)
                                 }
-                            },
-                        )
-                        if (showAiButton && text.isNotBlank()) {
-                            IconButton(onClick = onAi, modifier = Modifier.size(44.dp)) {
-                                ChatIconSparkles(tint = c.accentIn)
+                            }
+                            IconButton(
+                                onClick = onAttach,
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .testTag("chat_attach_button")
+                            ) {
+                                ChatIconPhoto(tint = c.textSecondary, modifier = Modifier.size(22.dp))
                             }
                         }
                     }
-                }
-            } else {
-                Box(Modifier.weight(1f)) { recording() }
-            }
-            Spacer(Modifier.width(4.dp))
-            Crossfade(targetState = (text.isNotBlank() && recording == null), animationSpec = tween(150), label = "micOrSend") { showSend ->
-                if (showSend) {
-                    SendButton(
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onSend()
-                        }
-                    )
                 } else {
-                    micButton()
+                    Box(Modifier.weight(1f)) { recording() }
+                }
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier.size(ChatDimens.MinTouch),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Crossfade(
+                        targetState = (text.isNotBlank() && recording == null),
+                        animationSpec = tween(150),
+                        label = "micOrSend"
+                    ) { showSend ->
+                        if (showSend) {
+                            SendButton(
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onSend()
+                                }
+                            )
+                        } else {
+                            micButton()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Subtle modern Telegram-inspired ambient wallpaper canvas with gentle radial wash and crisp geometric doodles.
+ */
+@Composable
+fun TelegramAmbientWallpaper(
+    colors: ChatColors,
+    modifier: Modifier = Modifier
+) {
+    val motifTint = if (colors.isDark) Color.White.copy(alpha = 0.035f) else colors.accentIn.copy(alpha = 0.045f)
+    val glowTint = colors.brand.copy(alpha = if (colors.isDark) 0.06f else 0.07f)
+    Canvas(modifier = modifier.background(colors.wallpaper)) {
+        drawCircle(
+            color = glowTint,
+            radius = size.width * 0.55f,
+            center = Offset(size.width * 0.85f, size.height * 0.14f)
+        )
+        drawCircle(
+            color = colors.accentIn.copy(alpha = if (colors.isDark) 0.04f else 0.035f),
+            radius = size.width * 0.48f,
+            center = Offset(size.width * 0.12f, size.height * 0.78f)
+        )
+        val stepX = 76.dp.toPx()
+        val stepY = 76.dp.toPx()
+        val cols = (size.width / stepX).toInt() + 2
+        val rows = (size.height / stepY).toInt() + 2
+        val stroke = Stroke(width = 1.4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+        for (r in 0 until rows) {
+            for (c in 0 until cols) {
+                val cx = c * stepX + if (r % 2 == 1) stepX * 0.45f else 0f
+                val cy = r * stepY
+                when ((r + c) % 3) {
+                    0 -> drawCircle(
+                        color = motifTint,
+                        radius = 7.dp.toPx(),
+                        center = Offset(cx, cy),
+                        style = stroke
+                    )
+                    1 -> {
+                        val s = 6.dp.toPx()
+                        val sparkle = Path().apply {
+                            moveTo(cx, cy - s)
+                            lineTo(cx, cy + s)
+                            moveTo(cx - s, cy)
+                            lineTo(cx + s, cy)
+                        }
+                        drawPath(sparkle, motifTint, style = stroke)
+                    }
+                    else -> {
+                        val s = 6.5.dp.toPx()
+                        val bubble = Path().apply {
+                            moveTo(cx - s, cy - s * 0.4f)
+                            lineTo(cx + s * 0.9f, cy - s * 0.4f)
+                            lineTo(cx + s * 0.2f, cy + s * 0.7f)
+                            close()
+                        }
+                        drawPath(bubble, motifTint, style = stroke)
+                    }
                 }
             }
         }

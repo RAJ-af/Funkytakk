@@ -96,12 +96,15 @@ fun CoinStoreScreen(
     var selectedIndex by remember { mutableStateOf(1) }
     var displayBalance by remember(currentBalance) { mutableStateOf(currentBalance) }
     var showDoneOverlay by remember { mutableStateOf(false) }
+    var showSpinOfferDialog by remember { mutableStateOf(false) }
     var lastAddedCoins by remember { mutableStateOf(0) }
     var balanceBeforePurchase by remember { mutableStateOf(currentBalance) }
     var balanceAfterPurchase by remember { mutableStateOf(currentBalance) }
 
     BackHandler {
-        if (showDoneOverlay) {
+        if (showSpinOfferDialog) {
+            showSpinOfferDialog = false
+        } else if (showDoneOverlay) {
             showDoneOverlay = false
         } else {
             onDismiss()
@@ -308,7 +311,86 @@ fun CoinStoreScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // ---------------------------------------------------------
+                // SPECIAL OFFERS SPIN WHEEL BANNER (CLOSED MOCKUP)
+                // ---------------------------------------------------------
+                Surface(
+                    onClick = { showSpinOfferDialog = true },
+                    shape = RoundedCornerShape(24.dp),
+                    color = funkyColors.surface,
+                    border = BorderStroke(1.2.dp, funkyColors.mango.copy(alpha = 0.55f)),
+                    shadowElevation = 2.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("coin_store_spin_offers_banner")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(46.dp)
+                                .clip(CircleShape)
+                                .background(funkyColors.mango.copy(alpha = 0.16f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_gift),
+                                contentDescription = "Special Offers Spin",
+                                tint = funkyColors.mango,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = "Special Offers Spin",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = funkyColors.ink
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(99.dp),
+                                    color = funkyColors.soft
+                                ) {
+                                    Text(
+                                        text = "CLOSED",
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = funkyColors.mango,
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Preview coin discounts & bonus spin offers",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = funkyColors.mute
+                            )
+                        }
+
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_chevron_right),
+                            contentDescription = null,
+                            tint = funkyColors.mute,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
 
                 // ---------------------------------------------------------
                 // PACKS SECTION HEADER
@@ -540,6 +622,12 @@ fun CoinStoreScreen(
                 oldBalance = balanceBeforePurchase,
                 newBalance = balanceAfterPurchase,
                 onBackToStore = { showDoneOverlay = false }
+            )
+        }
+
+        if (showSpinOfferDialog) {
+            SpinOfferWheelDialog(
+                onDismiss = { showSpinOfferDialog = false }
             )
         }
     }

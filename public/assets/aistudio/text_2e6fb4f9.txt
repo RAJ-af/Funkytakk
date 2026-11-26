@@ -1,0 +1,98 @@
+
+FunkyTalk Diagnostic Report
+Generated: 2026-11-26 17:14:14 UTC
+App Version: 0.9.0-beta1 (1)
+Device: OPPO CPH2757 (Android 16, SDK 36)
+Current Screen: home
+
+Recent Issues (3):
+---- #1 [SLOW_UI] 2026-11-26 17:13:57 UTC ----
+Source: MainThreadWatchdog
+Screen: home
+Message: UI thread paused for >2756ms
+Trace:
+jdk.internal.misc.Unsafe.park(Native Method)
+  at java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:276)
+  at java.util.concurrent.locks.AbstractQueuedSynchronizer.acquire(AbstractQueuedSynchronizer.java:792)
+  at java.util.concurrent.locks.AbstractQueuedSynchronizer.tryAcquireSharedNanos(AbstractQueuedSynchronizer.java:1166)
+  at java.util.concurrent.CountDownLatch.await(CountDownLatch.java:276)
+  at com.google.firebase.crashlytics.internal.common.Utils.awaitEvenIfOnMainThread(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:33)
+  at com.google.firebase.crashlytics.internal.common.CrashlyticsController.handleUncaughtException(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:69)
+  at com.google.firebase.crashlytics.internal.common.CrashlyticsController.handleUncaughtException(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:104)
+  at com.google.firebase.crashlytics.internal.common.CrashlyticsController$1.onUncaughtException(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:3)
+  at com.google.firebase.crashlytics.internal.common.CrashlyticsUncaughtExceptionHandler.uncaughtException(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:22)
+  at com.example.diagnostics.CrashAndErrorReporter.install$lambda$2(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:16)
+  at com.example.diagnostics.CrashAndErrorReporter.e(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:1)
+  at wg0.uncaughtException(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:1)
+  at java.lang.ThreadGroup.uncaughtException(ThreadGroup.java:1098)
+  at java.lang.ThreadGroup.uncaughtException(ThreadGroup.java:1093)
+  at com.android.internal.os.RuntimeInitExtImpl.uncaughtExceptionExt(RuntimeInitExtImpl.java:72)
+  at com.android.internal.os.RuntimeInit$LoggingHandler.uncaughtException(RuntimeInit.java:138)
+  at com.android.internal.os.RuntimeInit$KillApplicationHandler.ensureLogging(RuntimeInit.java:226)
+---- #2 [CRASH] 2026-11-26 17:13:55 UTC ----
+Source: Uncaught(main)
+Screen: home
+Message: ExceptionInInitializerError
+Trace:
+java.lang.ExceptionInInitializerError
+at com.example.ui.screens.home.tabs.MomentsTabContentKt.MomentsTabContent(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:419)
+at com.example.ui.screens.HomeScreenKt.HomeScreen$lambda$229$lambda$201$lambda$200(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:20)
+at com.example.ui.screens.HomeScreenKt.i0(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:1)
+at wn1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:219)
+at androidx.compose.runtime.internal.ComposableLambdaImpl.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:37)
+at androidx.compose.runtime.internal.ComposableLambdaImpl.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:9)
+at androidx.compose.animation.CrossfadeKt$Crossfade$5$1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:293)
+at androidx.compose.animation.CrossfadeKt$Crossfade$5$1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:309)
+at androidx.compose.runtime.internal.ComposableLambdaImpl.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:30)
+at androidx.compose.runtime.internal.ComposableLambdaImpl.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:159)
+at androidx.compose.animation.CrossfadeKt.Crossfade(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:776)
+at androidx.compose.animation.CrossfadeKt.Crossfade(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:856)
+at com.example.ui.screens.HomeScreenKt.HomeScreen$lambda$229$lambda$201(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:9)
+at com.example.ui.screens.HomeScreenKt.A(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:1)
+at xn1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:225)
+at androidx.compose.runtime.internal.ComposableLambdaImpl.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:37)
+at androidx.compose.runtime.internal.ComposableLambdaImpl$invoke$1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:13)
+at androidx.compose.runtime.internal.ComposableLambdaImpl$invoke$1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:17)
+at androidx.compose.runtime.RecomposeScopeImpl.compose(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:31)
+at androidx.compose.runtime.ComposerImpl.recomposeToGroupEnd(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:109)
+at androidx.compose.runtime.ComposerImpl.skipCurrentGroup(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:126)
+at androidx.compose.runtime.ComposerImpl.doCompose(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:281)
+at androidx.compose.runtime.ComposerImpl.recompose$runtime_release(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:36)
+at androidx.compose.runtime.CompositionImpl.recompose(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:34)
+at androidx.compose.runtime.Recomposer.performRecompose(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:63)
+at androidx.compose.runtime.Recomposer.access$performRecompose(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:1)
+at androidx.compose.runtime.Recomposer$runRecomposeAndApplyChanges$2$1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:557)
+---- #3 [CRASH] 2026-11-26 17:13:52 UTC ----
+Source: Uncaught(main)
+Screen: home
+Message: ExceptionInInitializerError
+Trace:
+java.lang.ExceptionInInitializerError
+at com.example.ui.screens.home.tabs.MomentsTabContentKt.MomentsTabContent(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:419)
+at com.example.ui.screens.HomeScreenKt.HomeScreen$lambda$229$lambda$201$lambda$200(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:20)
+at com.example.ui.screens.HomeScreenKt.i0(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:1)
+at wn1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:219)
+at androidx.compose.runtime.internal.ComposableLambdaImpl.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:37)
+at androidx.compose.runtime.internal.ComposableLambdaImpl.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:9)
+at androidx.compose.animation.CrossfadeKt$Crossfade$5$1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:293)
+at androidx.compose.animation.CrossfadeKt$Crossfade$5$1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:309)
+at androidx.compose.runtime.internal.ComposableLambdaImpl.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:30)
+at androidx.compose.runtime.internal.ComposableLambdaImpl.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:159)
+at androidx.compose.animation.CrossfadeKt.Crossfade(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:776)
+at androidx.compose.animation.CrossfadeKt.Crossfade(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:856)
+at com.example.ui.screens.HomeScreenKt.HomeScreen$lambda$229$lambda$201(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:9)
+at com.example.ui.screens.HomeScreenKt.A(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:1)
+at xn1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:225)
+at androidx.compose.runtime.internal.ComposableLambdaImpl.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:37)
+at androidx.compose.runtime.internal.ComposableLambdaImpl$invoke$1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:13)
+at androidx.compose.runtime.internal.ComposableLambdaImpl$invoke$1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:17)
+at androidx.compose.runtime.RecomposeScopeImpl.compose(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:31)
+at androidx.compose.runtime.ComposerImpl.recomposeToGroupEnd(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:109)
+at androidx.compose.runtime.ComposerImpl.skipCurrentGroup(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:126)
+at androidx.compose.runtime.ComposerImpl.doCompose(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:281)
+at androidx.compose.runtime.ComposerImpl.recompose$runtime_release(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:36)
+at androidx.compose.runtime.CompositionImpl.recompose(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:34)
+at androidx.compose.runtime.Recomposer.performRecompose(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:63)
+at androidx.compose.runtime.Recomposer.access$performRecompose(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:1)
+at androidx.compose.runtime.Recomposer$runRecomposeAndApplyChanges$2$1.invoke(r8-map-id-95240f248fe3506731c188881f53d2b821c35b73c1618a0408092abf61e35eac:557)
+ 

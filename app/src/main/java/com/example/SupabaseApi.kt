@@ -776,6 +776,13 @@ interface SupabaseApi {
         @Query("room_id") roomIdEq: String
     ): Response<List<RoomEndSummaryResponse>>
 
+    @POST("rest/v1/rpc/get_leaderboard_logins")
+    suspend fun getLeaderboardLoginsRpc(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: Map<String, String> = emptyMap()
+    ): Response<ResponseBody>
+
     @GET("rest/v1/room_invites?select=*")
     suspend fun getPendingRoomInvites(
         @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,

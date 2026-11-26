@@ -666,7 +666,7 @@ fun DirectChatScreen(
         }
 
         Scaffold(
-            contentWindowInsets = if (embeddedInSheet) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
             topBar = {
                 if (isSelectionMode) {
                     SelectionTopBar(
@@ -707,76 +707,111 @@ fun DirectChatScreen(
                     )
                 } else {
                     Surface(
-                        color = colors.surface,
-                        shadowElevation = 1.dp,
+                        color = colors.surface.copy(alpha = 0.96f),
+                        shadowElevation = 2.dp,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .then(if (embeddedInSheet) Modifier else Modifier.statusBarsPadding())
-                                .padding(horizontal = 4.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
-                                ChatIconBack(tint = colors.text, modifier = Modifier.size(24.dp))
-                            }
-
+                        Column(modifier = Modifier.fillMaxWidth()) {
                             Row(
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .defaultMinSize(minHeight = 48.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .clickable(enabled = partnerUserId.isNotBlank()) {
-                                        showPartnerProfile = true
-                                    }
-                                    .padding(horizontal = 4.dp, vertical = 4.dp)
-                                    .testTag("direct_chat_partner_header"),
+                                    .fillMaxWidth()
+                                    .then(if (embeddedInSheet) Modifier else Modifier.statusBarsPadding())
+                                    .padding(horizontal = 8.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                com.example.ui.components.PresenceAvatar(
-                                    avatarUrl = resolvedAvatarUrl.ifBlank { null },
-                                    size = 40.dp,
-                                    userId = partnerUserId,
-                                    enableFrameAnimation = true,
-                                    countryCode = resolvedCountryCode.takeIf { it.isNotBlank() },
-                                    isOnline = resolvedIsOnline
-                                )
+                                IconButton(
+                                    onClick = onBack,
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .testTag("direct_chat_back_button")
+                                ) {
+                                    ChatIconBack(tint = colors.text, modifier = Modifier.size(22.dp))
+                                }
 
-                                Spacer(modifier = Modifier.width(10.dp))
-
-                                Column(modifier = Modifier.weight(1f)) {
-                                    com.example.store.DecoratedUserName(
+                                Row(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .defaultMinSize(minHeight = 48.dp)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .clickable(enabled = partnerUserId.isNotBlank()) {
+                                            showPartnerProfile = true
+                                        }
+                                        .padding(horizontal = 6.dp, vertical = 4.dp)
+                                        .testTag("direct_chat_partner_header"),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    com.example.ui.components.PresenceAvatar(
+                                        avatarUrl = resolvedAvatarUrl.ifBlank { null },
+                                        size = 42.dp,
                                         userId = partnerUserId,
-                                        name = partnerName,
-                                        fontSize = 16f.chatSp(),
-                                        fontWeight = FontWeight.SemiBold,
-                                        defaultColor = colors.text,
-                                        modifier = Modifier.fillMaxWidth()
+                                        enableFrameAnimation = true,
+                                        countryCode = resolvedCountryCode.takeIf { it.isNotBlank() },
+                                        isOnline = resolvedIsOnline
                                     )
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(7.dp)
-                                                .clip(CircleShape)
-                                                .background(if (resolvedIsOnline) Color(0xFF22C55E) else Color(0xFF94A3B8))
-                                        )
-                                        Spacer(modifier = Modifier.width(5.dp))
-                                        val statusTxt = if (resolvedIsOnline) "Online" else "Offline"
-                                        val displayLocation = if (resolvedCountryName.isNotBlank()) "$statusTxt · $resolvedCountryName" else statusTxt
-                                        Text(
-                                            text = displayLocation,
-                                            color = colors.textSecondary,
-                                            fontSize = 12f.chatSp()
-                                        )
+
+                                    Spacer(modifier = Modifier.width(10.dp))
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            com.example.store.DecoratedUserName(
+                                                userId = partnerUserId,
+                                                name = partnerName,
+                                                fontSize = 16f.chatSp(),
+                                                fontWeight = FontWeight.Bold,
+                                                defaultColor = colors.text,
+                                                modifier = Modifier.weight(1f, fill = false)
+                                            )
+                                            Surface(
+                                                shape = RoundedCornerShape(99.dp),
+                                                color = colors.accentIn.copy(alpha = 0.12f)
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                                ) {
+                                                    ChatIconLock(tint = colors.accentIn, modifier = Modifier.size(10.dp))
+                                                    Text(
+                                                        text = "E2EE",
+                                                        color = colors.accentIn,
+                                                        fontSize = 9.5.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(7.dp)
+                                                    .clip(CircleShape)
+                                                    .background(if (resolvedIsOnline) Color(0xFF22C55E) else Color(0xFF94A3B8))
+                                            )
+                                            Spacer(modifier = Modifier.width(5.dp))
+                                            val statusTxt = if (resolvedIsOnline) "Active now" else "Offline"
+                                            val displayLocation = if (resolvedCountryName.isNotBlank()) "$statusTxt · $resolvedCountryName" else statusTxt
+                                            Text(
+                                                text = displayLocation,
+                                                color = if (resolvedIsOnline) Color(0xFF16A34A) else colors.textSecondary,
+                                                fontSize = 11.5f.chatSp(),
+                                                fontWeight = FontWeight.Medium,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
                                     }
                                 }
-                            }
 
-                            Box {
-                                IconButton(onClick = { showTopMenu = true }) {
-                                    com.example.ui.components.SoftThreeDotsIcon(size = 18.dp, color = colors.text)
-                                }
+                                Box {
+                                    IconButton(
+                                        onClick = { showTopMenu = true },
+                                        modifier = Modifier.size(48.dp)
+                                    ) {
+                                        com.example.ui.components.SoftThreeDotsIcon(size = 18.dp, color = colors.text)
+                                    }
                                 DropdownMenu(
                                     expanded = showTopMenu,
                                     onDismissRequest = { showTopMenu = false },
@@ -858,6 +893,8 @@ fun DirectChatScreen(
                                     )
                                 }
                             }
+                            }
+                            Box(Modifier.fillMaxWidth().height(0.6.dp).background(colors.hairline))
                         }
                     }
                 }
@@ -874,7 +911,6 @@ fun DirectChatScreen(
                             color = colors.surface,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .navigationBarsPadding()
                                 .padding(horizontal = 16.dp, vertical = 14.dp)
                         ) {
                             Text(
@@ -1117,7 +1153,7 @@ fun DirectChatScreen(
                 if (myChatBgConfig != null) {
                     com.example.store.ChatBackground(config = myChatBgConfig, isDark = false, modifier = Modifier.fillMaxSize())
                 } else {
-                    Box(modifier = Modifier.fillMaxSize().background(colors.wallpaper))
+                    TelegramAmbientWallpaper(colors = colors, modifier = Modifier.fillMaxSize())
                 }
                 LazyColumn(
                     state = listState,
