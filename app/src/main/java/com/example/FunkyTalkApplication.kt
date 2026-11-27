@@ -64,14 +64,16 @@ class FunkyTalkApplication : Application(), ImageLoaderFactory {
             .writeTimeout(15, TimeUnit.SECONDS)
             .addInterceptor { chain ->
                 val request = chain.request()
-                if (request.url.host.contains("appwrite.io")) {
-                    val newRequest = request.newBuilder()
-                        .header("X-Appwrite-Project", APPWRITE_PROJECT_ID)
-                        .build()
-                    chain.proceed(newRequest)
-                } else {
-                    chain.proceed(request)
+                val rawUrl = request.url.toString()
+                val optimizedUrl = optimizeCloudinaryImageUrl(rawUrl)
+                val builder = request.newBuilder()
+                if (optimizedUrl != rawUrl) {
+                    builder.url(optimizedUrl)
                 }
+                if (request.url.host.contains("appwrite.io")) {
+                    builder.header("X-Appwrite-Project", APPWRITE_PROJECT_ID)
+                }
+                chain.proceed(builder.build())
             }
             .build()
 
@@ -98,5 +100,27 @@ class FunkyTalkApplication : Application(), ImageLoaderFactory {
             }
             .crossfade(150)
             .build()
+    }
+
+    companion object Helpers {
+        internal fun optimizeCloudinaryImageUrl(url: String): String {
+            if (!url.contains("res.cloudinary.com/") || !url.contains("/image/upload/")) {
+                return url
+            }
+            val afterUpload = url.substringAfter("/image/upload/")
+            val firstSegment = afterUpload.substringBefore('/')
+            // Only inject transformation if no transformation flags are already present
+            val looksLikeVersionOrFolder = firstSegment.startsWith("v") && firstSegment.drop(1).all { it.isDigit() }
+            if (!looksLikeVersionOrFolder && firstSegment.contains(",")) {
+                return url
+            }
+            if (afterUpload.contains("f_auto") || afterUpload.contains("q_auto")) {
+                return url
+            }
+            return url.replaceFirst(
+                "/image/upload/",
+                "/image/upload/f_auto,q_auto,w_900,c_limit/"
+            )
+        }
     }
 }

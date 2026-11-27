@@ -50,6 +50,7 @@ media3 = "1.5.1"
 telephoto = "0.14.0"
 lottieCompose = "6.6.2"
 agoraVoice = "4.4.1"
+dailyClient = "0.41.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -124,6 +125,7 @@ androidx-media3-effect = { group = "androidx.media3", name = "media3-effect", ve
 telephoto-zoomable-image-coil = { group = "me.saket.telephoto", name = "zoomable-image-coil", version.ref = "telephoto" }
 lottie-compose = { group = "com.airbnb.android", name = "lottie-compose", version.ref = "lottieCompose" }
 agora-voice = { group = "io.agora.rtc", name = "voice-sdk", version.ref = "agoraVoice" }
+daily-client = { group = "co.daily", name = "client", version.ref = "dailyClient" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

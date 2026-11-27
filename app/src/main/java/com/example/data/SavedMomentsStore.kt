@@ -6,8 +6,9 @@ import com.example.ActiveUserManager
 import com.example.BuildConfig
 import com.example.MomentDto
 import com.example.crypto.VaultSecurityManager
-import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.Types
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -33,8 +34,17 @@ object SavedMomentsStore {
     private const val GCM_IV_LENGTH = 12
     private const val GCM_TAG_LENGTH_BITS = 128
 
-    private val gson = Gson()
-    private val listType = object : TypeToken<List<MomentDto>>() {}.type
+    private val moshi: Moshi by lazy {
+        Moshi.Builder()
+            .addLast(KotlinJsonAdapterFactory())
+            .build()
+    }
+    private val listType by lazy {
+        Types.newParameterizedType(List::class.java, MomentDto::class.java)
+    }
+    private val listAdapter by lazy {
+        moshi.adapter<List<MomentDto>>(listType)
+    }
     private val secureRandom = SecureRandom()
 
     private val _savedMoments = MutableStateFlow<List<MomentDto>>(emptyList())
@@ -72,13 +82,13 @@ object SavedMomentsStore {
     }
 
     internal fun serializeMoments(moments: List<MomentDto>): ByteArray {
-        return gson.toJson(moments, listType).toByteArray(Charsets.UTF_8)
+        return listAdapter.toJson(moments).toByteArray(Charsets.UTF_8)
     }
 
     internal fun deserializeMoments(jsonBytes: ByteArray): List<MomentDto> {
         val json = String(jsonBytes, Charsets.UTF_8)
         if (json.isBlank()) return emptyList()
-        return gson.fromJson<List<MomentDto>>(json, listType) ?: emptyList()
+        return runCatching { listAdapter.fromJson(json) }.getOrNull() ?: emptyList()
     }
 
     @Synchronized

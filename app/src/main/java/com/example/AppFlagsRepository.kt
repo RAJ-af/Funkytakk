@@ -17,14 +17,15 @@ import org.json.JSONObject
 data class AppFlags(
     val coinStoreEnabled: Boolean = false,
     val vipEnabled: Boolean = false,
-    val minSupportedVersionCode: Int = 0
+    val minSupportedVersionCode: Int = 0,
+    val screenShareEnabled: Boolean = false
 )
 
 /**
  * Reads remote feature/release flags from Supabase `get_app_flags` RPC (anon-readable, pre-login).
  *
  * Security & fail-closed guarantees:
- * - Defaults to `AppFlags(coinStoreEnabled = false, vipEnabled = false, minSupportedVersionCode = 0)`.
+ * - Defaults to `AppFlags(coinStoreEnabled = false, vipEnabled = false, minSupportedVersionCode = 0, screenShareEnabled = false)`.
  * - Fails closed on network failure, 3s timeout, unexpected payload, or missing/non-typed keys.
  * - Caches the last valid server payload in SharedPreferences (`app_flags_cache`) for immediate cold-start reads.
  * - Debug overrides are compiled/applied ONLY when `BuildConfig.DEBUG` is true and never exist in release UI.
@@ -36,6 +37,7 @@ object AppFlagsRepository {
     private const val KEY_COIN_STORE = "coin_store_enabled"
     private const val KEY_VIP = "vip_enabled"
     private const val KEY_MIN_VERSION = "min_supported_version_code"
+    private const val KEY_SCREEN_SHARE = "screen_share_enabled"
     private const val STALE_AFTER_MS = 10L * 60L * 1000L
     private const val RPC_TIMEOUT_MS = 3000L
 
@@ -63,6 +65,9 @@ object AppFlagsRepository {
     @Volatile
     private var debugOverrideMinVersion: Int? = null
 
+    @Volatile
+    private var debugOverrideScreenShare: Boolean? = null
+
     private val _flags = MutableStateFlow(AppFlags())
     val flags: StateFlow<AppFlags> = _flags.asStateFlow()
 
@@ -75,7 +80,8 @@ object AppFlagsRepository {
                 serverFlags = AppFlags(
                     coinStoreEnabled = prefs.getBoolean(KEY_COIN_STORE, false),
                     vipEnabled = prefs.getBoolean(KEY_VIP, false),
-                    minSupportedVersionCode = prefs.getInt(KEY_MIN_VERSION, 0).coerceAtLeast(0)
+                    minSupportedVersionCode = prefs.getInt(KEY_MIN_VERSION, 0).coerceAtLeast(0),
+                    screenShareEnabled = prefs.getBoolean(KEY_SCREEN_SHARE, false)
                 )
                 publishEffectiveFlags()
             } else {
@@ -142,6 +148,7 @@ object AppFlagsRepository {
                     .putBoolean(KEY_COIN_STORE, fetched.coinStoreEnabled)
                     .putBoolean(KEY_VIP, fetched.vipEnabled)
                     .putInt(KEY_MIN_VERSION, fetched.minSupportedVersionCode)
+                    .putBoolean(KEY_SCREEN_SHARE, fetched.screenShareEnabled)
                     .apply()
             } else {
                 // Fail closed when RPC fails, times out, or returns an unexpected payload.
@@ -152,7 +159,7 @@ object AppFlagsRepository {
         }
     }
 
-    private fun parseFlagsJson(raw: String): AppFlags? {
+    internal fun parseFlagsJson(raw: String): AppFlags? {
         if (raw.isBlank() || !raw.startsWith("{")) return null
         return try {
             val obj = JSONObject(raw)
@@ -168,10 +175,15 @@ object AppFlagsRepository {
                 is Number -> v.toInt().coerceAtLeast(0)
                 else -> 0
             }
+            val screenShare = when (val v = obj.opt(KEY_SCREEN_SHARE)) {
+                is Boolean -> v
+                else -> false
+            }
             AppFlags(
                 coinStoreEnabled = coinStore,
                 vipEnabled = vip,
-                minSupportedVersionCode = minVersion
+                minSupportedVersionCode = minVersion,
+                screenShareEnabled = screenShare
             )
         } catch (_: Exception) {
             null
@@ -183,7 +195,8 @@ object AppFlagsRepository {
             AppFlags(
                 coinStoreEnabled = debugOverrideCoinStore ?: serverFlags.coinStoreEnabled,
                 vipEnabled = debugOverrideVip ?: serverFlags.vipEnabled,
-                minSupportedVersionCode = debugOverrideMinVersion ?: serverFlags.minSupportedVersionCode
+                minSupportedVersionCode = debugOverrideMinVersion ?: serverFlags.minSupportedVersionCode,
+                screenShareEnabled = debugOverrideScreenShare ?: serverFlags.screenShareEnabled
             )
         } else {
             serverFlags
@@ -211,9 +224,18 @@ object AppFlagsRepository {
         publishEffectiveFlags()
     }
 
+    fun setDebugScreenShareOverride(enabled: Boolean?) {
+        if (!BuildConfig.DEBUG) return
+        debugOverrideScreenShare = enabled
+        publishEffectiveFlags()
+    }
+
     fun hasDebugOverrides(): Boolean {
         if (!BuildConfig.DEBUG) return false
-        return debugOverrideCoinStore != null || debugOverrideVip != null || debugOverrideMinVersion != null
+        return debugOverrideCoinStore != null ||
+            debugOverrideVip != null ||
+            debugOverrideMinVersion != null ||
+            debugOverrideScreenShare != null
     }
 
     fun clearDebugOverrides() {
@@ -221,6 +243,7 @@ object AppFlagsRepository {
         debugOverrideCoinStore = null
         debugOverrideVip = null
         debugOverrideMinVersion = null
+        debugOverrideScreenShare = null
         publishEffectiveFlags()
     }
 }

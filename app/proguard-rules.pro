@@ -21,6 +21,14 @@
 -keep class * extends com.squareup.moshi.JsonAdapter { *; }
 -keep class com.squareup.moshi.** { *; }
 
+# Keep Gson and TypeToken subclasses (prevents R8 stripping generic signatures under full mode)
+-keep class com.google.gson.** { *; }
+-keep class * extends com.google.gson.reflect.TypeToken
+-keepclassmembers class * extends com.google.gson.reflect.TypeToken {
+    <init>();
+}
+-dontwarn com.google.gson.**
+
 # Keep Retrofit & OkHttp / Okio
 -keepclassmembers,allowobfuscation interface * {
     @retrofit2.http.* <methods>;
@@ -58,6 +66,12 @@
 # Agora Voice SDK
 -keep class io.agora.** { *; }
 -dontwarn io.agora.**
+
+# Daily.co Screen Share SDK (Video-only)
+-keep class co.daily.** { *; }
+-dontwarn co.daily.**
+-keep class org.webrtc.** { *; }
+-dontwarn org.webrtc.**
 
 # Firebase (Auth, Firestore, Messaging, Crashlytics, Analytics, App Check)
 -keepattributes *Annotation*

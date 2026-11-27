@@ -2530,7 +2530,474 @@ fun SoftHourglassIcon(
     }
 }
 
+@Composable
+fun SoftBackChevronIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 24.dp,
+    color: Color = Color.White
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.11f
+        val chevron = Path().apply {
+            moveTo(w * 0.66f, h * 0.20f)
+            lineTo(w * 0.34f, h * 0.50f)
+            lineTo(w * 0.66f, h * 0.80f)
+        }
+        drawPath(
+            path = chevron,
+            color = color,
+            style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+    }
+}
 
+@Composable
+fun SoftPhoneCallIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 22.dp,
+    color: Color = Color(0xFF1F160C)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.095f
+        val handset = Path().apply {
+            moveTo(w * 0.27f, h * 0.17f)
+            cubicTo(w * 0.20f, h * 0.17f, w * 0.16f, h * 0.24f, w * 0.17f, h * 0.33f)
+            cubicTo(w * 0.20f, h * 0.61f, w * 0.39f, h * 0.80f, w * 0.67f, h * 0.83f)
+            cubicTo(w * 0.76f, h * 0.84f, w * 0.83f, h * 0.80f, w * 0.83f, h * 0.73f)
+            lineTo(w * 0.83f, h * 0.65f)
+            cubicTo(w * 0.83f, h * 0.60f, w * 0.78f, h * 0.57f, w * 0.72f, h * 0.57f)
+            lineTo(w * 0.63f, h * 0.57f)
+            cubicTo(w * 0.58f, h * 0.57f, w * 0.55f, h * 0.61f, w * 0.53f, h * 0.64f)
+            cubicTo(w * 0.44f, h * 0.59f, w * 0.41f, h * 0.56f, w * 0.36f, h * 0.47f)
+            cubicTo(w * 0.39f, h * 0.45f, w * 0.43f, h * 0.42f, w * 0.43f, h * 0.37f)
+            lineTo(w * 0.43f, h * 0.28f)
+            cubicTo(w * 0.43f, h * 0.22f, w * 0.40f, h * 0.17f, w * 0.35f, h * 0.17f)
+            close()
+        }
+        drawPath(
+            path = handset,
+            color = color,
+            style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+        // Soft subtle call ring arc at top-right
+        drawArc(
+            color = color,
+            startAngle = -80f,
+            sweepAngle = 70f,
+            useCenter = false,
+            topLeft = Offset(w * 0.50f, h * 0.16f),
+            size = Size(w * 0.34f, h * 0.34f),
+            style = Stroke(width = sw * 0.85f, cap = StrokeCap.Round)
+        )
+    }
+}
 
+@Composable
+fun SoftPhoneEndIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 26.dp,
+    color: Color = Color.White
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val handset = Path().apply {
+            moveTo(w * 0.14f, h * 0.56f)
+            cubicTo(w * 0.14f, h * 0.41f, w * 0.31f, h * 0.33f, w * 0.50f, h * 0.33f)
+            cubicTo(w * 0.69f, h * 0.33f, w * 0.86f, h * 0.41f, w * 0.86f, h * 0.56f)
+            cubicTo(w * 0.86f, h * 0.62f, w * 0.81f, h * 0.66f, w * 0.74f, h * 0.66f)
+            lineTo(w * 0.67f, h * 0.66f)
+            cubicTo(w * 0.62f, h * 0.66f, w * 0.59f, h * 0.62f, w * 0.59f, h * 0.57f)
+            lineTo(w * 0.59f, h * 0.52f)
+            cubicTo(w * 0.53f, h * 0.50f, w * 0.47f, h * 0.50f, w * 0.41f, h * 0.52f)
+            lineTo(w * 0.41f, h * 0.57f)
+            cubicTo(w * 0.41f, h * 0.62f, w * 0.38f, h * 0.66f, w * 0.33f, h * 0.66f)
+            lineTo(w * 0.26f, h * 0.66f)
+            cubicTo(w * 0.19f, h * 0.66f, w * 0.14f, h * 0.62f, w * 0.14f, h * 0.56f)
+            close()
+        }
+        drawPath(path = handset, color = color)
+    }
+}
 
+@Composable
+fun SoftVoiceWaveIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 22.dp,
+    color: Color = Color(0xFF9CA3AF),
+    levels: List<Float> = listOf(0.42f, 0.78f, 1.0f, 0.68f, 0.38f)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val count = levels.size.coerceAtLeast(3)
+        val barWidth = w / (count * 2f - 1f) * 0.88f
+        val gap = (w - barWidth * count) / (count - 1).coerceAtLeast(1)
+        val centerY = h * 0.5f
+
+        levels.forEachIndexed { idx, rawLevel ->
+            val level = rawLevel.coerceIn(0.18f, 1.0f)
+            val barH = h * 0.84f * level
+            val x = idx * (barWidth + gap)
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(x, centerY - barH / 2f),
+                size = Size(barWidth, barH),
+                cornerRadius = CornerRadius(barWidth / 2f, barWidth / 2f)
+            )
+        }
+    }
+}
+
+@Composable
+fun SoftFlameIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 28.dp,
+    color: Color = Color(0xFFF97316),
+    coreColor: Color = Color(0xFFFDE047)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val outer = Path().apply {
+            moveTo(w * 0.52f, h * 0.10f)
+            cubicTo(w * 0.68f, h * 0.28f, w * 0.82f, h * 0.42f, w * 0.80f, h * 0.62f)
+            cubicTo(w * 0.78f, h * 0.81f, w * 0.65f, h * 0.91f, w * 0.50f, h * 0.91f)
+            cubicTo(w * 0.31f, h * 0.91f, w * 0.20f, h * 0.78f, w * 0.20f, h * 0.60f)
+            cubicTo(w * 0.20f, h * 0.44f, w * 0.30f, h * 0.34f, w * 0.38f, h * 0.26f)
+            cubicTo(w * 0.39f, h * 0.36f, w * 0.43f, h * 0.41f, w * 0.46f, h * 0.41f)
+            cubicTo(w * 0.46f, h * 0.28f, w * 0.48f, h * 0.18f, w * 0.52f, h * 0.10f)
+            close()
+        }
+        drawPath(
+            path = outer,
+            brush = Brush.verticalGradient(
+                colors = listOf(Color(0xFFFBBF24), color, Color(0xFFEA580C))
+            )
+        )
+        val inner = Path().apply {
+            moveTo(w * 0.50f, h * 0.44f)
+            cubicTo(w * 0.62f, h * 0.54f, w * 0.66f, h * 0.65f, w * 0.63f, h * 0.76f)
+            cubicTo(w * 0.60f, h * 0.84f, w * 0.40f, h * 0.84f, w * 0.37f, h * 0.75f)
+            cubicTo(w * 0.34f, h * 0.64f, w * 0.40f, h * 0.52f, w * 0.50f, h * 0.44f)
+            close()
+        }
+        drawPath(path = inner, color = coreColor.copy(alpha = 0.90f))
+    }
+}
+
+@Composable
+fun SoftWheelCoinArtwork(
+    modifier: Modifier = Modifier,
+    size: Dp = 32.dp,
+    goldColor: Color = Color(0xFFFFB627),
+    highlightColor: Color = Color(0xFFFFF0A6)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val cx = w * 0.5f
+        val cy = h * 0.5f
+        val r = w * 0.44f
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(highlightColor, goldColor, Color(0xFFD97706)),
+                center = Offset(cx - r * 0.25f, cy - r * 0.25f),
+                radius = r * 1.35f
+            ),
+            radius = r,
+            center = Offset(cx, cy)
+        )
+        drawCircle(
+            color = Color(0xFFFFF8D6).copy(alpha = 0.65f),
+            radius = r * 0.72f,
+            center = Offset(cx, cy),
+            style = Stroke(width = w * 0.065f)
+        )
+        // Soft glossy heart/star center accent
+        val star = Path().apply {
+            moveTo(cx, cy - r * 0.36f)
+            quadraticTo(cx, cy, cx + r * 0.36f, cy)
+            quadraticTo(cx, cy, cx, cy + r * 0.36f)
+            quadraticTo(cx, cy, cx - r * 0.36f, cy)
+            quadraticTo(cx, cy, cx, cy - r * 0.36f)
+            close()
+        }
+        drawPath(star, color = Color(0xFFFFFBE6))
+    }
+}
+
+@Composable
+fun SoftWheelGiftArtwork(
+    modifier: Modifier = Modifier,
+    size: Dp = 32.dp,
+    accentColor: Color = Color(0xFF22C55E)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.08f
+        // Box base
+        drawRoundRect(
+            brush = Brush.verticalGradient(
+                colors = listOf(accentColor.copy(alpha = 0.95f), accentColor.copy(alpha = 0.70f))
+            ),
+            topLeft = Offset(w * 0.18f, h * 0.40f),
+            size = Size(w * 0.64f, h * 0.46f),
+            cornerRadius = CornerRadius(w * 0.10f, w * 0.10f)
+        )
+        // Box lid
+        drawRoundRect(
+            brush = Brush.horizontalGradient(
+                colors = listOf(Color.White.copy(alpha = 0.35f), accentColor)
+            ),
+            topLeft = Offset(w * 0.13f, h * 0.30f),
+            size = Size(w * 0.74f, h * 0.15f),
+            cornerRadius = CornerRadius(w * 0.07f, w * 0.07f)
+        )
+        // Ribbon stripe
+        drawRoundRect(
+            color = Color(0xFFFFE082),
+            topLeft = Offset(w * 0.44f, h * 0.30f),
+            size = Size(w * 0.12f, h * 0.56f),
+            cornerRadius = CornerRadius(w * 0.04f, w * 0.04f)
+        )
+        // Soft bow loops
+        drawCircle(
+            color = Color(0xFFFFE082),
+            radius = w * 0.10f,
+            center = Offset(w * 0.38f, h * 0.21f),
+            style = Stroke(width = sw)
+        )
+        drawCircle(
+            color = Color(0xFFFFE082),
+            radius = w * 0.10f,
+            center = Offset(w * 0.62f, h * 0.21f),
+            style = Stroke(width = sw)
+        )
+    }
+}
+
+@Composable
+fun SoftWheelCrownArtwork(
+    modifier: Modifier = Modifier,
+    size: Dp = 32.dp,
+    accentColor: Color = Color(0xFFFB7185)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val crown = Path().apply {
+            moveTo(w * 0.15f, h * 0.76f)
+            lineTo(w * 0.12f, h * 0.32f)
+            lineTo(w * 0.34f, h * 0.52f)
+            lineTo(w * 0.50f, h * 0.20f)
+            lineTo(w * 0.66f, h * 0.52f)
+            lineTo(w * 0.88f, h * 0.32f)
+            lineTo(w * 0.85f, h * 0.76f)
+            close()
+        }
+        drawPath(
+            path = crown,
+            brush = Brush.verticalGradient(
+                colors = listOf(Color(0xFFFFD6DF), accentColor, accentColor.copy(alpha = 0.82f))
+            )
+        )
+        drawCircle(color = Color.White.copy(alpha = 0.90f), radius = w * 0.055f, center = Offset(w * 0.50f, h * 0.19f))
+        drawCircle(color = Color.White.copy(alpha = 0.85f), radius = w * 0.045f, center = Offset(w * 0.12f, h * 0.30f))
+        drawCircle(color = Color.White.copy(alpha = 0.85f), radius = w * 0.045f, center = Offset(w * 0.88f, h * 0.30f))
+    }
+}
+
+@Composable
+fun SoftWheelStarArtwork(
+    modifier: Modifier = Modifier,
+    size: Dp = 32.dp,
+    accentColor: Color = Color(0xFFA78BFA)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val cx = w * 0.5f
+        val cy = h * 0.52f
+        val outerR = w * 0.42f
+        val innerR = w * 0.19f
+        val star = Path().apply {
+            for (i in 0 until 10) {
+                val r = if (i % 2 == 0) outerR else innerR
+                val deg = -90.0 + i * 36.0
+                val rad = Math.toRadians(deg)
+                val x = cx + (r * kotlin.math.cos(rad)).toFloat()
+                val y = cy + (r * kotlin.math.sin(rad)).toFloat()
+                if (i == 0) moveTo(x, y) else lineTo(x, y)
+            }
+            close()
+        }
+        drawPath(
+            path = star,
+            brush = Brush.verticalGradient(
+                colors = listOf(Color(0xFFEDE9FE), accentColor, Color(0xFF7C3AED))
+            )
+        )
+    }
+}
+
+@Composable
+fun SoftWheelSparkleArtwork(
+    modifier: Modifier = Modifier,
+    size: Dp = 32.dp,
+    accentColor: Color = Color(0xFFFBBF24)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        fun fourPoint(cx: Float, cy: Float, r: Float): Path = Path().apply {
+            moveTo(cx, cy - r)
+            quadraticTo(cx, cy, cx + r, cy)
+            quadraticTo(cx, cy, cx, cy + r)
+            quadraticTo(cx, cy, cx - r, cy)
+            quadraticTo(cx, cy, cx, cy - r)
+            close()
+        }
+        drawPath(
+            path = fourPoint(w * 0.46f, h * 0.52f, w * 0.36f),
+            brush = Brush.radialGradient(
+                colors = listOf(Color.White, accentColor, accentColor.copy(alpha = 0.8f)),
+                center = Offset(w * 0.44f, h * 0.48f),
+                radius = w * 0.42f
+            )
+        )
+        drawPath(
+            path = fourPoint(w * 0.78f, h * 0.24f, w * 0.16f),
+            color = Color(0xFFFFF8D6)
+        )
+    }
+}
+
+@Composable
+fun SoftScreenShareIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    color: Color = Color(0xFF0F172A)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.10f
+
+        // Soft rounded monitor frame
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(w * 0.11f, h * 0.16f),
+            size = Size(w * 0.78f, h * 0.52f),
+            cornerRadius = CornerRadius(w * 0.14f, w * 0.14f),
+            style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+
+        // Monitor stand base
+        drawLine(
+            color = color,
+            start = Offset(w * 0.34f, h * 0.84f),
+            end = Offset(w * 0.66f, h * 0.84f),
+            strokeWidth = sw,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = color,
+            start = Offset(w * 0.50f, h * 0.68f),
+            end = Offset(w * 0.50f, h * 0.84f),
+            strokeWidth = sw,
+            cap = StrokeCap.Round
+        )
+
+        // Upward share arrow inside screen
+        drawLine(
+            color = color,
+            start = Offset(w * 0.50f, h * 0.55f),
+            end = Offset(w * 0.50f, h * 0.30f),
+            strokeWidth = sw * 0.95f,
+            cap = StrokeCap.Round
+        )
+        val chevron = Path().apply {
+            moveTo(w * 0.37f, h * 0.41f)
+            lineTo(w * 0.50f, h * 0.29f)
+            lineTo(w * 0.63f, h * 0.41f)
+        }
+        drawPath(
+            path = chevron,
+            color = color,
+            style = Stroke(width = sw * 0.95f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+    }
+}
+
+@Composable
+fun SoftTvWatchIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 20.dp,
+    color: Color = Color(0xFFF59E0B)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.10f
+
+        drawRoundRect(
+            color = color.copy(alpha = 0.16f),
+            topLeft = Offset(w * 0.10f, h * 0.18f),
+            size = Size(w * 0.80f, h * 0.54f),
+            cornerRadius = CornerRadius(w * 0.14f, w * 0.14f)
+        )
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(w * 0.10f, h * 0.18f),
+            size = Size(w * 0.80f, h * 0.54f),
+            cornerRadius = CornerRadius(w * 0.14f, w * 0.14f),
+            style = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+        drawLine(
+            color = color,
+            start = Offset(w * 0.32f, h * 0.84f),
+            end = Offset(w * 0.68f, h * 0.84f),
+            strokeWidth = sw,
+            cap = StrokeCap.Round
+        )
+        val play = Path().apply {
+            moveTo(w * 0.43f, h * 0.34f)
+            lineTo(w * 0.63f, h * 0.45f)
+            lineTo(w * 0.43f, h * 0.56f)
+            close()
+        }
+        drawPath(path = play, color = color)
+    }
+}
+
+@Composable
+fun SoftStopCircleIcon(
+    modifier: Modifier = Modifier,
+    size: Dp = 18.dp,
+    color: Color = Color(0xFFEF4444)
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = w * 0.10f
+        drawCircle(
+            color = color,
+            radius = w * 0.40f,
+            center = Offset(w * 0.5f, h * 0.5f),
+            style = Stroke(width = sw)
+        )
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(w * 0.34f, h * 0.34f),
+            size = Size(w * 0.32f, h * 0.32f),
+            cornerRadius = CornerRadius(w * 0.08f, w * 0.08f)
+        )
+    }
+}
 

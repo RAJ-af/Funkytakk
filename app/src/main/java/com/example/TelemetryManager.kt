@@ -87,6 +87,8 @@ object TelemetryManager {
     fun onLogin(uid: String) {
         if (uid.isBlank()) return
         val hashedUid = sha256Hex(uid)
+        com.example.diagnostics.CrashAndErrorReporter.onActiveUserChanged(uid)
+        com.example.diagnostics.CrashAndErrorReporter.recordBreadcrumb("AUTH", "Session active (${hashedUid.take(8)})")
         try {
             crashlytics()?.setUserId(hashedUid)
             analytics()?.setUserId(hashedUid)
@@ -94,6 +96,8 @@ object TelemetryManager {
     }
 
     fun onLogout() {
+        com.example.diagnostics.CrashAndErrorReporter.resetAdminState()
+        com.example.diagnostics.CrashAndErrorReporter.recordBreadcrumb("AUTH", "Signed out")
         try {
             crashlytics()?.setUserId("")
             analytics()?.setUserId(null)
@@ -107,6 +111,9 @@ object TelemetryManager {
 
     fun setCurrentScreen(screen: String) {
         if (screen.isBlank()) return
+        if (lastScreenName != screen) {
+            com.example.diagnostics.CrashAndErrorReporter.recordBreadcrumb("NAV", "$lastScreenName -> $screen")
+        }
         lastScreenName = screen
         try {
             crashlytics()?.setCustomKey("current_screen", screen)
@@ -133,6 +140,10 @@ object TelemetryManager {
 
     fun recordRpcFailure(rpcName: String, httpCode: Int?, rawError: String?) {
         val codeText = rawError.orEmpty()
+        com.example.diagnostics.CrashAndErrorReporter.recordBreadcrumb(
+            "RPC",
+            "$rpcName failed (HTTP ${httpCode ?: -1})"
+        )
         // Never treat expected user validation, rate-limit, or offline/DNS connectivity failures as non-fatal crashes
         val ignoredCodes = listOf(
             "empty_message", "message_too_long", "body_too_long", "title_too_long",

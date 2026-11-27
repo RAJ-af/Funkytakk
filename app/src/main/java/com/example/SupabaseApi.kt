@@ -1962,6 +1962,39 @@ interface SupabaseApi {
         @Header("Authorization") auth: String,
         @Body body: RemixCardDesignRequest
     ): Response<ResponseBody>
+
+    // ----------------------------------------------------
+    // VOICE ROOM SCREEN SHARE (Daily.co video-only)
+    // ----------------------------------------------------
+    @POST("functions/v1/get-screenshare-token")
+    suspend fun getScreenShareToken(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: GetScreenShareTokenRequest
+    ): Response<ResponseBody>
+
+    @POST("rest/v1/rpc/screen_share_heartbeat")
+    suspend fun screenShareHeartbeat(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: ScreenShareIdRequest
+    ): Response<ScreenShareHeartbeatResponse>
+
+    @POST("rest/v1/rpc/leave_screen_share")
+    suspend fun leaveScreenShare(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Body body: ScreenShareIdRequest
+    ): Response<ResponseBody>
+
+    @GET("rest/v1/room_screen_shares?select=id,room_id,host_id,status,started_at,ended_at,end_reason")
+    suspend fun getActiveRoomScreenShares(
+        @Header("apikey") apiKey: String = BuildConfig.SUPABASE_ANON_KEY,
+        @Header("Authorization") auth: String,
+        @Query("room_id") roomIdEq: String,
+        @Query("status") statusEq: String = "eq.active",
+        @Query("limit") limit: Int = 1
+    ): Response<List<RoomScreenShareRow>>
 }
 
 @JsonClass(generateAdapter = true)
@@ -3180,3 +3213,31 @@ data class ListRemixableCardsRequest(
     val p_offset: Int = 0
 )
 
+// ----------------------------------------------------
+// VOICE ROOM SCREEN SHARE DTOs
+// ----------------------------------------------------
+@JsonClass(generateAdapter = true)
+data class GetScreenShareTokenRequest(
+    val action: String,
+    val room_id: String? = null,
+    val share_id: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class ScreenShareIdRequest(
+    val p_share_id: String
+)
+
+data class ScreenShareHeartbeatResponse(
+    val active: Boolean = false
+)
+
+data class RoomScreenShareRow(
+    val id: String = "",
+    val room_id: String = "",
+    val host_id: String = "",
+    val status: String = "active",
+    val started_at: String? = null,
+    val ended_at: String? = null,
+    val end_reason: String? = null
+)

@@ -40,6 +40,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -178,6 +180,7 @@ fun DirectChatScreen(
     var isPreparingMediaLabel by remember { mutableStateOf<String?>(null) }
     var showReportUserDialog by remember { mutableStateOf(false) }
     var showPartnerProfile by remember(partnerUserId) { mutableStateOf(false) }
+    var showVoiceCallOverlay by remember(partnerUserId) { mutableStateOf(false) }
     var showTopMenu by remember { mutableStateOf(false) }
     var showBlockConfirmDialog by remember { mutableStateOf(false) }
     var isBlockingUser by remember { mutableStateOf(false) }
@@ -644,7 +647,9 @@ fun DirectChatScreen(
         }
 
         BackHandler {
-            if (showAttachmentChooser) {
+            if (showVoiceCallOverlay) {
+                showVoiceCallOverlay = false
+            } else if (showAttachmentChooser) {
                 showAttachmentChooser = false
             } else if (showPartnerProfile) {
                 showPartnerProfile = false
@@ -665,6 +670,7 @@ fun DirectChatScreen(
             }
         }
 
+        Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             topBar = {
@@ -802,6 +808,21 @@ fun DirectChatScreen(
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                         }
+                                    }
+                                }
+
+                                if (!isChatBlocked && !isPartnerBlockedLocally) {
+                                    IconButton(
+                                        onClick = { showVoiceCallOverlay = true },
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .testTag("direct_chat_voice_call_button")
+                                            .semantics { contentDescription = "Voice call" }
+                                    ) {
+                                        com.example.ui.components.SoftPhoneCallIcon(
+                                            size = 21.dp,
+                                            color = colors.text
+                                        )
                                     }
                                 }
 
@@ -2310,6 +2331,21 @@ fun DirectChatScreen(
                     onStartChat = { showPartnerProfile = false }
                 )
             }
+        }
+
+        AnimatedVisibility(
+            visible = showVoiceCallOverlay,
+            enter = fadeIn(tween(220)),
+            exit = fadeOut(tween(180)),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            DirectVoiceCallOverlay(
+                partnerName = partnerName,
+                partnerAvatarUrl = resolvedAvatarUrl.ifBlank { partnerAvatarUrl },
+                partnerCountryCode = resolvedCountryCode.ifBlank { partnerCountryCode },
+                onDismiss = { showVoiceCallOverlay = false }
+            )
+        }
         }
     }
 }

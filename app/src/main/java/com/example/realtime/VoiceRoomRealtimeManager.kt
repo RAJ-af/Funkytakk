@@ -121,6 +121,15 @@ sealed class RealtimeTableEvent {
         val record: JSONObject?,
         val groupId: String?
     ) : RealtimeTableEvent()
+    data class RoomScreenShareChanged(
+        val eventType: String,
+        val record: JSONObject?,
+        val shareId: String? = null,
+        val roomId: String? = null,
+        val hostId: String? = null,
+        val status: String? = null,
+        val endReason: String? = null
+    ) : RealtimeTableEvent()
     data class Reconnected(val timestamp: Long = System.currentTimeMillis()) : RealtimeTableEvent()
 }
 
@@ -507,10 +516,12 @@ object VoiceRoomRealtimeManager {
             subscribeGroupRealtime(gid)
         }
 
-        // Resubscribe to any active room broadcast channels
+        // Resubscribe to any active room broadcast & postgres channels
         subscribedRoomChannels.forEach { roomId ->
             sendJoinRoomChannel(ws, roomId)
             sendJoinRoomSpeakerRequestsChannel(ws, roomId)
+            sendJoinRoomVoiceRoomChannel(ws, roomId)
+            sendJoinRoomScreenSharesChannel(ws, roomId)
         }
     }
 
@@ -831,6 +842,26 @@ object VoiceRoomRealtimeManager {
                             groupId = groupId
                         )
                     )
+                } else if (table == "room_screen_shares" || topic.contains("room_screen_shares")) {
+                    val shareId = record?.optString("id")?.ifBlank { null }
+                    val shareRoomId = record?.optString("room_id")?.ifBlank { null }
+                    val hostId = record?.optString("host_id")?.ifBlank { null }
+                    val status = record?.optString("status")?.ifBlank { null }
+                    val endReason = record?.optString("end_reason")?.ifBlank { null }
+                    if (BuildConfig.DEBUG) {
+                        Log.d(TAG, "[Realtime] Received room_screen_shares ($eventType): shareId=$shareId, roomId=$shareRoomId, status=$status")
+                    }
+                    _events.tryEmit(
+                        RealtimeTableEvent.RoomScreenShareChanged(
+                            eventType = eventType,
+                            record = record,
+                            shareId = shareId,
+                            roomId = shareRoomId,
+                            hostId = hostId,
+                            status = status,
+                            endReason = endReason
+                        )
+                    )
                 }
             }
         } catch (e: Exception) {
@@ -1138,6 +1169,38 @@ object VoiceRoomRealtimeManager {
         }
     }
 
+    private fun sendJoinRoomScreenSharesChannel(ws: WebSocket, roomId: String) {
+        try {
+            val token = currentAuthToken
+            val joinMsg = JSONObject().apply {
+                put("topic", "realtime:public:room_screen_shares:room_id=eq.$roomId")
+                put("event", "phx_join")
+                put("payload", JSONObject().apply {
+                    if (!token.isNullOrBlank()) {
+                        put("access_token", token)
+                    }
+                    put("config", JSONObject().apply {
+                        put("postgres_changes", org.json.JSONArray().apply {
+                            put(JSONObject().apply {
+                                put("event", "*")
+                                put("schema", "public")
+                                put("table", "room_screen_shares")
+                                put("filter", "room_id=eq.$roomId")
+                            })
+                        })
+                    })
+                })
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(joinMsg.toString())
+            if (BuildConfig.DEBUG) {
+                Log.d(TAG, "Subscribed to postgres_changes room_screen_shares for room:$roomId")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error sending join for room_screen_shares room channel $roomId: ${e.message}")
+        }
+    }
+
     fun subscribeRoomSpeakerRequests(roomId: String) {
         if (roomId.isBlank()) return
         val ws = webSocket ?: return
@@ -1151,6 +1214,7 @@ object VoiceRoomRealtimeManager {
         sendJoinRoomChannel(ws, roomId)
         sendJoinRoomSpeakerRequestsChannel(ws, roomId)
         sendJoinRoomVoiceRoomChannel(ws, roomId)
+        sendJoinRoomScreenSharesChannel(ws, roomId)
     }
 
     fun leaveRoomChannel(roomId: String) {
@@ -1186,6 +1250,15 @@ object VoiceRoomRealtimeManager {
                 put("ref", refCounter.getAndIncrement().toString())
             }
             ws.send(leaveSpeakerReqs.toString())
+        } catch (_: Exception) {}
+        try {
+            val leaveScreenShares = JSONObject().apply {
+                put("topic", "realtime:public:room_screen_shares:room_id=eq.$roomId")
+                put("event", "phx_leave")
+                put("payload", JSONObject())
+                put("ref", refCounter.getAndIncrement().toString())
+            }
+            ws.send(leaveScreenShares.toString())
         } catch (_: Exception) {}
     }
 

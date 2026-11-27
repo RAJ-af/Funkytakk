@@ -215,6 +215,15 @@ fun DiscoverTabContent(
     // Interactive States
     var isSearchActive by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
+    var debouncedSearchQuery by remember { mutableStateOf("") }
+    LaunchedEffect(searchQuery) {
+        if (searchQuery.isBlank()) {
+            debouncedSearchQuery = ""
+        } else {
+            kotlinx.coroutines.delay(250L)
+            debouncedSearchQuery = searchQuery
+        }
+    }
     var activeCategoryFilter by remember { mutableStateOf("All") } // "All", "Online", "Same Vibe", "Interests", "Language"
     var selectedLanguageFilter by remember { mutableStateOf("All") }
     var languageFilterType by remember { mutableStateOf("They speak") }
@@ -380,18 +389,18 @@ fun DiscoverTabContent(
     val blockedUserIds by com.example.repository.BlockRepository.blockedUserIds.collectAsState()
 
     // Filter logic
-    val filteredPartners = remember(partnersList, blockedUserIds, searchQuery, activeCategoryFilter, selectedLanguageFilter, languageFilterType, selectedInterestTag) {
+    val filteredPartners = remember(partnersList, blockedUserIds, debouncedSearchQuery, activeCategoryFilter, selectedLanguageFilter, languageFilterType, selectedInterestTag) {
         partnersList.filter { partner ->
             if (blockedUserIds.contains(partner.id)) return@filter false
             // Search query filter
-            val matchesSearch = if (searchQuery.isBlank()) true else {
-                partner.name.contains(searchQuery, ignoreCase = true) ||
-                partner.username.contains(searchQuery, ignoreCase = true) ||
-                partner.bio.contains(searchQuery, ignoreCase = true) ||
-                partner.nativeLang.contains(searchQuery, ignoreCase = true) ||
-                partner.learningLang.contains(searchQuery, ignoreCase = true) ||
-                partner.nativeLangFull.contains(searchQuery, ignoreCase = true) ||
-                partner.learningLangFull.contains(searchQuery, ignoreCase = true)
+            val matchesSearch = if (debouncedSearchQuery.isBlank()) true else {
+                partner.name.contains(debouncedSearchQuery, ignoreCase = true) ||
+                partner.username.contains(debouncedSearchQuery, ignoreCase = true) ||
+                partner.bio.contains(debouncedSearchQuery, ignoreCase = true) ||
+                partner.nativeLang.contains(debouncedSearchQuery, ignoreCase = true) ||
+                partner.learningLang.contains(debouncedSearchQuery, ignoreCase = true) ||
+                partner.nativeLangFull.contains(debouncedSearchQuery, ignoreCase = true) ||
+                partner.learningLangFull.contains(debouncedSearchQuery, ignoreCase = true)
             }
 
             // Category filter

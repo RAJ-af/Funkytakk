@@ -188,6 +188,7 @@ dependencies {
   implementation(libs.coil.gif)
   implementation(libs.converter.moshi)
   implementation(libs.agora.voice)
+  implementation(libs.daily.client)
   // implementation(libs.firebase.ai)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
