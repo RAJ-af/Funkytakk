@@ -1,13 +1,25 @@
 package com.example.ui.screens
 
 import android.Manifest
+import android.app.Activity
+import android.content.Context
 import android.content.pm.PackageManager
+import android.media.projection.MediaProjectionManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import com.example.AppFlagsRepository
 import com.example.BuildConfig
+import com.example.realtime.RoomScreenShareManager
+import com.example.realtime.ScreenShareNotice
+import com.example.realtime.ScreenShareRole
+import com.example.ui.components.HostScreenShareActiveBanner
+import com.example.ui.components.HostScreenShareHeaderButton
+import com.example.ui.components.SafeShareCountdownDialog
+import com.example.ui.components.ViewerScreenShareBanner
+import com.example.ui.components.ViewerScreenShareStage
 import com.example.util.RoomShareHelper
 import com.example.UpdateVoiceRoomRequest
 import com.example.SpeakerRequestInsert
@@ -145,7 +157,6 @@ import android.util.Log
 import com.example.SupabaseSessionManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
@@ -488,6 +499,46 @@ fun VoiceRoomScreen(
     val voiceConnectionState by (voiceSession?.connectionState?.collectAsState() ?: remember { mutableStateOf(com.example.voice.VoiceConnectionState.Idle) })
     val speakingUserIds by (voiceSession?.speakingUserIds?.collectAsState() ?: remember { mutableStateOf(emptySet()) })
 
+    val appFlags by AppFlagsRepository.flags.collectAsState()
+    val screenShareState by RoomScreenShareManager.state.collectAsState()
+    var showSafeShareDialog by remember { mutableStateOf(false) }
+
+    val mediaProjectionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val projectionData = result.data
+        if (result.resultCode == Activity.RESULT_OK && projectionData != null && activeRoomId.isNotBlank()) {
+            RoomScreenShareManager.startHostScreenShare(
+                context = context,
+                roomId = activeRoomId,
+                roomTitle = cachedRoomTitle.ifBlank { activeRoomTitle },
+                projectionIntent = projectionData
+            )
+        } else if (result.resultCode != Activity.RESULT_CANCELED) {
+            Toast.makeText(context, "Screen capture permission was not granted.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    LaunchedEffect(activeRoomId) {
+        if (activeRoomId.isNotBlank()) {
+            RoomScreenShareManager.onRoomEntered(context, activeRoomId)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        RoomScreenShareManager.notices.collect { notice ->
+            when (notice) {
+                is ScreenShareNotice.ToastMessage -> {
+                    Toast.makeText(context, notice.message, Toast.LENGTH_SHORT).show()
+                }
+                is ScreenShareNotice.ReauthRequired -> {
+                    Toast.makeText(context, notice.message, Toast.LENGTH_LONG).show()
+                    SupabaseSessionManager.forceRefreshSession(context)
+                }
+            }
+        }
+    }
+
     val micPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
@@ -593,6 +644,9 @@ fun VoiceRoomScreen(
         } else if (isCurrentUserHost) {
             showHostLeaveDialog = true
         } else {
+            if (screenShareState.role == ScreenShareRole.WATCHING) {
+                RoomScreenShareManager.stopSessionAsync(context, "viewer_back_button")
+            }
             if (com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
                 com.example.service.VoiceRoomOverlayManager.startServiceIfPermitted(context)
             }
@@ -608,6 +662,7 @@ fun VoiceRoomScreen(
             val effectiveTitle = activeRoomTitle.ifBlank { cachedRoomTitle }
             Log.i("VoiceRoomExit", "Room exit: roomId=$effectiveRoomId, reason='$reason', trigger='$triggerDesc'")
 
+            RoomScreenShareManager.onRoomExited(context, effectiveRoomId.ifBlank { null }, "room_ended")
             com.example.realtime.AgoraVoiceManager.leaveChannel()
             com.example.realtime.AgoraVoiceManager.muteLocalAudioStream(true)
             viewModel?.setMicEnabled(false)
@@ -1430,6 +1485,9 @@ fun VoiceRoomScreen(
                         }
                     }
                 }
+                is RealtimeTableEvent.RoomScreenShareChanged -> {
+                    RoomScreenShareManager.onRealtimeShareEvent(context, event)
+                }
                 else -> {}
             }
         }
@@ -1438,6 +1496,9 @@ fun VoiceRoomScreen(
     DisposableEffect(activeRoomId) {
         onDispose {
             VoiceRoomRealtimeManager.leaveRoomChannel(activeRoomId)
+            if (viewModel?.activeRoomId?.value != activeRoomId) {
+                RoomScreenShareManager.onRoomExited(context, activeRoomId, "room_screen_disposed")
+            }
         }
     }
 
@@ -2192,6 +2253,9 @@ fun VoiceRoomScreen(
                                 if (isCurrentUserHost) {
                                     showHostLeaveDialog = true
                                 } else {
+                                    if (screenShareState.role == ScreenShareRole.WATCHING) {
+                                        RoomScreenShareManager.stopSessionAsync(context, "viewer_header_back")
+                                    }
                                     if (com.example.service.OverlayPermissionHelper.canDrawOverlays(context)) {
                                         com.example.service.VoiceRoomOverlayManager.startServiceIfPermitted(context)
                                     }
@@ -2241,8 +2305,22 @@ fun VoiceRoomScreen(
                     )
                 }
 
-                // Right action buttons (Share, Action Overflow)
+                // Right action buttons (Host Screen Share when enabled, Invite Share, Action Overflow)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (appFlags.screenShareEnabled && isCurrentUserHost) {
+                        HostScreenShareHeaderButton(
+                            role = screenShareState.role,
+                            isConnecting = screenShareState.isConnecting,
+                            cardBgColor = currentTheme.cardBgColor,
+                            cardBorderColor = currentTheme.cardBorderColor,
+                            primaryTextColor = currentTheme.primaryTextColor,
+                            onStartClick = { showSafeShareDialog = true },
+                            onStopClick = {
+                                RoomScreenShareManager.stopSessionAsync(context, "host_header_stop")
+                            }
+                        )
+                    }
+
                     // Improved Share Button
                     Box(
                         modifier = Modifier
@@ -2726,6 +2804,45 @@ fun VoiceRoomScreen(
                 }
             }
 
+            // 1B. ROOM SCREEN SHARE BANNER / STAGE (Daily.co video-only; strictly flag-gated)
+            if (appFlags.screenShareEnabled) {
+                if (isCurrentUserHost && (screenShareState.role == ScreenShareRole.SHARING || screenShareState.isConnecting)) {
+                    HostScreenShareActiveBanner(
+                        isConnecting = screenShareState.isConnecting,
+                        viewerCount = screenShareState.remoteViewerCount,
+                        isDarkMode = isRoomDarkMode,
+                        onStopClick = {
+                            RoomScreenShareManager.stopSessionAsync(context, "host_banner_stop")
+                        }
+                    )
+                } else if (!isCurrentUserHost && (screenShareState.role == ScreenShareRole.WATCHING || screenShareState.isConnecting)) {
+                    ViewerScreenShareStage(
+                        hostName = hostSeat.name,
+                        isConnecting = screenShareState.isConnecting,
+                        remoteScreenTrack = screenShareState.remoteScreenTrack,
+                        isDarkMode = isRoomDarkMode,
+                        onStopWatching = {
+                            RoomScreenShareManager.stopSessionAsync(context, "viewer_stop_button")
+                        }
+                    )
+                } else if (!isCurrentUserHost && screenShareState.activeShareRow != null) {
+                    ViewerScreenShareBanner(
+                        hostName = hostSeat.name,
+                        isDarkMode = isRoomDarkMode,
+                        onWatchClick = {
+                            val shareId = screenShareState.activeShareRow?.id.orEmpty()
+                            if (shareId.isNotBlank() && activeRoomId.isNotBlank()) {
+                                RoomScreenShareManager.startWatchingScreenShare(
+                                    context = context,
+                                    roomId = activeRoomId,
+                                    shareId = shareId
+                                )
+                            }
+                        }
+                    )
+                }
+            }
+
             // 2. SPEAKERS VISUAL SYSTEM
             val currentParticipant = participantsData.find { it.user_id == currentUserId }
             val isCurrentUserSpeakerOrHost = (currentUserId == roomHostId || currentParticipant?.role == "speaker" || speakerSeats.any { it.userId == currentUserId })
@@ -2767,7 +2884,7 @@ fun VoiceRoomScreen(
                 isCurrentUserHostOrModerator = isHostOrModerator,
                 onHostInviteSeatClick = { showPeopleSheet = true },
                 onRequestSpeakerSeat = handleRequestSpeakerSeat,
-                compactForKeyboard = isImeVisible
+                compactForKeyboard = isImeVisible || (!isCurrentUserHost && screenShareState.role == ScreenShareRole.WATCHING)
             )
 
             // 3. MINIMAL COMPACT CHAT LOG ROW (flexes cleanly above keyboard)
@@ -3695,6 +3812,25 @@ fun VoiceRoomScreen(
                         }
                     }
                 }
+            }
+        )
+    }
+
+    // 1c) Safe-Share Pre-Flight Dialog (3-2-1 countdown -> MediaProjection capture consent)
+    if (showSafeShareDialog) {
+        SafeShareCountdownDialog(
+            isDarkMode = isRoomDarkMode,
+            onContinueToCapture = {
+                showSafeShareDialog = false
+                val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
+                if (projectionManager != null) {
+                    mediaProjectionLauncher.launch(projectionManager.createScreenCaptureIntent())
+                } else {
+                    Toast.makeText(context, "Screen capture is unavailable on this device.", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onDismiss = {
+                showSafeShareDialog = false
             }
         )
     }

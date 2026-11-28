@@ -38,6 +38,9 @@ class ScreenShareForegroundService : Service() {
         @Volatile
         var onStopRequested: ((reason: String) -> Unit)? = null
 
+        private val _runningFlow = kotlinx.coroutines.flow.MutableStateFlow(false)
+        val runningFlow: kotlinx.coroutines.flow.StateFlow<Boolean> = _runningFlow
+
         @Volatile
         var isRunning: Boolean = false
             private set
@@ -60,6 +63,7 @@ class ScreenShareForegroundService : Service() {
         fun stop(context: Context) {
             val appCtx = context.applicationContext
             if (!isRunning) {
+                _runningFlow.value = false
                 // Still send stopService safely in case startForegroundService was just queued
                 runCatching { appCtx.stopService(Intent(appCtx, ScreenShareForegroundService::class.java)) }
                 return
@@ -70,6 +74,7 @@ class ScreenShareForegroundService : Service() {
                 }
                 appCtx.startService(intent)
             }.onFailure {
+                _runningFlow.value = false
                 runCatching { appCtx.stopService(Intent(appCtx, ScreenShareForegroundService::class.java)) }
             }
         }
@@ -86,6 +91,7 @@ class ScreenShareForegroundService : Service() {
                 Log.i(TAG, "Stop action triggered from notification/client")
                 onStopRequested?.invoke("notification_stop")
                 isRunning = false
+                _runningFlow.value = false
                 ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return START_NOT_STICKY
@@ -101,9 +107,11 @@ class ScreenShareForegroundService : Service() {
                     }
                     ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, fgType)
                     isRunning = true
+                    _runningFlow.value = true
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to enter mediaProjection foreground state: ${e.message}", e)
                     isRunning = false
+                    _runningFlow.value = false
                     onStopRequested?.invoke("fgs_start_failed")
                     stopSelf()
                     return START_NOT_STICKY
@@ -117,6 +125,7 @@ class ScreenShareForegroundService : Service() {
         Log.i(TAG, "App task removed while sharing screen — stopping share cleanly")
         onStopRequested?.invoke("task_removed")
         isRunning = false
+        _runningFlow.value = false
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
         super.onTaskRemoved(rootIntent)
@@ -124,6 +133,7 @@ class ScreenShareForegroundService : Service() {
 
     override fun onDestroy() {
         isRunning = false
+        _runningFlow.value = false
         super.onDestroy()
     }
 

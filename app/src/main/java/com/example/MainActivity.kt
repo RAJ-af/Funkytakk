@@ -1113,6 +1113,16 @@ class MainActivity : FragmentActivity() {
         }
     }
 
+    override fun onDestroy() {
+        if (isFinishing) {
+            com.example.realtime.RoomScreenShareManager.stopSessionAsync(
+                context = applicationContext,
+                reason = "activity_destroyed"
+            )
+        }
+        super.onDestroy()
+    }
+
     private fun handleDeepLinkIntent(intent: Intent?) {
         val data: Uri? = intent?.data
         if (data != null) {

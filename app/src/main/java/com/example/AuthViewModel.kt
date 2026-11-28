@@ -511,6 +511,9 @@ class AuthViewModel : ViewModel() {
                                 _activeRoomSpeakers.value = emptyList()
                                 com.example.service.VoiceRoomOverlayManager.stopService(FunkyTalkApplication.appContext)
                                 com.example.service.VoiceRoomOverlayManager.clear()
+                                FunkyTalkApplication.appContext?.let { ctx ->
+                                    com.example.realtime.RoomScreenShareManager.onRoomExited(ctx, currentRoomId, "voice_room_changed_ended")
+                                }
                             }
                         }
                     }
@@ -542,6 +545,9 @@ class AuthViewModel : ViewModel() {
                                 _activeRoomSpeakers.value = emptyList()
                                 com.example.service.VoiceRoomOverlayManager.stopService(FunkyTalkApplication.appContext)
                                 com.example.service.VoiceRoomOverlayManager.clear()
+                                FunkyTalkApplication.appContext?.let { ctx ->
+                                    com.example.realtime.RoomScreenShareManager.onRoomExited(ctx, currentRoomId, "room_lifecycle_ended")
+                                }
                             }
                         }
                     }
@@ -1381,6 +1387,7 @@ class AuthViewModel : ViewModel() {
         endVoiceSession()
 
         if (ctx != null) {
+            com.example.realtime.RoomScreenShareManager.onRoomExited(ctx, roomId, trigger)
             com.example.service.VoiceRoomOverlayManager.stopService(ctx)
         }
         com.example.service.VoiceRoomOverlayManager.clear()
@@ -1477,6 +1484,9 @@ class AuthViewModel : ViewModel() {
         _mySpeakerRequestStatus.value = null
         _activeRoomSpeakers.value = emptyList()
         com.example.realtime.RoomMicController.reset()
+        if (ctx != null) {
+            com.example.realtime.RoomScreenShareManager.onRoomExited(ctx, roomId, trigger)
+        }
 
         if (roomId != null && uid != null) {
             VoiceRoomRealtimeManager.removeLiveParticipant(roomId, uid)
@@ -1545,6 +1555,7 @@ class AuthViewModel : ViewModel() {
         _activeRoomSpeakers.value = emptyList()
 
         if (ctx != null) {
+            com.example.realtime.RoomScreenShareManager.onRoomExited(ctx, roomId, "host_ended_room")
             com.example.service.VoiceRoomOverlayManager.stopService(ctx)
         }
         com.example.service.VoiceRoomOverlayManager.clear()
@@ -1642,6 +1653,7 @@ class AuthViewModel : ViewModel() {
                         _pendingSpeakerRequest.value = null
                         _mySpeakerRequestStatus.value = null
                         _activeRoomSpeakers.value = emptyList()
+                        com.example.realtime.RoomScreenShareManager.onRoomExited(context, roomId, "verify_room_ended")
                         com.example.service.VoiceRoomOverlayManager.stopService(context)
                         com.example.service.VoiceRoomOverlayManager.clear()
                         onRoomEnded()
